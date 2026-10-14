@@ -674,4 +674,71 @@
       <UniqueIdentifier>{c5df3e3a-73f5-4b5b-8688-112163941bea}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
+  <ItemGroup>
+    <Filter Include="ThirdParty" />
+    <Filter Include="ThirdParty\ImGui" />
+    <Filter Include="ThirdParty\ImGui\Backends" />
+    <Filter Include="ThirdParty\ImGui\Cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ImGuiOverlay.cpp" />
+    <ClInclude Include="ImGuiOverlay.h" />
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui.cpp">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui_demo.cpp">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui_draw.cpp">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui_tables.cpp">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui_widgets.cpp">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\backends\imgui_impl_win32.cpp">
+      <Filter>ThirdParty\ImGui\Backends</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\backends\imgui_impl_dx12.cpp">
+      <Filter>ThirdParty\ImGui\Backends</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\misc\cpp\imgui_stdlib.cpp">
+      <Filter>ThirdParty\ImGui\Cpp</Filter>
+    </ClCompile>
+    <ClInclude Include="..\..\ThirdParty\ImGui\imconfig.h">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\ThirdParty\ImGui\imgui.h">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\ThirdParty\ImGui\imgui_internal.h">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\ThirdParty\ImGui\imstb_rectpack.h">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\ThirdParty\ImGui\imstb_textedit.h">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\ThirdParty\ImGui\imstb_truetype.h">
+      <Filter>ThirdParty\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\ThirdParty\ImGui\backends\imgui_impl_win32.h">
+      <Filter>ThirdParty\ImGui\Backends</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\ThirdParty\ImGui\backends\imgui_impl_dx12.h">
+      <Filter>ThirdParty\ImGui\Backends</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\ThirdParty\ImGui\misc\cpp\imgui_stdlib.h">
+      <Filter>ThirdParty\ImGui\Cpp</Filter>
+    </ClInclude>
+    <None Include="..\..\ThirdParty\ImGui\LICENSE.txt">
+      <Filter>ThirdParty\ImGui</Filter>
+    </None>
+    <None Include="..\..\ThirdParty\ImGui\README.PARS.md">
+      <Filter>ThirdParty\ImGui</Filter>
+    </None>
+  </ItemGroup>
 </Project>

@@ -18,6 +18,7 @@
 namespace GameCore
 {
     extern bool gIsSupending;
+    extern HWND g_hWnd;
 
     class IGameApp
     {
@@ -40,6 +41,9 @@ namespace GameCore
 
         // Optional UI (overlay) rendering pass.  This is LDR.  The buffer is already cleared.
         virtual void RenderUI( class GraphicsContext& ) {};
+
+        // Opt in to the Win32/DX12 ImGui overlay and shared mouse cursor.
+        virtual bool UsesImGui() const { return false; }
 
         // Override this in applications that use DirectX Raytracing to require a DXR-capable device.
         virtual bool RequiresRaytracingSupport() const { return false; }

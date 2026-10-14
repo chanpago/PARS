@@ -39,11 +39,17 @@ msbuild MiniEngine\ModelViewer\ModelViewer.slnx -restore -p:RestorePackagesConfi
 See [the MiniEngine guide](MiniEngine/readme.md) for controls, model loading, and
 additional build configurations.
 
+ModelViewer also opens a temporary **PARS - ImGui Test** panel. Try its slider,
+button, text input, or **Show ImGui demo** checkbox. **F1** hides/reopens the panel.
+Hold the right mouse button outside the UI to look around and use WASD to move.
+
 ## Repository layout
 
 - `MiniEngine/Core`: engine foundation, graphics, input, cameras, and utilities.
 - `MiniEngine/Model`: model loading and rendering.
 - `MiniEngine/ModelViewer`: the application used as the starting point.
+- `ThirdParty/ImGui`: Dear ImGui with Win32 and DirectX 12 backends, compiled into
+  Core. See [integration notes](ThirdParty/ImGui/README.PARS.md) for version and usage.
 - `Samples`, `Libraries`, `TechniqueDemos`, `Tools`, and `Assets`: the accompanying
   DirectX samples, shared code, and assets retained from the source snapshot.
 - `vcpkg` and `vcpkg.json`: dependency integration and automatic setup.

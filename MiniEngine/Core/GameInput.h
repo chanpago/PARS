@@ -15,7 +15,7 @@
 
 namespace GameInput
 {
-    void Initialize();
+    void Initialize(bool sharedMouse = false);
     void Shutdown();
     void Update( float frameDelta );
 

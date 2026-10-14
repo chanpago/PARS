@@ -11,7 +11,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>..\Core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\Core;$(MSBuildThisFileDirectory)..\..\ThirdParty\ImGui;$(MSBuildThisFileDirectory)..\..\ThirdParty\ImGui\backends;$(MSBuildThisFileDirectory)..\..\ThirdParty\ImGui\misc\cpp;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level4</WarningLevel>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FloatingPointModel>Fast</FloatingPointModel>

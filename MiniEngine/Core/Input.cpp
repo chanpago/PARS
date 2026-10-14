@@ -14,6 +14,7 @@
 #include "pch.h"
 #include "GameCore.h"
 #include "GameInput.h"
+#include "ImGuiOverlay.h"
 
 #ifdef _GAMING_DESKTOP
 
@@ -195,7 +196,7 @@ namespace
         memset(s_Keybuffer, 0, sizeof(s_Keybuffer));
     }
 
-    void KbmInitialize()
+    void KbmInitialize(bool sharedMouse)
     {
         KbmBuildKeyMapping();
 
@@ -222,7 +223,8 @@ namespace
             ASSERT(false, "Mouse CreateDevice failed.");
         if (FAILED(s_Mouse->SetDataFormat(&c_dfDIMouse2)))
             ASSERT(false, "Mouse SetDataFormat failed.");
-        if (FAILED(s_Mouse->SetCooperativeLevel(GameCore::g_hWnd, DISCL_FOREGROUND | DISCL_EXCLUSIVE)))
+        const DWORD mouseMode = sharedMouse ? DISCL_NONEXCLUSIVE : DISCL_EXCLUSIVE;
+        if (FAILED(s_Mouse->SetCooperativeLevel(GameCore::g_hWnd, DISCL_FOREGROUND | mouseMode)))
             ASSERT(false, "Mouse SetCooperativeLevel failed.");
 
         KbmZeroInputs();
@@ -272,13 +274,13 @@ namespace
 
 }
 
-void GameInput::Initialize()
+void GameInput::Initialize(bool sharedMouse)
 {
     ZeroMemory(s_Buttons, sizeof(s_Buttons) );
     ZeroMemory(s_Analogs, sizeof(s_Analogs) );
 
 #ifdef USE_KEYBOARD_MOUSE
-    KbmInitialize();
+    KbmInitialize(sharedMouse);
 #endif
 }
 
@@ -385,6 +387,20 @@ void GameInput::Update( float frameDelta )
     else if (s_MouseState.lZ < 0)
         s_Analogs[kAnalogMouseScroll] = -1.0f;
 #endif
+
+    // DirectInput polls independently of Win32 messages, so mask captured UI input here.
+    if (ImGuiOverlay::WantsKeyboard())
+        for (uint32_t i = 0; i < kNumKeys; ++i)
+            s_Buttons[0][i] = false;
+
+    if (ImGuiOverlay::WantsMouse())
+    {
+        for (uint32_t i = kMouse0; i < kNumDigitalInputs; ++i)
+            s_Buttons[0][i] = false;
+        s_Analogs[kAnalogMouseX] = 0.0f;
+        s_Analogs[kAnalogMouseY] = 0.0f;
+        s_Analogs[kAnalogMouseScroll] = 0.0f;
+    }
 
     // Update time duration for buttons pressed
     for (uint32_t i = 0; i < kNumDigitalInputs; ++i)

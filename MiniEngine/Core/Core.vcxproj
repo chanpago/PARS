@@ -446,6 +446,45 @@
     <None Include="Shaders\SSAORS.hlsli" />
     <None Include="Shaders\TextRS.hlsli" />
   </ItemGroup>
+  <ItemGroup Label="Dear ImGui">
+    <ClCompile Include="ImGuiOverlay.cpp" />
+    <ClInclude Include="ImGuiOverlay.h" />
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui_demo.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui_draw.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui_tables.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\imgui_widgets.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\backends\imgui_impl_win32.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\backends\imgui_impl_dx12.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\ThirdParty\ImGui\misc\cpp\imgui_stdlib.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClInclude Include="..\..\ThirdParty\ImGui\imconfig.h" />
+    <ClInclude Include="..\..\ThirdParty\ImGui\imgui.h" />
+    <ClInclude Include="..\..\ThirdParty\ImGui\imgui_internal.h" />
+    <ClInclude Include="..\..\ThirdParty\ImGui\imstb_rectpack.h" />
+    <ClInclude Include="..\..\ThirdParty\ImGui\imstb_textedit.h" />
+    <ClInclude Include="..\..\ThirdParty\ImGui\imstb_truetype.h" />
+    <ClInclude Include="..\..\ThirdParty\ImGui\backends\imgui_impl_win32.h" />
+    <ClInclude Include="..\..\ThirdParty\ImGui\backends\imgui_impl_dx12.h" />
+    <ClInclude Include="..\..\ThirdParty\ImGui\misc\cpp\imgui_stdlib.h" />
+    <None Include="..\..\ThirdParty\ImGui\LICENSE.txt" />
+    <None Include="..\..\ThirdParty\ImGui\README.PARS.md" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemDefinitionGroup>
     <ClCompile>

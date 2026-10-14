@@ -20,6 +20,7 @@
 #include "CommandContext.h"
 #include "PostEffects.h"
 #include "Display.h"
+#include "ImGuiOverlay.h"
 #include "Util/CommandLineArg.h"
 #include <shellapi.h>
 
@@ -39,7 +40,9 @@ namespace GameCore
 
         Graphics::Initialize(game.RequiresRaytracingSupport());
         SystemTime::Initialize();
-        GameInput::Initialize();
+        if (game.UsesImGui())
+            ImGuiOverlay::Initialize(g_hWnd);
+        GameInput::Initialize(game.UsesImGui());
         EngineTuning::Initialize();
 
         game.Startup();
@@ -51,6 +54,7 @@ namespace GameCore
 
         game.Cleanup();
 
+        ImGuiOverlay::Shutdown();
         GameInput::Shutdown();
     }
 
@@ -60,6 +64,7 @@ namespace GameCore
 
         float DeltaTime = Graphics::GetFrameTime();
     
+        ImGuiOverlay::NewFrame();
         GameInput::Update(DeltaTime);
         EngineTuning::Update(DeltaTime);
         
@@ -81,6 +86,7 @@ namespace GameCore
 
         UiContext.Finish();
 
+        ImGuiOverlay::Render();
         Display::Present();
 
         return !game.IsDone();
@@ -161,10 +167,14 @@ namespace GameCore
     //--------------------------------------------------------------------------------------
     LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam )
     {
+        if (ImGuiOverlay::HandleMessage(hWnd, message, wParam, lParam))
+            return 1;
+
         switch( message )
         {
         case WM_SIZE:
-            Display::Resize((UINT)(UINT64)lParam & 0xFFFF, (UINT)(UINT64)lParam >> 16);
+            if (wParam != SIZE_MINIMIZED && LOWORD(lParam) != 0 && HIWORD(lParam) != 0)
+                Display::Resize(LOWORD(lParam), HIWORD(lParam));
             break;
 
         case WM_DESTROY:

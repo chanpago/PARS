@@ -33,6 +33,7 @@
 #include "ModelLoader.h"
 #include "ShadowCamera.h"
 #include "Display.h"
+#include "imgui.h"
 
 #define LEGACY_RENDERER
 
@@ -54,6 +55,8 @@ public:
 
     virtual void Update( float deltaT ) override;
     virtual void RenderScene( void ) override;
+    virtual void RenderUI(GraphicsContext&) override;
+    virtual bool UsesImGui() const override { return true; }
 
 private:
 
@@ -220,7 +223,11 @@ void ModelViewer::Update( float deltaT )
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
 
-    m_CameraController->Update(deltaT);
+    // Keep a free cursor for the UI; hold the right mouse button to control the camera.
+    if (GameInput::IsPressed(GameInput::kMouse1))
+        m_CameraController->Update(deltaT);
+    else
+        m_Camera.Update();
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
 
@@ -247,6 +254,43 @@ void ModelViewer::Update( float deltaT )
     m_MainScissor.top = 0;
     m_MainScissor.right = (LONG)g_SceneColorBuffer.GetWidth();
     m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
+}
+
+void ModelViewer::RenderUI(GraphicsContext&)
+{
+    static bool showWindow = true;
+    static bool showDemo = false;
+    static float testValue = 0.5f;
+    static int clicks = 0;
+    static char text[64] = "Hello PARS!";
+
+    if (ImGui::IsKeyPressed(ImGuiKey_F1, false))
+        showWindow = !showWindow;
+
+    if (showWindow)
+    {
+        ImGui::SetNextWindowPos(ImVec2(30.0f, 80.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 330.0f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("PARS - ImGui Test", &showWindow))
+        {
+            ImGui::TextColored(ImVec4(0.4f, 0.95f, 0.65f, 1.0f), "Win32 + DirectX 12 connected");
+            ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
+            ImGui::Separator();
+            ImGui::SliderFloat("Test value", &testValue, 0.0f, 1.0f);
+            if (ImGui::Button("Click me"))
+                ++clicks;
+            ImGui::SameLine();
+            ImGui::Text("Clicked %d times", clicks);
+            ImGui::InputText("Text", text, IM_ARRAYSIZE(text));
+            ImGui::Checkbox("Show ImGui demo", &showDemo);
+            ImGui::Separator();
+            ImGui::TextWrapped("Drag the title bar to move this window. F1 toggles this panel.");
+            ImGui::TextWrapped("Hold right mouse outside the UI to look around; use WASD while holding it to move.");
+        }
+        ImGui::End();
+    }
+    if (showDemo)
+        ImGui::ShowDemoWindow(&showDemo);
 }
 
 void ModelViewer::RenderScene( void )
