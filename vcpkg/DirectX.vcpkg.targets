@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Companion to DirectX.vcpkg.props. Import this after <Import ...Microsoft.Cpp.targets/>
+  in a consumer .vcxproj. It runs the manifest install (building DirectXTK12/DirectXTex/
+  DirectXMesh from source for the current triplet) and auto-links the produced libraries
+  and include directories.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Download only during a real build, never during IntelliSense evaluation. -->
+  <Target Name="EnsureVCPKG" BeforeTargets="_CheckForInvalidConfigurationAndPlatform;VcpkgInstallManifestDependencies"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <ReadLinesFromFile File="$(MSBuildThisFileDirectory)vcpkg-version.txt" Condition="'$(DirectXVcpkgUseLocal)' == 'true'">
+      <Output TaskParameter="Lines" PropertyName="DirectXVcpkgExpectedRevision" />
+    </ReadLinesFromFile>
+    <ReadLinesFromFile File="$(VcpkgRoot).directx-vcpkg-revision"
+                       Condition="'$(DirectXVcpkgUseLocal)' == 'true' and Exists('$(VcpkgRoot).directx-vcpkg-revision')">
+      <Output TaskParameter="Lines" PropertyName="DirectXVcpkgInstalledRevision" />
+    </ReadLinesFromFile>
+    <Exec Condition="'$(DirectXVcpkgUseLocal)' == 'true' and ('$(DirectXVcpkgInstalledRevision)' != '$(DirectXVcpkgExpectedRevision)' or !Exists('$(VcpkgRoot)vcpkg.exe') or !Exists('$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.targets'))"
+          Command="&quot;$(SystemRoot)\System32\WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)Bootstrap-Vcpkg.ps1&quot; -VisualStudioRoot &quot;$(VSInstallDir).&quot;" />
+    <Error Condition="!Exists('$(VcpkgRoot)scripts\buildsystems\msbuild\vcpkg.targets')"
+           Text="vcpkg setup did not complete. Check the build output for download errors, or set VCPKG_ROOT to a complete vcpkg installation." />
+  </Target>
+  <Import Project="$(DirectXVcpkgIntegrationDir)vcpkg.targets" Condition="Exists('$(DirectXVcpkgIntegrationDir)vcpkg.targets')" />
+  <!--
+    vcpkg's directxtk12 port installs its headers under include\directxtk12\ (e.g.
+    DDSTextureLoader.h, ResourceUploadBatch.h), whereas the old NuGet package placed them
+    flat in include\. Add that subdirectory so the samples' existing #include "DDSTextureLoader.h"
+    style keeps resolving. DirectXTex/DirectXMesh headers are installed flat and need nothing extra.
+  -->
+  <ItemDefinitionGroup Condition="'$(VcpkgEnableManifest)' == 'true'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(_ZVcpkgCurrentInstalledDir)include\directxtk12</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

@@ -1,0 +1,6 @@
+These files are an unmodified copy of scripts/buildsystems/msbuild from:
+https://github.com/microsoft/vcpkg/tree/e456309491fd875487bf02b8a0dca76c1b1b00cc/scripts/buildsystems/msbuild
+
+They let Visual Studio evaluate a fresh checkout before vcpkg is downloaded.
+The MIT license is included in LICENSE.txt.
+Keep this snapshot in sync with ../vcpkg-version.txt when updating vcpkg.

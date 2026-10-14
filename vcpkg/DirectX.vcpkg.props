@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared vcpkg enablement for samples that consume the static-lib DirectX helper
+  libraries (DirectXTK12, DirectXTex, DirectXMesh). Import this near the top of a
+  consumer .vcxproj, right after <Import ...Microsoft.Cpp.props/>, and import the
+  companion DirectX.vcpkg.targets after <Import ...Microsoft.Cpp.targets/>.
+
+  The triplet is derived automatically from $(Platform): x64 -> x64-windows-static-md,
+  ARM64 -> arm64-windows-static-md (a static lib linked against the dynamic CRT /MD,
+  matching the samples). Building these libraries from source with the same toolset
+  the samples use avoids the STL/ABI skew that the deprecated prebuilt NuGet packages
+  hit on ARM64.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="VcpkgSettings">
+    <VcpkgEnabled>true</VcpkgEnabled>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+    <VcpkgUseMD>true</VcpkgUseMD>
+    <!--
+      MiniEngine (and similar projects) set RuntimeLibrary directly without setting
+      UseDebugLibraries, so vcpkg's default heuristic mis-detects them as Release and links the
+      release (MD / _ITERATOR_DEBUG_LEVEL=0) libraries into a debug (MDd / IDL=2) build -> LNK2038.
+      Derive VcpkgConfiguration from the configuration name so the correct libraries are selected.
+    -->
+    <VcpkgConfiguration Condition="'$(VcpkgConfiguration)' == '' and $(Configuration.Contains('Debug'))">Debug</VcpkgConfiguration>
+    <VcpkgConfiguration Condition="'$(VcpkgConfiguration)' == ''">Release</VcpkgConfiguration>
+    <!-- Reuse an existing installation when available. Otherwise bootstrap a
+         pinned copy inside this checkout, without changing the user's machine. -->
+    <VcpkgRoot Condition="'$(VcpkgRoot)' == '' and Exists('$(VCPKG_ROOT)\scripts\buildsystems\msbuild\vcpkg.targets')">$(VCPKG_ROOT)</VcpkgRoot>
+    <VcpkgRoot Condition="'$(VcpkgRoot)' == '' and Exists('$(VsInstallRoot)\VC\vcpkg\scripts\buildsystems\msbuild\vcpkg.targets')">$(VsInstallRoot)\VC\vcpkg\</VcpkgRoot>
+    <DirectXVcpkgUseLocal Condition="'$(VcpkgRoot)' == ''">true</DirectXVcpkgUseLocal>
+    <VcpkgRoot Condition="'$(DirectXVcpkgUseLocal)' == 'true'">$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '.tools', 'vcpkg'))</VcpkgRoot>
+    <VcpkgRoot Condition="'$(VcpkgRoot)' != '' and !HasTrailingSlash('$(VcpkgRoot)')">$(VcpkgRoot)\</VcpkgRoot>
+    <!-- Ship the integration files so the very first project evaluation already
+         has the include/link/restore rules, before vcpkg itself is downloaded. -->
+    <DirectXVcpkgIntegrationDir>$(VcpkgRoot)scripts\buildsystems\msbuild\</DirectXVcpkgIntegrationDir>
+    <DirectXVcpkgIntegrationDir Condition="'$(DirectXVcpkgUseLocal)' == 'true'">$(MSBuildThisFileDirectory)msbuild\</DirectXVcpkgIntegrationDir>
+    <VcpkgAutoBootstrap Condition="'$(DirectXVcpkgUseLocal)' == 'true' or '$(DesignTimeBuild)' == 'true'">false</VcpkgAutoBootstrap>
+    <VcpkgManifestInstall Condition="'$(DesignTimeBuild)' == 'true'">false</VcpkgManifestInstall>
+    <!-- Surface the vcpkg property page in Visual Studio. -->
+    <VcpkgPageSchema Condition="'$(VcpkgPageSchema)' == ''">$(DirectXVcpkgIntegrationDir)vcpkg-general.xml</VcpkgPageSchema>
+  </PropertyGroup>
+  <Import Project="$(DirectXVcpkgIntegrationDir)vcpkg.props" Condition="Exists('$(DirectXVcpkgIntegrationDir)vcpkg.props')" />
+</Project>
