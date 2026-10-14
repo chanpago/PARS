@@ -14,8 +14,16 @@ independent Git history beginning with a single initial commit.
    the **MSVC v143** tools, and a Windows SDK. Install Git if it is not already
    available.
 2. Clone this repository and open `MiniEngine/ModelViewer/ModelViewer.slnx`.
-3. Set `ModelViewer` as the startup project, select **Debug** and **Windows** (x64),
-   then press **F5**.
+3. A fresh checkout opens with **Debug / Windows** (x64) and `ModelViewer` as the
+   startup project. Press **F5** to build and run.
+
+`Core` and `Model` are grouped under the `Engine` solution folder. The main
+solution targets Windows x64; for native ARM64 development, open
+`MiniEngine/ModelViewer/ModelViewer.ARM64.slnx` with the ARM64 C++ tools installed.
+
+Visual Studio remembers selections for solutions you have already opened. If an
+existing checkout still uses an old selection, choose **Debug / Windows** and
+set `ModelViewer` as the startup project once; future opens keep that selection.
 
 The first build needs internet access. NuGet restores the SDK/runtime packages,
 and the build sets up vcpkg when needed and restores the DirectX libraries.

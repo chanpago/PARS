@@ -3,12 +3,14 @@
 ## Getting started:
 * Install Visual Studio 2022 17.14 or later with **Desktop development with C++**, the **MSVC v143** tools, and a Windows SDK (tested with 10.0.26100.0).
 * Clone this repository, then open `ModelViewer/ModelViewer.slnx`.
-* Select `ModelViewer` as the startup project, configuration `Debug`, and solution platform `Windows` (x64).
+* A fresh checkout selects configuration `Debug`, solution platform `Windows` (x64), and startup project `ModelViewer` automatically. `Core` and `Model` appear under the `Engine` solution folder.
 * Press **F5** to build and run. NuGet restores the SDK/runtime packages. If vcpkg is not already installed, the build downloads a pinned copy into `.tools/vcpkg` and restores DirectXTK12, DirectXTex, and DirectXMesh automatically.
 
 The first build needs internet access and takes longer while tools and libraries are downloaded and built. No separate vcpkg installation, `vcpkg integrate install`, or `VCPKG_ROOT` setting is required. Git must be on `PATH`, or available through Visual Studio's bundled Git. Downloaded tools and libraries are ignored by Git.
 
-`Profile` (instrumented), `Release`, and the existing ARM64 configurations remain available; ARM64 also requires the corresponding C++ build tools. A DirectX 12 capable GPU and driver are required to run ModelViewer.
+`Profile` (instrumented) and `Release` remain available in the main solution. For native ARM64 development, open `ModelViewer/ModelViewer.ARM64.slnx` with the corresponding C++ build tools installed. A DirectX 12 capable GPU and driver are required to run ModelViewer.
+
+Visual Studio keeps your previously selected configuration and startup project in local solution settings. For a checkout you have already opened, select `Debug` / `Windows` and set `ModelViewer` as the startup project once if needed. The defaults above apply when opening a fresh checkout.
 
 From a Visual Studio Developer Command Prompt, the equivalent build from the repository root is:
 

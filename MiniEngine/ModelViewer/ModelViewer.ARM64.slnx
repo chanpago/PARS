@@ -1,0 +1,19 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Profile" />
+    <BuildType Name="Release" />
+    <Platform Name="ARM64" />
+  </Configurations>
+  <Project Path="ModelViewer.vcxproj" Id="1813bd6e-e2af-4a3c-8c54-4e72119da993" DefaultStartup="true">
+    <Platform Project="ARM64" />
+  </Project>
+  <Folder Name="/Engine/">
+    <Project Path="../Core/Core.vcxproj" Id="86a58508-0d6a-4786-a32f-01a301fdc6f3">
+      <Platform Project="ARM64" />
+    </Project>
+    <Project Path="../Model/Model.vcxproj" Id="5d3aeefb-8789-48e5-9bd9-09c667052d09">
+      <Platform Project="ARM64" />
+    </Project>
+  </Folder>
+</Solution>
