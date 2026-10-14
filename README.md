@@ -1,4 +1,6 @@
-# miniengine-project
+# PARS
+
+**Procedural Active Ragdoll System**
 
 A C++ / DirectX 12 project built on Microsoft's MiniEngine.
 
