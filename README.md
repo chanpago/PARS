@@ -64,6 +64,11 @@ Use command-line arguments `-physics 0` for the original Sponza scene, or
 The physics demo uses its own metre-scale floor; Sponza and imported model meshes
 do not have collision shapes yet. The existing ARM64 viewer does not use PhysX.
 
+To install PVD on another PC, follow the [PVD setup guide for users and AI agents](docs/PVD_SETUP.md).
+Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File Tools\Setup-PVD.ps1 -OpenDownloadPage`;
+if a download is needed, sign in to NVIDIA in your browser, download the installer,
+then rerun the command. The script validates and installs it under `.tools/pvd/app`.
+
 For live physics debugging, run a **Debug** or **Profile** build and click
 **Launch / connect PVD**. The button connects to `127.0.0.1:5425`, or starts the
 local `.tools/pvd/app/PVD3.exe` and retries while the debugger opens. A missing

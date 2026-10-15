@@ -67,9 +67,11 @@ colliders, character input and animation integration remain subsequent work.
 ## PhysX Visual Debugger (PVD)
 
 The standalone PVD application is installed separately from the `PhysXPvdSDK`
-library. Download it from [NVIDIA's PVD page](https://developer.nvidia.com/physx-visual-debugger)
-(NVIDIA login required). Local tools can be installed under `.tools/pvd/app`;
-their installers and binaries are excluded from Git and must be installed on each PC.
+library. Use the [PVD setup guide for users and AI agents](../../docs/PVD_SETUP.md)
+and `Tools/Setup-PVD.ps1` to install it on each PC. The user completes NVIDIA login
+and downloads the installer in their browser; the script validates its SHA256 and
+NVIDIA signature and installs it under `.tools/pvd/app`. Installers and binaries
+are excluded from Git. A valid existing installation is reused.
 Launch `PVD3.exe` to open the debugger. Its default connection port is TCP 5425.
 The x64 ModelViewer physics scene connects automatically to `127.0.0.1:5425`
 in Debug and Profile. **Launch / connect PVD** in the **PARS - Physics** panel
