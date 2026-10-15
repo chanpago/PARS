@@ -1,0 +1,3 @@
+# MiniEngine regenerates these caches from glTF and PNG sources.
+*.mini
+*.dds

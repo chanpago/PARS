@@ -52,6 +52,11 @@ void LoadMaterials(Model& model,
     model.textures.resize(numTextures);
     for (size_t ti = 0; ti < numTextures; ++ti)
     {
+        // BuildMaterials marks images unused by the supported material slots as 0xFF.
+        // This is a sentinel, not a valid combination of texture conversion flags.
+        if (textureOptions[ti] == 0xFF)
+            continue;
+
         std::wstring originalFile = basePath + textureNames[ti];
         CompileTextureOnDemand(originalFile, textureOptions[ti]);
 

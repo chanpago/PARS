@@ -47,6 +47,49 @@ using namespace std;
 
 using Renderer::MeshSorter;
 
+namespace
+{
+    const wchar_t* const kPreviewFiles[] = {
+        L"Idle/Idle.gltf", L"Walking/Walking.gltf", L"SlowRun/SlowRun.gltf"
+    };
+    const char* const kPreviewNames[] = { "Idle", "Walking", "Slow Run" };
+    constexpr uint32_t kPreviewCount = 3;
+
+    // Find the project assets from either the executable or the working directory.
+    // This also works when launching directly from the build output folder.
+    std::wstring FindPreviewAssetRoot()
+    {
+        wchar_t path[32768];
+        for (int location = 0; location < 2; ++location)
+        {
+            DWORD length = location == 0 ? GetModuleFileNameW(nullptr, path, _countof(path))
+                                        : GetCurrentDirectoryW(_countof(path), path);
+            if (length == 0 || length >= _countof(path))
+                continue;
+            std::wstring directory(path, length);
+            if (location == 0)
+                directory = directory.substr(0, directory.find_last_of(L"/\\"));
+            while (!directory.empty())
+            {
+                const std::wstring root = directory + L"/Assets/Characters/Mixamo/Converted/";
+                bool found = true;
+                for (const wchar_t* file : kPreviewFiles)
+                {
+                    const DWORD attributes = GetFileAttributesW((root + file).c_str());
+                    found &= attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
+                }
+                if (found)
+                    return root;
+                const size_t separator = directory.find_last_of(L"/\\");
+                if (separator == std::wstring::npos)
+                    break;
+                directory.resize(separator);
+            }
+        }
+        return L"";
+    }
+}
+
 class ModelViewer : public GameCore::IGameApp
 {
 public:
@@ -63,6 +106,11 @@ public:
 
 private:
 
+    void LoadAnimationPreview(bool forceRebuild);
+    void SelectPreview(uint32_t index);
+    void ResetPreviewCamera();
+    ModelInstance& ActiveModel() { return m_PreviewMode ? m_PreviewModels[m_PreviewIndex] : m_ModelInst; }
+
     Camera m_Camera;
     unique_ptr<CameraController> m_CameraController;
 
@@ -70,6 +118,15 @@ private:
     D3D12_RECT m_MainScissor;
 
     ModelInstance m_ModelInst;
+    ModelInstance m_PreviewModels[kPreviewCount];
+    float m_PreviewDurations[kPreviewCount] = {};
+    uint32_t m_PreviewIndex = 0;
+    float m_PreviewElapsed = 0.0f;
+    bool m_PreviewMode = false;
+    bool m_PreviewReady = false;
+    bool m_PreviewPlaying = true;
+    bool m_PreviewAutoCycle = true;
+    std::string m_PreviewError;
     ShadowCamera m_SunShadowCamera;
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
@@ -165,13 +222,18 @@ void ModelViewer::Startup( void )
 
     Renderer::Initialize();
 
-    // Start with a metre-scale physics scene on x64. Explicit models and
-    // -physics 0 retain the model viewer / legacy Sponza paths.
-#if defined(_M_X64)
+    // The default scene combines the physics map and the animated character.
+    // -physics 0 selects Sponza; -model still selects a standalone model.
     uint32_t physicsMode = 1;
-    CommandLineArgs::GetInteger(L"physics", physicsMode);
-    std::wstring requestedModel;
-    if (physicsMode && !CommandLineArgs::GetString(L"model", requestedModel))
+    const bool hasPhysicsOption = CommandLineArgs::GetInteger(L"physics", physicsMode);
+    std::wstring gltfFileName;
+    const bool hasModel = CommandLineArgs::GetString(L"model", gltfFileName);
+    bool forceRebuild = false;
+    uint32_t rebuildValue;
+    if (CommandLineArgs::GetInteger(L"rebuild", rebuildValue))
+        forceRebuild = rebuildValue != 0;
+#if defined(_M_X64)
+    if (physicsMode && !hasModel)
     {
         m_PhysicsDemo.reset(new PhysicsDemo());
         if (m_PhysicsDemo->Startup())
@@ -180,11 +242,8 @@ void ModelViewer::Startup( void )
             TemporalEffects::EnableTAA = false; // This simple pass has no object velocity buffer.
             PostEffects::EnableAdaptation = false;
             SSAO::Enable = false;
-            m_Camera.SetEyeAtUp(Vector3(9, 6, 11), Vector3(0, 1.5f, 0), Vector3(kYUnitVector));
-            m_Camera.SetZRange(0.1f, 100.0f);
-            auto controller = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
-            controller->SetMoveSpeed(5.0f);
-            m_CameraController.reset(controller);
+            LoadIBLTextures();
+            LoadAnimationPreview(forceRebuild);
             return;
         }
         Utility::Printf("Physics demo initialization failed; loading the model viewer.\n");
@@ -194,14 +253,13 @@ void ModelViewer::Startup( void )
 
     LoadIBLTextures();
 
-    std::wstring gltfFileName;
+    if (!hasModel && !hasPhysicsOption)
+    {
+        LoadAnimationPreview(forceRebuild);
+        return;
+    }
 
-    bool forceRebuild = false;
-    uint32_t rebuildValue;
-    if (CommandLineArgs::GetInteger(L"rebuild", rebuildValue))
-        forceRebuild = rebuildValue != 0;
-
-    if (CommandLineArgs::GetString(L"model", gltfFileName) == false)
+    if (!hasModel)
     {
 #ifdef LEGACY_RENDERER
         Sponza::Startup(m_Camera);
@@ -222,6 +280,12 @@ void ModelViewer::Startup( void )
         m_ModelInst.Resize(10.0f);
 
         MotionBlur::Enable = false;
+        // Skinned meshes do not yet write object velocities for temporal reprojection.
+        if (m_ModelInst.GetNumAnimations() > 0)
+        {
+            TemporalEffects::EnableTAA = false;
+            FXAA::Enable = true;
+        }
     }
 
     m_Camera.SetZRange(1.0f, 10000.0f);
@@ -229,6 +293,82 @@ void ModelViewer::Startup( void )
         m_CameraController.reset(new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector)));
     else
         m_CameraController.reset(new OrbitCamera(m_Camera, m_ModelInst.GetBoundingSphere(), Vector3(kYUnitVector)));
+}
+
+void ModelViewer::LoadAnimationPreview(bool forceRebuild)
+{
+    m_PreviewMode = true;
+    MotionBlur::Enable = false;
+    TemporalEffects::EnableTAA = false;
+    FXAA::Enable = true;
+    ResetPreviewCamera();
+
+    const std::wstring root = FindPreviewAssetRoot();
+    if (root.empty())
+    {
+        m_PreviewError = "Cannot find Idle, Walking and SlowRun in Assets/Characters/Mixamo/Converted.";
+        return;
+    }
+
+    // Keep each instance alive so changing clips never reallocates GPU buffers.
+    for (uint32_t i = 0; i < kPreviewCount; ++i)
+    {
+        auto model = Renderer::LoadModel(root + kPreviewFiles[i], forceRebuild);
+        if (!model || model->m_NumAnimations == 0 || model->m_Animations[0].duration <= 0.0f)
+        {
+            m_PreviewError = std::string("Could not load animation: ") + kPreviewNames[i];
+            return;
+        }
+        m_PreviewModels[i] = model;
+#if defined(_M_X64)
+        if (m_PhysicsDemo)
+            // The converted glTF is already in metres. Keep the same fixed
+            // placement for every clip, beside the falling box at the origin.
+            m_PreviewModels[i].SetPosition(Vector3(2.0f, 0.0f, 0.0f));
+        else
+#endif
+            m_PreviewModels[i].Resize(10.0f);
+        const float duration = model->m_Animations[0].duration;
+        // Show complete loops for at least four seconds before changing clips.
+        m_PreviewDurations[i] = duration * ceilf(4.0f / duration);
+    }
+    m_PreviewReady = true;
+    SelectPreview(0);
+    ResetPreviewCamera();
+}
+
+void ModelViewer::SelectPreview(uint32_t index)
+{
+    m_PreviewIndex = index % kPreviewCount;
+    m_PreviewElapsed = 0.0f;
+    m_PreviewModels[m_PreviewIndex].LoopAllAnimations();
+}
+
+void ModelViewer::ResetPreviewCamera()
+{
+    m_Camera.SetZRange(0.1f, 1000.0f);
+#if defined(_M_X64)
+    if (m_PhysicsDemo)
+    {
+        m_Camera.SetZRange(0.1f, 100.0f);
+        m_Camera.SetEyeAtUp(Vector3(5, 3.2f, 7), Vector3(1, 1.8f, 0), Vector3(kYUnitVector));
+        auto controller = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
+        controller->SetMoveSpeed(5.0f);
+        m_CameraController.reset(controller);
+        return;
+    }
+#endif
+    if (!m_PreviewReady)
+    {
+        m_CameraController.reset(new OrbitCamera(m_Camera, BoundingSphere(Vector3(0, 8, 0), 14.0f)));
+        return;
+    }
+    // Leave room for the hands and feet throughout all three animations.
+    BoundingSphere bounds = m_PreviewModels[0].GetBoundingSphere();
+    for (uint32_t i = 1; i < kPreviewCount; ++i)
+        bounds = bounds.Union(m_PreviewModels[i].GetBoundingSphere());
+    m_CameraController.reset(new OrbitCamera(m_Camera,
+        BoundingSphere(bounds.GetCenter(), bounds.GetRadius() * 1.4f), Vector3(kYUnitVector)));
 }
 
 void ModelViewer::Cleanup( void )
@@ -241,6 +381,8 @@ void ModelViewer::Cleanup( void )
     }
 #endif
     m_ModelInst = nullptr;
+    for (auto& model : m_PreviewModels)
+        model = nullptr;
 
     g_IBLTextures.clear();
 
@@ -279,7 +421,19 @@ void ModelViewer::Update( float deltaT )
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
 
-    m_ModelInst.Update(gfxContext, deltaT);
+    float animationDelta = deltaT;
+    if (m_PreviewMode)
+    {
+        // Pausing also freezes the automatic switch timer; camera input still works.
+        animationDelta = m_PreviewPlaying ? Clamp(deltaT, 0.0f, 0.1f) : 0.0f;
+        if (m_PreviewReady && m_PreviewAutoCycle)
+        {
+            m_PreviewElapsed += animationDelta;
+            if (m_PreviewElapsed >= m_PreviewDurations[m_PreviewIndex])
+                SelectPreview(m_PreviewIndex + 1);
+        }
+    }
+    ActiveModel().Update(gfxContext, animationDelta);
 
     gfxContext.Finish();
 
@@ -310,9 +464,50 @@ void ModelViewer::RenderUI(GraphicsContext&)
     if (m_PhysicsDemo)
     {
         m_PhysicsDemo->RenderUI();
-        return;
+        if (!m_PreviewMode)
+            return;
     }
 #endif
+    if (m_PreviewMode)
+    {
+        ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 24.0f, 70.0f),
+            ImGuiCond_FirstUseEver, ImVec2(1.0f, 0.0f));
+        ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Character Animation", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            if (!m_PreviewReady)
+                ImGui::TextWrapped("%s", m_PreviewError.c_str());
+            else
+            {
+                ImGui::Text("Now playing: %s", kPreviewNames[m_PreviewIndex]);
+                ImGui::TextUnformatted("Idle -> Walking -> Slow Run -> repeat");
+                ImGui::Separator();
+                ImGui::Checkbox("Play", &m_PreviewPlaying);
+                ImGui::SameLine();
+                if (ImGui::Checkbox("Auto cycle", &m_PreviewAutoCycle))
+                    m_PreviewElapsed = 0.0f;
+                if (m_PreviewAutoCycle)
+                    ImGui::Text("Next animation in %.1f s", m_PreviewDurations[m_PreviewIndex] - m_PreviewElapsed);
+                for (uint32_t i = 0; i < kPreviewCount; ++i)
+                {
+                    if (i > 0)
+                        ImGui::SameLine();
+                    if (ImGui::Button(kPreviewNames[i]))
+                        SelectPreview(i);
+                }
+                if (ImGui::Button("Reset camera"))
+                    ResetPreviewCamera();
+#if defined(_M_X64)
+                if (m_PhysicsDemo)
+                    ImGui::TextWrapped("WASD: move camera. Q/E: down/up. Hold right mouse to look around.");
+                else
+#endif
+                    ImGui::TextWrapped("Hold right mouse and drag to orbit. Hold right mouse and scroll to zoom.");
+            }
+        }
+        ImGui::End();
+        return;
+    }
     static bool showWindow = true;
     static bool showDemo = false;
     static float testValue = 0.5f;
@@ -356,22 +551,36 @@ void ModelViewer::RenderScene( void )
     const D3D12_VIEWPORT& viewport = m_MainViewport;
     const D3D12_RECT& scissor = m_MainScissor;
 
+    bool physicsScene = false;
 #if defined(_M_X64)
     if (m_PhysicsDemo)
     {
+        physicsScene = true;
         m_PhysicsDemo->Render(gfxContext, m_Camera, viewport, scissor);
-        gfxContext.Finish();
-        return;
+        if (ActiveModel().IsNull())
+        {
+            gfxContext.Finish();
+            return;
+        }
     }
 #endif
 
     ParticleEffectManager::Update(gfxContext.GetComputeContext(), Graphics::GetFrameTime());
 
-    if (m_ModelInst.IsNull())
+    ModelInstance& model = ActiveModel();
+    if (model.IsNull())
     {
 #ifdef LEGACY_RENDERER
-        Sponza::RenderScene(gfxContext, m_Camera, viewport, scissor);
+        if (m_SponzaStarted)
+            Sponza::RenderScene(gfxContext, m_Camera, viewport, scissor);
+        else
 #endif
+        {
+            gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
+            gfxContext.ClearColor(g_SceneColorBuffer);
+            gfxContext.Finish();
+            return;
+        }
     }
     else
     {
@@ -382,9 +591,9 @@ void ModelViewer::RenderScene( void )
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3( costheta * cosphi, sinphi, sintheta * cosphi ));
-        Vector3 ShadowBounds = Vector3(m_ModelInst.GetRadius());
-        //m_SunShadowCamera.UpdateMatrix(-SunDirection, m_ModelInst.GetCenter(), ShadowBounds,
-        m_SunShadowCamera.UpdateMatrix(-SunDirection, Vector3(0, -500.0f, 0), Vector3(5000, 3000, 3000),
+        m_SunShadowCamera.UpdateMatrix(-SunDirection,
+            physicsScene ? Vector3(0, 2, 0) : Vector3(0, -500.0f, 0),
+            physicsScene ? Vector3(16, 10, 16) : Vector3(5000, 3000, 3000),
             (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
 
         GlobalConstants globals;
@@ -396,7 +605,9 @@ void ModelViewer::RenderScene( void )
 
         // Begin rendering depth
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
-        gfxContext.ClearDepth(g_SceneDepthBuffer);
+        // Preserve the floor and box depth so they correctly occlude the character.
+        if (!physicsScene)
+            gfxContext.ClearDepth(g_SceneDepthBuffer);
 
         MeshSorter sorter(MeshSorter::kDefault);
 		sorter.SetCamera(m_Camera);
@@ -405,7 +616,7 @@ void ModelViewer::RenderScene( void )
 		sorter.SetDepthStencilTarget(g_SceneDepthBuffer);
 		sorter.AddRenderTarget(g_SceneColorBuffer);
 
-        m_ModelInst.Render(sorter);
+        model.Render(sorter);
 
         sorter.Sort();
 
@@ -427,14 +638,15 @@ void ModelViewer::RenderScene( void )
 				shadowSorter.SetCamera(m_SunShadowCamera);
 				shadowSorter.SetDepthStencilTarget(g_ShadowBuffer);
 
-                m_ModelInst.Render(shadowSorter);
+                model.Render(shadowSorter);
 
                 shadowSorter.Sort();
                 shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);
             }
 
             gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-            gfxContext.ClearColor(g_SceneColorBuffer);
+            if (!physicsScene)
+                gfxContext.ClearColor(g_SceneColorBuffer);
 
             {
                 ScopedTimer _prof(L"Render Color", gfxContext);
@@ -447,7 +659,8 @@ void ModelViewer::RenderScene( void )
                 sorter.RenderMeshes(MeshSorter::kOpaque, gfxContext, globals);
             }
 
-            Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
+            if (!physicsScene)
+                Renderer::DrawSkybox(gfxContext, m_Camera, viewport, scissor);
 
             sorter.RenderMeshes(MeshSorter::kTransparent, gfxContext, globals);
         }
@@ -458,7 +671,8 @@ void ModelViewer::RenderScene( void )
     // is necessary for all temporal effects (and motion blur).
     MotionBlur::GenerateCameraVelocityBuffer(gfxContext, m_Camera, true);
 
-    TemporalEffects::ResolveImage(gfxContext);
+    if (TemporalEffects::EnableTAA)
+        TemporalEffects::ResolveImage(gfxContext);
 
     ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer,  g_LinearDepth[FrameIndex]);
 
