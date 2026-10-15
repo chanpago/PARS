@@ -1,0 +1,46 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.33627.172
+MinimumVisualStudioVersion = 17.0.31903.59
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "ModelViewer", "ModelViewer.vcxproj", "{1813BD6E-E2AF-4A3C-8C54-4E72119DA993}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Engine", "Engine", "{FC6A3A8E-9F09-4515-B582-531756F1C97C}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "Core", "..\Core\Core.vcxproj", "{86A58508-0D6A-4786-A32F-01A301FDC6F3}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "Model", "..\Model\Model.vcxproj", "{5D3AEEFB-8789-48E5-9BD9-09C667052D09}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Windows = Debug|Windows
+		Profile|Windows = Profile|Windows
+		Release|Windows = Release|Windows
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1813BD6E-E2AF-4A3C-8C54-4E72119DA993}.Debug|Windows.ActiveCfg = Debug|x64
+		{1813BD6E-E2AF-4A3C-8C54-4E72119DA993}.Debug|Windows.Build.0 = Debug|x64
+		{1813BD6E-E2AF-4A3C-8C54-4E72119DA993}.Profile|Windows.ActiveCfg = Profile|x64
+		{1813BD6E-E2AF-4A3C-8C54-4E72119DA993}.Profile|Windows.Build.0 = Profile|x64
+		{1813BD6E-E2AF-4A3C-8C54-4E72119DA993}.Release|Windows.ActiveCfg = Release|x64
+		{1813BD6E-E2AF-4A3C-8C54-4E72119DA993}.Release|Windows.Build.0 = Release|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Debug|Windows.ActiveCfg = Debug|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Debug|Windows.Build.0 = Debug|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Profile|Windows.ActiveCfg = Profile|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Profile|Windows.Build.0 = Profile|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Release|Windows.ActiveCfg = Release|x64
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3}.Release|Windows.Build.0 = Release|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Debug|Windows.ActiveCfg = Debug|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Debug|Windows.Build.0 = Debug|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Profile|Windows.ActiveCfg = Profile|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Profile|Windows.Build.0 = Profile|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Release|Windows.ActiveCfg = Release|x64
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09}.Release|Windows.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{86A58508-0D6A-4786-A32F-01A301FDC6F3} = {FC6A3A8E-9F09-4515-B582-531756F1C97C}
+		{5D3AEEFB-8789-48E5-9BD9-09C667052D09} = {FC6A3A8E-9F09-4515-B582-531756F1C97C}
+	EndGlobalSection
+EndGlobal

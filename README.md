@@ -17,6 +17,11 @@ independent Git history beginning with a single initial commit.
 3. A fresh checkout opens with **Debug / Windows** (x64) and `ModelViewer` as the
    startup project. Press **F5** to build and run.
 
+For Visual Studio 2022 versions that cannot open `.slnx`, open
+`MiniEngine/ModelViewer/ModelViewer.sln` instead. This compatibility solution has
+the same projects and configurations; keep both solution files in sync when
+changing them. The build prerequisites above still apply.
+
 `Core` and `Model` are grouped under the `Engine` solution folder. The main
 solution targets Windows x64; for native ARM64 development, open
 `MiniEngine/ModelViewer/ModelViewer.ARM64.slnx` with the ARM64 C++ tools installed.
@@ -41,7 +46,9 @@ additional build configurations.
 
 ModelViewer also opens a temporary **PARS - ImGui Test** panel. Try its slider,
 button, text input, or **Show ImGui demo** checkbox. **F1** hides/reopens the panel.
-Hold the right mouse button outside the UI to look around and use WASD to move.
+Use WASD to move and Q/E to move down/up; hold the right mouse button outside the
+UI to look around. Movement does not require a mouse button. Active UI controls
+such as the text field capture keyboard input while you edit them.
 
 ## Repository layout
 

@@ -33,8 +33,9 @@ download, DLL, or additional ImGui project is needed.
 ModelViewer opts in through `IGameApp::UsesImGui()` and displays a temporary
 `PARS - ImGui Test` panel from `ModelViewer::RenderUI()`. It includes a slider,
 click counter, text input, FPS display, and a checkbox for the official demo.
-Press **F1** to hide or reopen the test panel. Hold the right mouse button outside
-the UI to control the camera; use WASD while holding it to move.
+Press **F1** to hide or reopen the test panel. Use WASD to move and Q/E to move
+down/up without holding a mouse button. Hold the right mouse button outside the
+UI to look around.
 
 `MiniEngine/Core/ImGuiOverlay.*` owns the context, Win32/DX12 backends, and a
 shader-visible SRV descriptor heap. GameCore forwards window messages, starts
@@ -44,7 +45,10 @@ isolated from MiniEngine's cached graphics state, and per-frame fences protect
 the backend's upload buffers. Shutdown waits for outstanding GPU work.
 
 GameInput uses a shared mouse cursor for opted-in apps and masks keyboard/mouse
-input captured by ImGui. Other MiniEngine applications keep their previous mouse
+input captured by ImGui. A focused panel alone does not capture keyboard input;
+active widgets (including text fields) and modal dialogs still do. Camera
+controllers update every frame, with only mouse input gated by the right button
+in ModelViewer. Other MiniEngine applications keep their previous mouse
 mode unless they override `UsesImGui()`. Preview layout persistence and separate
 OS viewport windows are disabled; the upstream files remain unchanged.
 

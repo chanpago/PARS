@@ -223,11 +223,10 @@ void ModelViewer::Update( float deltaT )
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
 
-    // Keep a free cursor for the UI; hold the right mouse button to control the camera.
-    if (GameInput::IsPressed(GameInput::kMouse1))
-        m_CameraController->Update(deltaT);
-    else
-        m_Camera.Update();
+    // Only mouse look requires a right-button drag. Keyboard/gamepad input is
+    // updated every frame, after GameInput has masked input captured by the UI.
+    m_CameraController->EnableMouseInput(GameInput::IsPressed(GameInput::kMouse1));
+    m_CameraController->Update(deltaT);
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
 
@@ -285,7 +284,7 @@ void ModelViewer::RenderUI(GraphicsContext&)
             ImGui::Checkbox("Show ImGui demo", &showDemo);
             ImGui::Separator();
             ImGui::TextWrapped("Drag the title bar to move this window. F1 toggles this panel.");
-            ImGui::TextWrapped("Hold right mouse outside the UI to look around; use WASD while holding it to move.");
+            ImGui::TextWrapped("Use WASD to move and Q/E to move down/up. Hold right mouse outside the UI to look around.");
         }
         ImGui::End();
     }

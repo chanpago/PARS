@@ -97,8 +97,11 @@ void FlyingFPSCamera::Update( float deltaTime )
     }
 
     // don't apply momentum to mouse inputs
-    yaw += GameInput::GetAnalogInput(GameInput::kAnalogMouseX) * m_MouseSensitivityX;
-    pitch += GameInput::GetAnalogInput(GameInput::kAnalogMouseY) * m_MouseSensitivityY;
+    if (m_MouseInputEnabled)
+    {
+        yaw += GameInput::GetAnalogInput(GameInput::kAnalogMouseX) * m_MouseSensitivityX;
+        pitch += GameInput::GetAnalogInput(GameInput::kAnalogMouseY) * m_MouseSensitivityY;
+    }
 
     m_CurrentPitch += pitch;
     m_CurrentPitch = XMMin( XM_PIDIV2, m_CurrentPitch);
@@ -187,9 +190,12 @@ void OrbitCamera::Update( float deltaTime )
     }
 
     // don't apply momentum to mouse inputs
-    yaw += GameInput::GetAnalogInput(GameInput::kAnalogMouseX) * m_MouseSensitivityX;
-    pitch += GameInput::GetAnalogInput(GameInput::kAnalogMouseY) * m_MouseSensitivityY;
-    closeness += GameInput::GetAnalogInput(GameInput::kAnalogMouseScroll) * 0.1f;
+    if (m_MouseInputEnabled)
+    {
+        yaw += GameInput::GetAnalogInput(GameInput::kAnalogMouseX) * m_MouseSensitivityX;
+        pitch += GameInput::GetAnalogInput(GameInput::kAnalogMouseY) * m_MouseSensitivityY;
+        closeness += GameInput::GetAnalogInput(GameInput::kAnalogMouseScroll) * 0.1f;
+    }
 
     m_CurrentPitch += pitch;
     m_CurrentPitch = XMMin( XM_PIDIV2, m_CurrentPitch);

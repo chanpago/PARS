@@ -50,6 +50,9 @@ void ImGuiOverlay::Initialize(HWND window)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+    // A focused panel alone must not swallow game keys. Active widgets and
+    // modal dialogs still set WantCaptureKeyboard and keep their input.
+    io.ConfigNavCaptureKeyboard = false;
     io.ConfigWindowsMoveFromTitleBarOnly = true;
     io.IniFilename = nullptr; // This temporary preview should not persist its layout.
     ImFontConfig fontConfig;

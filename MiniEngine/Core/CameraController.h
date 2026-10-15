@@ -32,11 +32,15 @@ public:
     virtual ~CameraController() {}
     virtual void Update( float dt ) = 0;
 
+    // Allow a free UI cursor without disabling keyboard or gamepad movement.
+    void EnableMouseInput( bool enable ) { m_MouseInputEnabled = enable; }
+
     // Helper function
     static void ApplyMomentum( float& oldValue, float& newValue, float deltaTime );
 
 protected:
     Camera& m_TargetCamera;
+    bool m_MouseInputEnabled = true;
 
 private:
     CameraController& operator=( const CameraController& ) {return *this;}
