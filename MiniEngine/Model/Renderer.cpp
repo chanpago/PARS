@@ -244,6 +244,21 @@ void Renderer::Initialize(void)
     s_Initialized = true;
 }
 
+DescriptorHandle Renderer::CreateCommonTextureTable(D3D12_CPU_DESCRIPTOR_HANDLE ao, D3D12_CPU_DESCRIPTOR_HANDLE shadow)
+{
+    DescriptorHandle table = s_TextureHeap.Alloc(8);
+    D3D12_CPU_DESCRIPTOR_HANDLE sources[] = {
+        s_RadianceCubeMap.IsValid() ? s_RadianceCubeMap.GetSRV() : GetDefaultTexture(kBlackCubeMap),
+        s_IrradianceCubeMap.IsValid() ? s_IrradianceCubeMap.GetSRV() : GetDefaultTexture(kBlackCubeMap),
+        ao, shadow, Lighting::m_LightBuffer.GetSRV(), Lighting::m_LightShadowArray.GetSRV(),
+        Lighting::m_LightGrid.GetSRV(), Lighting::m_LightGridBitMask.GetSRV()
+    };
+    for (int i = 0; i < 8; ++i)
+        g_Device->CopyDescriptorsSimple(1, table + i * s_TextureHeap.GetDescriptorSize(), sources[i],
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    return table;
+}
+
 void Renderer::UpdateGlobalDescriptors(void)
 {
     if (g_SSAOFullScreenID == g_SSAOFullScreen.GetVersionID() &&
@@ -553,7 +568,7 @@ void MeshSorter::RenderMeshes(
     context.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, s_SamplerHeap.GetHeapPointer());
 
     // Set common textures
-    context.SetDescriptorTable(kCommonSRVs, m_CommonTextures);
+    context.SetDescriptorTable(kCommonSRVs, m_TextureTable.IsNull() ? m_CommonTextures : m_TextureTable);
 
     // Set common shader constants
 	globals.ViewProjMatrix = m_Camera->GetViewProjMatrix();
@@ -604,7 +619,7 @@ void MeshSorter::RenderMeshes(
 			m_Scissor.left = 0;
 			m_Scissor.right = m_DSV->GetWidth();
 			m_Scissor.top = 0;
-			m_Scissor.bottom = m_DSV->GetWidth();
+			m_Scissor.bottom = m_DSV->GetHeight();
 		}
 	}
 
@@ -616,6 +631,16 @@ void MeshSorter::RenderMeshes(
 
 		if (m_BatchType == kDefault)
 		{
+            D3D12_CPU_DESCRIPTOR_HANDLE targets[8] = {};
+            if (m_CurrentPass != kZPass)
+            {
+                ASSERT(m_NumRTVs > 0);
+                for (uint32_t i = 0; i < m_NumRTVs; ++i)
+                {
+                    context.TransitionResource(*m_RTV[i], D3D12_RESOURCE_STATE_RENDER_TARGET);
+                    targets[i] = m_RTV[i]->GetRTV();
+                }
+            }
 			switch (m_CurrentPass)
 			{
 			case kZPass:
@@ -626,20 +651,17 @@ void MeshSorter::RenderMeshes(
 				if (SeparateZPass)
 				{
 					context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_READ);
-					context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-					context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV_DepthReadOnly());
+                    context.SetRenderTargets(m_NumRTVs, targets, m_DSV->GetDSV_DepthReadOnly());
 				}
 				else
 				{
 					context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-					context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-					context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV());
+                    context.SetRenderTargets(m_NumRTVs, targets, m_DSV->GetDSV());
 				}
 				break;
 			case kTransparent:
 				context.TransitionResource(*m_DSV, D3D12_RESOURCE_STATE_DEPTH_READ);
-				context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-				context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), m_DSV->GetDSV_DepthReadOnly());
+                context.SetRenderTargets(m_NumRTVs, targets, m_DSV->GetDSV_DepthReadOnly());
 				break;
 			}
 		}

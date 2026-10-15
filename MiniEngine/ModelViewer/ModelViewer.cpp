@@ -36,6 +36,7 @@
 #include "GameFramework/World.h"
 #include "WorldRenderer.h"
 #include "PreviewAnimInstance.h"
+#include "SkeletalMeshViewer.h"
 #include "GameFramework/PlayerController.h"
 #include "ShadowCamera.h"
 #include "Display.h"
@@ -139,6 +140,7 @@ private:
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
     std::string m_PreviewError;
+    unique_ptr<SkeletalMeshViewer> m_MeshViewer;
     ShadowCamera m_SunShadowCamera;
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
@@ -390,6 +392,9 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     context.Finish(true);
     m_PreviewReady = true;
     ResetPreviewCamera();
+    m_MeshViewer = std::make_unique<SkeletalMeshViewer>();
+    if (!m_MeshViewer->Initialize(models, kPreviewNames, kPreviewCount))
+        m_MeshViewer.reset();
 }
 
 void ModelViewer::SelectPreview(uint32_t index)
@@ -466,6 +471,11 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
     using namespace GameInput;
     auto player = GetPlayerController();
     if (!player) return;
+    if (m_MeshViewer && m_MeshViewer->WantsInput())
+    {
+        player->SetInputEnabled(false);
+        return;
+    }
     if (IsFirstPressed(kKey_tab)) SetFreeCamera(!m_FreeCamera);
     player->SetInputEnabled(!m_FreeCamera);
     if (m_FreeCamera) return;
@@ -499,6 +509,7 @@ void ModelViewer::Cleanup( void )
 {
     // GameCore waits for the GPU before Cleanup. End actor lifetimes while the
     // renderer and physics services are still available to their components.
+    m_MeshViewer.reset();
     m_PreviewCharacter = {};
     m_PlayerController = {};
     m_World.Clear();
@@ -545,7 +556,7 @@ void ModelViewer::Update( float deltaT )
 
     m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
     UpdateCharacterInput(deltaT);
-    if (!GetPlayerController() || m_FreeCamera)
+    if ((!GetPlayerController() || m_FreeCamera) && !(m_MeshViewer && m_MeshViewer->WantsInput()))
     {
         m_CameraController->EnableMouseInput(GameInput::IsPressed(GameInput::kMouse1));
         m_CameraController->Update(deltaT);
@@ -561,6 +572,7 @@ void ModelViewer::Update( float deltaT )
         UpdateFollowCamera();
     Renderer::UpdateWorldRenderData(m_World, gfxContext);
     m_ModelInst.Update(gfxContext, deltaT);
+    if (m_MeshViewer) m_MeshViewer->Update(deltaT);
 
     gfxContext.Finish();
 
@@ -585,7 +597,7 @@ void ModelViewer::Update( float deltaT )
     m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
 }
 
-void ModelViewer::RenderUI(GraphicsContext&)
+void ModelViewer::RenderUI(GraphicsContext& context)
 {
 #if defined(_M_X64)
     if (m_PhysicsDemo)
@@ -597,6 +609,16 @@ void ModelViewer::RenderUI(GraphicsContext&)
 #endif
     if (m_PreviewMode)
     {
+        if (ImGui::BeginMainMenuBar())
+        {
+            if (ImGui::BeginMenu("Window"))
+            {
+                if (ImGui::MenuItem("Skeletal Mesh Viewer", nullptr, false, m_MeshViewer != nullptr))
+                    m_MeshViewer->Open();
+                ImGui::EndMenu();
+            }
+            ImGui::EndMainMenuBar();
+        }
         ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 24.0f, 70.0f),
             ImGuiCond_FirstUseEver, ImVec2(1.0f, 0.0f));
         ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_FirstUseEver);
@@ -664,6 +686,7 @@ void ModelViewer::RenderUI(GraphicsContext&)
             }
         }
         ImGui::End();
+        if (m_MeshViewer) m_MeshViewer->RenderUI(context);
         return;
     }
     static bool showWindow = true;

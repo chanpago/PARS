@@ -145,3 +145,23 @@ bool ImGuiOverlay::WantsKeyboard()
 {
     return s_Initialized && ImGui::GetIO().WantCaptureKeyboard;
 }
+
+uint64_t ImGuiOverlay::RegisterTexture(D3D12_CPU_DESCRIPTOR_HANDLE source)
+{
+    ASSERT(s_Initialized);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu;
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu;
+    AllocateDescriptor(nullptr, &cpu, &gpu);
+    Graphics::g_Device->CopyDescriptorsSimple(1, cpu, source, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    return gpu.ptr;
+}
+
+void ImGuiOverlay::UnregisterTexture(uint64_t texture)
+{
+    if (!s_Initialized || !texture) return;
+    const UINT64 offset = texture - s_DescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr;
+    ASSERT(offset % s_DescriptorSize == 0 && offset / s_DescriptorSize < kDescriptorCount);
+    auto cpu = s_DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+    cpu.ptr += static_cast<SIZE_T>(offset);
+    FreeDescriptor(nullptr, cpu, {texture});
+}

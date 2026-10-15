@@ -19,6 +19,7 @@
 #include "../Core/CommandContext.h"
 #include "../Core/UploadBuffer.h"
 #include "../Core/TextureManager.h"
+#include "../Core/DescriptorHeap.h"
 #include <cstdint>
 #include <vector>
 
@@ -65,6 +66,8 @@ namespace Renderer
     void SetIBLTextures(TextureRef diffuseIBL, TextureRef specularIBL);
     void SetIBLBias(float LODBias);
     void UpdateGlobalDescriptors(void);
+    // Allocate once per preview; the table lives until Renderer::Shutdown.
+    DescriptorHandle CreateCommonTextureTable(D3D12_CPU_DESCRIPTOR_HANDLE ao, D3D12_CPU_DESCRIPTOR_HANDLE shadow);
     void DrawSkybox( GraphicsContext& gfxContext, const Camera& camera, const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor );
 
     class MeshSorter
@@ -97,6 +100,7 @@ namespace Renderer
 			m_RTV[m_NumRTVs++] = &RTV;
 		}
 		void SetDepthStencilTarget( DepthBuffer& DSV ) { m_DSV = &DSV; }
+        void SetCommonTextures(DescriptorHandle textures) { m_TextureTable = textures; }
 
         const Frustum& GetWorldFrustum() const { return m_Camera->GetWorldSpaceFrustum(); }
         const Frustum& GetViewFrustum() const { return m_Camera->GetViewSpaceFrustum(); }
@@ -151,6 +155,7 @@ namespace Renderer
 		uint32_t m_NumRTVs;
 		ColorBuffer* m_RTV[8];
 		DepthBuffer* m_DSV;
+        DescriptorHandle m_TextureTable;
 	};
 
 } // namespace Renderer

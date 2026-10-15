@@ -71,12 +71,20 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ModelViewer.cpp" />
+    <ClCompile Include="SkeletalMeshViewer.cpp" />
     <ClCompile Include="PhysicsDemo.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PhysicsDemo.h" />
+    <ClInclude Include="SkeletalMeshViewer.h" />
+    <FxCompile Include="Shaders\MeshPreviewVS.hlsl">
+      <ShaderType>Vertex</ShaderType>
+    </FxCompile>
+    <FxCompile Include="Shaders\MeshPreviewPS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+    </FxCompile>
     <FxCompile Include="Shaders\PhysicsDemoVS.hlsl">
       <ShaderType>Vertex</ShaderType>
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
