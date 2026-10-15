@@ -741,4 +741,8 @@
       <Filter>ThirdParty\ImGui</Filter>
     </None>
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="PhysicsWorld.h" />
+    <ClCompile Include="PhysicsWorld.cpp" />
+  </ItemGroup>
 </Project>

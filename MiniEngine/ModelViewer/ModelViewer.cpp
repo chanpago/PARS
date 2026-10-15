@@ -34,6 +34,9 @@
 #include "ShadowCamera.h"
 #include "Display.h"
 #include "imgui.h"
+#if defined(_M_X64)
+#include "PhysicsDemo.h"
+#endif
 
 #define LEGACY_RENDERER
 
@@ -68,6 +71,10 @@ private:
 
     ModelInstance m_ModelInst;
     ShadowCamera m_SunShadowCamera;
+    bool m_SponzaStarted = false;
+#if defined(_M_X64)
+    unique_ptr<PhysicsDemo> m_PhysicsDemo;
+#endif
 };
 
 CREATE_APPLICATION( ModelViewer )
@@ -158,6 +165,33 @@ void ModelViewer::Startup( void )
 
     Renderer::Initialize();
 
+    // Start with a metre-scale physics scene on x64. Explicit models and
+    // -physics 0 retain the model viewer / legacy Sponza paths.
+#if defined(_M_X64)
+    uint32_t physicsMode = 1;
+    CommandLineArgs::GetInteger(L"physics", physicsMode);
+    std::wstring requestedModel;
+    if (physicsMode && !CommandLineArgs::GetString(L"model", requestedModel))
+    {
+        m_PhysicsDemo.reset(new PhysicsDemo());
+        if (m_PhysicsDemo->Startup())
+        {
+            MotionBlur::Enable = false;
+            TemporalEffects::EnableTAA = false; // This simple pass has no object velocity buffer.
+            PostEffects::EnableAdaptation = false;
+            SSAO::Enable = false;
+            m_Camera.SetEyeAtUp(Vector3(9, 6, 11), Vector3(0, 1.5f, 0), Vector3(kYUnitVector));
+            m_Camera.SetZRange(0.1f, 100.0f);
+            auto controller = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
+            controller->SetMoveSpeed(5.0f);
+            m_CameraController.reset(controller);
+            return;
+        }
+        Utility::Printf("Physics demo initialization failed; loading the model viewer.\n");
+        m_PhysicsDemo.reset();
+    }
+#endif
+
     LoadIBLTextures();
 
     std::wstring gltfFileName;
@@ -171,6 +205,7 @@ void ModelViewer::Startup( void )
     {
 #ifdef LEGACY_RENDERER
         Sponza::Startup(m_Camera);
+        m_SponzaStarted = true;
 #else
         m_ModelInst = Renderer::LoadModel(L"Sponza/PBR/sponza2.gltf", forceRebuild);
         m_ModelInst.Resize(100.0f * m_ModelInst.GetRadius());
@@ -198,12 +233,20 @@ void ModelViewer::Startup( void )
 
 void ModelViewer::Cleanup( void )
 {
+#if defined(_M_X64)
+    if (m_PhysicsDemo)
+    {
+        m_PhysicsDemo->Cleanup();
+        m_PhysicsDemo.reset();
+    }
+#endif
     m_ModelInst = nullptr;
 
     g_IBLTextures.clear();
 
 #ifdef LEGACY_RENDERER
-    Sponza::Cleanup();
+    if (m_SponzaStarted)
+        Sponza::Cleanup();
 #endif
 
     Renderer::Shutdown();
@@ -222,6 +265,12 @@ void ModelViewer::Update( float deltaT )
         DebugZoom.Decrement();
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
+
+#if defined(_M_X64)
+    if (m_PhysicsDemo)
+        m_PhysicsDemo->Update(deltaT);
+#endif
+    m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
 
     // Only mouse look requires a right-button drag. Keyboard/gamepad input is
     // updated every frame, after GameInput has masked input captured by the UI.
@@ -257,6 +306,13 @@ void ModelViewer::Update( float deltaT )
 
 void ModelViewer::RenderUI(GraphicsContext&)
 {
+#if defined(_M_X64)
+    if (m_PhysicsDemo)
+    {
+        m_PhysicsDemo->RenderUI();
+        return;
+    }
+#endif
     static bool showWindow = true;
     static bool showDemo = false;
     static float testValue = 0.5f;
@@ -299,6 +355,15 @@ void ModelViewer::RenderScene( void )
     uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
     const D3D12_VIEWPORT& viewport = m_MainViewport;
     const D3D12_RECT& scissor = m_MainScissor;
+
+#if defined(_M_X64)
+    if (m_PhysicsDemo)
+    {
+        m_PhysicsDemo->Render(gfxContext, m_Camera, viewport, scissor);
+        gfxContext.Finish();
+        return;
+    }
+#endif
 
     ParticleEffectManager::Update(gfxContext.GetComputeContext(), Graphics::GetFrameTime());
 

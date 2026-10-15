@@ -47,11 +47,45 @@ msbuild MiniEngine\ModelViewer\ModelViewer.slnx -restore -p:RestorePackagesConfi
 See [the MiniEngine guide](MiniEngine/readme.md) for controls, model loading, and
 additional build configurations.
 
-ModelViewer also opens a temporary **PARS - ImGui Test** panel. Try its slider,
-button, text input, or **Show ImGui demo** checkbox. **F1** hides/reopens the panel.
+On x64, ModelViewer starts with a **PARS - Physics** test scene, paused with a
+one-metre box four metres above the floor. Click **Start drop** to watch it fall;
+**Drop again** immediately replays the experiment, and **Reset & pause** restores
+the starting pose. **Kick up + spin** applies a PhysX impulse and torque so you
+can observe flight, rotation and collision from the current pose. Use **Slow
+motion (0.25x)**, **Pause**, and **Step 1/60 s** to inspect the motion. Height,
+vertical speed and a height history plot make the result visible after it settles.
+Physics runs at 60 Hz independently of rendering, with at most eight catch-up
+steps per frame after a stall. **F1** hides/reopens the panel.
 Use WASD to move and Q/E to move down/up; hold the right mouse button outside the
-UI to look around. Movement does not require a mouse button. Active UI controls
-such as the text field capture keyboard input while you edit them.
+UI to look around. Movement does not require a mouse button.
+
+Use command-line arguments `-physics 0` for the original Sponza scene, or
+`-model <path.gltf>` for the model viewer. These paths retain the ImGui test panel.
+The physics demo uses its own metre-scale floor; Sponza and imported model meshes
+do not have collision shapes yet. The existing ARM64 viewer does not use PhysX.
+
+For live physics debugging, run a **Debug** or **Profile** build and click
+**Launch / connect PVD**. The button connects to `127.0.0.1:5425`, or starts the
+local `.tools/pvd/app/PVD3.exe` and retries while the debugger opens. A missing
+installation, launch failure or connection timeout is shown in the panel.
+PVD can also be opened manually before starting ModelViewer for automatic
+connection. Use **Reconnect PVD** after restarting the debugger, including while
+the demo is paused. **Start drop** or **Step** records simulation frames; inspect
+the `Ground` and `Falling box` actors in PVD. **Release** runs physics without
+PVD instrumentation.
+
+The production `Core/PhysicsWorld.cpp` also has a GPU-independent regression test.
+From a Visual Studio Developer Command Prompt at the repository root:
+
+```bat
+msbuild MiniEngine\Tests\PhysicsWorldTests.vcxproj -p:Configuration=Debug -p:Platform=x64 -m
+.tools\physicsworld-tests\Debug\PhysicsWorldTests.exe
+```
+
+Substitute `Profile` or `Release` to test those builds. With PVD listening, append
+`--require-pvd` in Debug/Profile to verify the actual debugger connection as well.
+Tests cover frame-rate independence, floor collision, stall limits, fractional
+steps, actor replacement, and shutdown/reinitialization.
 
 ## Repository layout
 

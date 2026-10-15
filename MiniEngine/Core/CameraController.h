@@ -58,6 +58,8 @@ public:
 
     void EnableMomentum( bool enable ) { m_Momentum = enable; }
 
+    void SetMoveSpeed(float speed) { m_MoveSpeed = m_StrafeSpeed = speed; }
+
     void SetHeadingPitchAndPosition(float heading, float pitch, const Vector3& position);
 
 private:

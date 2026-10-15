@@ -59,9 +59,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ThirdParty\PhysX\Build.p
 The headless smoke test checks SDK/PVD initialization, a dynamic box falling onto
 a floor at a fixed 1/60 second step, triangle mesh cooking, and a capsule controller
 moving along the floor. It fails on SDK errors/warnings or incorrect final positions.
-It is separate from ModelViewer: this integration prepares the dependency; an
-engine physics world, level colliders, character input, and animation integration
-are subsequent work.
+It is separate from ModelViewer. The engine now has `MiniEngine/Core/PhysicsWorld`
+and a visible floor/box test scene, plus `MiniEngine/Tests/PhysicsWorldTests.vcxproj`
+for the production wrapper. See the root README for usage. Imported level
+colliders, character input and animation integration remain subsequent work.
 
 ## PhysX Visual Debugger (PVD)
 
@@ -70,8 +71,12 @@ library. Download it from [NVIDIA's PVD page](https://developer.nvidia.com/physx
 (NVIDIA login required). Local tools can be installed under `.tools/pvd/app`;
 their installers and binaries are excluded from Git and must be installed on each PC.
 Launch `PVD3.exe` to open the debugger. Its default connection port is TCP 5425.
-ModelViewer does not connect to PVD yet; that connection belongs to the upcoming
-physics-world integration.
+The x64 ModelViewer physics scene connects automatically to `127.0.0.1:5425`
+in Debug and Profile. **Launch / connect PVD** in the **PARS - Physics** panel
+also starts the local debugger if needed and retries during startup. Connection
+failures are displayed in the panel. Use **Reconnect PVD** after a debugger restart
+and **Start drop** or **Step** to record simulation frames. Release SDK builds
+disable PVD instrumentation.
 
 ## Upstream changes
 

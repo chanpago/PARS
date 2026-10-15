@@ -35,3 +35,6 @@ vcpkg_installed/
 
 # Tools downloaded automatically on the first build
 /.tools/
+
+# Local development plan
+/목요일 계획.md

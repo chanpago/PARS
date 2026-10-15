@@ -233,4 +233,10 @@
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="PhysicsDemo.h"><Filter>Source Files</Filter></ClInclude>
+    <ClCompile Include="PhysicsDemo.cpp"><Filter>Source Files</Filter></ClCompile>
+    <FxCompile Include="Shaders\PhysicsDemoVS.hlsl"><Filter>Shaders</Filter></FxCompile>
+    <FxCompile Include="Shaders\PhysicsDemoPS.hlsl"><Filter>Shaders</Filter></FxCompile>
+  </ItemGroup>
 </Project>
