@@ -11,8 +11,8 @@ independent Git history beginning with a single initial commit.
 ## Build and run
 
 1. Install Visual Studio 2022 17.14 or later with **Desktop development with C++**,
-   the **MSVC v143** tools, and a Windows SDK. Install Git if it is not already
-   available.
+   the **MSVC v143** tools, **C++ CMake tools for Windows** (CMake 3.25+), and a
+   Windows SDK. Install Git if it is not already available.
 2. Clone this repository and open `MiniEngine/ModelViewer/ModelViewer.slnx`.
 3. A fresh checkout opens with **Debug / Windows** (x64) and `ModelViewer` as the
    startup project. Press **F5** to build and run.
@@ -32,6 +32,9 @@ set `ModelViewer` as the startup project once; future opens keep that selection.
 
 The first build needs internet access. NuGet restores the SDK/runtime packages,
 and the build sets up vcpkg when needed and restores the DirectX libraries.
+For Windows x64, it also builds the bundled CPU PhysX SDK automatically; the
+first build of each configuration takes longer. See the
+[PhysX integration notes](ThirdParty/PhysX/README.PARS.md) for details and the smoke test.
 Build outputs, downloaded tools, and dependency caches are excluded from Git.
 A DirectX 12 capable GPU and driver are required to run the application.
 
@@ -57,6 +60,8 @@ such as the text field capture keyboard input while you edit them.
 - `MiniEngine/ModelViewer`: the application used as the starting point.
 - `ThirdParty/ImGui`: Dear ImGui with Win32 and DirectX 12 backends, compiled into
   Core. See [integration notes](ThirdParty/ImGui/README.PARS.md) for version and usage.
+- `ThirdParty/PhysX`: PhysX 5.6.1 CPU SDK sources and automatic x64 static-library
+  build, including character controllers and collision mesh cooking.
 - `Samples`, `Libraries`, `TechniqueDemos`, `Tools`, and `Assets`: the accompanying
   DirectX samples, shared code, and assets retained from the source snapshot.
 - `vcpkg` and `vcpkg.json`: dependency integration and automatic setup.

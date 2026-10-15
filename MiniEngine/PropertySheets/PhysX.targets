@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Condition="'$(Platform)'=='x64'">
+    <PhysXBuildInput Include="$(PhysXRoot)CMakeLists.txt;$(PhysXRoot)physx\**\*" />
+    <!-- Declaring inputs/outputs also lets VS's up-to-date check see SDK changes
+         and missing libraries, even when application sources have not changed. -->
+    <CustomBuild Include="$(PhysXRoot)Build.ps1">
+      <LinkObjects>false</LinkObjects>
+      <Message>Building PhysX CPU SDK ($(Configuration), x64)...</Message>
+      <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(PhysXRoot)Build.ps1&quot; -Configuration &quot;$(Configuration)&quot; -VisualStudioPath &quot;$(VSInstallDir).&quot; -ToolsetVersion &quot;$(VCToolsVersion)&quot; -WindowsSDKVersion &quot;$(WindowsTargetPlatformVersion)&quot;</Command>
+      <AdditionalInputs>@(PhysXBuildInput);%(AdditionalInputs)</AdditionalInputs>
+      <Outputs>$(PhysXBuildRoot)lib\$(PhysXConfiguration)\PhysX_static_64.lib;$(PhysXBuildRoot)lib\$(PhysXConfiguration)\PhysXCommon_static_64.lib;$(PhysXBuildRoot)lib\$(PhysXConfiguration)\PhysXFoundation_static_64.lib;$(PhysXBuildRoot)lib\$(PhysXConfiguration)\PhysXCooking_static_64.lib;$(PhysXBuildRoot)lib\$(PhysXConfiguration)\PhysXExtensions_static_64.lib;$(PhysXBuildRoot)lib\$(PhysXConfiguration)\PhysXCharacterKinematic_static_64.lib;$(PhysXBuildRoot)lib\$(PhysXConfiguration)\PhysXPvdSDK_static_64.lib;%(Outputs)</Outputs>
+    </CustomBuild>
+  </ItemGroup>
+</Project>
