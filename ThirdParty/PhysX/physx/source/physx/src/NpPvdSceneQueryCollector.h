@@ -176,7 +176,7 @@ public:
 	PvdSceneQueryCollector(Vd::PvdSceneClient* pvd, bool isBatched);
 	~PvdSceneQueryCollector()	{}
 
-	void clear()
+	void clear(bool resetGeometries = false)
 	{
 		PxMutex::ScopedLock lock(mMutex);
 
@@ -186,6 +186,8 @@ public:
 		mPvdSqHits.clear();
 		mPoses.clear();
 		mFilterData.clear();
+		if(resetGeometries)
+			clearGeometryArrays();
 	}
 
 	void clearGeometryArrays()

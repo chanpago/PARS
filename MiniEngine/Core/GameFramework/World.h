@@ -3,14 +3,16 @@
 #include "Actor.h"
 #include <functional>
 
+class PhysicsWorld;
+
 namespace PARS
 {
-    // Owns gameplay actors. PhysicsWorld remains the separate PhysX simulation.
+    // Owns gameplay actors and the optional PhysX simulation they share.
     // Main-thread only; mutations during callbacks never invalidate a live Actor.
     class World
     {
     public:
-        World() = default;
+        World();
         ~World();
         World(const World&) = delete;
         World& operator=(const World&) = delete;
@@ -40,6 +42,13 @@ namespace PARS
         void BeginPlay();
         void Tick(float deltaTime);
         bool HasBegunPlay() const { return m_Playing; }
+        bool InitializePhysics(bool connectPvd = true);
+        PhysicsWorld* GetPhysicsWorld() const;
+        void SetPhysicsPaused(bool paused);
+        bool IsPhysicsPaused() const { return m_PhysicsPaused; }
+        void SetPhysicsTimeScale(float scale);
+        float GetPhysicsTimeScale() const { return m_PhysicsTimeScale; }
+        void RequestPhysicsStep() { if (m_PhysicsPaused) m_StepRequested = true; }
 
         // New actors join on the next pass; pending destruction is skipped.
         void ForEachActor(const std::function<void(Actor&)>& visitor);
@@ -56,5 +65,11 @@ namespace PARS
         size_t m_IterationDepth = 0;
         bool m_Playing = false;
         bool m_Clearing = false;
+#if defined(_M_X64)
+        std::unique_ptr<PhysicsWorld> m_Physics;
+#endif
+        bool m_PhysicsPaused = false;
+        bool m_StepRequested = false;
+        float m_PhysicsTimeScale = 1.0f;
     };
 }

@@ -212,4 +212,8 @@
     <ClInclude Include="WorldRenderer.h"><Filter>GameFramework</Filter></ClInclude>
     <ClCompile Include="WorldRenderer.cpp"><Filter>GameFramework</Filter></ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="LocomotionAnimInstance.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClInclude Include="LocomotionAnimInstance.h"><Filter>GameFramework</Filter></ClInclude>
+  </ItemGroup>
 </Project>

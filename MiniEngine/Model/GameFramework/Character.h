@@ -2,6 +2,7 @@
 
 #include "../../Core/GameFramework/Pawn.h"
 #include "../../Core/GameFramework/CapsuleComponent.h"
+#include "../../Core/GameFramework/CharacterMovementComponent.h"
 #include "../Components/SkeletalMeshComponent.h"
 
 namespace PARS
@@ -11,10 +12,12 @@ namespace PARS
     public:
         explicit Character(const std::string& name = "Character");
         CapsuleComponent& GetCapsuleComponent() const { return *m_Capsule; }
+        CharacterMovementComponent& GetCharacterMovement() const { return *m_Movement; }
         SkeletalMeshComponent& GetMesh() const { return *m_Mesh; }
 
     private:
         CapsuleComponent* m_Capsule;
+        CharacterMovementComponent* m_Movement;
         SkeletalMeshComponent* m_Mesh;
     };
 }

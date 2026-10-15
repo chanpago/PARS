@@ -152,6 +152,7 @@ namespace
 }
 
 void RunWorldTests();
+void RunCharacterMovementTests();
 
 int main()
 {
@@ -159,5 +160,6 @@ int main()
     TestLifecycle();
     TestPoseSampling();
     RunWorldTests();
+    RunCharacterMovementTests();
     return 0;
 }

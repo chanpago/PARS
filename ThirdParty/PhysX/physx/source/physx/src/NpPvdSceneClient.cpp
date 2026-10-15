@@ -321,6 +321,10 @@ void PvdSceneClient::onPvdConnected()
 	if(mIsConnected || !mPvd)
 		return;
 
+	// Query geometries belong to one PVD session. A reconnect creates a fresh
+	// object registry, so previous-frame geometries must not be removed from it.
+	mScene.getNpSQ().getSingleSqCollector().clear(true);
+
 	mIsConnected = true;
 
 	mPvdDataStream = PvdDataStream::create(mPvd);

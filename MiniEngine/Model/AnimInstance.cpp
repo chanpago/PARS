@@ -46,6 +46,7 @@ namespace PARS
         m_Playing = false;
         m_Time = 0.0f;
         m_Pose.clear();
+        m_BlendSource.clear();
         EvaluatePose();
     }
 
@@ -74,8 +75,30 @@ namespace PARS
 
     void AnimInstance::Reset()
     {
+        m_BlendSource.clear();
         m_Time = 0.0f;
         EvaluatePose();
+    }
+
+    bool AnimInstance::TransitionToAnimation(uint32_t index, float duration, bool loop)
+    {
+        if (index >= m_Clips.size() || !std::isfinite(duration))
+            return false;
+        if (index == m_CurrentClip && m_Playing)
+            return true;
+        if (duration <= 0.0f || m_Pose.empty())
+            return PlayAnimation(index, loop);
+        // Snapshot the displayed pose, including an interrupted blend. Starting
+        // another transition therefore never snaps back to a previous clip.
+        m_BlendSource = m_Pose;
+        m_BlendElapsed = 0.0f;
+        m_BlendDuration = duration;
+        m_CurrentClip = index;
+        m_Time = 0.0f;
+        m_Loop = loop;
+        m_Playing = true;
+        EvaluatePose();
+        return true;
     }
 
     void AnimInstance::Stop()
@@ -110,6 +133,9 @@ namespace PARS
         if (m_Playing && !m_Clips.empty())
         {
             m_Time += deltaTime;
+            m_BlendElapsed += deltaTime;
+            if (m_BlendElapsed >= m_BlendDuration)
+                m_BlendSource.clear();
             const float duration = GetAnimationDuration(m_CurrentClip);
             if (m_Loop)
                 m_Time = std::fmod(m_Time, duration);
@@ -134,5 +160,7 @@ namespace PARS
             EvaluateAnimationPose(clip.source->m_Animations[clip.animationIndex], clip.source->m_CurveData.get(),
                 clip.source->m_KeyFrameData.get(), m_Pose.data(), static_cast<uint32_t>(m_Pose.size()), m_Time);
         }
+        if (IsBlending())
+            BlendAnimationPoses(m_BlendSource.data(), m_Pose.data(), static_cast<uint32_t>(m_Pose.size()), GetBlendAlpha());
     }
 }

@@ -762,4 +762,16 @@
     <ClInclude Include="GameFramework\World.h"><Filter>GameFramework</Filter></ClInclude>
     <ClCompile Include="GameFramework\World.cpp"><Filter>GameFramework</Filter></ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="GameFramework\CapsuleComponent.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClCompile Include="GameFramework\Pawn.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClCompile Include="GameFramework\Controller.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClCompile Include="GameFramework\PlayerController.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClCompile Include="GameFramework\CharacterMovementComponent.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClInclude Include="GameFramework\Controller.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\PlayerController.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\MovementComponent.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\PawnMovementComponent.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\CharacterMovementComponent.h"><Filter>GameFramework</Filter></ClInclude>
+  </ItemGroup>
 </Project>

@@ -525,4 +525,16 @@
     <Error Condition="!Exists('..\..\Packages\Microsoft.Direct3D.D3D12.1.618.3\build\native\Microsoft.Direct3D.D3D12.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\Microsoft.Direct3D.D3D12.1.618.3\build\native\Microsoft.Direct3D.D3D12.props'))" />
     <Error Condition="!Exists('..\..\Packages\Microsoft.Direct3D.D3D12.1.618.3\build\native\Microsoft.Direct3D.D3D12.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\Microsoft.Direct3D.D3D12.1.618.3\build\native\Microsoft.Direct3D.D3D12.targets'))" />
   </Target>
+  <ItemGroup>
+    <ClCompile Include="GameFramework\CapsuleComponent.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="GameFramework\Pawn.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="GameFramework\Controller.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="GameFramework\PlayerController.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="GameFramework\CharacterMovementComponent.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="GameFramework\Controller.h" />
+    <ClInclude Include="GameFramework\PlayerController.h" />
+    <ClInclude Include="GameFramework\MovementComponent.h" />
+    <ClInclude Include="GameFramework\PawnMovementComponent.h" />
+    <ClInclude Include="GameFramework\CharacterMovementComponent.h" />
+  </ItemGroup>
 </Project>

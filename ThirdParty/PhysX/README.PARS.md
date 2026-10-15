@@ -82,12 +82,18 @@ disable PVD instrumentation.
 
 ## Upstream changes
 
-One small build-system patch is applied in
-`physx/source/compiler/cmake/windows/CMakeLists.txt`: the public-release external
-DLL copy is conditioned on `PX_BUILDSNIPPETS`, unless explicitly requested through
-`PX_COPY_EXTERNAL_DLL`. This avoids requiring freeglut DLLs for a CPU SDK build
-without sample applications. SDK C++ sources are unchanged.
+Two local patches are applied:
+
+- `physx/source/compiler/cmake/windows/CMakeLists.txt`: the public-release external
+  DLL copy is conditioned on `PX_BUILDSNIPPETS`, unless explicitly requested through
+  `PX_COPY_EXTERNAL_DLL`. This avoids requiring freeglut DLLs for a CPU SDK build
+  without sample applications.
+- `NpPvdSceneClient.cpp` and `NpPvdSceneQueryCollector.h`: reset recorded queries
+  and both geometry buffers when a new PVD session connects. Otherwise reconnecting
+  after capsule movement leaves previous-session geometry references that trigger
+  `isInstanceValid(data)` in `removeObjectRef` on the next simulation step.
+  `PhysicsWorldTests --require-pvd` covers repeated reconnects after controller queries.
 
 To update the SDK, copy the paths listed above from the selected upstream commit,
-reapply this patch, update the version/commit here, and run the smoke test plus
+reapply these patches, update the version/commit here, and run the smoke test plus
 ModelViewer builds for Debug, Profile, and Release.

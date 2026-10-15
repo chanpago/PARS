@@ -78,3 +78,6 @@ struct AnimationState
 // No graphics device is required; the final key is safe to sample exactly.
 bool EvaluateAnimationPose(const AnimationSet& animation, const AnimationCurve* curves,
     const uint8_t* keyFrames, GraphNode* pose, uint32_t nodeCount, float time);
+
+// Blend local transforms into target. Hierarchy and matrix indices remain intact.
+void BlendAnimationPoses(const GraphNode* source, GraphNode* target, uint32_t count, float alpha);

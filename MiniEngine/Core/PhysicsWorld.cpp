@@ -93,6 +93,13 @@ bool PhysicsWorld::Initialize(bool connectPvd)
         Shutdown();
         return false;
     }
+    m_ControllerManager = PxCreateControllerManager(*m_Scene);
+    if (!m_ControllerManager)
+    {
+        Shutdown();
+        return false;
+    }
+    m_ControllerManager->setOverlapRecoveryModule(true);
     if (PxPvdSceneClient* client = m_Scene->getScenePvdClient())
     {
         client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
@@ -105,6 +112,7 @@ bool PhysicsWorld::Initialize(bool connectPvd)
 
 void PhysicsWorld::Shutdown()
 {
+    Release(m_ControllerManager);
     Release(m_Scene); // Also releases actors and their exclusive shapes.
     Release(m_Material);
     Release(m_Dispatcher);
@@ -150,16 +158,20 @@ void PhysicsWorld::ResetClock()
     m_LastSubsteps = 0;
 }
 
-void PhysicsWorld::Step()
+void PhysicsWorld::Step(const BeforeStep& beforeStep)
 {
     if (!m_Scene)
         return;
+    m_ControllerManager->computeInteractions(static_cast<float>(FixedDeltaTime));
+    if (beforeStep)
+        beforeStep(static_cast<float>(FixedDeltaTime));
     m_Scene->simulate(static_cast<float>(FixedDeltaTime));
     m_Scene->fetchResults(true); // Actor poses are safe to read after this completes.
     ++m_StepCount;
+    m_LastSubsteps = 1;
 }
 
-uint32_t PhysicsWorld::Update(double elapsedSeconds)
+uint32_t PhysicsWorld::Update(double elapsedSeconds, const BeforeStep& beforeStep)
 {
     m_LastSubsteps = 0;
     if (!m_Scene || !std::isfinite(elapsedSeconds) || elapsedSeconds <= 0.0)
@@ -174,15 +186,17 @@ uint32_t PhysicsWorld::Update(double elapsedSeconds)
         elapsedSeconds = maxElapsed;
     }
     m_Accumulator += elapsedSeconds;
-    while (m_Accumulator + 1e-10 >= FixedDeltaTime && m_LastSubsteps < MaxSubsteps)
+    uint32_t steps = 0;
+    while (m_Accumulator + 1e-10 >= FixedDeltaTime && steps < MaxSubsteps)
     {
-        Step();
+        Step(beforeStep);
         m_Accumulator -= FixedDeltaTime;
-        ++m_LastSubsteps;
+        ++steps;
     }
     if (m_Accumulator < 0.0)
         m_Accumulator = 0.0;
-    return m_LastSubsteps;
+    m_LastSubsteps = steps;
+    return steps;
 }
 
 PxRigidStatic* PhysicsWorld::CreateStaticBox(const PxTransform& pose,
@@ -212,4 +226,30 @@ PxRigidDynamic* PhysicsWorld::CreateDynamicBox(const PxTransform& pose,
         m_Scene->addActor(*actor);
     }
     return actor;
+}
+
+PxCapsuleController* PhysicsWorld::CreateCapsuleController(const PxExtendedVec3& centre,
+    float radius, float halfHeight)
+{
+    if (!m_ControllerManager || !std::isfinite(radius) || !std::isfinite(halfHeight) ||
+        radius <= 0 || halfHeight <= radius || !centre.isFinite())
+        return nullptr;
+    PxCapsuleControllerDesc desc;
+    desc.position = centre;
+    desc.radius = radius;
+    desc.height = 2.0f * (halfHeight - radius);
+    desc.upDirection = PxVec3(0, 1, 0);
+    desc.material = m_Material;
+    desc.contactOffset = 0.02f;
+    desc.stepOffset = PxMin(0.25f, halfHeight);
+    desc.slopeLimit = 0.70710678f;
+    desc.climbingMode = PxCapsuleClimbingMode::eCONSTRAINED;
+    desc.nonWalkableMode = PxControllerNonWalkableMode::ePREVENT_CLIMBING_AND_FORCE_SLIDING;
+    if (!desc.isValid()) return nullptr;
+    return static_cast<PxCapsuleController*>(m_ControllerManager->createController(desc));
+}
+
+uint32_t PhysicsWorld::GetControllerCount() const
+{
+    return m_ControllerManager ? m_ControllerManager->getNbControllers() : 0;
 }

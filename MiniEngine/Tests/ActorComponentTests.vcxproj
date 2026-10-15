@@ -15,6 +15,7 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="..\PropertySheets\PhysX.props" />
   <PropertyGroup>
     <OutDir>$(MSBuildThisFileDirectory)..\..\.tools\actor-component-tests\$(Configuration)\</OutDir>
     <IntDir>$(OutDir)obj\</IntDir>
@@ -33,17 +34,25 @@
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <PreprocessorDefinitions>_DEBUG;NOMINMAX</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;NOMINMAX;PX_PHYSX_STATIC_LIB</PreprocessorDefinitions>
       <Optimization>Disabled</Optimization>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ActorComponentTests.cpp" />
     <ClCompile Include="WorldTests.cpp" />
+    <ClCompile Include="..\Core\GameFramework\CapsuleComponent.cpp" />
+    <ClCompile Include="..\Core\GameFramework\Pawn.cpp" />
+    <ClCompile Include="..\Core\GameFramework\Controller.cpp" />
+    <ClCompile Include="..\Core\GameFramework\PlayerController.cpp" />
+    <ClCompile Include="..\Core\GameFramework\CharacterMovementComponent.cpp" />
+    <ClCompile Include="..\Core\PhysicsWorld.cpp" />
+    <ClCompile Include="CharacterMovementTests.cpp" />
     <ClCompile Include="..\Core\GameFramework\World.cpp" />
     <ClCompile Include="..\Core\GameFramework\Actor.cpp" />
     <ClCompile Include="..\Core\GameFramework\SceneComponent.cpp" />
     <ClCompile Include="..\Model\AnimationPose.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="..\PropertySheets\PhysX.targets" />
 </Project>

@@ -26,6 +26,8 @@ namespace PARS
         virtual void BeginPlay() {}
         virtual void EndPlay() {}
         virtual void TickComponent(float deltaTime) { (void)deltaTime; }
+        virtual void PreparePhysics(float deltaTime) { (void)deltaTime; }
+        virtual void FixedTickComponent(float deltaTime) { (void)deltaTime; }
 
     private:
         friend class Actor;

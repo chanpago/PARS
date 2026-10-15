@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#if defined(_M_X64)
+#include "../PhysicsWorld.h"
+#endif
 
 namespace
 {
@@ -19,7 +22,41 @@ namespace
 
 namespace PARS
 {
+    World::World() = default;
     World::~World() { Clear(); }
+
+    bool World::InitializePhysics(bool connectPvd)
+    {
+#if defined(_M_X64)
+        if (!m_Physics)
+            m_Physics = std::make_unique<PhysicsWorld>();
+        return m_Physics->Initialize(connectPvd);
+#else
+        (void)connectPvd;
+        return false;
+#endif
+    }
+
+    PhysicsWorld* World::GetPhysicsWorld() const
+    {
+#if defined(_M_X64)
+        return m_Physics.get();
+#else
+        return nullptr;
+#endif
+    }
+
+    void World::SetPhysicsPaused(bool paused)
+    {
+        m_PhysicsPaused = paused;
+        m_StepRequested = false;
+    }
+
+    void World::SetPhysicsTimeScale(float scale)
+    {
+        if (std::isfinite(scale) && scale > 0 && scale <= 1.0f)
+            m_PhysicsTimeScale = scale;
+    }
 
     void World::RegisterActor(std::unique_ptr<Actor> actor)
     {
@@ -78,19 +115,51 @@ namespace PARS
         if (m_Playing || m_Clearing || m_IterationDepth != 0)
             return;
         m_Playing = true;
-        ForEachActor([](Actor& actor) { actor.BeginPlay(); });
+        ForEachActor([](Actor& actor) { if (!actor.HasBegunPlay()) actor.BeginPlay(); });
     }
 
     void World::Tick(float deltaTime)
     {
         if (!m_Playing || m_IterationDepth != 0 || !std::isfinite(deltaTime) || deltaTime < 0.0f)
             return;
+        // Inputs -> fixed movement/physics -> animation. A new actor is configured
+        // before BeginPlay and never joins a tick pass halfway through spawning.
+        ForEachActor([](Actor& actor) { if (!actor.HasBegunPlay()) actor.BeginPlay(); });
+        if (!m_Playing) return;
         ForEachActor([&](Actor& actor) {
-            // SpawnActor leaves time to configure components before their first
-            // BeginPlay. Spawns made during this pass start on the next Tick.
-            actor.BeginPlay();
-            if (!actor.IsPendingDestroy())
+            if (actor.HasBegunPlay() && actor.GetTickGroup() == Actor::TickGroup::PrePhysics)
                 actor.Tick(deltaTime);
+        });
+        if (!m_Playing) return;
+        ForEachActor([&](Actor& actor) { actor.PreparePhysics(deltaTime); });
+        if (!m_Playing) return;
+        float animationDelta = deltaTime;
+#if defined(_M_X64)
+        if (m_Physics && m_Physics->IsInitialized())
+        {
+            m_Physics->Update(0.0); // Reset per-frame statistics, preserving the fractional step.
+            const auto stepActors = [&](float dt) {
+                ForEachActor([&](Actor& actor) { actor.FixedTick(dt); });
+            };
+            animationDelta = m_PhysicsPaused ? 0.0f : deltaTime * m_PhysicsTimeScale;
+            if (m_PhysicsPaused && m_StepRequested)
+            {
+                m_Physics->Step(stepActors);
+                animationDelta = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+            }
+            else if (!m_PhysicsPaused)
+            {
+                m_Physics->Update(animationDelta, stepActors);
+                // Animation discards the same long stall as the physics clock.
+                animationDelta = std::min(animationDelta, static_cast<float>(PhysicsWorld::FixedDeltaTime * PhysicsWorld::MaxSubsteps));
+            }
+            m_StepRequested = false;
+        }
+#endif
+        if (!m_Playing) return;
+        ForEachActor([&](Actor& actor) {
+            if (actor.HasBegunPlay() && actor.GetTickGroup() == Actor::TickGroup::PostPhysics)
+                actor.Tick(animationDelta);
         });
     }
 

@@ -3,6 +3,7 @@
 
 #include "Animation.h"
 #include <cmath>
+#include <cstring>
 
 using Math::Quaternion;
 using Math::Vector4;
@@ -112,4 +113,38 @@ bool EvaluateAnimationPose(const AnimationSet& animation, const AnimationCurve* 
         }
     }
     return true;
+}
+
+void BlendAnimationPoses(const GraphNode* source, GraphNode* target, uint32_t count, float alpha)
+{
+    if (!source || !target || !std::isfinite(alpha) || alpha >= 1.0f)
+        return;
+    if (alpha <= 0.0f)
+    {
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            target[i].xform = source[i].xform;
+            target[i].rotation = source[i].rotation;
+            target[i].scale = source[i].scale;
+            target[i].staleMatrix = source[i].staleMatrix;
+        }
+        return;
+    }
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const auto& from = source[i];
+        auto& to = target[i];
+        // Preserve matrix-only static nodes; rebuild TRS only for animated nodes.
+        if (from.staleMatrix || to.staleMatrix ||
+            std::memcmp(&from.rotation, &to.rotation, sizeof(to.rotation)) != 0 ||
+            std::memcmp(&from.scale, &to.scale, sizeof(to.scale)) != 0)
+        {
+            to.rotation = Math::Slerp(from.rotation, to.rotation, alpha);
+            Lerp3(reinterpret_cast<float*>(&to.scale), reinterpret_cast<const float*>(&from.scale),
+                reinterpret_cast<const float*>(&to.scale), alpha);
+            to.staleMatrix = true;
+        }
+        Lerp3(reinterpret_cast<float*>(&to.xform) + 12, reinterpret_cast<const float*>(&from.xform) + 12,
+            reinterpret_cast<const float*>(&to.xform) + 12, alpha);
+    }
 }

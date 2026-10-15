@@ -24,6 +24,9 @@ namespace PARS
         void Initialize(std::shared_ptr<const Model> skeleton);
         bool AddAnimation(const std::string& name, std::shared_ptr<const Model> source, uint32_t animationIndex = 0);
         bool PlayAnimation(uint32_t index, bool loop = true);
+        bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true);
+        bool IsBlending() const { return !m_BlendSource.empty(); }
+        float GetBlendAlpha() const { return IsBlending() ? Math::Clamp(m_BlendElapsed / m_BlendDuration, 0.0f, 1.0f) : 1.0f; }
         void SetPlaying(bool playing) { m_Playing = playing && !m_Clips.empty(); }
         bool IsPlaying() const { return m_Playing; }
         void Stop();
@@ -52,6 +55,9 @@ namespace PARS
         std::shared_ptr<const Model> m_Skeleton;
         std::vector<Clip> m_Clips;
         std::vector<GraphNode> m_Pose;
+        std::vector<GraphNode> m_BlendSource;
+        float m_BlendElapsed = 0.0f;
+        float m_BlendDuration = 0.2f;
         uint32_t m_CurrentClip = 0;
         float m_Time = 0.0f;
         bool m_Playing = false;

@@ -36,6 +36,7 @@
 #include "GameFramework/World.h"
 #include "WorldRenderer.h"
 #include "PreviewAnimInstance.h"
+#include "GameFramework/PlayerController.h"
 #include "ShadowCamera.h"
 #include "Display.h"
 #include "imgui.h"
@@ -114,6 +115,10 @@ private:
     void LoadAnimationPreview(bool forceRebuild);
     void SelectPreview(uint32_t index);
     void ResetPreviewCamera();
+    void UpdateCharacterInput(float deltaTime);
+    void UpdateFollowCamera();
+    void SetFreeCamera(bool freeCamera);
+    PARS::PlayerController* GetPlayerController() const { return m_World.FindActor<PARS::PlayerController>(m_PlayerController); }
     PARS::Character* GetPreviewCharacter() const { return m_World.FindActor<PARS::Character>(m_PreviewCharacter); }
     PreviewAnimInstance* GetPreviewAnimation() const;
     void RenderModels(Renderer::MeshSorter& sorter);
@@ -127,6 +132,10 @@ private:
     ModelInstance m_ModelInst;
     PARS::World m_World;
     PARS::ActorHandle m_PreviewCharacter; // Observation only; World owns the Actor.
+    PARS::ActorHandle m_PlayerController;
+    bool m_FreeCamera = false;
+    float m_ControlYaw = XM_PI;
+    float m_ControlPitch = 0.28f;
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
     std::string m_PreviewError;
@@ -239,8 +248,9 @@ void ModelViewer::Startup( void )
 #if defined(_M_X64)
     if (physicsMode && !hasModel)
     {
-        m_PhysicsDemo.reset(new PhysicsDemo());
-        if (m_PhysicsDemo->Startup())
+        if (m_World.InitializePhysics())
+            m_PhysicsDemo.reset(new PhysicsDemo(m_World));
+        if (m_PhysicsDemo && m_PhysicsDemo->Startup())
         {
             MotionBlur::Enable = false;
             TemporalEffects::EnableTAA = false; // This simple pass has no object velocity buffer.
@@ -362,6 +372,18 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     }
     m_PreviewCharacter = character->GetHandle();
     mesh.GetAnimInstance().PlayAnimation(0);
+    auto animation = GetPreviewAnimation();
+    bool characterControl = false;
+#if defined(_M_X64)
+    characterControl = m_PhysicsDemo != nullptr;
+#endif
+    animation->SetLocomotionEnabled(characterControl);
+    if (characterControl)
+    {
+        auto player = m_World.SpawnActor<PARS::PlayerController>("PlayerController");
+        if (player && player->Possess(*character))
+            m_PlayerController = player->GetHandle();
+    }
     m_World.Tick(0.0f);
     auto& context = GraphicsContext::Begin(L"Initialize Character Pose");
     Renderer::UpdateWorldRenderData(m_World, context);
@@ -395,6 +417,13 @@ void ModelViewer::ResetPreviewCamera()
     if (m_PhysicsDemo)
     {
         m_Camera.SetZRange(0.1f, 100.0f);
+        m_ControlYaw = XM_PI;
+        m_ControlPitch = 0.28f;
+        if (GetPlayerController() && !m_FreeCamera)
+        {
+            UpdateFollowCamera();
+            return;
+        }
         m_Camera.SetEyeAtUp(Vector3(5, 3.2f, 7), Vector3(1, 1.8f, 0), Vector3(kYUnitVector));
         auto controller = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
         controller->SetMoveSpeed(5.0f);
@@ -414,11 +443,64 @@ void ModelViewer::ResetPreviewCamera()
         BoundingSphere(bounds.GetCenter(), bounds.GetRadius() * 1.4f), Vector3(kYUnitVector)));
 }
 
+void ModelViewer::SetFreeCamera(bool freeCamera)
+{
+    m_FreeCamera = freeCamera;
+    if (auto player = GetPlayerController()) player->SetInputEnabled(!freeCamera);
+    if (freeCamera)
+    {
+        auto camera = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
+        camera->SetMoveSpeed(5.0f);
+        m_CameraController.reset(camera);
+    }
+    else
+    {
+        const auto forward = m_Camera.GetForwardVec();
+        m_ControlYaw = std::atan2(float(forward.GetX()), float(forward.GetZ()));
+        m_ControlPitch = Clamp(std::asin(Clamp(-float(forward.GetY()), -1.0f, 1.0f)), -0.1f, 1.1f);
+    }
+}
+
+void ModelViewer::UpdateCharacterInput(float deltaTime)
+{
+    using namespace GameInput;
+    auto player = GetPlayerController();
+    if (!player) return;
+    if (IsFirstPressed(kKey_tab)) SetFreeCamera(!m_FreeCamera);
+    player->SetInputEnabled(!m_FreeCamera);
+    if (m_FreeCamera) return;
+    m_ControlYaw -= GetAnalogInput(kAnalogRightStickX) * deltaTime * 2.0f;
+    m_ControlPitch -= GetAnalogInput(kAnalogRightStickY) * deltaTime * 2.0f;
+    if (IsPressed(kMouse1))
+    {
+        m_ControlYaw -= GetAnalogInput(kAnalogMouseX);
+        m_ControlPitch -= GetAnalogInput(kAnalogMouseY);
+    }
+    m_ControlYaw = std::remainder(m_ControlYaw, XM_2PI);
+    m_ControlPitch = Clamp(m_ControlPitch, -0.1f, 1.1f);
+    player->SetControlYaw(m_ControlYaw);
+    player->SetMoveInput(float(IsPressed(kKey_w)) - float(IsPressed(kKey_s)) + GetAnalogInput(kAnalogLeftStickY),
+        float(IsPressed(kKey_d)) - float(IsPressed(kKey_a)) + GetAnalogInput(kAnalogLeftStickX),
+        IsPressed(kKey_lshift) || IsPressed(kKey_rshift) || IsPressed(kLThumbClick));
+}
+
+void ModelViewer::UpdateFollowCamera()
+{
+    auto character = GetPreviewCharacter();
+    if (!character) return;
+    const Vector3 target = character->GetActorLocation() + Vector3(0, 0.55f, 0);
+    const Vector3 forward(std::sin(m_ControlYaw) * std::cos(m_ControlPitch), -std::sin(m_ControlPitch),
+        std::cos(m_ControlYaw) * std::cos(m_ControlPitch));
+    m_Camera.SetEyeAtUp(target - forward * 4.5f, target, Vector3(kYUnitVector));
+    m_Camera.Update();
+}
+
 void ModelViewer::Cleanup( void )
 {
     // GameCore waits for the GPU before Cleanup. End actor lifetimes while the
     // renderer and physics services are still available to their components.
     m_PreviewCharacter = {};
+    m_PlayerController = {};
     m_World.Clear();
 #if defined(_M_X64)
     if (m_PhysicsDemo)
@@ -461,20 +543,22 @@ void ModelViewer::Update( float deltaT )
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
         DebugZoom.Increment();
 
+    m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
+    UpdateCharacterInput(deltaT);
+    if (!GetPlayerController() || m_FreeCamera)
+    {
+        m_CameraController->EnableMouseInput(GameInput::IsPressed(GameInput::kMouse1));
+        m_CameraController->Update(deltaT);
+    }
+
+    GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
+    m_World.Tick(deltaT);
 #if defined(_M_X64)
     if (m_PhysicsDemo)
         m_PhysicsDemo->Update(deltaT);
 #endif
-    m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
-
-    // Only mouse look requires a right-button drag. Keyboard/gamepad input is
-    // updated every frame, after GameInput has masked input captured by the UI.
-    m_CameraController->EnableMouseInput(GameInput::IsPressed(GameInput::kMouse1));
-    m_CameraController->Update(deltaT);
-
-    GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
-
-    m_World.Tick(Clamp(deltaT, 0.0f, 0.1f));
+    if (GetPlayerController() && !m_FreeCamera)
+        UpdateFollowCamera();
     Renderer::UpdateWorldRenderData(m_World, gfxContext);
     m_ModelInst.Update(gfxContext, deltaT);
 
@@ -524,17 +608,32 @@ void ModelViewer::RenderUI(GraphicsContext&)
             else
             {
                 ImGui::Text("Now playing: %s", animation->GetAnimationName(animation->GetCurrentAnimationIndex()).c_str());
-                ImGui::TextUnformatted("Idle -> Walking -> Slow Run -> repeat");
+                if (auto character = GetPreviewCharacter())
+                {
+                    const auto& movement = character->GetCharacterMovement();
+                    ImGui::Text("Speed: %.2f m/s | %s", movement.GetGroundSpeed(),
+                        movement.IsMovingOnGround() ? "Grounded" : "Airborne");
+                    ImGui::Text("Blend: %.0f%%", animation->GetBlendAlpha() * 100.0f);
+                }
                 ImGui::Separator();
-                bool playing = animation->IsPlaying();
-                if (ImGui::Checkbox("Play", &playing))
-                    animation->SetPlaying(playing);
-                ImGui::SameLine();
-                bool autoCycle = animation->IsAutoCycleEnabled();
-                if (ImGui::Checkbox("Auto cycle", &autoCycle))
-                    animation->SetAutoCycleEnabled(autoCycle);
-                if (autoCycle)
-                    ImGui::Text("Next animation in %.1f s", animation->GetTimeUntilNextAnimation());
+                if (GetPlayerController())
+                {
+                    bool automatic = animation->IsLocomotionEnabled();
+                    if (ImGui::Checkbox("Animation follows movement", &automatic))
+                        animation->SetLocomotionEnabled(automatic);
+                    bool freeCamera = m_FreeCamera;
+                    if (ImGui::Checkbox("Free camera (Tab)", &freeCamera))
+                        SetFreeCamera(freeCamera);
+                }
+                if (!animation->IsLocomotionEnabled())
+                {
+                    bool playing = animation->IsPlaying();
+                    if (ImGui::Checkbox("Play", &playing)) animation->SetPlaying(playing);
+                    ImGui::SameLine();
+                    bool autoCycle = animation->IsAutoCycleEnabled();
+                    if (ImGui::Checkbox("Auto cycle", &autoCycle)) animation->SetAutoCycleEnabled(autoCycle);
+                    if (autoCycle) ImGui::Text("Next animation in %.1f s", animation->GetTimeUntilNextAnimation());
+                }
                 for (uint32_t i = 0; i < kPreviewCount; ++i)
                 {
                     if (i > 0)
@@ -546,7 +645,19 @@ void ModelViewer::RenderUI(GraphicsContext&)
                     ResetPreviewCamera();
 #if defined(_M_X64)
                 if (m_PhysicsDemo)
-                    ImGui::TextWrapped("WASD: move camera. Q/E: down/up. Hold right mouse to look around.");
+                {
+                    if (ImGui::Button("Reset character"))
+                    {
+                        if (auto character = GetPreviewCharacter())
+                        {
+                            character->SetActorLocation(Vector3(2, 0.95f, 0));
+                            character->GetCharacterMovement().StopMovementImmediately();
+                        }
+                    }
+                    ImGui::TextWrapped(m_FreeCamera ? "Free camera: WASD + Q/E. Tab: control character." :
+                        "Character: WASD move, Shift run. Tab: free camera.");
+                    ImGui::TextWrapped("Hold right mouse to look. Animation buttons enable manual preview.");
+                }
                 else
 #endif
                     ImGui::TextWrapped("Hold right mouse and drag to orbit. Hold right mouse and scroll to zoom.");

@@ -59,9 +59,14 @@ namespace PARS
         bool SetActorTransform(const Math::AffineTransform& transform);
         bool SetActorLocation(Math::Vector3 location);
 
-        void BeginPlay();
-        void EndPlay();
+        virtual void BeginPlay();
+        virtual void EndPlay();
         virtual void Tick(float deltaTime);
+        void PreparePhysics(float deltaTime);
+        void FixedTick(float deltaTime);
+        enum class TickGroup { PrePhysics, PostPhysics };
+        TickGroup GetTickGroup() const { return m_TickGroup; }
+        void SetTickGroup(TickGroup group) { m_TickGroup = group; }
         bool HasBegunPlay() const { return m_BegunPlay; }
 
     private:
@@ -74,5 +79,6 @@ namespace PARS
         SceneComponent* m_RootComponent = nullptr;
         bool m_BegunPlay = false;
         bool m_EndingPlay = false;
+        TickGroup m_TickGroup = TickGroup::PostPhysics;
     };
 }

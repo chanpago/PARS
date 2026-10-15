@@ -101,8 +101,9 @@ PVD3.exe 파일 버전은 `0.0.0.0`으로 표시될 수 있어 SHA256으로 구�
    **Release**는 PVD 계측이 비활성화되어 있으므로 이 검증에 사용하지 않는다.
 3. **PARS - Physics** 패널에서 **Launch / connect PVD**를 누른다.
    PVD가 자동으로 실행되고 `127.0.0.1:5425`로 연결을 재시도한다.
-4. `PVD: Connected`를 확인하고 **Start drop** 또는 **Step 1/60 s**를 누른다.
-   처음에는 물리가 일시정지되어 있으므로 프레임을 진행해야 PVD에 장면이 기록된다.
+4. `PVD: Connected`를 확인하고 **Start drop**으로 상자를 낙하시킨다.
+   처음에는 상자만 고정되어 있고 캐릭터 물리는 진행된다.
+   **Pause world**를 켠 경우에는 **Step 1/60 s**로 한 프레임씩 기록할 수 있다.
 5. PVD에서 `Ground`, `Falling box`와 프레임 증가를 확인한다.
    상자가 낙하한 뒤 바닥에 멈추는지 확인한다.
 
@@ -115,6 +116,10 @@ Start-Process -FilePath (Join-Path $pvdApp 'PVD3.exe') -WorkingDirectory $pvdApp
 ```
 
 PVD를 재시작했다면 **Reconnect PVD**를 누른다.
+게임 실행 후에 PVD를 켜고 연결해도 현재 장면을 볼 수 있으며, 연결 시점부터 기록된다.
+기존 PVD 창이 응답하지 않으면 **Restart unresponsive PVD**가 표시된다.
+이 버튼은 프로젝트에 설치된 PVD만 종료하고 다시 실행하며, 미저장 기록은 사라진다.
+다른 경로의 PVD는 직접 종료한 뒤 다시 연결한다.
 설치 스크립트는 설치와 파일 검증까지만 수행한다. `PVD_READY`만으로
 실제 디버거 연결과 물리 프레임 기록까지 확인했다고 보고하지 않는다.
 
@@ -135,7 +140,8 @@ if ($LASTEXITCODE -ne 0) { throw 'PhysicsWorldTests build failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'PhysicsWorldTests PVD connection test failed.' }
 ```
 
-테스트는 물리 계산과 실제 PVD 연결, 일시정지 중 재연결을 확인한다.
+테스트는 물리 계산과 실제 PVD 연결, 일시정지 중 재연결,
+캐릭터 충돌 검사 이후 반복 재연결과 물리 재개를 확인한다.
 GUI에서 장면을 직접 확인하지 못했다면 최종 보고에 그 점을 구분해서 적는다.
 
 ## 문제 해결과 완료 보고

@@ -6,6 +6,8 @@ namespace PARS
     {
         m_Capsule = &CreateDefaultSubobject<CapsuleComponent>("CapsuleComponent");
         SetRootComponent(*m_Capsule);
+        m_Movement = &CreateDefaultSubobject<CharacterMovementComponent>("CharacterMovementComponent");
+        m_Movement->SetUpdatedComponent(*m_Capsule);
         m_Mesh = &CreateDefaultSubobject<SkeletalMeshComponent>("SkeletalMeshComponent");
         m_Mesh->AttachToComponent(*m_Capsule);
         // Actor origin is capsule centre; the imported mesh origin is at its feet.

@@ -3,6 +3,7 @@
 #include <PxPhysicsAPI.h>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 
 // CPU physics in metres, kilograms and seconds; +Y is up. Use on the game thread.
 // Actors returned by Create* are owned by the scene until explicitly released or
@@ -20,14 +21,18 @@ public:
 
     bool Initialize(bool connectPvd = true);
     void Shutdown();
-    uint32_t Update(double elapsedSeconds);
-    void Step();
+    using BeforeStep = std::function<void(float)>;
+    uint32_t Update(double elapsedSeconds, const BeforeStep& beforeStep = {});
+    void Step(const BeforeStep& beforeStep = {});
     void ResetClock();
 
     physx::PxRigidStatic* CreateStaticBox(const physx::PxTransform& pose,
         const physx::PxVec3& halfExtents, const char* name);
     physx::PxRigidDynamic* CreateDynamicBox(const physx::PxTransform& pose,
         const physx::PxVec3& halfExtents, float density, const char* name);
+    physx::PxCapsuleController* CreateCapsuleController(const physx::PxExtendedVec3& centre,
+        float radius, float halfHeight);
+    uint32_t GetControllerCount() const;
 
     bool ConnectPvd(bool reconnect = false);
     bool IsPvdConnected() const;
@@ -55,6 +60,7 @@ private:
     physx::PxPhysics* m_Physics = nullptr;
     physx::PxDefaultCpuDispatcher* m_Dispatcher = nullptr;
     physx::PxScene* m_Scene = nullptr;
+    physx::PxControllerManager* m_ControllerManager = nullptr;
     physx::PxMaterial* m_Material = nullptr;
     bool m_ExtensionsInitialized = false;
     double m_Accumulator = 0.0;

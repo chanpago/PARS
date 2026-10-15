@@ -94,7 +94,29 @@ int main(int argc, char** argv)
             "Connecting/reconnecting does not advance paused physics");
         for (int step = 0; step < 60; ++step)
             world.Step();
-        std::puts("PASS: live PVD connection, paused-scene reconnect and simulation stream");
+        Check(world.CreateStaticBox(PxTransform(PxVec3(0, -0.25f, 0)),
+            PxVec3(6, 0.25f, 6), "PVD ground"), "PVD ground");
+        auto capsule = world.CreateCapsuleController(PxExtendedVec3(2, 1, 0), 0.3f, 0.9f);
+        Check(capsule != nullptr, "PVD character capsule");
+        const auto moveCapsule = [capsule](float dt)
+        {
+            capsule->move(PxVec3(0.02f, -0.1f, 0), 0.001f, dt, PxControllerFilters());
+        };
+        for (int reconnect = 0; reconnect < 3; ++reconnect)
+        {
+            // Controller sweeps leave query geometry in the previous PVD session.
+            world.Step(moveCapsule);
+            const auto steps = world.GetStepCount();
+            const auto position = capsule->getPosition();
+            Check(world.ConnectPvd(true) && world.IsPvdConnected(),
+                "Reconnect after recording character scene queries");
+            Check(world.GetStepCount() == steps && capsule->getPosition() == position,
+                "Reconnect preserves paused character state");
+            world.Step(moveCapsule);
+            Check(capsule->getPosition().x > position.x, "Character moves after reconnect");
+        }
+        capsule->release();
+        std::puts("PASS: live PVD, paused-scene reconnect and character queries after reconnect");
     }
     world.Shutdown();
     Check(world.GetErrorCount() == 0, "No errors after reinitialize/PVD shutdown");
