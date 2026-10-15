@@ -492,6 +492,20 @@
     <None Include="..\..\ThirdParty\ImGui\LICENSE.txt" />
     <None Include="..\..\ThirdParty\ImGui\README.PARS.md" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="GameFramework\Actor.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="GameFramework\Actor.h" />
+    <ClInclude Include="GameFramework\ActorComponent.h" />
+    <ClInclude Include="GameFramework\CapsuleComponent.h" />
+    <ClInclude Include="GameFramework\Pawn.h" />
+    <ClInclude Include="GameFramework\PrimitiveComponent.h" />
+    <ClCompile Include="GameFramework\SceneComponent.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="GameFramework\SceneComponent.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="GameFramework\World.h" />
+    <ClCompile Include="GameFramework\World.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemDefinitionGroup>
     <ClCompile>

@@ -16,6 +16,7 @@
 #include "BufferManager.h"
 #include "Camera.h"
 #include "CommandContext.h"
+#include "CommandListManager.h"
 #include "TemporalEffects.h"
 #include "MotionBlur.h"
 #include "DepthOfField.h"
@@ -31,6 +32,10 @@
 #include "Renderer.h"
 #include "Model.h"
 #include "ModelLoader.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/World.h"
+#include "WorldRenderer.h"
+#include "PreviewAnimInstance.h"
 #include "ShadowCamera.h"
 #include "Display.h"
 #include "imgui.h"
@@ -109,7 +114,9 @@ private:
     void LoadAnimationPreview(bool forceRebuild);
     void SelectPreview(uint32_t index);
     void ResetPreviewCamera();
-    ModelInstance& ActiveModel() { return m_PreviewMode ? m_PreviewModels[m_PreviewIndex] : m_ModelInst; }
+    PARS::Character* GetPreviewCharacter() const { return m_World.FindActor<PARS::Character>(m_PreviewCharacter); }
+    PreviewAnimInstance* GetPreviewAnimation() const;
+    void RenderModels(Renderer::MeshSorter& sorter);
 
     Camera m_Camera;
     unique_ptr<CameraController> m_CameraController;
@@ -118,14 +125,10 @@ private:
     D3D12_RECT m_MainScissor;
 
     ModelInstance m_ModelInst;
-    ModelInstance m_PreviewModels[kPreviewCount];
-    float m_PreviewDurations[kPreviewCount] = {};
-    uint32_t m_PreviewIndex = 0;
-    float m_PreviewElapsed = 0.0f;
+    PARS::World m_World;
+    PARS::ActorHandle m_PreviewCharacter; // Observation only; World owns the Actor.
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
-    bool m_PreviewPlaying = true;
-    bool m_PreviewAutoCycle = true;
     std::string m_PreviewError;
     ShadowCamera m_SunShadowCamera;
     bool m_SponzaStarted = false;
@@ -221,6 +224,7 @@ void ModelViewer::Startup( void )
     SSAO::Enable = true;
 
     Renderer::Initialize();
+    m_World.BeginPlay();
 
     // The default scene combines the physics map and the animated character.
     // -physics 0 selects Sponza; -model still selects a standalone model.
@@ -310,38 +314,78 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         return;
     }
 
-    // Keep each instance alive so changing clips never reallocates GPU buffers.
+    std::shared_ptr<const Model> models[kPreviewCount];
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
-        auto model = Renderer::LoadModel(root + kPreviewFiles[i], forceRebuild);
+        auto& model = models[i];
+        model = Renderer::LoadModel(root + kPreviewFiles[i], forceRebuild);
         if (!model || model->m_NumAnimations == 0 || model->m_Animations[0].duration <= 0.0f)
         {
             m_PreviewError = std::string("Could not load animation: ") + kPreviewNames[i];
             return;
         }
-        m_PreviewModels[i] = model;
-#if defined(_M_X64)
-        if (m_PhysicsDemo)
-            // The converted glTF is already in metres. Keep the same fixed
-            // placement for every clip, beside the falling box at the origin.
-            m_PreviewModels[i].SetPosition(Vector3(2.0f, 0.0f, 0.0f));
-        else
-#endif
-            m_PreviewModels[i].Resize(10.0f);
-        const float duration = model->m_Animations[0].duration;
-        // Show complete loops for at least four seconds before changing clips.
-        m_PreviewDurations[i] = duration * ceilf(4.0f / duration);
     }
+
+    // Configure the world-owned Character before its first BeginPlay/Tick.
+    auto* character = m_World.SpawnActor<PARS::Character>("MixamoCharacter");
+    if (!character)
+        return;
+    auto& mesh = character->GetMesh();
+    for (uint32_t i = 0; i < kPreviewCount; ++i)
+    {
+        const auto& model = models[i];
+        if (i == 0)
+        {
+            if (!mesh.SetSkeletalMesh(model))
+            {
+                m_PreviewError = "The character model has no usable skeleton.";
+                character->Destroy();
+                return;
+            }
+            mesh.SetAnimInstance(std::make_unique<PreviewAnimInstance>(mesh));
+        }
+        if (!mesh.GetAnimInstance().AddAnimation(kPreviewNames[i], model))
+        {
+            m_PreviewError = std::string("Animation skeleton does not match the character: ") + kPreviewNames[i];
+            character->Destroy();
+            return;
+        }
+    }
+    const float halfHeight = character->GetCapsuleComponent().GetHalfHeight();
+    character->SetActorLocation(Vector3(2.0f, halfHeight, 0.0f));
+#if defined(_M_X64)
+    if (!m_PhysicsDemo)
+#endif
+    {
+        const float scale = 10.0f / float(mesh.GetLocalBounds().GetRadius());
+        character->SetActorTransform(AffineTransform(Matrix3::MakeScale(scale), Vector3(0, halfHeight * scale, 0)));
+    }
+    m_PreviewCharacter = character->GetHandle();
+    mesh.GetAnimInstance().PlayAnimation(0);
+    m_World.Tick(0.0f);
+    auto& context = GraphicsContext::Begin(L"Initialize Character Pose");
+    Renderer::UpdateWorldRenderData(m_World, context);
+    context.Finish(true);
     m_PreviewReady = true;
-    SelectPreview(0);
     ResetPreviewCamera();
 }
 
 void ModelViewer::SelectPreview(uint32_t index)
 {
-    m_PreviewIndex = index % kPreviewCount;
-    m_PreviewElapsed = 0.0f;
-    m_PreviewModels[m_PreviewIndex].LoopAllAnimations();
+    if (auto animation = GetPreviewAnimation())
+        animation->SelectAnimation(index);
+}
+
+PreviewAnimInstance* ModelViewer::GetPreviewAnimation() const
+{
+    auto character = GetPreviewCharacter();
+    return character ? dynamic_cast<PreviewAnimInstance*>(&character->GetMesh().GetAnimInstance()) : nullptr;
+}
+
+void ModelViewer::RenderModels(Renderer::MeshSorter& sorter)
+{
+    Renderer::AddWorldMeshes(m_World, sorter);
+    m_ModelInst.Render(sorter);
 }
 
 void ModelViewer::ResetPreviewCamera()
@@ -358,21 +402,24 @@ void ModelViewer::ResetPreviewCamera()
         return;
     }
 #endif
-    if (!m_PreviewReady)
+    auto character = GetPreviewCharacter();
+    if (!m_PreviewReady || !character)
     {
         m_CameraController.reset(new OrbitCamera(m_Camera, BoundingSphere(Vector3(0, 8, 0), 14.0f)));
         return;
     }
     // Leave room for the hands and feet throughout all three animations.
-    BoundingSphere bounds = m_PreviewModels[0].GetBoundingSphere();
-    for (uint32_t i = 1; i < kPreviewCount; ++i)
-        bounds = bounds.Union(m_PreviewModels[i].GetBoundingSphere());
+    const BoundingSphere bounds = character->GetMesh().GetModelInstance().GetBoundingSphere();
     m_CameraController.reset(new OrbitCamera(m_Camera,
         BoundingSphere(bounds.GetCenter(), bounds.GetRadius() * 1.4f), Vector3(kYUnitVector)));
 }
 
 void ModelViewer::Cleanup( void )
 {
+    // GameCore waits for the GPU before Cleanup. End actor lifetimes while the
+    // renderer and physics services are still available to their components.
+    m_PreviewCharacter = {};
+    m_World.Clear();
 #if defined(_M_X64)
     if (m_PhysicsDemo)
     {
@@ -381,8 +428,6 @@ void ModelViewer::Cleanup( void )
     }
 #endif
     m_ModelInst = nullptr;
-    for (auto& model : m_PreviewModels)
-        model = nullptr;
 
     g_IBLTextures.clear();
 
@@ -403,6 +448,14 @@ void ModelViewer::Update( float deltaT )
 {
     ScopedTimer _prof(L"Update State");
 
+    if (m_World.HasPendingDestroy())
+    {
+        // Actor meshes may still be referenced by the previous GPU frame. Only
+        // deletion waits; ordinary world updates do not force a GPU idle.
+        g_CommandManager.IdleGPU();
+        m_World.CollectGarbage();
+    }
+
     if (GameInput::IsFirstPressed(GameInput::kLShoulder))
         DebugZoom.Decrement();
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
@@ -421,19 +474,9 @@ void ModelViewer::Update( float deltaT )
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
 
-    float animationDelta = deltaT;
-    if (m_PreviewMode)
-    {
-        // Pausing also freezes the automatic switch timer; camera input still works.
-        animationDelta = m_PreviewPlaying ? Clamp(deltaT, 0.0f, 0.1f) : 0.0f;
-        if (m_PreviewReady && m_PreviewAutoCycle)
-        {
-            m_PreviewElapsed += animationDelta;
-            if (m_PreviewElapsed >= m_PreviewDurations[m_PreviewIndex])
-                SelectPreview(m_PreviewIndex + 1);
-        }
-    }
-    ActiveModel().Update(gfxContext, animationDelta);
+    m_World.Tick(Clamp(deltaT, 0.0f, 0.1f));
+    Renderer::UpdateWorldRenderData(m_World, gfxContext);
+    m_ModelInst.Update(gfxContext, deltaT);
 
     gfxContext.Finish();
 
@@ -475,19 +518,23 @@ void ModelViewer::RenderUI(GraphicsContext&)
         ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("Character Animation", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
-            if (!m_PreviewReady)
-                ImGui::TextWrapped("%s", m_PreviewError.c_str());
+            auto animation = GetPreviewAnimation();
+            if (!m_PreviewReady || !animation)
+                ImGui::TextWrapped("%s", m_PreviewError.empty() ? "Preview character is no longer in the world." : m_PreviewError.c_str());
             else
             {
-                ImGui::Text("Now playing: %s", kPreviewNames[m_PreviewIndex]);
+                ImGui::Text("Now playing: %s", animation->GetAnimationName(animation->GetCurrentAnimationIndex()).c_str());
                 ImGui::TextUnformatted("Idle -> Walking -> Slow Run -> repeat");
                 ImGui::Separator();
-                ImGui::Checkbox("Play", &m_PreviewPlaying);
+                bool playing = animation->IsPlaying();
+                if (ImGui::Checkbox("Play", &playing))
+                    animation->SetPlaying(playing);
                 ImGui::SameLine();
-                if (ImGui::Checkbox("Auto cycle", &m_PreviewAutoCycle))
-                    m_PreviewElapsed = 0.0f;
-                if (m_PreviewAutoCycle)
-                    ImGui::Text("Next animation in %.1f s", m_PreviewDurations[m_PreviewIndex] - m_PreviewElapsed);
+                bool autoCycle = animation->IsAutoCycleEnabled();
+                if (ImGui::Checkbox("Auto cycle", &autoCycle))
+                    animation->SetAutoCycleEnabled(autoCycle);
+                if (autoCycle)
+                    ImGui::Text("Next animation in %.1f s", animation->GetTimeUntilNextAnimation());
                 for (uint32_t i = 0; i < kPreviewCount; ++i)
                 {
                     if (i > 0)
@@ -552,12 +599,13 @@ void ModelViewer::RenderScene( void )
     const D3D12_RECT& scissor = m_MainScissor;
 
     bool physicsScene = false;
+    const bool hasModels = Renderer::HasWorldMeshes(m_World) || !m_ModelInst.IsNull();
 #if defined(_M_X64)
     if (m_PhysicsDemo)
     {
         physicsScene = true;
         m_PhysicsDemo->Render(gfxContext, m_Camera, viewport, scissor);
-        if (ActiveModel().IsNull())
+        if (!hasModels)
         {
             gfxContext.Finish();
             return;
@@ -567,8 +615,7 @@ void ModelViewer::RenderScene( void )
 
     ParticleEffectManager::Update(gfxContext.GetComputeContext(), Graphics::GetFrameTime());
 
-    ModelInstance& model = ActiveModel();
-    if (model.IsNull())
+    if (!hasModels)
     {
 #ifdef LEGACY_RENDERER
         if (m_SponzaStarted)
@@ -616,7 +663,7 @@ void ModelViewer::RenderScene( void )
 		sorter.SetDepthStencilTarget(g_SceneDepthBuffer);
 		sorter.AddRenderTarget(g_SceneColorBuffer);
 
-        model.Render(sorter);
+        RenderModels(sorter);
 
         sorter.Sort();
 
@@ -638,7 +685,7 @@ void ModelViewer::RenderScene( void )
 				shadowSorter.SetCamera(m_SunShadowCamera);
 				shadowSorter.SetDepthStencilTarget(g_ShadowBuffer);
 
-                model.Render(shadowSorter);
+                RenderModels(shadowSorter);
 
                 shadowSorter.Sort();
                 shadowSorter.RenderMeshes(MeshSorter::kZPass, gfxContext, globals);

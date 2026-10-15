@@ -79,19 +79,6 @@ struct Mesh
     Draw draw[1];           // Actually 1 or more draws
 };
 
-struct GraphNode // 96 bytes
-{
-    Math::Matrix4 xform;
-    Math::Quaternion rotation;
-    Math::XMFLOAT3 scale;
-
-    uint32_t matrixIdx : 28;
-    uint32_t hasSibling : 1;
-    uint32_t hasChildren : 1;
-    uint32_t staleMatrix : 1;
-    uint32_t skeletonRoot : 1;
-};
-
 struct Joint
 {
     Math::Matrix4 posXform;
@@ -146,10 +133,12 @@ public:
     bool IsNull(void) const { return m_Model == nullptr; }
 
     void Update(GraphicsContext& gfxContext, float deltaTime);
+    bool UpdatePose(GraphicsContext& gfxContext, const std::vector<GraphNode>& pose);
     void Render(Renderer::MeshSorter& sorter) const;
 
     void Resize(float newRadius);
     void SetPosition(Math::Vector3 position) { m_Locator.SetTranslation(position); }
+    void SetTransform(const Math::AffineTransform& transform) { m_Locator = transform; }
     Math::Vector3 GetCenter() const;
     Math::Scalar GetRadius() const;
     Math::BoundingSphere GetBoundingSphere() const;
@@ -164,11 +153,12 @@ public:
     void LoopAllAnimations(void);
 
 private:
+    void UpdateTransforms(GraphicsContext& gfxContext);
     std::shared_ptr<const Model> m_Model;
     UploadBuffer m_MeshConstantsCPU;
     ByteAddressBuffer m_MeshConstantsGPU;
     std::unique_ptr<Math::AffineTransform[]> m_BoundingSphereTransforms;
-    Math::UniformTransform m_Locator;
+    Math::AffineTransform m_Locator{ Math::kIdentity };
 
     std::unique_ptr<GraphNode[]> m_AnimGraph;   // A copy of the scene graph when instancing animation
     std::vector<AnimationState> m_AnimState;    // Per-animation (not per-curve)

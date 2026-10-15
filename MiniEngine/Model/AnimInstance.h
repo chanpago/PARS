@@ -1,0 +1,60 @@
+#pragma once
+
+#include "Animation.h"
+#include <memory>
+#include <string>
+
+class Model;
+
+namespace PARS
+{
+    class SkeletalMeshComponent;
+
+    // Owned by SkeletalMeshComponent, not by Actor's component list.
+    // Evaluates CPU poses; GPU skinning/upload belongs to the mesh component.
+    class AnimInstance
+    {
+    public:
+        explicit AnimInstance(SkeletalMeshComponent& owner) : m_Owner(owner) {}
+        virtual ~AnimInstance() = default;
+        AnimInstance(const AnimInstance&) = delete;
+        AnimInstance& operator=(const AnimInstance&) = delete;
+
+        SkeletalMeshComponent& GetOwningComponent() const { return m_Owner; }
+        void Initialize(std::shared_ptr<const Model> skeleton);
+        bool AddAnimation(const std::string& name, std::shared_ptr<const Model> source, uint32_t animationIndex = 0);
+        bool PlayAnimation(uint32_t index, bool loop = true);
+        void SetPlaying(bool playing) { m_Playing = playing && !m_Clips.empty(); }
+        bool IsPlaying() const { return m_Playing; }
+        void Stop();
+        void Reset();
+        void UpdateAnimation(float deltaTime);
+
+        size_t GetAnimationCount() const { return m_Clips.size(); }
+        uint32_t GetCurrentAnimationIndex() const { return m_CurrentClip; }
+        float GetAnimationTime() const { return m_Time; }
+        float GetAnimationDuration(uint32_t index) const;
+        const std::string& GetAnimationName(uint32_t index) const;
+        const std::vector<GraphNode>& GetPose() const { return m_Pose; }
+
+    protected:
+        virtual void NativeUpdateAnimation(float deltaTime) { (void)deltaTime; }
+
+    private:
+        struct Clip
+        {
+            std::string name;
+            std::shared_ptr<const Model> source;
+            uint32_t animationIndex;
+        };
+        void EvaluatePose();
+        SkeletalMeshComponent& m_Owner;
+        std::shared_ptr<const Model> m_Skeleton;
+        std::vector<Clip> m_Clips;
+        std::vector<GraphNode> m_Pose;
+        uint32_t m_CurrentClip = 0;
+        float m_Time = 0.0f;
+        bool m_Playing = false;
+        bool m_Loop = true;
+    };
+}

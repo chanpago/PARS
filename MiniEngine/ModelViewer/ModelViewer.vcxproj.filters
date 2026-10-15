@@ -239,4 +239,10 @@
     <FxCompile Include="Shaders\PhysicsDemoVS.hlsl"><Filter>Shaders</Filter></FxCompile>
     <FxCompile Include="Shaders\PhysicsDemoPS.hlsl"><Filter>Shaders</Filter></FxCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Filter Include="GameFramework"><UniqueIdentifier>{0627E540-0F92-5251-B237-03567B27DABA}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="PreviewAnimInstance.h"><Filter>GameFramework</Filter></ClInclude>
+  </ItemGroup>
 </Project>

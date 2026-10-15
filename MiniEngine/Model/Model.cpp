@@ -18,6 +18,17 @@
 using namespace Math;
 using namespace Renderer;
 
+namespace
+{
+    // Upper bound on stretch, including shear from rotated non-uniform parents.
+    Scalar MaximumStretch(const AffineTransform& transform)
+    {
+        const Vector3 x = transform.GetX(), y = transform.GetY(), z = transform.GetZ();
+        const Scalar xy = Abs(Dot(x, y)), xz = Abs(Dot(x, z)), yz = Abs(Dot(y, z));
+        return Sqrt(Max(Max(Dot(x, x) + xy + xz, Dot(y, y) + xy + yz), Dot(z, z) + xz + yz));
+    }
+}
+
 void Model::Destroy()
 {
     m_BoundingSphere = BoundingSphere(kZero);
@@ -46,10 +57,7 @@ void Model::Render(
         const Mesh& mesh = *(const Mesh*)pMesh;
 
         const AffineTransform& sphereXform = sphereTransforms[mesh.meshCBV];
-        Scalar scaleXSqr = LengthSquare((Vector3)sphereXform.GetX());
-        Scalar scaleYSqr = LengthSquare((Vector3)sphereXform.GetY());
-        Scalar scaleZSqr = LengthSquare((Vector3)sphereXform.GetZ());
-        Scalar sphereScale = Sqrt(Max(Max(scaleXSqr, scaleYSqr), scaleZSqr));
+        Scalar sphereScale = MaximumStretch(sphereXform);
 
 		BoundingSphere sphereLS((const XMFLOAT4*)mesh.bounds);
 		BoundingSphere sphereWS = BoundingSphere(sphereXform * sphereLS.GetCenter(), sphereScale * sphereLS.GetRadius());
@@ -99,11 +107,11 @@ ModelInstance::ModelInstance( std::shared_ptr<const Model> sourceModel )
         m_BoundingSphereTransforms.reset(new AffineTransform[sourceModel->m_NumNodes]);
         m_Skeleton.reset(new Joint[sourceModel->m_NumJoints]);
 
-        if (sourceModel->m_NumAnimations > 0)
+        if (sourceModel->m_NumAnimations > 0 || sourceModel->m_NumJoints > 0)
         {
             m_AnimGraph.reset(new GraphNode[sourceModel->m_NumNodes]);
             std::memcpy(m_AnimGraph.get(), sourceModel->m_SceneGraph.get(), sourceModel->m_NumNodes * sizeof(GraphNode));
-            m_AnimState.resize(sourceModel->m_NumAnimations);
+            m_AnimState.assign(sourceModel->m_NumAnimations, AnimationState());
         }
         else
         {
@@ -121,7 +129,7 @@ ModelInstance::ModelInstance( const ModelInstance& modelInstance )
 ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceModel )
 {
     m_Model = sourceModel;
-    m_Locator = UniformTransform(kIdentity);
+    m_Locator = AffineTransform(kIdentity);
     if (sourceModel == nullptr)
     {
         m_MeshConstantsCPU.Destroy();
@@ -139,11 +147,11 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
         m_BoundingSphereTransforms.reset(new AffineTransform[sourceModel->m_NumNodes]);
         m_Skeleton.reset(new Joint[sourceModel->m_NumJoints]);
 
-        if (sourceModel->m_NumAnimations > 0)
+        if (sourceModel->m_NumAnimations > 0 || sourceModel->m_NumJoints > 0)
         {
             m_AnimGraph.reset(new GraphNode[sourceModel->m_NumNodes]);
             std::memcpy(m_AnimGraph.get(), sourceModel->m_SceneGraph.get(), sourceModel->m_NumNodes * sizeof(GraphNode));
-            m_AnimState.resize(sourceModel->m_NumAnimations);
+            m_AnimState.assign(sourceModel->m_NumAnimations, AnimationState());
         }
         else
         {
@@ -158,7 +166,22 @@ void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)
 {
     if (m_Model == nullptr)
         return;
+    if (m_AnimGraph)
+        UpdateAnimations(deltaTime);
+    UpdateTransforms(gfxContext);
+}
 
+bool ModelInstance::UpdatePose(GraphicsContext& gfxContext, const std::vector<GraphNode>& pose)
+{
+    if (!m_Model || !m_AnimGraph || pose.size() != m_Model->m_NumNodes)
+        return false;
+    std::memcpy(m_AnimGraph.get(), pose.data(), pose.size() * sizeof(GraphNode));
+    UpdateTransforms(gfxContext);
+    return true;
+}
+
+void ModelInstance::UpdateTransforms(GraphicsContext& gfxContext)
+{
     static const size_t kMaxStackDepth = 32;
 
     size_t stackIdx = 0;
@@ -169,8 +192,6 @@ void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)
 
     if (m_AnimGraph)
     {
-        UpdateAnimations(deltaTime);
-
         for (uint32_t i = 0; i < m_Model->m_NumNodes; ++i)
         {
             GraphNode& node = m_AnimGraph[i];
@@ -251,7 +272,9 @@ void ModelInstance::Resize( float newRadius )
     if (m_Model == nullptr)
         return;
 
-    m_Locator.SetScale(newRadius / m_Model->m_BoundingSphere.GetRadius());
+    const float radius = GetRadius();
+    if (radius > 0.0f && newRadius > 0.0f)
+        m_Locator.SetBasis(m_Locator.GetBasis() * Scalar(newRadius / radius));
 }
 
 Vector3 ModelInstance::GetCenter() const
@@ -267,7 +290,7 @@ Scalar ModelInstance::GetRadius() const
     if (m_Model == nullptr)
         return Scalar(kZero);
 
-    return m_Locator.GetScale() * m_Model->m_BoundingSphere.GetRadius();
+    return MaximumStretch(m_Locator) * m_Model->m_BoundingSphere.GetRadius();
 }
 
 Math::BoundingSphere ModelInstance::GetBoundingSphere() const
@@ -275,7 +298,7 @@ Math::BoundingSphere ModelInstance::GetBoundingSphere() const
     if (m_Model == nullptr)
         return BoundingSphere(kZero);
 
-    return m_Locator * m_Model->m_BoundingSphere;
+    return BoundingSphere(GetCenter(), GetRadius());
 }
 
 Math::OrientedBox ModelInstance::GetBoundingBox() const
@@ -283,5 +306,5 @@ Math::OrientedBox ModelInstance::GetBoundingBox() const
     if (m_Model == nullptr)
         return AxisAlignedBox(Vector3(kZero), Vector3(kZero));
 
-    return m_Locator * m_Model->m_BoundingBox;
+    return m_Locator * OrientedBox(m_Model->m_BoundingBox);
 }

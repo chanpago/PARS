@@ -15,6 +15,19 @@
 
 #include <vector>
 #include <cstdint>
+#include "../Core/VectorMath.h"
+
+struct GraphNode // CPU pose and scene hierarchy; matrices are rebuilt after sampling.
+{
+    Math::Matrix4 xform;
+    Math::Quaternion rotation;
+    Math::XMFLOAT3 scale;
+    uint32_t matrixIdx : 28;
+    uint32_t hasSibling : 1;
+    uint32_t hasChildren : 1;
+    uint32_t staleMatrix : 1;
+    uint32_t skeletonRoot : 1;
+};
 
 //
 // An animation curve describes how a value (or values) change over time.
@@ -60,3 +73,8 @@ struct AnimationState
     float time;
     AnimationState() : state(kStopped), time(0.0f) {}
 };
+
+// Sample one uniformly spaced animation into an existing reference pose.
+// No graphics device is required; the final key is safe to sample exactly.
+bool EvaluateAnimationPose(const AnimationSet& animation, const AnimationCurve* curves,
+    const uint8_t* keyFrames, GraphNode* pose, uint32_t nodeCount, float time);

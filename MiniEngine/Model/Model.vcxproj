@@ -184,6 +184,21 @@
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="AnimationPose.cpp" />
+    <ClCompile Include="AnimInstance.cpp" />
+    <ClInclude Include="AnimInstance.h" />
+    <ClInclude Include="Components\MeshComponent.h" />
+    <ClCompile Include="Components\SkeletalMeshComponent.cpp" />
+    <ClInclude Include="Components\SkeletalMeshComponent.h" />
+    <ClInclude Include="Components\SkinnedMeshComponent.h" />
+    <ClCompile Include="GameFramework\Character.cpp" />
+    <ClInclude Include="GameFramework\Character.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="WorldRenderer.h" />
+    <ClCompile Include="WorldRenderer.cpp" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildThisFileDirectory)', 'vcpkg.json'))\vcpkg\DirectX.vcpkg.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -745,4 +745,21 @@
     <ClInclude Include="PhysicsWorld.h" />
     <ClCompile Include="PhysicsWorld.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <Filter Include="GameFramework"><UniqueIdentifier>{B7C6FDBC-09E2-5543-99F4-3ED14EB32622}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="GameFramework\Actor.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClInclude Include="GameFramework\Actor.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\ActorComponent.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\CapsuleComponent.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\Pawn.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\PrimitiveComponent.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClCompile Include="GameFramework\SceneComponent.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClInclude Include="GameFramework\SceneComponent.h"><Filter>GameFramework</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="GameFramework\World.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClCompile Include="GameFramework\World.cpp"><Filter>GameFramework</Filter></ClCompile>
+  </ItemGroup>
 </Project>
