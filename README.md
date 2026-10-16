@@ -10,6 +10,12 @@ independent Git history beginning with a single initial commit.
 
 ## Build and run
 
+## Project presentation
+
+An overview of the project's goals, technical approach, and planned implementation scope.
+
+[View the PARS presentation (Korean)](https://www.canva.com/design/DAHYFBn98Zc/BCHxzDVSFVDVx0fE3fzTkA/edit)
+
 1. Install Visual Studio 2022 17.14 or later with **Desktop development with C++**,
    the **MSVC v143** tools, **C++ CMake tools for Windows** (CMake 3.25+), and a
    Windows SDK. Install Git if it is not already available.
