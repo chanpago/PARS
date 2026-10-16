@@ -23,6 +23,7 @@
 #include "../Core/Math/BoundingBox.h"
 #include "../Core/Math/BoundingSphere.h"
 #include <cstdint>
+#include <string>
 
 namespace Renderer
 {
@@ -106,6 +107,8 @@ public:
     uint32_t m_NumJoints;
     std::unique_ptr<uint8_t[]> m_MeshData;
     std::unique_ptr<GraphNode[]> m_SceneGraph;
+    std::vector<std::string> m_NodeNames;
+    std::vector<int32_t> m_NodeParents;
     std::vector<TextureRef> textures;
     std::unique_ptr<uint8_t[]> m_KeyFrameData;
     std::unique_ptr<AnimationCurve[]> m_CurveData;
@@ -134,6 +137,9 @@ public:
 
     void Update(GraphicsContext& gfxContext, float deltaTime);
     bool UpdatePose(GraphicsContext& gfxContext, const std::vector<GraphNode>& pose);
+    // Cached scene-node transform, valid after Update/UpdatePose. Skin roots
+    // use skin space; multiply by the owning mesh transform for rendered bones.
+    bool GetNodeTransform(uint32_t nodeIndex, Math::Matrix4& transform) const;
     void Render(Renderer::MeshSorter& sorter) const;
 
     void Resize(float newRadius);
@@ -163,4 +169,5 @@ private:
     std::unique_ptr<GraphNode[]> m_AnimGraph;   // A copy of the scene graph when instancing animation
     std::vector<AnimationState> m_AnimState;    // Per-animation (not per-curve)
     std::unique_ptr<Joint[]> m_Skeleton;
+    bool m_TransformsValid = false;
 };

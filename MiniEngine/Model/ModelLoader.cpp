@@ -147,7 +147,7 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     struct _stat64 sourceFileStat;
     struct _stat64 miniFileStat;
     std::ifstream inFile;
-    FileHeader header;
+    FileHeader header{};
 
     bool sourceFileMissing = _wstat64(filePath.c_str(), &sourceFileStat) == -1;
     bool miniFileMissing = _wstat64(miniFileName.c_str(), &miniFileStat) == -1;
@@ -172,7 +172,11 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     {
         inFile = std::ifstream(miniFileName, std::ios::in | std::ios::binary);
         inFile.read((char*)&header, sizeof(FileHeader));
-        if (strncmp(header.id, "MINI", 4) != 0 || header.version != CURRENT_MINI_FILE_VERSION)
+        // Rebuild v13 when source is available, but retain cache-only assets.
+        const bool legacyCache = header.version == 13 &&
+            (sourceFileMissing || Utility::ToLower(Utility::GetFileExtension(filePath)) == L"mini");
+        if (!inFile || strncmp(header.id, "MINI", 4) != 0 ||
+            (header.version != CURRENT_MINI_FILE_VERSION && !legacyCache))
         {
             Utility::Printf("Model version deprecated.  Rebuilding %ws...\n", fileName.c_str());
             needBuild = true;
@@ -221,7 +225,7 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     if (!inFile)
         return nullptr;
 
-    ASSERT(strncmp(header.id, "MINI", 4) == 0 && header.version == CURRENT_MINI_FILE_VERSION);
+    ASSERT(strncmp(header.id, "MINI", 4) == 0 && (header.version == CURRENT_MINI_FILE_VERSION || header.version == 13));
 
     std::wstring basePath = Utility::GetBasePath(filePath);
 
@@ -302,5 +306,16 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
         inFile.read((char*)model->m_JointIBMs.get(), header.numJoints * sizeof(Matrix4));
     }
 
+    model->m_NodeNames.resize(header.numNodes);
+    for (uint32_t i = 0; i < header.numNodes; ++i)
+    {
+        if (header.version >= 14) std::getline(inFile, model->m_NodeNames[i], '\0');
+        if (model->m_NodeNames[i].empty()) model->m_NodeNames[i] = "Node " + std::to_string(i);
+    }
+    if (!inFile || !BuildSceneGraphParents(model->m_SceneGraph.get(), header.numNodes, model->m_NodeParents))
+    {
+        Utility::Printf("Error: Invalid node data in %ws\n", fileName.c_str());
+        return nullptr;
+    }
     return model;
 }

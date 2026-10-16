@@ -110,6 +110,11 @@ public:
     virtual void RenderScene( void ) override;
     virtual void RenderUI(GraphicsContext&) override;
     virtual bool UsesImGui() const override { return true; }
+    virtual bool IsDone() override
+    {
+        // Escape belongs to the preview while it is focused (cancel a gizmo drag).
+        return !(m_MeshViewer && m_MeshViewer->WantsInput()) && GameCore::IGameApp::IsDone();
+    }
 
 private:
 

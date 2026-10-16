@@ -8,6 +8,8 @@
 #include "DescriptorHeap.h"
 #include "PipelineState.h"
 #include "RootSignature.h"
+#include "Animation.h"
+#include "SkeletonOverlay.h"
 #include <memory>
 
 class Model;
@@ -29,6 +31,18 @@ public:
 private:
     void ResetCamera();
     void RenderPreview(GraphicsContext& context, float aspect);
+    void BuildSkeleton();
+    void DrawBoneTree(int32_t node);
+    void UpdateBoneWorld();
+    void DrawSkeleton();
+    void SelectBone(int32_t node);
+    void HandlePick(uint32_t id);
+    void BeginGizmoDrag(uint32_t axis);
+    void UpdateGizmoDrag(float mouseX, float mouseY);
+    void CancelInteraction();
+    float GetGizmoLength() const;
+    Math::Vector3 GetBoneAxis(int axis) const;
+    float GetDragAngle(float x, float y) const;
     PARS::World m_World;
     PARS::SkeletalMeshComponent* m_Mesh = nullptr; // Owned by the preview World.
     Math::Camera m_Camera;
@@ -50,4 +64,23 @@ private:
     uint64_t m_Image = 0;
     RootSignature m_PresentRoot;
     GraphicsPSO m_PresentPSO;
+    SkeletonOverlay m_Overlay;
+    std::vector<std::vector<int32_t>> m_BoneChildren;
+    std::vector<int32_t> m_BoneRoots, m_BoneParents;
+    std::vector<bool> m_IsJoint, m_InSkeleton;
+    std::vector<Math::Matrix4> m_NodeWorld, m_NodeMeshWorld;
+    std::vector<GraphNode> m_EditPose;
+    std::vector<GraphNode> m_PickPose; // Pose rendered when the GPU pick was requested.
+    bool m_ShowBones = true, m_RevealSelection = false;
+    int32_t m_SelectedBone = -1;
+    int m_GizmoMode = 0; // 0 = move, 1 = rotate, 2 = scale; local axes.
+    int m_DragAxis = -1;
+    GraphNode m_DragOriginal{};
+    Math::Vector3 m_DragLocalDirection{Math::kZero};
+    Math::Vector3 m_DragScreenAxis{Math::kZero};
+    Math::Vector3 m_DragCenter{Math::kZero}, m_DragU{Math::kZero}, m_DragV{Math::kZero};
+    float m_DragLength = 1, m_DragAngle = 0, m_LastDragAngle = 0;
+    float m_ClickX = 0, m_ClickY = 0;
+    bool m_HasPickRequest = false;
+    float m_ViewportHeight = 1;
 };

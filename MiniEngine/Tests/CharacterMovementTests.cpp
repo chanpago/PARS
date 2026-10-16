@@ -155,6 +155,30 @@ namespace
         std::puts("PASS: wall collision/sliding, multiple capsules, possession and deferred destruction");
     }
 
+    void TestSkeletonHierarchy()
+    {
+        // Two scene roots, nested children and siblings. Joint indices need not
+        // be in this order; non-joint armatures must remain in the parent chain.
+        GraphNode graph[7]{};
+        graph[0].hasChildren = graph[0].hasSibling = true;
+        graph[1].hasChildren = graph[1].hasSibling = true;
+        graph[2].hasSibling = true;
+        graph[4].hasChildren = true;
+        std::vector<int32_t> parents;
+        Check(BuildSceneGraphParents(graph, 7, parents), "Recover skeleton hierarchy with multiple scene roots");
+        Check(parents == std::vector<int32_t>({-1, 0, 1, 1, 0, 4, -1}), "Preserve helper nodes and nested sibling parents");
+        Check(!BuildSceneGraphParents(graph, 6, parents) && parents.empty(), "Reject a truncated scene hierarchy");
+        graph[0].hasChildren = graph[0].hasSibling = false;
+        Check(!BuildSceneGraphParents(graph, 7, parents) && parents.empty(), "Reject unreachable trailing nodes");
+        std::vector<GraphNode> deep(96);
+        for (size_t i = 0; i + 1 < deep.size(); ++i) deep[i].hasChildren = true;
+        Check(BuildSceneGraphParents(deep.data(), static_cast<uint32_t>(deep.size()), parents) && parents.back() == 94,
+            "Hierarchy inspection does not truncate deep chains");
+        Check(BuildSceneGraphParents(nullptr, 0, parents) && parents.empty(), "Empty skeleton is valid");
+        Check(!BuildSceneGraphParents(nullptr, 1, parents), "Reject missing node storage");
+        std::puts("PASS: skeleton hierarchy, helper nodes, multiple roots and malformed data");
+    }
+
     void TestPoseBlending()
     {
         GraphNode from{};
@@ -185,4 +209,5 @@ void RunCharacterMovementTests()
     TestMovement();
     TestCollisionAndLifetime();
     TestPoseBlending();
+    TestSkeletonHierarchy();
 }

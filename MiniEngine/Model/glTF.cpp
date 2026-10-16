@@ -44,6 +44,9 @@ void glTF::Asset::ProcessNodes( json& nodes )
         glTF::Node& node = m_nodes[nodeIdx++];
         json& thisNode = it.value();
 
+        if (thisNode.find("name") != thisNode.end())
+            node.name = thisNode.at("name").get<std::string>();
+
         node.flags = 0;
         node.mesh = nullptr;
         node.linearIdx = -1;

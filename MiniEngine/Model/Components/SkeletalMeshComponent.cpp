@@ -31,12 +31,12 @@ namespace PARS
         m_AnimInstance->UpdateAnimation(deltaTime);
     }
 
-    bool SkeletalMeshComponent::UpdateRenderData(GraphicsContext& context)
+    bool SkeletalMeshComponent::UpdateRenderData(GraphicsContext& context, const std::vector<GraphNode>* poseOverride)
     {
         if (!m_SkeletalMesh)
             return false;
         m_ModelInstance.SetTransform(GetComponentTransform());
-        return m_ModelInstance.UpdatePose(context, m_AnimInstance->GetPose());
+        return m_ModelInstance.UpdatePose(context, poseOverride ? *poseOverride : m_AnimInstance->GetPose());
     }
 
     void SkeletalMeshComponent::Render(Renderer::MeshSorter& sorter) const

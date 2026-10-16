@@ -458,6 +458,10 @@ bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneI
     model.m_BoundingBox = AxisAlignedBox(kZero);
     uint32_t numNodes = WalkGraph(model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, scene->nodes, 0, Matrix4(kIdentity));
     model.m_SceneGraph.resize(numNodes);
+    model.m_NodeNames.resize(numNodes);
+    for (const auto& node : asset.m_nodes)
+        if (node.linearIdx >= 0 && static_cast<uint32_t>(node.linearIdx) < numNodes)
+            model.m_NodeNames[node.linearIdx] = node.name;
 
     BuildAnimations(model, asset);
     BuildSkins(model, asset);
@@ -530,5 +534,11 @@ bool Renderer::SaveModel(const std::wstring& filePath, const ModelData& data)
         outFile.write((char*)data.m_JointIBMs.data(), header.numJoints * sizeof(Matrix4));
     }
 
-    return true;
+    // v14 appends names without changing GraphNode's packed rendering layout.
+    for (uint32_t i = 0; i < header.numNodes; ++i)
+    {
+        if (i < data.m_NodeNames.size()) outFile << data.m_NodeNames[i];
+        outFile.put('\0');
+    }
+    return static_cast<bool>(outFile);
 }

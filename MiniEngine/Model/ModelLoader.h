@@ -24,7 +24,7 @@
 
 namespace glTF { class Asset; struct Mesh; }
 
-#define CURRENT_MINI_FILE_VERSION 13
+#define CURRENT_MINI_FILE_VERSION 14
 
 namespace Renderer
 {
@@ -63,6 +63,7 @@ namespace Renderer
         std::vector<MaterialConstantData> m_MaterialConstants;
         std::vector<Mesh*> m_Meshes;
         std::vector<GraphNode> m_SceneGraph;
+        std::vector<std::string> m_NodeNames;
         std::vector<std::string> m_TextureNames;
         std::vector<uint8_t> m_TextureOptions;
     };

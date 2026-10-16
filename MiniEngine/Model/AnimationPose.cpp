@@ -10,6 +10,36 @@ using Math::Vector4;
 using DirectX::XMFLOAT4;
 using DirectX::FXMVECTOR;
 
+bool BuildSceneGraphParents(const GraphNode* nodes, uint32_t count, std::vector<int32_t>& parents)
+{
+    parents.clear();
+    if (!count) return true;
+    if (!nodes) return false;
+    std::vector<int32_t> pending;
+    int32_t parent = -1;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        parents.push_back(parent);
+        if (nodes[i].hasChildren)
+        {
+            if (nodes[i].hasSibling) pending.push_back(parent);
+            parent = static_cast<int32_t>(i);
+        }
+        else if (!nodes[i].hasSibling)
+        {
+            if (pending.empty())
+            {
+                if (i + 1 == count) return true;
+                break;
+            }
+            parent = pending.back();
+            pending.pop_back();
+        }
+    }
+    parents.clear();
+    return false;
+}
+
 static inline float ToFloat(const int8_t x) { return Math::Max(x / 127.0f, -1.0f); }
 static inline float ToFloat(const uint8_t x) { return x / 255.0f; }
 static inline float ToFloat(const int16_t x) { return Math::Max(x / 32767.0f, -1.0f); }

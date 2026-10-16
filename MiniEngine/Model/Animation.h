@@ -81,3 +81,7 @@ bool EvaluateAnimationPose(const AnimationSet& animation, const AnimationCurve* 
 
 // Blend local transforms into target. Hierarchy and matrix indices remain intact.
 void BlendAnimationPoses(const GraphNode* source, GraphNode* target, uint32_t count, float alpha);
+
+// Recover explicit parents from the depth-first hierarchy used by the renderer.
+// Includes non-joint nodes (armatures/mesh roots), which still affect bone poses.
+bool BuildSceneGraphParents(const GraphNode* nodes, uint32_t count, std::vector<int32_t>& parents);

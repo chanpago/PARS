@@ -14,7 +14,8 @@ namespace PARS
         bool SetAnimInstance(std::unique_ptr<AnimInstance> instance);
         AnimInstance& GetAnimInstance() const { return *m_AnimInstance; }
 
-        bool UpdateRenderData(GraphicsContext& context);
+        // Optional final pose override, owned by the caller (e.g. an editor preview).
+        bool UpdateRenderData(GraphicsContext& context, const std::vector<GraphNode>* poseOverride = nullptr);
         void Render(Renderer::MeshSorter& sorter) const;
         const ModelInstance& GetModelInstance() const { return m_ModelInstance; }
 

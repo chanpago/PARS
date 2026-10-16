@@ -129,6 +129,7 @@ ModelInstance::ModelInstance( const ModelInstance& modelInstance )
 ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceModel )
 {
     m_Model = sourceModel;
+    m_TransformsValid = false;
     m_Locator = AffineTransform(kIdentity);
     if (sourceModel == nullptr)
     {
@@ -177,6 +178,16 @@ bool ModelInstance::UpdatePose(GraphicsContext& gfxContext, const std::vector<Gr
         return false;
     std::memcpy(m_AnimGraph.get(), pose.data(), pose.size() * sizeof(GraphNode));
     UpdateTransforms(gfxContext);
+    return true;
+}
+
+bool ModelInstance::GetNodeTransform(uint32_t nodeIndex, Matrix4& transform) const
+{
+    if (!m_Model || !m_TransformsValid || nodeIndex >= m_Model->m_NumNodes)
+        return false;
+    const uint32_t matrix = m_Model->m_SceneGraph[nodeIndex].matrixIdx;
+    if (matrix >= m_Model->m_NumNodes) return false;
+    transform = Matrix4(m_BoundingSphereTransforms[matrix]);
     return true;
 }
 
@@ -253,6 +264,7 @@ void ModelInstance::UpdateTransforms(GraphicsContext& gfxContext)
     }
 
     // Update skeletal joints
+    m_TransformsValid = true;
     for (uint32_t i = 0; i < m_Model->m_NumJoints; ++i)
     {
         Joint& joint = m_Skeleton[i];

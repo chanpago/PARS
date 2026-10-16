@@ -237,6 +237,12 @@
     <ClInclude Include="PhysicsDemo.h"><Filter>Source Files</Filter></ClInclude>
     <ClCompile Include="PhysicsDemo.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="SkeletalMeshViewer.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="SkeletalMeshViewerSkeleton.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="SkeletonOverlay.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClInclude Include="SkeletonOverlay.h" />
+    <FxCompile Include="Shaders\SkeletonOverlayVS.hlsl"><Filter>Shaders</Filter></FxCompile>
+    <FxCompile Include="Shaders\SkeletonOverlayPS.hlsl"><Filter>Shaders</Filter></FxCompile>
+    <FxCompile Include="Shaders\SkeletonPickCS.hlsl"><Filter>Shaders</Filter></FxCompile>
     <ClInclude Include="SkeletalMeshViewer.h" />
     <FxCompile Include="Shaders\MeshPreviewVS.hlsl"><Filter>Shaders</Filter></FxCompile>
     <FxCompile Include="Shaders\MeshPreviewPS.hlsl"><Filter>Shaders</Filter></FxCompile>
