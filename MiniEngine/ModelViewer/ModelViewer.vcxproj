@@ -73,6 +73,8 @@
     <ClCompile Include="ModelViewer.cpp" />
     <ClCompile Include="SkeletalMeshViewer.cpp" />
     <ClCompile Include="SkeletonOverlay.cpp" />
+    <ClCompile Include="SkeletonOverlayShapes.cpp" />
+    <ClCompile Include="SkeletalMeshViewerPhysics.cpp" />
     <ClCompile Include="SkeletalMeshViewerSkeleton.cpp" />
     <ClCompile Include="PhysicsDemo.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
@@ -85,6 +87,8 @@
     <FxCompile Include="Shaders\SkeletonOverlayVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
+    <FxCompile Include="Shaders\PhysicsAssetVS.hlsl"><ShaderType>Vertex</ShaderType></FxCompile>
+    <FxCompile Include="Shaders\PhysicsAssetPS.hlsl"><ShaderType>Pixel</ShaderType></FxCompile>
     <FxCompile Include="Shaders\SkeletonOverlayPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>

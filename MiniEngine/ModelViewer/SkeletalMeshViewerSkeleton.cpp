@@ -4,7 +4,7 @@
 #include <cmath>
 
 using namespace Math;
-namespace { constexpr uint32_t GizmoId = 0x800000; }
+namespace { constexpr uint32_t GizmoId = 0x800000, BodyId = 0x400000; }
 
 void SkeletalMeshViewer::BuildSkeleton()
 {
@@ -54,7 +54,7 @@ void SkeletalMeshViewer::DrawBoneTree(int32_t node)
     const auto separator = fullName.find_last_of(':');
     const char* label = fullName.c_str() + (separator == std::string::npos ? 0 : separator + 1);
     const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<intptr_t>(node + 1)), flags,
-        "%s%s", label, m_IsJoint[node] ? "" : " (root)");
+        "%s%s%s", label, m_IsJoint[node] ? "" : " (root)", m_PhysicsAsset.FindBody(fullName) >= 0 ? " [PA]" : "");
     if (!m_IsJoint[node]) ImGui::PopStyleColor();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nNode %d", fullName.c_str(), node);
     if (m_IsJoint[node] && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) SelectBone(node);
@@ -70,13 +70,17 @@ void SkeletalMeshViewer::SelectBone(int32_t node)
 {
     CancelInteraction();
     m_SelectedBone = node;
+    m_SelectedBody = node >= 0 && m_EditPhysics ? m_PhysicsAsset.FindBody(m_Mesh->GetSkeletalMesh()->m_NodeNames[node]) : -1;
     m_RevealSelection = true;
 }
 
 void SkeletalMeshViewer::CancelInteraction()
 {
-    if (m_DragAxis >= 0 && m_SelectedBone >= 0 && !m_EditPose.empty())
-        m_EditPose[m_SelectedBone] = m_DragOriginal;
+    if (m_DragAxis >= 0)
+    {
+        if (EditingBody()) { m_PhysicsAsset.bodies[m_SelectedBody] = m_DragBodyOriginal; m_PhysicsDirty = m_DragWasDirty; }
+        else if (m_SelectedBone >= 0 && !m_EditPose.empty()) m_EditPose[m_SelectedBone] = m_DragOriginal;
+    }
     m_DragAxis = -1;
     m_Orbiting = false;
     m_HasPickRequest = false;
@@ -113,7 +117,7 @@ void SkeletalMeshViewer::UpdateBoneWorld()
 
 Vector3 SkeletalMeshViewer::GetBoneAxis(int axis) const
 {
-    const auto& matrix = m_NodeWorld[m_SelectedBone];
+    const auto matrix = GetGizmoWorld();
     const Vector3 direction = axis == 0 ? Vector3(matrix.GetX()) : axis == 1 ? Vector3(matrix.GetY()) : Vector3(matrix.GetZ());
     const float length = Length(direction);
     return length > 1e-6f ? direction / length : Vector3(axis == 0 ? 1.0f : 0, axis == 1 ? 1.0f : 0, axis == 2 ? 1.0f : 0);
@@ -121,7 +125,7 @@ Vector3 SkeletalMeshViewer::GetBoneAxis(int axis) const
 
 float SkeletalMeshViewer::GetGizmoLength() const
 {
-    const Vector3 center(m_NodeWorld[m_SelectedBone].GetW());
+    const Vector3 center(GetGizmoWorld().GetW());
     const float depth = Dot(center - m_Camera.GetPosition(), m_Camera.GetForwardVec());
     return Max(depth, m_Radius * .01f) * (2.0f * std::tan(XM_PI / 8)) * 85.0f / Max(m_ViewportHeight, 1.0f);
 }
@@ -143,8 +147,10 @@ void SkeletalMeshViewer::DrawSkeleton()
                 m_Overlay.Point(Vector3(m_NodeWorld[node].GetW()), Vector3(.8f, .95f, .95f), node + 1, 3.5f);
     }
     if (m_SelectedBone < 0) return;
-    const Vector3 center(m_NodeWorld[m_SelectedBone].GetW());
-    m_Overlay.Point(center, Vector3(1, .72f, .12f), m_SelectedBone + 1, 5);
+    if (m_EditPhysics && !EditingBody()) return;
+    if (EditingBody() && !m_ShowBodies) return;
+    const Vector3 center(GetGizmoWorld().GetW());
+    m_Overlay.Point(center, Vector3(1, .72f, .12f), EditingBody() ? BodyId + m_SelectedBody + 1 : m_SelectedBone + 1, 5);
     const float length = GetGizmoLength();
     for (int axis = 0; axis < 3; ++axis)
     {
@@ -186,6 +192,7 @@ void SkeletalMeshViewer::HandlePick(uint32_t id)
     {
         if (m_SelectedBone >= 0 && ImGui::IsMouseDown(ImGuiMouseButton_Left)) BeginGizmoDrag(id - GizmoId - 1);
     }
+    else if (id > BodyId && id <= BodyId + m_PhysicsAsset.bodies.size()) SelectBody(static_cast<int>(id - BodyId - 1));
     else if (id > 0 && id <= m_IsJoint.size() && m_IsJoint[id - 1]) SelectBone(static_cast<int32_t>(id - 1));
     else SelectBone(-1);
 }
@@ -197,16 +204,17 @@ void SkeletalMeshViewer::BeginGizmoDrag(uint32_t axis)
     if (m_EditPose.empty()) m_EditPose = m_PickPose.empty() ? animation.GetPose() : m_PickPose;
     m_DragAxis = static_cast<int>(axis);
     m_DragOriginal = m_EditPose[m_SelectedBone];
+    if (EditingBody()) { m_DragBodyOriginal = m_PhysicsAsset.bodies[m_SelectedBody]; m_DragWasDirty = m_PhysicsDirty; }
     m_DragLength = GetGizmoLength();
-    const Vector3 center(m_NodeWorld[m_SelectedBone].GetW()), direction = GetBoneAxis(axis);
+    const Vector3 center(GetGizmoWorld().GetW()), direction = GetBoneAxis(axis);
     Vector3 endpoint;
     if (!m_Overlay.Project(center, m_DragCenter) || !m_Overlay.Project(center + direction * m_DragLength, endpoint))
     { m_DragAxis = -1; return; }
     m_DragScreenAxis = endpoint - m_DragCenter;
     const auto& model = *m_Mesh->GetSkeletalMesh();
     const int32_t parent = model.m_NodeParents[m_SelectedBone];
-    const Matrix4 parentWorld = (parent < 0 || m_DragOriginal.skeletonRoot) ?
-        m_NodeMeshWorld[m_SelectedBone] : m_NodeWorld[parent];
+    const Matrix4 parentWorld = EditingBody() ? PARS::PhysicsBoneFrame(m_NodeWorld[m_SelectedBone]) :
+        (parent < 0 || m_DragOriginal.skeletonRoot) ? m_NodeMeshWorld[m_SelectedBone] : m_NodeWorld[parent];
     m_DragLocalDirection = Vector3(Invert(parentWorld) * Vector4(direction, 0));
     Vector3 u, v;
     if (m_Overlay.Project(center + GetBoneAxis((axis + 1) % 3) * m_DragLength, u) &&
@@ -231,12 +239,36 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
     if (m_DragAxis < 0) return;
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) { CancelInteraction(); return; }
     if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) { m_DragAxis = -1; return; }
-    auto& node = m_EditPose[m_SelectedBone];
-    node = m_DragOriginal;
     const float dx = mouseX - m_ClickX, dy = mouseY - m_ClickY;
     const float sx = m_DragScreenAxis.GetX(), sy = m_DragScreenAxis.GetY();
     const float denominator = sx * sx + sy * sy;
     const float amount = denominator > 36 ? (dx * sx + dy * sy) / denominator : -dy / 80;
+    if (EditingBody())
+    {
+        auto& body = m_PhysicsAsset.bodies[m_SelectedBody];
+        body = m_DragBodyOriginal;
+        if (m_GizmoMode == 0)
+            XMStoreFloat3(&body.offset, Vector3(body.offset) + m_DragLocalDirection * (amount * m_DragLength));
+        else if (m_GizmoMode == 1)
+        {
+            const float angle = GetDragAngle(mouseX, mouseY);
+            m_DragAngle += std::remainder(angle - m_LastDragAngle, XM_2PI);
+            m_LastDragAngle = angle;
+            const Vector3 axis(m_DragAxis == 0 ? 1.0f : 0, m_DragAxis == 1 ? 1.0f : 0, m_DragAxis == 2 ? 1.0f : 0);
+            XMStoreFloat4(&body.rotation, Normalize(Quaternion(XMLoadFloat4(&body.rotation)) * Quaternion(axis, m_DragAngle)));
+        }
+        else
+        {
+            const float factor = std::exp(Clamp(amount, -5.0f, 5.0f));
+            if (body.shape == PARS::PhysicsShapeType::Box) (&body.halfExtents.x)[m_DragAxis] = Clamp((&body.halfExtents.x)[m_DragAxis] * factor, .001f, 100.0f);
+            else if (body.shape == PARS::PhysicsShapeType::Capsule && m_DragAxis == 0) body.halfLength = Clamp(Max(body.halfLength, .001f) * factor, 0.0f, 100.0f);
+            else body.radius = Clamp(body.radius * factor, .001f, 100.0f);
+        }
+        m_PhysicsDirty = true;
+        return;
+    }
+    auto& node = m_EditPose[m_SelectedBone];
+    node = m_DragOriginal;
     if (m_GizmoMode == 0)
         node.xform.SetW(Vector4(Vector3(m_DragOriginal.xform.GetW()) + m_DragLocalDirection * (amount * m_DragLength), 1));
     else if (m_GizmoMode == 1)

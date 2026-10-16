@@ -40,6 +40,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ActorComponentTests.cpp" />
+    <ClCompile Include="PhysicsAssetTests.cpp" />
+    <ClCompile Include="..\Model\PhysicsAsset.cpp" />
     <ClCompile Include="WorldTests.cpp" />
     <ClCompile Include="..\Core\GameFramework\CapsuleComponent.cpp" />
     <ClCompile Include="..\Core\GameFramework\Pawn.cpp" />

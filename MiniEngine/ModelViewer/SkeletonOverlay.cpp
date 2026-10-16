@@ -33,6 +33,7 @@ void SkeletonOverlay::Initialize(uint32_t resolution)
     m_DrawPSO.SetVertexShader(g_pSkeletonOverlayVS, sizeof(g_pSkeletonOverlayVS));
     m_DrawPSO.SetPixelShader(g_pSkeletonOverlayPS, sizeof(g_pSkeletonOverlayPS));
     m_DrawPSO.Finalize();
+    InitializeSurfaces();
 
     m_PickRoot.Reset(3);
     m_PickRoot[0].InitAsConstants(0, 2);
@@ -47,6 +48,8 @@ void SkeletonOverlay::Initialize(uint32_t resolution)
 void SkeletonOverlay::Cleanup()
 {
     m_Ids.Destroy();
+    m_SurfaceDepth.Destroy();
+    m_SurfaceVertices.clear();
     m_PickResult.Destroy();
     m_Readback.Destroy();
     m_PickFence = 0;
@@ -57,6 +60,8 @@ void SkeletonOverlay::Cleanup()
 void SkeletonOverlay::Begin(const Camera& camera, float width, float height)
 {
     m_ViewProjection = camera.GetViewProjMatrix();
+    m_Eye = camera.GetPosition();
+    m_SurfaceVertices.clear();
     m_Width = Max(width, 1.0f);
     m_Height = Max(height, 1.0f);
     m_Vertices.clear();
@@ -155,8 +160,23 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
     context.TransitionResource(m_Ids, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
     context.ClearColor(m_Ids);
     const D3D12_CPU_DESCRIPTOR_HANDLE rtvs[] = {target.GetRTV(), m_Ids.GetRTV()};
-    context.SetRenderTargets(2, rtvs);
     context.SetViewportAndScissor(0, 0, m_Resolution, m_Resolution);
+    if (!m_SurfaceVertices.empty())
+    {
+        // A separate depth buffer keeps bodies visible through the character,
+        // while the nearest collider still wins the ID at each pixel.
+        context.TransitionResource(m_SurfaceDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
+        context.ClearDepth(m_SurfaceDepth);
+        context.SetRenderTargets(2, rtvs, m_SurfaceDepth.GetDSV());
+        context.SetRootSignature(m_SurfaceRoot);
+        context.SetPipelineState(m_SurfacePSO);
+        struct Constants { Matrix4 viewProjection; Vector4 eye; } constants{m_ViewProjection, Vector4(m_Eye, 1)};
+        context.SetDynamicConstantBufferView(0, sizeof(constants), &constants);
+        context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context.SetDynamicVB(0, m_SurfaceVertices.size(), sizeof(SurfaceVertex), m_SurfaceVertices.data());
+        context.Draw(static_cast<uint32_t>(m_SurfaceVertices.size()));
+    }
+    context.SetRenderTargets(2, rtvs);
     if (!m_Vertices.empty())
     {
         context.SetRootSignature(m_DrawRoot);

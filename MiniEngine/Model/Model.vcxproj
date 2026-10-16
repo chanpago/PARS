@@ -73,6 +73,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Animation.h" />
+    <ClInclude Include="PhysicsAsset.h" />
     <ClInclude Include="ConstantBuffers.h" />
     <ClInclude Include="glTF.h" />
     <ClInclude Include="IndexOptimizePostTransform.h" />
@@ -89,6 +90,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Animation.cpp" />
+    <ClCompile Include="PhysicsAsset.cpp" />
     <ClCompile Include="BuildH3D.cpp" />
     <ClCompile Include="glTF.cpp" />
     <ClCompile Include="IndexOptimizePostTransform.cpp" />

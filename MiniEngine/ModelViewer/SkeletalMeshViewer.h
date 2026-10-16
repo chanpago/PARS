@@ -43,6 +43,14 @@ private:
     float GetGizmoLength() const;
     Math::Vector3 GetBoneAxis(int axis) const;
     float GetDragAngle(float x, float y) const;
+    void DrawPhysicsPanel();
+    void CreatePhysicsBody(PARS::PhysicsShapeType shape);
+    void DrawPhysicsBodies();
+    void SelectBody(int index);
+    bool EditingBody() const { return m_EditPhysics && m_SelectedBody >= 0; }
+    Math::Matrix4 GetGizmoWorld() const;
+    Math::Matrix4 GetBodyWorld(int index) const;
+    int FindBodyNode(int index) const;
     PARS::World m_World;
     PARS::SkeletalMeshComponent* m_Mesh = nullptr; // Owned by the preview World.
     Math::Camera m_Camera;
@@ -83,4 +91,11 @@ private:
     float m_ClickX = 0, m_ClickY = 0;
     bool m_HasPickRequest = false;
     float m_ViewportHeight = 1;
+    PARS::PhysicsAsset m_PhysicsAsset;
+    PARS::PhysicsBody m_DragBodyOriginal;
+    bool m_EditPhysics = false, m_ShowBodies = true, m_PhysicsDirty = false, m_DragWasDirty = false;
+    int m_SelectedBody = -1;
+    float m_BodyOpacity = .28f;
+    char m_PhysicsPath[260] = "Mixamo.physics.json";
+    std::string m_PhysicsMessage;
 };

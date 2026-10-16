@@ -153,6 +153,7 @@ namespace
 
 void RunWorldTests();
 void RunCharacterMovementTests();
+void RunPhysicsAssetTests();
 
 int main()
 {
@@ -161,5 +162,6 @@ int main()
     TestPoseSampling();
     RunWorldTests();
     RunCharacterMovementTests();
+    RunPhysicsAssetTests();
     return 0;
 }
