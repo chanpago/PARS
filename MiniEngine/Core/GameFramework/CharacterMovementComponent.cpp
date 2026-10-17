@@ -30,7 +30,7 @@ namespace PARS
     {
         auto capsule = dynamic_cast<CapsuleComponent*>(GetUpdatedComponent());
         auto pawn = GetPawnOwner();
-        if (!capsule || !pawn || !capsule->HasPhysicsController() || dt <= 0) return;
+        if (!capsule || !pawn || !capsule->HasPhysicsCollision() || dt <= 0) return;
         const Vector3 desired = m_Input * (pawn->IsRunRequested() ? RunSpeed : WalkSpeed);
         Vector3 horizontal(m_Velocity.GetX(), 0, m_Velocity.GetZ());
         const Vector3 difference = desired - horizontal;

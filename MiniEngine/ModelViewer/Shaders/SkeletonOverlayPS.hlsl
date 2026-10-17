@@ -4,10 +4,10 @@ struct Output
     float4 id : SV_Target1;
 };
 
-Output main(float4 position : SV_Position, float3 color : COLOR, nointerpolation uint id : TEXCOORD)
+Output main(float4 position : SV_Position, float4 color : COLOR, nointerpolation uint id : TEXCOORD)
 {
     Output output;
-    output.color = float4(color, 1);
+    output.color = color;
     output.id = float4(float3(id & 255, (id >> 8) & 255, (id >> 16) & 255) / 255.0, 1);
     return output;
 }

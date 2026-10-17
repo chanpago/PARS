@@ -7,6 +7,20 @@
 using namespace Math;
 using namespace PARS;
 
+bool SkeletalMeshViewer::SetPhysicsAsset(const PhysicsAsset& asset, std::string& error)
+{
+    if (!m_Mesh) { error = "Preview mesh is unavailable."; return false; }
+    std::vector<std::string> joints;
+    const auto& model = *m_Mesh->GetSkeletalMesh();
+    for (uint32_t i = 0; i < model.m_NumNodes; ++i) if (m_IsJoint[i]) joints.push_back(model.m_NodeNames[i]);
+    if (!asset.ValidateSkeleton(joints, error)) return false;
+    CancelInteraction();
+    m_PhysicsAsset = asset;
+    m_PhysicsDirty = true;
+    SelectBone(m_SelectedBone);
+    return true;
+}
+
 int SkeletalMeshViewer::FindBodyNode(int index) const
 {
     const auto& names = m_Mesh->GetSkeletalMesh()->m_NodeNames;
@@ -23,6 +37,7 @@ Matrix4 SkeletalMeshViewer::GetBodyWorld(int index) const
 
 Matrix4 SkeletalMeshViewer::GetGizmoWorld() const
 {
+    if (EditingConstraint()) return GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame);
     return EditingBody() ? GetBodyWorld(m_SelectedBody) : m_NodeWorld[m_SelectedBone];
 }
 
@@ -30,6 +45,8 @@ void SkeletalMeshViewer::SelectBody(int index)
 {
     CancelInteraction();
     m_EditPhysics = true;
+    m_EditConstraints = false;
+    m_SelectedConstraint = -1;
     m_SelectedBody = index;
     m_SelectedBone = index < 0 ? -1 : FindBodyNode(index);
     m_RevealSelection = true;
@@ -99,7 +116,7 @@ void SkeletalMeshViewer::DrawPhysicsBodies()
 
 void SkeletalMeshViewer::DrawPhysicsPanel()
 {
-    ImGui::Text("PhysicsAsset | %zu bodies%s", m_PhysicsAsset.bodies.size(), m_PhysicsDirty ? " *" : "");
+    ImGui::Text("PA | %zu bodies / %zu joints%s", m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size(), m_PhysicsDirty ? " *" : "");
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##PhysicsAssetPath", m_PhysicsPath, sizeof(m_PhysicsPath));
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("PhysicsAsset JSON path (relative to the working directory or absolute)");
@@ -130,25 +147,38 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
         if (candidate.Load(m_PhysicsPath, m_PhysicsMessage))
         {
             const auto& model = *m_Mesh->GetSkeletalMesh();
-            bool compatible = true;
-            for (const auto& body : candidate.bodies)
-            {
-                const auto it = std::find(model.m_NodeNames.begin(), model.m_NodeNames.end(), body.bone);
-                if (it == model.m_NodeNames.end() || !m_IsJoint[it - model.m_NodeNames.begin()]) { compatible = false; break; }
-            }
-            if (compatible)
+            std::vector<std::string> joints;
+            for (uint32_t i = 0; i < model.m_NumNodes; ++i)
+                if (m_IsJoint[i]) joints.push_back(model.m_NodeNames[i]);
+            if (candidate.ValidateSkeleton(joints, m_PhysicsMessage))
             {
                 m_PhysicsAsset = std::move(candidate);
                 m_PhysicsDirty = false;
                 m_PhysicsMessage = "Loaded.";
                 SelectBone(m_SelectedBone);
                 m_ShowBodies = true;
+                m_ShowConstraints = true;
             }
-            else m_PhysicsMessage = "File contains bones outside this skeleton.";
         }
     }
+    if (ImGui::Button("Assign to preview mesh"))
+    {
+        CancelInteraction();
+        if (m_Mesh->SetPhysicsAsset(m_PhysicsAsset, m_PhysicsMessage))
+            m_PhysicsMessage = "Assigned current PA to preview mesh. Simulation is not enabled.";
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Copies the current PA settings to this SkeletalMeshComponent. Reassign after further edits.");
     if (!m_PhysicsMessage.empty()) ImGui::TextWrapped("%s", m_PhysicsMessage.c_str());
     ImGui::Separator();
+    if (ImGui::RadioButton("Bodies##PA", !m_EditConstraints)) { CancelInteraction(); m_EditConstraints = false; }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Joints##PA", m_EditConstraints))
+    {
+        CancelInteraction(); m_EditConstraints = true;
+        if (m_GizmoMode == 2) m_GizmoMode = 0;
+        m_ConstraintParent = FindConstraintParent();
+    }
+    if (m_EditConstraints) { DrawConstraintPanel(); return; }
     if (m_SelectedBone < 0) ImGui::TextWrapped("Select a bone in the hierarchy to add a body.");
     ImGui::BeginDisabled(m_SelectedBone < 0 || m_SelectedBody >= 0);
     if (ImGui::Button("+ Capsule")) CreatePhysicsBody(PhysicsShapeType::Capsule);
@@ -190,9 +220,12 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     if (ImGui::Button("Delete body"))
     {
         CancelInteraction();
-        m_PhysicsAsset.bodies.erase(m_PhysicsAsset.bodies.begin() + m_SelectedBody);
+        m_PhysicsAsset.RemoveBody(m_SelectedBody);
+        m_SelectedConstraint = -1;
+        m_ConstraintParent = -1;
         m_SelectedBody = -1;
         changed = true;
     }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Also removes joints connected to this body.");
     if (changed) { m_PhysicsDirty = true; m_PhysicsMessage.clear(); }
 }

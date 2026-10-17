@@ -4,6 +4,15 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <vector>
+
+// Query geometry only: never creates a PxActor/PxShape or a CCT proxy body.
+struct PhysicsQueryCapsule
+{
+    physx::PxVec3 centre;
+    float radius, halfHeight;
+};
 
 // CPU physics in metres, kilograms and seconds; +Y is up. Use on the game thread.
 // Actors returned by Create* are owned by the scene until explicitly released or
@@ -30,9 +39,22 @@ public:
         const physx::PxVec3& halfExtents, const char* name);
     physx::PxRigidDynamic* CreateDynamicBox(const physx::PxTransform& pose,
         const physx::PxVec3& halfExtents, float density, const char* name);
-    physx::PxCapsuleController* CreateCapsuleController(const physx::PxExtendedVec3& centre,
+    PhysicsQueryCapsule* CreateQueryCapsule(const physx::PxVec3& centre,
         float radius, float halfHeight);
-    uint32_t GetControllerCount() const;
+    void DestroyQueryCapsule(PhysicsQueryCapsule* capsule);
+    struct CapsuleMoveResult { bool grounded = false, ceiling = false, wall = false; };
+    CapsuleMoveResult MoveQueryCapsule(PhysicsQueryCapsule& capsule, const physx::PxVec3& displacement);
+    uint32_t GetQueryCapsuleCount() const { return static_cast<uint32_t>(m_QueryCapsules.size()); }
+    void GetCapsuleDebugLines(std::vector<physx::PxDebugLine>& lines) const;
+    void SetCapsuleDebugVisible(bool visible) { m_CapsuleDebugVisible = visible; }
+    bool IsCapsuleDebugVisible() const { return m_CapsuleDebugVisible; }
+    void SetPvdSceneQueries(bool enabled);
+    uint32_t GetDynamicBodyCount() const;
+    uint32_t GetConstraintCount() const;
+    physx::PxRigidDynamic* CreateDynamicBody(const physx::PxTransform& pose,
+        const physx::PxGeometry& geometry, float mass, const char* name);
+    physx::PxD6Joint* CreateJoint(physx::PxRigidActor& parent, const physx::PxTransform& parentFrame,
+        physx::PxRigidActor& child, const physx::PxTransform& childFrame);
 
     bool ConnectPvd(bool reconnect = false);
     bool IsPvdConnected() const;
@@ -60,7 +82,8 @@ private:
     physx::PxPhysics* m_Physics = nullptr;
     physx::PxDefaultCpuDispatcher* m_Dispatcher = nullptr;
     physx::PxScene* m_Scene = nullptr;
-    physx::PxControllerManager* m_ControllerManager = nullptr;
+    std::vector<std::unique_ptr<PhysicsQueryCapsule>> m_QueryCapsules;
+    bool m_CapsuleDebugVisible = true;
     physx::PxMaterial* m_Material = nullptr;
     bool m_ExtensionsInitialized = false;
     double m_Accumulator = 0.0;

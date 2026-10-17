@@ -14,10 +14,14 @@ namespace PARS
         CapsuleComponent& GetCapsuleComponent() const { return *m_Capsule; }
         CharacterMovementComponent& GetCharacterMovement() const { return *m_Movement; }
         SkeletalMeshComponent& GetMesh() const { return *m_Mesh; }
+        bool StartRagdoll(std::string& error);
+        bool StopRagdoll(std::string& error);
+        bool IsRagdoll() const { return m_Mesh->IsRagdoll(); }
 
     private:
         CapsuleComponent* m_Capsule;
         CharacterMovementComponent* m_Movement;
         SkeletalMeshComponent* m_Mesh;
+        bool m_MovementWasEnabled = true, m_CapsuleWasEnabled = true;
     };
 }

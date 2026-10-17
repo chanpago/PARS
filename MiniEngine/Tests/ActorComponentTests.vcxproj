@@ -42,6 +42,9 @@
     <ClCompile Include="ActorComponentTests.cpp" />
     <ClCompile Include="PhysicsAssetTests.cpp" />
     <ClCompile Include="..\Model\PhysicsAsset.cpp" />
+    <ClCompile Include="..\Model\PhysicsPose.cpp" />
+    <ClCompile Include="..\Model\Ragdoll.cpp" />
+    <ClCompile Include="RagdollTests.cpp" />
     <ClCompile Include="WorldTests.cpp" />
     <ClCompile Include="..\Core\GameFramework\CapsuleComponent.cpp" />
     <ClCompile Include="..\Core\GameFramework\Pawn.cpp" />

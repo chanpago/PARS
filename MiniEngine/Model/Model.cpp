@@ -44,7 +44,7 @@ void Model::Render(
     MeshSorter& sorter,
     const GpuBuffer& meshConstants,
     const AffineTransform sphereTransforms[],
-    const Joint* skeleton ) const
+    const Joint* skeleton, const BoundingSphere* skinnedWorldBounds ) const
 {
     // Pointer to current mesh
     const uint8_t* pMesh = m_MeshData.get();
@@ -61,6 +61,7 @@ void Model::Render(
 
 		BoundingSphere sphereLS((const XMFLOAT4*)mesh.bounds);
 		BoundingSphere sphereWS = BoundingSphere(sphereXform * sphereLS.GetCenter(), sphereScale * sphereLS.GetRadius());
+        if (mesh.numJoints && skinnedWorldBounds) sphereWS = *skinnedWorldBounds;
         BoundingSphere sphereVS = BoundingSphere(viewMat * sphereWS.GetCenter(), sphereWS.GetRadius());
 
         if (frustum.IntersectSphere(sphereVS))
@@ -82,7 +83,7 @@ void ModelInstance::Render(MeshSorter& sorter) const
     {
         //const Frustum& frustum = sorter.GetWorldFrustum();
         m_Model->Render(sorter, m_MeshConstantsGPU, m_BoundingSphereTransforms.get(),
-            m_Skeleton.get());
+            m_Skeleton.get(), m_HasSkinnedWorldBounds ? &m_SkinnedWorldBounds : nullptr);
     }
 }
 
@@ -130,6 +131,7 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
 {
     m_Model = sourceModel;
     m_TransformsValid = false;
+    m_HasSkinnedWorldBounds = false;
     m_Locator = AffineTransform(kIdentity);
     if (sourceModel == nullptr)
     {
@@ -307,6 +309,7 @@ Scalar ModelInstance::GetRadius() const
 
 Math::BoundingSphere ModelInstance::GetBoundingSphere() const
 {
+    if (m_HasSkinnedWorldBounds) return m_SkinnedWorldBounds;
     if (m_Model == nullptr)
         return BoundingSphere(kZero);
 

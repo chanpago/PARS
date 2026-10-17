@@ -75,8 +75,13 @@
     <ClCompile Include="SkeletonOverlay.cpp" />
     <ClCompile Include="SkeletonOverlayShapes.cpp" />
     <ClCompile Include="SkeletalMeshViewerPhysics.cpp" />
+    <ClCompile Include="SkeletalMeshViewerConstraints.cpp" />
+    <ClCompile Include="SkeletalMeshViewerLayout.cpp" />
     <ClCompile Include="SkeletalMeshViewerSkeleton.cpp" />
     <ClCompile Include="PhysicsDemo.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="RagdollValidation.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
     </ClCompile>
   </ItemGroup>

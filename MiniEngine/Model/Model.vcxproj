@@ -49,6 +49,7 @@
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\PropertySheets\Build.props" />
+    <Import Project="..\PropertySheets\PhysX.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Platform)'=='x64'" Label="PropertySheets">
     <Import Project="..\PropertySheets\Desktop.props" />
@@ -192,6 +193,11 @@
     <ClInclude Include="AnimInstance.h" />
     <ClInclude Include="Components\MeshComponent.h" />
     <ClCompile Include="Components\SkeletalMeshComponent.cpp" />
+    <ClCompile Include="Components\SkeletalMeshPhysics.cpp" />
+    <ClCompile Include="PhysicsPose.cpp" />
+    <ClInclude Include="PhysicsPose.h" />
+    <ClCompile Include="Ragdoll.cpp" />
+    <ClInclude Include="Ragdoll.h" />
     <ClInclude Include="Components\SkeletalMeshComponent.h" />
     <ClInclude Include="Components\SkinnedMeshComponent.h" />
     <ClCompile Include="GameFramework\Character.cpp" />

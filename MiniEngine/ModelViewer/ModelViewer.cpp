@@ -43,6 +43,7 @@
 #include "imgui.h"
 #if defined(_M_X64)
 #include "PhysicsDemo.h"
+bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
 #endif
 
 #define LEGACY_RENDERER
@@ -112,6 +113,7 @@ public:
     virtual bool UsesImGui() const override { return true; }
     virtual bool IsDone() override
     {
+        if (m_RagdollTestDone) return true;
         // Escape belongs to the preview while it is focused (cancel a gizmo drag).
         return !(m_MeshViewer && m_MeshViewer->WantsInput()) && GameCore::IGameApp::IsDone();
     }
@@ -128,6 +130,7 @@ private:
     PARS::Character* GetPreviewCharacter() const { return m_World.FindActor<PARS::Character>(m_PreviewCharacter); }
     PreviewAnimInstance* GetPreviewAnimation() const;
     void RenderModels(Renderer::MeshSorter& sorter);
+    void DrawRagdollPanel(PARS::Character& character);
 
     Camera m_Camera;
     unique_ptr<CameraController> m_CameraController;
@@ -145,6 +148,9 @@ private:
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
     std::string m_PreviewError;
+    std::string m_RagdollMessage;
+    char m_CharacterPAPath[260] = "Mixamo.physics.json";
+    bool m_RagdollTestDone = false;
     unique_ptr<SkeletalMeshViewer> m_MeshViewer;
     ShadowCamera m_SunShadowCamera;
     bool m_SponzaStarted = false;
@@ -265,6 +271,12 @@ void ModelViewer::Startup( void )
             SSAO::Enable = false;
             LoadIBLTextures();
             LoadAnimationPreview(forceRebuild);
+            std::wstring ragdollReport;
+            if (CommandLineArgs::GetString(L"ragdolltest", ragdollReport))
+            {
+                if (auto* character = GetPreviewCharacter()) RunRagdollValidation(m_World, *character, ragdollReport);
+                m_RagdollTestDone = true;
+            }
             return;
         }
         Utility::Printf("Physics demo initialization failed; loading the model viewer.\n");
@@ -378,6 +390,12 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         character->SetActorTransform(AffineTransform(Matrix3::MakeScale(scale), Vector3(0, halfHeight * scale, 0)));
     }
     m_PreviewCharacter = character->GetHandle();
+    PARS::PhysicsSkeleton physicsSkeleton;
+    PARS::PhysicsAsset defaultPA;
+    const std::vector<GraphNode> reference(models[0]->m_SceneGraph.get(), models[0]->m_SceneGraph.get() + models[0]->m_NumNodes);
+    if (mesh.BuildPhysicsSkeleton(physicsSkeleton, m_RagdollMessage) &&
+        PARS::BuildMixamoPhysicsAsset(physicsSkeleton, reference, defaultPA, m_RagdollMessage) &&
+        mesh.SetPhysicsAsset(defaultPA, m_RagdollMessage)) m_RagdollMessage = "Mixamo default PA assigned.";
     mesh.GetAnimInstance().PlayAnimation(0);
     auto animation = GetPreviewAnimation();
     bool characterControl = false;
@@ -400,6 +418,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     m_MeshViewer = std::make_unique<SkeletalMeshViewer>();
     if (!m_MeshViewer->Initialize(models, kPreviewNames, kPreviewCount))
         m_MeshViewer.reset();
+    else if (mesh.GetPhysicsAsset())
+        m_MeshViewer->SetPhysicsAsset(*mesh.GetPhysicsAsset(), m_PreviewError);
 }
 
 void ModelViewer::SelectPreview(uint32_t index)
@@ -482,7 +502,7 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
         return;
     }
     if (IsFirstPressed(kKey_tab)) SetFreeCamera(!m_FreeCamera);
-    player->SetInputEnabled(!m_FreeCamera);
+    player->SetInputEnabled(!m_FreeCamera && !(GetPreviewCharacter() && GetPreviewCharacter()->IsRagdoll()));
     if (m_FreeCamera) return;
     m_ControlYaw -= GetAnalogInput(kAnalogRightStickX) * deltaTime * 2.0f;
     m_ControlPitch -= GetAnalogInput(kAnalogRightStickY) * deltaTime * 2.0f;
@@ -503,7 +523,8 @@ void ModelViewer::UpdateFollowCamera()
 {
     auto character = GetPreviewCharacter();
     if (!character) return;
-    const Vector3 target = character->GetActorLocation() + Vector3(0, 0.55f, 0);
+    const Vector3 target = character->IsRagdoll() ? character->GetMesh().GetRagdoll().GetPosition() + Vector3(0, .25f, 0) :
+        character->GetActorLocation() + Vector3(0, 0.55f, 0);
     const Vector3 forward(std::sin(m_ControlYaw) * std::cos(m_ControlPitch), -std::sin(m_ControlPitch),
         std::cos(m_ControlYaw) * std::cos(m_ControlPitch));
     m_Camera.SetEyeAtUp(target - forward * 4.5f, target, Vector3(kYUnitVector));
@@ -602,6 +623,73 @@ void ModelViewer::Update( float deltaT )
     m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
 }
 
+void ModelViewer::DrawRagdollPanel(PARS::Character& character)
+{
+    if (!ImGui::CollapsingHeader("Ragdoll / PhysicsAsset", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    auto& mesh = character.GetMesh();
+    const auto* asset = mesh.GetPhysicsAsset();
+    if (asset) ImGui::Text("Assigned PA: %zu bodies / %zu joints", asset->bodies.size(), asset->constraints.size());
+    else ImGui::TextUnformatted("No PhysicsAsset assigned");
+    const auto& runtime = mesh.GetRagdoll();
+    ImGui::Text("PhysX: %zu bodies / %zu joints", runtime.GetBodyCount(), runtime.GetJointCount());
+    if (runtime.IsActive())
+    {
+        ImGui::Text("Mode: %s", character.IsRagdoll() ? "Dynamic ragdoll" : "Animation");
+        ImGui::Text("Kinematic bodies: %zu", runtime.GetKinematicBodyCount());
+    }
+    if (!mesh.GetPhysicsError().empty()) ImGui::TextWrapped("%s", mesh.GetPhysicsError().c_str());
+    ImGui::BeginDisabled(character.IsRagdoll());
+    ImGui::SetNextItemWidth(290);
+    ImGui::InputText("##CharacterPAPath", m_CharacterPAPath, sizeof(m_CharacterPAPath));
+    if (ImGui::Button("Load character PA"))
+    {
+        PARS::PhysicsAsset candidate;
+        if (candidate.Load(m_CharacterPAPath, m_RagdollMessage) && mesh.SetPhysicsAsset(candidate, m_RagdollMessage))
+            m_RagdollMessage = "PA loaded and assigned to the play character.";
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!m_MeshViewer || m_MeshViewer->GetPhysicsAsset().bodies.empty());
+    if (ImGui::Button("Use editor PA") && mesh.SetPhysicsAsset(m_MeshViewer->GetPhysicsAsset(), m_RagdollMessage))
+        m_RagdollMessage = "Current editor PA assigned to the play character.";
+    ImGui::EndDisabled();
+    ImGui::BeginDisabled(!asset);
+    if (ImGui::Button("Save character PA"))
+    {
+        if (mesh.GetPhysicsAsset()->Save(m_CharacterPAPath, m_RagdollMessage)) m_RagdollMessage = "Character PA saved.";
+    }
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    asset = mesh.GetPhysicsAsset();
+    if (!character.IsRagdoll())
+    {
+        ImGui::BeginDisabled(!asset || asset->bodies.empty() || !m_World.GetPhysicsWorld());
+        if (ImGui::Button("Start ragdoll") && character.StartRagdoll(m_RagdollMessage))
+            m_RagdollMessage = "Ragdoll running. Character movement and capsule collision are disabled.";
+        ImGui::EndDisabled();
+    }
+    else
+    {
+        if (ImGui::Button("Stop / return to start") && character.StopRagdoll(m_RagdollMessage))
+            m_RagdollMessage = "Returned to animation and character control at the start position.";
+        if (ImGui::Button("Restart ragdoll"))
+        {
+            if (character.StopRagdoll(m_RagdollMessage)) character.StartRagdoll(m_RagdollMessage);
+        }
+        if (character.IsRagdoll())
+        {
+            if (ImGui::Button("Push ragdoll")) mesh.GetRagdoll().AddVelocity(Vector3(1.5f, 2, 0));
+            ImGui::Text("Joint separation: %.4f m", mesh.GetRagdoll().GetMaxAnchorError());
+        }
+    }
+    bool paused = m_World.IsPhysicsPaused();
+    if (ImGui::Checkbox("Pause world##Ragdoll", &paused)) m_World.SetPhysicsPaused(paused);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!paused);
+    if (ImGui::Button("Step 1/60##Ragdoll")) m_World.RequestPhysicsStep();
+    ImGui::EndDisabled();
+    if (!m_RagdollMessage.empty()) ImGui::TextWrapped("%s", m_RagdollMessage.c_str());
+}
+
 void ModelViewer::RenderUI(GraphicsContext& context)
 {
 #if defined(_M_X64)
@@ -642,7 +730,9 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                         movement.IsMovingOnGround() ? "Grounded" : "Airborne");
                     ImGui::Text("Blend: %.0f%%", animation->GetBlendAlpha() * 100.0f);
                 }
+                if (auto character = GetPreviewCharacter()) DrawRagdollPanel(*character);
                 ImGui::Separator();
+                ImGui::BeginDisabled(GetPreviewCharacter() && GetPreviewCharacter()->IsRagdoll());
                 if (GetPlayerController())
                 {
                     bool automatic = animation->IsLocomotionEnabled();
@@ -670,6 +760,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 }
                 if (ImGui::Button("Reset camera"))
                     ResetPreviewCamera();
+                ImGui::EndDisabled();
 #if defined(_M_X64)
                 if (m_PhysicsDemo)
                 {
@@ -677,8 +768,11 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     {
                         if (auto character = GetPreviewCharacter())
                         {
-                            character->SetActorLocation(Vector3(2, 0.95f, 0));
-                            character->GetCharacterMovement().StopMovementImmediately();
+                            if (character->StopRagdoll(m_RagdollMessage))
+                            {
+                                character->SetActorLocation(Vector3(2, 0.95f, 0));
+                                character->GetCharacterMovement().StopMovementImmediately();
+                            }
                         }
                     }
                     ImGui::TextWrapped(m_FreeCamera ? "Free camera: WASD + Q/E. Tab: control character." :
@@ -746,6 +840,7 @@ void ModelViewer::RenderScene( void )
         m_PhysicsDemo->Render(gfxContext, m_Camera, viewport, scissor);
         if (!hasModels)
         {
+            m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
             gfxContext.Finish();
             return;
         }
@@ -852,6 +947,9 @@ void ModelViewer::RenderScene( void )
         }
     }
 
+#if defined(_M_X64)
+    if (m_PhysicsDemo) m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
+#endif
     // Some systems generate a per-pixel velocity buffer to better track dynamic and skinned meshes.  Everything
     // is static in our scene, so we generate velocity from camera motion and the depth buffer.  A velocity buffer
     // is necessary for all temporal effects (and motion blur).

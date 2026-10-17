@@ -96,26 +96,27 @@ int main(int argc, char** argv)
             world.Step();
         Check(world.CreateStaticBox(PxTransform(PxVec3(0, -0.25f, 0)),
             PxVec3(6, 0.25f, 6), "PVD ground"), "PVD ground");
-        auto capsule = world.CreateCapsuleController(PxExtendedVec3(2, 1, 0), 0.3f, 0.9f);
+        auto capsule = world.CreateQueryCapsule(PxVec3(2, 1, 0), 0.3f, 0.9f);
         Check(capsule != nullptr, "PVD character capsule");
-        const auto moveCapsule = [capsule](float dt)
+        world.SetPvdSceneQueries(true);
+        const auto moveCapsule = [&world, capsule](float)
         {
-            capsule->move(PxVec3(0.02f, -0.1f, 0), 0.001f, dt, PxControllerFilters());
+            world.MoveQueryCapsule(*capsule, PxVec3(0.02f, -0.1f, 0));
         };
         for (int reconnect = 0; reconnect < 3; ++reconnect)
         {
-            // Controller sweeps leave query geometry in the previous PVD session.
+            // Movement sweeps leave query geometry in the previous PVD session.
             world.Step(moveCapsule);
             const auto steps = world.GetStepCount();
-            const auto position = capsule->getPosition();
+            const auto position = capsule->centre;
             Check(world.ConnectPvd(true) && world.IsPvdConnected(),
                 "Reconnect after recording character scene queries");
-            Check(world.GetStepCount() == steps && capsule->getPosition() == position,
+            Check(world.GetStepCount() == steps && capsule->centre == position,
                 "Reconnect preserves paused character state");
             world.Step(moveCapsule);
-            Check(capsule->getPosition().x > position.x, "Character moves after reconnect");
+            Check(capsule->centre.x > position.x, "Character moves after reconnect");
         }
-        capsule->release();
+        world.DestroyQueryCapsule(capsule);
         std::puts("PASS: live PVD, paused-scene reconnect and character queries after reconnect");
     }
     world.Shutdown();

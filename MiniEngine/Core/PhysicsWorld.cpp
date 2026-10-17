@@ -1,6 +1,7 @@
 #include "PhysicsWorld.h"
 
 #include <cmath>
+#include <algorithm>
 
 using namespace physx;
 
@@ -93,18 +94,12 @@ bool PhysicsWorld::Initialize(bool connectPvd)
         Shutdown();
         return false;
     }
-    m_ControllerManager = PxCreateControllerManager(*m_Scene);
-    if (!m_ControllerManager)
-    {
-        Shutdown();
-        return false;
-    }
-    m_ControllerManager->setOverlapRecoveryModule(true);
     if (PxPvdSceneClient* client = m_Scene->getScenePvdClient())
     {
         client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
         client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
-        client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
+        // Movement queries otherwise overlay the PA with swept capsule volumes.
+        client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, false);
     }
     ResetClock();
     return true;
@@ -112,7 +107,7 @@ bool PhysicsWorld::Initialize(bool connectPvd)
 
 void PhysicsWorld::Shutdown()
 {
-    Release(m_ControllerManager);
+    m_QueryCapsules.clear();
     Release(m_Scene); // Also releases actors and their exclusive shapes.
     Release(m_Material);
     Release(m_Dispatcher);
@@ -162,9 +157,14 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
 {
     if (!m_Scene)
         return;
-    m_ControllerManager->computeInteractions(static_cast<float>(FixedDeltaTime));
     if (beforeStep)
         beforeStep(static_cast<float>(FixedDeltaTime));
+    if (IsPvdConnected())
+    {
+        std::vector<PxDebugLine> lines;
+        GetCapsuleDebugLines(lines);
+        if (!lines.empty()) m_Scene->getScenePvdClient()->drawLines(lines.data(), static_cast<PxU32>(lines.size()));
+    }
     m_Scene->simulate(static_cast<float>(FixedDeltaTime));
     m_Scene->fetchResults(true); // Actor poses are safe to read after this completes.
     ++m_StepCount;
@@ -228,28 +228,263 @@ PxRigidDynamic* PhysicsWorld::CreateDynamicBox(const PxTransform& pose,
     return actor;
 }
 
-PxCapsuleController* PhysicsWorld::CreateCapsuleController(const PxExtendedVec3& centre,
+PhysicsQueryCapsule* PhysicsWorld::CreateQueryCapsule(const PxVec3& centre,
     float radius, float halfHeight)
 {
-    if (!m_ControllerManager || !std::isfinite(radius) || !std::isfinite(halfHeight) ||
+    if (!m_Scene || !std::isfinite(radius) || !std::isfinite(halfHeight) ||
         radius <= 0 || halfHeight <= radius || !centre.isFinite())
         return nullptr;
-    PxCapsuleControllerDesc desc;
-    desc.position = centre;
-    desc.radius = radius;
-    desc.height = 2.0f * (halfHeight - radius);
-    desc.upDirection = PxVec3(0, 1, 0);
-    desc.material = m_Material;
-    desc.contactOffset = 0.02f;
-    desc.stepOffset = PxMin(0.25f, halfHeight);
-    desc.slopeLimit = 0.70710678f;
-    desc.climbingMode = PxCapsuleClimbingMode::eCONSTRAINED;
-    desc.nonWalkableMode = PxControllerNonWalkableMode::ePREVENT_CLIMBING_AND_FORCE_SLIDING;
-    if (!desc.isValid()) return nullptr;
-    return static_cast<PxCapsuleController*>(m_ControllerManager->createController(desc));
+    auto capsule = std::make_unique<PhysicsQueryCapsule>();
+    capsule->centre = centre; capsule->radius = radius; capsule->halfHeight = halfHeight;
+    auto* result = capsule.get();
+    m_QueryCapsules.push_back(std::move(capsule));
+    return result;
 }
 
-uint32_t PhysicsWorld::GetControllerCount() const
+void PhysicsWorld::DestroyQueryCapsule(PhysicsQueryCapsule* capsule)
 {
-    return m_ControllerManager ? m_ControllerManager->getNbControllers() : 0;
+    m_QueryCapsules.erase(std::remove_if(m_QueryCapsules.begin(), m_QueryCapsules.end(),
+        [capsule](const auto& entry) { return entry.get() == capsule; }), m_QueryCapsules.end());
+}
+
+namespace
+{
+    constexpr float CapsuleSkin = .02f, SweepEpsilon = .0002f, WalkableNormal = .70710678f;
+    PxCapsuleGeometry CapsuleGeometry(const PhysicsQueryCapsule& capsule, float skin = 0)
+    { return PxCapsuleGeometry(capsule.radius + skin, capsule.halfHeight - capsule.radius); }
+    PxTransform CapsulePose(const PxVec3& centre)
+    { return PxTransform(centre, PxQuat(PxHalfPi, PxVec3(0, 0, 1))); } // PhysX local X -> PARS +Y.
+
+    class CapsuleQueryFilter : public PxQueryFilterCallback
+    {
+    public:
+        PxVec3 direction{0};
+        PxQueryHitType::Enum preFilter(const PxFilterData&, const PxShape* shape,
+            const PxRigidActor*, PxHitFlags&) override
+        { return shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ? PxQueryHitType::eNONE : PxQueryHitType::eBLOCK; }
+        PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit& hit,
+            const PxShape*, const PxRigidActor*) override
+        {
+            const auto& sweep = static_cast<const PxSweepHit&>(hit);
+            // Touching the floor must not block tangential travel or moving away.
+            return sweep.normal.dot(direction) < -1e-5f ? PxQueryHitType::eBLOCK : PxQueryHitType::eNONE;
+        }
+    };
+
+    // Process all overlaps, including scenes with more hits than the local buffer.
+    class CapsulePenetration : public PxOverlapCallback
+    {
+    public:
+        CapsulePenetration(const PhysicsQueryCapsule& capsule) : PxOverlapCallback(hits, 32),
+            geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre)) {}
+        void Consider(const PxGeometry& other, const PxTransform& otherPose)
+        {
+            PxVec3 normal; float depth;
+            if (PxGeometryQuery::computePenetration(normal, depth, geometry, pose, other, otherPose) && depth > deepest)
+            { deepest = depth; direction = normal; }
+        }
+        PxAgain processTouches(const PxOverlapHit* buffer, PxU32 count) override
+        {
+            for (PxU32 i = 0; i < count; ++i)
+                Consider(buffer[i].shape->getGeometry(), PxShapeExt::getGlobalPose(*buffer[i].shape, *buffer[i].actor));
+            return true;
+        }
+        void finalizeQuery() override { processTouches(touches, nbTouches); }
+        PxCapsuleGeometry geometry;
+        PxTransform pose;
+        float deepest = 0;
+        PxVec3 direction{0};
+    private:
+        PxOverlapHit hits[32];
+    };
+}
+
+PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsule& capsule, const PxVec3& displacement)
+{
+    CapsuleMoveResult result;
+    if (!m_Scene || !capsule.centre.isFinite() || !displacement.isFinite()) return result;
+    CapsuleQueryFilter filter;
+    // Recover spawn/teleport penetration before attempting any sweep.
+    for (int iteration = 0; iteration < 8; ++iteration)
+    {
+        CapsulePenetration overlaps(capsule);
+        m_Scene->overlap(overlaps.geometry, overlaps.pose, overlaps,
+            PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::eNO_BLOCK), &filter);
+        for (const auto& other : m_QueryCapsules)
+            if (other.get() != &capsule) overlaps.Consider(CapsuleGeometry(*other), CapsulePose(other->centre));
+        if (overlaps.deepest <= 0) break;
+        capsule.centre += overlaps.direction * PxMin(overlaps.deepest + SweepEpsilon, 2.0f);
+    }
+
+    const auto sweep = [&](const PxVec3& origin, const PxVec3& delta, PxGeomSweepHit& hit) {
+        const float distance = delta.magnitude();
+        if (distance < 1e-6f) return false;
+        filter.direction = delta / distance;
+        PxSweepBuffer buffer;
+        const auto geometry = CapsuleGeometry(capsule, CapsuleSkin);
+        const auto pose = CapsulePose(origin);
+        const PxHitFlags flags = PxHitFlag::eDEFAULT | PxHitFlag::eMTD;
+        m_Scene->sweep(geometry, pose, filter.direction, distance, buffer, flags,
+            PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::ePOSTFILTER), &filter);
+        bool found = buffer.hasBlock;
+        if (found) hit = buffer.block;
+        // Other characters also remain query geometry, without registering proxies.
+        for (const auto& other : m_QueryCapsules)
+        {
+            if (other.get() == &capsule) continue;
+            PxGeomSweepHit candidate;
+            if (PxGeometryQuery::sweep(filter.direction, distance, geometry, pose,
+                CapsuleGeometry(*other), CapsulePose(other->centre), candidate, flags) &&
+                candidate.normal.dot(filter.direction) < -1e-5f && (!found || candidate.distance < hit.distance))
+            { hit = candidate; found = true; }
+        }
+        return found;
+    };
+    const auto travel = [](const PxVec3& delta, const PxGeomSweepHit& hit) {
+        // The sweep geometry already includes the contact skin. Stop exactly
+        // there; adding another gap changes the established character foot height.
+        return delta.getNormalized() * PxMax(0.0f, hit.distance);
+    };
+    PxGeomSweepHit floor;
+    const bool floorContact = displacement.y <= 0 && sweep(capsule.centre, PxVec3(0, -.04f, 0), floor);
+    const bool wasGrounded = floorContact && floor.normal.y >= WalkableNormal;
+    const PxVec3 horizontal(displacement.x, 0, displacement.z);
+    bool stepped = false;
+    PxGeomSweepHit obstruction;
+    if (floorContact && floor.normal.y > .01f && sweep(capsule.centre, horizontal, obstruction) && obstruction.normal.y < WalkableNormal)
+    {
+        // Keep the old 25 cm step allowance. All three legs must be clear and
+        // the landing must be walkable; never lift through a low ceiling.
+        const float stepHeight = PxMin(.25f, capsule.halfHeight);
+        const PxVec3 up(0, stepHeight, 0), down(0, -stepHeight - .04f, 0);
+        // Probe a full footprint ahead to find the tread rather than rejecting
+        // the rounded capsule/step edge normal on very short fixed-step moves.
+        const PxVec3 forward = horizontal + horizontal.getNormalized() * (capsule.radius + CapsuleSkin);
+        PxGeomSweepHit hit;
+        if (!sweep(capsule.centre, up, hit) && !sweep(capsule.centre + up, forward, hit) &&
+            sweep(capsule.centre + up + forward, down, hit) && hit.normal.y >= WalkableNormal)
+        {
+            capsule.centre += up + horizontal + travel(down, hit);
+            stepped = true;
+            result.grounded = true;
+        }
+    }
+    const auto slide = [&](PxVec3 remaining, bool vertical) {
+        for (int iteration = 0; iteration < 8 && remaining.magnitudeSquared() > 1e-10f; ++iteration)
+        {
+            PxGeomSweepHit hit;
+            if (!sweep(capsule.centre, remaining, hit)) { capsule.centre += remaining; break; }
+            const auto moved = travel(remaining, hit);
+            capsule.centre += moved; remaining -= moved;
+            PxVec3 normal = hit.normal;
+            if (normal.y >= WalkableNormal)
+            {
+                result.grounded = true;
+                if (vertical) break; // Ground support absorbs gravity, without sliding downhill.
+            }
+            else if (normal.y < -.01f)
+            {
+                result.ceiling = true;
+                if (vertical) break;
+            }
+            else
+            {
+                result.wall = true;
+                // Steep slopes behave as walls instead of turning forward input
+                // into upward velocity. Walkable slopes retain their true normal.
+                if (!vertical) { normal.y = 0; normal.normalize(); }
+            }
+            remaining -= normal * PxMin(0.0f, remaining.dot(normal));
+        }
+    };
+    if (!stepped)
+    {
+        slide(horizontal, false);
+        slide(PxVec3(0, displacement.y, 0), true);
+    }
+    if (displacement.y <= 0)
+    {
+        const PxVec3 down(0, wasGrounded ? -.29f : -.002f, 0);
+        if (sweep(capsule.centre, down, floor) && floor.normal.y >= WalkableNormal)
+        {
+            capsule.centre += travel(down, floor);
+            result.grounded = true;
+        }
+    }
+    return result;
+}
+
+void PhysicsWorld::GetCapsuleDebugLines(std::vector<PxDebugLine>& lines) const
+{
+    lines.clear();
+    if (!m_CapsuleDebugVisible) return;
+    constexpr PxU32 color = 0xffe8b84a;
+    for (const auto& capsule : m_QueryCapsules)
+    {
+        const PxVec3 centre = capsule->centre;
+        const float radius = capsule->radius, halfCylinder = capsule->halfHeight - radius;
+        const auto line = [&](const PxVec3& a, const PxVec3& b) { lines.emplace_back(centre + a, centre + b, color); };
+        for (int end : {-1, 1})
+        {
+            const float y = end * halfCylinder;
+            for (int segment = 0; segment < 24; ++segment)
+            {
+                const float a = segment * PxTwoPi / 24, b = (segment + 1) * PxTwoPi / 24;
+                line(PxVec3(radius * std::cos(a), y, radius * std::sin(a)), PxVec3(radius * std::cos(b), y, radius * std::sin(b)));
+            }
+            for (int plane = 0; plane < 2; ++plane)
+                for (int segment = 0; segment < 12; ++segment)
+                {
+                    const float a = segment * PxPi / 12, b = (segment + 1) * PxPi / 12;
+                    const PxVec3 p(radius * std::cos(a), y + end * radius * std::sin(a), 0);
+                    const PxVec3 q(radius * std::cos(b), y + end * radius * std::sin(b), 0);
+                    line(plane ? PxVec3(0, p.y, p.x) : p, plane ? PxVec3(0, q.y, q.x) : q);
+                }
+        }
+        for (int side = 0; side < 4; ++side)
+        {
+            const float a = side * PxHalfPi, x = radius * std::cos(a), z = radius * std::sin(a);
+            line(PxVec3(x, -halfCylinder, z), PxVec3(x, halfCylinder, z));
+        }
+    }
+}
+
+void PhysicsWorld::SetPvdSceneQueries(bool enabled)
+{
+    if (m_Scene)
+        if (auto* client = m_Scene->getScenePvdClient())
+            client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, enabled);
+}
+
+PxRigidDynamic* PhysicsWorld::CreateDynamicBody(const PxTransform& pose, const PxGeometry& geometry, float mass, const char* name)
+{
+    if (!m_Scene || !pose.isValid() || !std::isfinite(mass) || mass <= 0) return nullptr;
+    auto* body = PxCreateDynamic(*m_Physics, pose, geometry, *m_Material, 1.0f);
+    if (!body) return nullptr;
+    if (!PxRigidBodyExt::setMassAndUpdateInertia(*body, mass)) { body->release(); return nullptr; }
+    body->setName(name);
+    body->setSolverIterationCounts(32, 8);
+    body->setAngularDamping(.3f);
+    body->setLinearDamping(.05f);
+    body->setMaxAngularVelocity(20);
+    body->setMaxDepenetrationVelocity(3);
+    m_Scene->addActor(*body);
+    return body;
+}
+
+PxD6Joint* PhysicsWorld::CreateJoint(PxRigidActor& parent, const PxTransform& parentFrame,
+    PxRigidActor& child, const PxTransform& childFrame)
+{
+    if (!m_Physics || parent.getScene() != m_Scene || child.getScene() != m_Scene) return nullptr;
+    return PxD6JointCreate(*m_Physics, &parent, parentFrame, &child, childFrame);
+}
+
+uint32_t PhysicsWorld::GetDynamicBodyCount() const
+{
+    return m_Scene ? m_Scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC) : 0;
+}
+
+uint32_t PhysicsWorld::GetConstraintCount() const
+{
+    return m_Scene ? m_Scene->getNbConstraints() : 0;
 }

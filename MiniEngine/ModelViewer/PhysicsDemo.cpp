@@ -164,6 +164,10 @@ bool PhysicsDemo::Startup()
     m_PSO.SetVertexShader(g_pPhysicsDemoVS, sizeof(g_pPhysicsDemoVS));
     m_PSO.SetPixelShader(g_pPhysicsDemoPS, sizeof(g_pPhysicsDemoPS));
     m_PSO.Finalize();
+    m_LinePSO = m_PSO;
+    m_LinePSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE);
+    m_LinePSO.SetDepthStencilState(DepthStateReadOnly);
+    m_LinePSO.Finalize();
     return true;
 }
 
@@ -373,6 +377,32 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
     }
 }
 
+void PhysicsDemo::RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
+    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+{
+    std::vector<PxDebugLine> lines;
+    m_World.GetCapsuleDebugLines(lines);
+    if (lines.empty()) return;
+    std::vector<Vertex> vertices;
+    vertices.reserve(lines.size() * 2);
+    for (const auto& line : lines)
+    {
+        const PxVec3 color(float((line.color0 >> 16) & 255) / 255, float((line.color0 >> 8) & 255) / 255, float(line.color0 & 255) / 255);
+        vertices.push_back({line.pos0, PxVec3(0, 1, 0), color});
+        vertices.push_back({line.pos1, PxVec3(0, 1, 0), color});
+    }
+    context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ, true);
+    context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
+    context.SetViewportAndScissor(viewport, scissor);
+    context.SetRootSignature(m_RootSignature);
+    context.SetPipelineState(m_LinePSO);
+    context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+    context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
+    context.SetDynamicVB(0, static_cast<UINT>(vertices.size()), sizeof(Vertex), vertices.data());
+    context.Draw(static_cast<UINT>(vertices.size()));
+}
+
 void PhysicsDemo::RenderUI()
 {
     static bool visible = true;
@@ -427,11 +457,16 @@ void PhysicsDemo::RenderUI()
             m_World.GetLastSubsteps());
         ImGui::Text("Dropped stall time: %.2f s", m_World.GetDroppedTime());
         ImGui::Separator();
+        bool showCapsule = m_World.IsCapsuleDebugVisible();
+        if (ImGui::Checkbox("Movement capsule outline", &showCapsule))
+            m_World.SetCapsuleDebugVisible(showCapsule);
         if (!PhysicsWorld::SupportsPvd())
             ImGui::TextWrapped("PVD recording requires a Debug or Profile build.");
         else
         {
             const bool connected = m_World.IsPvdConnected();
+            if (ImGui::Checkbox("Show scene queries in PVD", &m_PvdSceneQueries))
+                m_World.SetPvdSceneQueries(m_PvdSceneQueries);
             ImGui::TextColored(connected ? ImVec4(0.4f, 0.95f, 0.65f, 1) : ImVec4(1, 0.75f, 0.3f, 1),
                 "PVD: %s", connected ? "Connected" : "Disconnected");
             ImGui::BeginDisabled(m_PvdConnecting);

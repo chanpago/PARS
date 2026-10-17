@@ -9,26 +9,64 @@ namespace PARS
 
     bool SkeletalMeshComponent::SetSkeletalMesh(std::shared_ptr<const Model> mesh)
     {
+        if (IsRagdoll()) return false;
         if (mesh && (mesh->m_NumNodes == 0 || mesh->m_NumJoints == 0))
             return false;
+        DestroyPhysicsState();
         m_SkeletalMesh = std::move(mesh);
         m_ModelInstance = m_SkeletalMesh;
         m_AnimInstance->Initialize(m_SkeletalMesh);
+        m_PhysicsAsset.reset();
+        return true;
+    }
+
+    bool SkeletalMeshComponent::SetPhysicsAsset(const PhysicsAsset& asset, std::string& error)
+    {
+        if (IsRagdoll()) { error = "Stop the ragdoll before replacing its PA."; return false; }
+        if (!m_SkeletalMesh) { error = "Assign a skeletal mesh first."; return false; }
+        std::vector<std::string> joints;
+        for (uint32_t i = 0; i < m_SkeletalMesh->m_NumJoints; ++i)
+        {
+            const auto node = m_SkeletalMesh->m_JointIndices[i];
+            if (node >= m_SkeletalMesh->m_NodeNames.size()) { error = "Skeletal mesh has an invalid joint index."; return false; }
+            joints.push_back(m_SkeletalMesh->m_NodeNames[node]);
+        }
+        if (!asset.ValidateSkeleton(joints, error)) return false;
+        Ragdoll candidate;
+        PhysicsSkeleton skeleton;
+        if (HasBegunPlay() && !CreatePhysicsState(asset, candidate, skeleton, error)) return false;
+        m_Ragdoll.Swap(candidate);
+        m_PhysicsSkeleton = std::move(skeleton);
+        m_PhysicsAsset = std::make_unique<const PhysicsAsset>(asset);
+        m_PhysicsError.clear(); error.clear();
         return true;
     }
 
     bool SkeletalMeshComponent::SetAnimInstance(std::unique_ptr<AnimInstance> instance)
     {
+        if (IsRagdoll()) return false;
         if (!instance || &instance->GetOwningComponent() != this)
             return false;
         instance->Initialize(m_SkeletalMesh);
         m_AnimInstance = std::move(instance);
+        UpdateKinematicPose(true);
         return true;
     }
 
     void SkeletalMeshComponent::TickComponent(float deltaTime)
     {
+        if (IsRagdoll()) UpdatePhysicsPose();
+        else if (m_Ragdoll.IsActive()) UpdateKinematicPose(true);
+        else m_AnimInstance->UpdateAnimation(deltaTime);
+    }
+
+    void SkeletalMeshComponent::FixedTickComponent(float deltaTime)
+    {
+        if (!m_Ragdoll.IsActive() || IsRagdoll()) return;
+        // Character movement has already updated the component root. Sample the
+        // animation before simulate(), so both PVD and rendering see this pose.
         m_AnimInstance->UpdateAnimation(deltaTime);
+        UpdateKinematicPose(false);
     }
 
     bool SkeletalMeshComponent::UpdateRenderData(GraphicsContext& context, const std::vector<GraphNode>* poseOverride)
@@ -36,7 +74,7 @@ namespace PARS
         if (!m_SkeletalMesh)
             return false;
         m_ModelInstance.SetTransform(GetComponentTransform());
-        return m_ModelInstance.UpdatePose(context, poseOverride ? *poseOverride : m_AnimInstance->GetPose());
+        return m_ModelInstance.UpdatePose(context, IsRagdoll() ? m_PhysicsPose : poseOverride ? *poseOverride : m_AnimInstance->GetPose());
     }
 
     void SkeletalMeshComponent::Render(Renderer::MeshSorter& sorter) const

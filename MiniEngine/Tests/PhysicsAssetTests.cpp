@@ -4,6 +4,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#pragma warning(push)
+#pragma warning(disable: 4100)
+#include "../Model/json.hpp"
+#pragma warning(pop)
 
 using namespace Math;
 using namespace PARS;
@@ -15,6 +19,11 @@ namespace
         if (!condition) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
     }
     bool Near(Vector3 a, Vector3 b) { return float(Length(a - b)) < 1e-5f; }
+    bool SameFrame(const Matrix4& a, const Matrix4& b)
+    {
+        return Near(Vector3(a.GetW()), Vector3(b.GetW())) && Near(Vector3(a.GetX()), Vector3(b.GetX())) &&
+            Near(Vector3(a.GetY()), Vector3(b.GetY())) && Near(Vector3(a.GetZ()), Vector3(b.GetZ()));
+    }
 }
 
 void RunPhysicsAssetTests()
@@ -43,6 +52,28 @@ void RunPhysicsAssetTests()
     char directory[MAX_PATH], path[MAX_PATH];
     Check(GetTempPathA(MAX_PATH, directory) && GetTempFileNameA(directory, "PAt", 0, path), "Create temporary PA test file");
     std::string error;
+    const Matrix4 parentBody = frame * original.bodies[0].GetLocalTransform();
+    const Matrix4 childBone = Matrix4(OrthogonalTransform(Quaternion(Vector3(kYUnitVector), -.8f), Vector3(2, 4, -1))) *
+        Matrix4::MakeScale(Vector3(.01f, .01f, .01f));
+    const Matrix4 childBody = PhysicsBoneFrame(childBone) * original.bodies[1].GetLocalTransform();
+    const Matrix4 jointWorld(OrthogonalTransform(Quaternion(Vector3(kXUnitVector), .3f) *
+        Quaternion(Vector3(kZUnitVector), -.5f), Vector3(2, 4, -1)));
+    PhysicsConstraint joint;
+    joint.parentBone = original.bodies[0].bone; joint.childBone = original.bodies[1].bone;
+    joint.SetWorldFrame(parentBody, childBody, jointWorld);
+    joint.twistMin = -.65f; joint.twistMax = .8f; joint.swingYLimit = .4f; joint.swingZLimit = .9f;
+    joint.swingY = PhysicsJointMotion::Locked; joint.swingZ = PhysicsJointMotion::Free;
+    joint.enableCollision = true;
+    original.constraints.push_back(joint);
+    Check(SameFrame(parentBody * joint.parentFrame.GetTransform(), jointWorld) &&
+        SameFrame(childBody * joint.childFrame.GetTransform(), jointWorld),
+        "Both body-local joint frames reconstruct the same world frame with import scale, offsets and different orientations");
+    const Matrix4 global(OrthogonalTransform(Quaternion(Vector3(kYUnitVector), 1.1f), Vector3(-8, 3, 7)));
+    Check(SameFrame((global * parentBody) * joint.parentFrame.GetTransform(), global * jointWorld) &&
+        SameFrame((global * childBody) * joint.childFrame.GetTransform(), global * jointWorld),
+        "Joint attachment is invariant under actor world movement and rotation");
+    Check(original.ValidateSkeleton({joint.parentBone, joint.childBone, original.bodies[2].bone}, error), "Compatible skeleton accepts PA");
+    Check(!original.ValidateSkeleton({joint.parentBone, joint.childBone}, error), "Missing skeletal joint rejects PA assignment");
     Check(original.Save(path, error), "Save physics asset");
     PhysicsAsset loaded;
     Check(loaded.Load(path, error) && loaded.bodies.size() == 3, "Load all primitive types");
@@ -54,6 +85,61 @@ void RunPhysicsAssetTests()
             Near(Quaternion(DirectX::XMLoadFloat4(&a.rotation)) * Vector3(kXUnitVector), Quaternion(DirectX::XMLoadFloat4(&b.rotation)) * Vector3(kXUnitVector)),
             "Round trip preserves attachment, transform, geometry and mass");
     }
+    Check(loaded.constraints.size() == 1, "Round trip preserves joint count");
+    const auto& savedJoint = loaded.constraints[0];
+    Check(savedJoint.parentBone == joint.parentBone && savedJoint.childBone == joint.childBone &&
+        SameFrame(savedJoint.parentFrame.GetTransform(), joint.parentFrame.GetTransform()) &&
+        SameFrame(savedJoint.childFrame.GetTransform(), joint.childFrame.GetTransform()) &&
+        savedJoint.twist == joint.twist && savedJoint.swingY == joint.swingY && savedJoint.swingZ == joint.swingZ &&
+        savedJoint.twistMin == joint.twistMin && savedJoint.twistMax == joint.twistMax &&
+        savedJoint.swingYLimit == joint.swingYLimit && savedJoint.swingZLimit == joint.swingZLimit && savedJoint.enableCollision,
+        "Joint round trip preserves frames, radians, all motion modes and collision setting");
+    Check(loaded.FindConstraint(joint.childBone, joint.parentBone) == 0, "Joint pair lookup ignores order");
+    PhysicsAsset invalid = loaded;
+    invalid.constraints[0].childBone = "missing";
+    Check(!invalid.Validate(error), "Reject dangling joint body reference");
+    invalid = loaded; invalid.constraints[0].childBone = joint.parentBone;
+    Check(!invalid.Validate(error), "Reject joint connecting a body to itself");
+    invalid = loaded; invalid.constraints.push_back(joint);
+    std::swap(invalid.constraints[1].parentBone, invalid.constraints[1].childBone);
+    Check(!invalid.Validate(error), "Reject duplicate reversed joint pair");
+    invalid = loaded; invalid.constraints[0].parentFrame.rotation = DirectX::XMFLOAT4(0, 0, 0, 0);
+    Check(!invalid.Validate(error), "Reject invalid joint frame quaternion");
+    invalid = loaded; invalid.constraints[0].childFrame.offset.y = std::numeric_limits<float>::infinity();
+    Check(!invalid.Validate(error), "Reject non-finite joint offset");
+    invalid = loaded; invalid.constraints[0].twist = static_cast<PhysicsJointMotion>(99);
+    Check(!invalid.Validate(error), "Reject invalid joint motion enum");
+    invalid = loaded; invalid.constraints[0].twistMin = invalid.constraints[0].twistMax;
+    Check(!invalid.Save(path, error) && loaded.Load(path, error) && loaded.constraints[0].twistMin == joint.twistMin,
+        "Invalid twist range cannot overwrite existing joint file");
+    for (float angle : {0.0f, DirectX::XM_PI, std::numeric_limits<float>::quiet_NaN()})
+    {
+        invalid = loaded; invalid.constraints[0].swingYLimit = angle;
+        Check(!invalid.Validate(error), "Reject zero, pi and non-finite swing limits");
+    }
+    invalid = loaded;
+    PhysicsConstraint second = joint; second.parentBone = joint.childBone; second.childBone = invalid.bodies[2].bone;
+    invalid.constraints.push_back(second);
+    invalid.RemoveBody(1);
+    Check(invalid.bodies.size() == 2 && invalid.constraints.empty() && invalid.Validate(error),
+        "Deleting the middle body removes both attached joints without dangling references");
+    nlohmann::json saved;
+    { std::ifstream input(path); input >> saved; }
+    const auto writeJson = [&](const nlohmann::json& value) { std::ofstream output(path); output << value.dump(); };
+    auto corruptJoint = saved;
+    corruptJoint["constraints"][0]["childBone"] = "unknown";
+    writeJson(corruptJoint);
+    Check(!loaded.Load(path, error) && loaded.bodies.size() == 3 && loaded.constraints.size() == 1 &&
+        loaded.constraints[0].childBone == joint.childBone, "Rejected joint load preserves bodies and joints together");
+    corruptJoint = saved; corruptJoint["angleUnits"] = "degrees";
+    writeJson(corruptJoint);
+    Check(!loaded.Load(path, error) && loaded.constraints.size() == 1, "Reject ambiguous angular units");
+    auto legacy = saved; legacy["version"] = 1; legacy.erase("constraints"); legacy.erase("angleUnits");
+    writeJson(legacy);
+    Check(loaded.Load(path, error) && loaded.bodies.size() == 3 && loaded.constraints.empty(),
+        "Legacy version 1 body-only file loads and clears previous joints");
+    writeJson(saved);
+    Check(loaded.Load(path, error), "Restore version 2 asset");
     original.bodies[0].radius = -1;
     Check(!original.Save(path, error), "Reject negative radius before overwriting saved asset");
     Check(loaded.Load(path, error) && loaded.bodies[0].radius == .12f, "Failed save preserves previous file");
@@ -69,5 +155,5 @@ void RunPhysicsAssetTests()
     { std::ofstream corrupt(path); corrupt << "{broken json"; }
     Check(!loaded.Load(path, error) && loaded.bodies.size() == 3, "Malformed asset preserves editor state");
     DeleteFileA(path);
-    std::puts("PASS: PhysicsAsset units, rigid bone frames, primitive round trip and transactional validation");
+    std::puts("PASS: PhysicsAsset body/joint transforms, angular limits, v1/v2 round trip, skeleton compatibility and transactional validation");
 }

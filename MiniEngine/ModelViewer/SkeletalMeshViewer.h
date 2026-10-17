@@ -27,12 +27,18 @@ public:
     void RenderUI(GraphicsContext& context);
     void Open() { m_Open = true; m_FocusRequested = true; }
     bool WantsInput() const { return m_Open && m_Focused; }
+    const PARS::PhysicsAsset& GetPhysicsAsset() const { return m_PhysicsAsset; }
+    bool SetPhysicsAsset(const PARS::PhysicsAsset& asset, std::string& error);
 
 private:
     void ResetCamera();
+    void UpdateCamera(bool hovered);
     void RenderPreview(GraphicsContext& context, float aspect);
     void BuildSkeleton();
     void DrawBoneTree(int32_t node);
+    void DrawNavigation();
+    void DrawRelationshipGraph();
+    void DrawDetails();
     void UpdateBoneWorld();
     void DrawSkeleton();
     void SelectBone(int32_t node);
@@ -47,22 +53,30 @@ private:
     void CreatePhysicsBody(PARS::PhysicsShapeType shape);
     void DrawPhysicsBodies();
     void SelectBody(int index);
-    bool EditingBody() const { return m_EditPhysics && m_SelectedBody >= 0; }
+    bool EditingBody() const { return m_EditPhysics && !m_EditConstraints && m_SelectedBody >= 0; }
+    bool EditingConstraint() const { return m_EditPhysics && m_EditConstraints && m_SelectedConstraint >= 0; }
+    void DrawConstraintPanel();
+    void DrawConstraints();
+    void SelectConstraint(int index);
+    void CreateConstraint();
+    void ResetConstraintFrames(PARS::PhysicsConstraint& joint);
+    void MatchConstraintFrames();
+    int FindConstraintParent() const;
+    Math::Matrix4 GetConstraintBodyWorld(int frame) const;
+    Math::Matrix4 GetConstraintWorld(int index, int frame) const;
     Math::Matrix4 GetGizmoWorld() const;
     Math::Matrix4 GetBodyWorld(int index) const;
     int FindBodyNode(int index) const;
     PARS::World m_World;
     PARS::SkeletalMeshComponent* m_Mesh = nullptr; // Owned by the preview World.
     Math::Camera m_Camera;
-    Math::Vector3 m_Target{Math::kZero};
     float m_Radius = 1;
     float m_Yaw = 0;
     float m_Pitch = 0.12f;
-    float m_Distance = 3;
     bool m_Open = true;
     bool m_Focused = false;
     bool m_FocusRequested = true;
-    bool m_Orbiting = false;
+    bool m_Flying = false;
     ColorBuffer m_Color;
     ColorBuffer m_Display;
     ColorBuffer m_AmbientOcclusion{Color(1.0f, 1.0f, 1.0f, 1.0f)};
@@ -80,6 +94,10 @@ private:
     std::vector<GraphNode> m_EditPose;
     std::vector<GraphNode> m_PickPose; // Pose rendered when the GPU pick was requested.
     bool m_ShowBones = true, m_RevealSelection = false;
+    bool m_PhysicsTreeOnly = true;
+    float m_HierarchyFraction = .57f;
+    float m_GraphZoom = 1, m_GraphPanX = 0, m_GraphPanY = 0;
+    int m_GraphSelection = -1;
     int32_t m_SelectedBone = -1;
     int m_GizmoMode = 0; // 0 = move, 1 = rotate, 2 = scale; local axes.
     int m_DragAxis = -1;
@@ -93,7 +111,10 @@ private:
     float m_ViewportHeight = 1;
     PARS::PhysicsAsset m_PhysicsAsset;
     PARS::PhysicsBody m_DragBodyOriginal;
-    bool m_EditPhysics = false, m_ShowBodies = true, m_PhysicsDirty = false, m_DragWasDirty = false;
+    PARS::PhysicsConstraint m_DragConstraintOriginal;
+    bool m_EditConstraints = false, m_ShowConstraints = true, m_ShowLimits = true, m_MoveBothFrames = true;
+    int m_SelectedConstraint = -1, m_ConstraintParent = -1, m_ConstraintFrame = 0;
+    bool m_EditPhysics = true, m_ShowBodies = true, m_PhysicsDirty = false, m_DragWasDirty = false;
     int m_SelectedBody = -1;
     float m_BodyOpacity = .28f;
     char m_PhysicsPath[260] = "Mixamo.physics.json";

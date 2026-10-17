@@ -19,13 +19,16 @@ void SkeletonOverlay::Initialize(uint32_t resolution)
     m_DrawRoot.Reset(0);
     m_DrawRoot.Finalize(L"Skeleton overlay", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
     const D3D12_INPUT_ELEMENT_DESC layout[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32_UINT, 0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32_UINT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
     m_DrawPSO.SetRootSignature(m_DrawRoot);
     m_DrawPSO.SetInputLayout(_countof(layout), layout);
     m_DrawPSO.SetRasterizerState(RasterizerTwoSided);
-    m_DrawPSO.SetBlendState(BlendDisable); // IDs must not be blended or tone mapped.
+    auto blend = BlendTraditional;
+    blend.IndependentBlendEnable = TRUE;
+    blend.RenderTarget[1] = BlendDisable.RenderTarget[0]; // IDs stay exact even on translucent limits.
+    m_DrawPSO.SetBlendState(blend);
     m_DrawPSO.SetDepthStencilState(DepthStateDisabled); // X-ray bones, as in the reference viewer.
     m_DrawPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
     const DXGI_FORMAT formats[] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM};
@@ -55,6 +58,7 @@ void SkeletonOverlay::Cleanup()
     m_PickFence = 0;
     CancelPick();
     m_Vertices.clear();
+    m_FillVertices.clear();
 }
 
 void SkeletonOverlay::Begin(const Camera& camera, float width, float height)
@@ -65,6 +69,7 @@ void SkeletonOverlay::Begin(const Camera& camera, float width, float height)
     m_Width = Max(width, 1.0f);
     m_Height = Max(height, 1.0f);
     m_Vertices.clear();
+    m_FillVertices.clear();
 }
 
 bool SkeletonOverlay::Project(Vector3 position, Vector3& pixel) const
@@ -81,8 +86,20 @@ bool SkeletonOverlay::Project(Vector3 position, Vector3& pixel) const
 void SkeletonOverlay::Triangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color, uint32_t id)
 {
     for (Vector3 p : {a, b, c})
-        m_Vertices.push_back({float(p.GetX()) * 2 / m_Width - 1, 1 - float(p.GetY()) * 2 / m_Height,
-            color.GetX(), color.GetY(), color.GetZ(), id});
+        m_Vertices.push_back({float(p.GetX()) * 2 / m_Width - 1, 1 - float(p.GetY()) * 2 / m_Height, 0, 1,
+            color.GetX(), color.GetY(), color.GetZ(), 1, id});
+}
+
+void SkeletonOverlay::FillTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color, uint32_t id, float opacity)
+{
+    // Keep homogeneous coordinates: the GPU clips triangles crossing the near
+    // plane instead of dropping the entire cone when its pivot leaves view.
+    for (Vector3 p : {a, b, c})
+    {
+        const Vector4 clip = m_ViewProjection * p;
+        m_FillVertices.push_back({clip.GetX(), clip.GetY(), clip.GetZ(), clip.GetW(),
+            color.GetX(), color.GetY(), color.GetZ(), opacity, id});
+    }
 }
 
 void SkeletonOverlay::Line(Vector3 start, Vector3 end, Vector3 color, uint32_t id, float width)
@@ -177,13 +194,17 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
         context.Draw(static_cast<uint32_t>(m_SurfaceVertices.size()));
     }
     context.SetRenderTargets(2, rtvs);
-    if (!m_Vertices.empty())
+    if (!m_FillVertices.empty() || !m_Vertices.empty())
     {
         context.SetRootSignature(m_DrawRoot);
         context.SetPipelineState(m_DrawPSO);
         context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context.SetDynamicVB(0, m_Vertices.size(), sizeof(Vertex), m_Vertices.data());
-        context.Draw(static_cast<uint32_t>(m_Vertices.size()));
+        for (const auto* vertices : {&m_FillVertices, &m_Vertices})
+        {
+            if (vertices->empty()) continue;
+            context.SetDynamicVB(0, vertices->size(), sizeof(Vertex), vertices->data());
+            context.Draw(static_cast<uint32_t>(vertices->size()));
+        }
     }
     context.TransitionResource(target, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     if (m_PickRequested)

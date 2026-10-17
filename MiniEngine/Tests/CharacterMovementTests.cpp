@@ -58,7 +58,8 @@ namespace
             player = world.SpawnActor<PlayerController>();
             Check(player->Possess(*character), "Possess character");
             world.BeginPlay();
-            Check(character->capsule->HasPhysicsController(), "BeginPlay creates capsule controller");
+            Check(character->capsule->HasPhysicsCollision(), "BeginPlay registers query-only capsule");
+            Check(world.GetPhysicsWorld()->GetDynamicBodyCount() == 0, "Movement capsule creates no rigid body to obscure PA in PVD");
             Frames(120);
             Check(character->movement->IsMovingOnGround(), "Gravity lands capsule on shared floor");
             Check(Near(character->GetActorLocation().GetY(), .92f, .03f), "Capsule rests at half height plus contact skin");
@@ -138,21 +139,78 @@ namespace
         auto other = f.world.SpawnActor<TestCharacter>();
         other->SetActorLocation(Vector3(3, 2, 0));
         f.Frames(60);
-        Check(physics->GetControllerCount() == 2 && other->movement->IsMovingOnGround(), "Multiple actors get independent capsules in one scene");
+        Check(physics->GetQueryCapsuleCount() == 2 && other->movement->IsMovingOnGround(), "Multiple actors get independent capsules in one scene");
         const auto oldHandle = f.character->GetHandle();
         f.character->Destroy();
         Check(f.player->GetPawn() == nullptr, "Possession handle stops resolving immediately on destroy");
         Check(f.player->Possess(*other), "Possess another actor before old pawn is reclaimed");
         f.world.CollectGarbage();
-        Check(physics->GetControllerCount() == 1 && !f.world.FindActor(oldHandle), "EndPlay releases deleted capsule");
+        Check(physics->GetQueryCapsuleCount() == 1 && !f.world.FindActor(oldHandle), "EndPlay releases deleted capsule");
         Check(f.player->GetPawn() == other && other->GetController() == f.player, "Retired pawn cannot unpossess its replacement");
         Check(f.player->Possess(*other) && other->GetController() == f.player, "Controller can possess replacement pawn");
         f.player->Destroy();
         f.world.CollectGarbage();
         Check(other->GetController() == nullptr, "Controller deletion clears possession safely");
         f.world.Clear();
-        Check(physics->GetControllerCount() == 0, "World clears all capsules before physics shutdown");
+        Check(physics->GetQueryCapsuleCount() == 0, "World clears all capsules before physics shutdown");
         std::puts("PASS: wall collision/sliding, multiple capsules, possession and deferred destruction");
+    }
+
+    void TestQueryCapsules()
+    {
+        Fixture f;
+        auto* physics = f.world.GetPhysicsWorld();
+        auto* capsule = f.character->capsule;
+        // The line geometry is in metres, +Y-up, and must not add scene actors.
+        std::vector<PxDebugLine> lines;
+        physics->GetCapsuleDebugLines(lines);
+        Check(!lines.empty(), "Query capsule produces debug lines");
+        float minY = 100, maxY = -100, maxRadius = 0;
+        const auto centre = f.character->GetActorLocation();
+        for (const auto& line : lines)
+            for (const auto& point : {line.pos0, line.pos1})
+            {
+                minY = PxMin(minY, point.y); maxY = PxMax(maxY, point.y);
+                maxRadius = PxMax(maxRadius, std::sqrt(point.x * point.x + point.z * point.z));
+            }
+        Check(Near(maxY - minY, 1.8f, .001f) && Near((minY + maxY) * .5f, centre.GetY(), .001f) &&
+            Near(maxRadius, .3f, .001f), "Wire capsule dimensions and +Y axis match collision geometry");
+        physics->SetCapsuleDebugVisible(false); physics->GetCapsuleDebugLines(lines);
+        Check(lines.empty() && capsule->HasPhysicsCollision(), "Hiding the outline preserves movement collision");
+        physics->SetCapsuleDebugVisible(true);
+
+        // A 20 cm ledge is reachable, while a tall wall remains blocking.
+        auto* ledge = physics->CreateStaticBox(PxTransform(PxVec3(0, .1f, 2)), PxVec3(2, .1f, 1), "Step");
+        f.player->SetMoveInput(1, 0, false); f.Frames(90);
+        Check(float(f.character->GetActorLocation().GetZ()) > 1.8f &&
+            Near(f.character->GetActorLocation().GetY(), 1.12f, .015f), "Query movement climbs a low step");
+        f.Frames(120);
+        Check(Near(f.character->GetActorLocation().GetY(), .92f, .015f) && f.character->movement->IsMovingOnGround(),
+            "Leaving a ledge returns to the floor");
+        f.player->SetMoveInput(0, 0, false); f.Frames(30); ledge->release();
+
+        auto* ceiling = physics->CreateStaticBox(PxTransform(PxVec3(0, 2.5f, 0)), PxVec3(2, .25f, 2), "Ceiling");
+        f.character->SetActorLocation(Vector3(0, .92f, 0));
+        Check(capsule->Move(Vector3(0, 5, 0), 1.0f / 60).ceiling && float(f.character->GetActorLocation().GetY()) < 1.34f,
+            "Upward query movement cannot tunnel through a ceiling");
+        ceiling->release();
+        f.character->SetActorLocation(Vector3(0, .7f, 0));
+        capsule->Move(Vector3(kZero), 1.0f / 60);
+        Check(float(f.character->GetActorLocation().GetY()) > .919f, "Teleport penetration recovers from the floor");
+        f.character->SetActorLocation(Vector3(0, 10, 0));
+        Check(capsule->Move(Vector3(0, -50, 0), 1.0f / 60).grounded &&
+            Near(f.character->GetActorLocation().GetY(), .92f, .001f), "Long downward sweep cannot tunnel through the floor");
+
+        auto* other = f.world.SpawnActor<TestCharacter>();
+        other->SetActorLocation(Vector3(0, .92f, 2)); f.Frames(1);
+        capsule->Move(Vector3(0, 5, 10), 1.0f / 60); // Horizontal pass must stop at the other capsule.
+        Check(float(f.character->GetActorLocation().GetZ()) < 1.4f && physics->GetDynamicBodyCount() == 0,
+            "Two characters block each other without CCT proxy actors");
+        Check(capsule->SetPhysicsEnabled(false) && physics->GetQueryCapsuleCount() == 1,
+            "Disabling query collision removes its debug geometry and other-character blocker");
+        Check(capsule->SetPhysicsEnabled(true) && physics->GetDynamicBodyCount() == 0,
+            "Re-enabling movement never creates a rigid capsule");
+        std::puts("PASS: query-only capsule, wire outline, steps, ceiling, depenetration, long sweeps and character collision");
     }
 
     void TestSkeletonHierarchy()
@@ -208,6 +266,7 @@ void RunCharacterMovementTests()
 {
     TestMovement();
     TestCollisionAndLifetime();
+    TestQueryCapsules();
     TestPoseBlending();
     TestSkeletonHierarchy();
 }

@@ -21,6 +21,7 @@
 #include "RootSignature.h"
 #include "ImageScaling.h"
 #include "TemporalEffects.h"
+#include <cmath>
 
 #pragma comment(lib, "dxgi.lib") 
 
@@ -226,6 +227,9 @@ void Display::Resize(uint32_t width, uint32_t height)
 // Initialize the DirectX resources required to run.
 void Display::Initialize(void)
 {
+    s_FrameTime = 0.0f;
+    s_FrameIndex = 0;
+    s_FrameStartTick = 0;
     ASSERT(s_SwapChain1 == nullptr, "Graphics has already been initialized");
 
     Microsoft::WRL::ComPtr<IDXGIFactory4> dxgiFactory;
@@ -485,41 +489,34 @@ void Display::Present(void)
     else
         PreparePresentSDR();
 
-    UINT PresentInterval = s_EnableVSync ? std::min(4, (int)Round(s_FrameTime * 60.0f)) : 0;
+    // Presentation cadence is independent of the elapsed time supplied to gameplay.
+    // One sync interval is one display refresh, which is not necessarily 1/60 s.
+    UINT PresentInterval = s_EnableVSync ? 1 : 0;
+    if (s_EnableVSync && s_DropRandomFrames && std::rand() % 50 == 0)
+        ++PresentInterval;
 
     s_SwapChain1->Present(PresentInterval, 0);
 
     g_CurrentBuffer = (g_CurrentBuffer + 1) % SWAP_CHAIN_BUFFER_COUNT;
 
-    // Test robustness to handle spikes in CPU time
-    //if (s_DropRandomFrames)
-    //{
-    //	if (std::rand() % 25 == 0)
-    //		BusyLoopSleep(0.010);
-    //}
-
     int64_t CurrentTick = SystemTime::GetCurrentTick();
-
-    if (s_EnableVSync)
+    if (s_LimitTo30Hz && s_FrameStartTick != 0)
     {
-        // With VSync enabled, the time step between frames becomes a multiple of 16.666 ms.  We need
-        // to add logic to vary between 1 and 2 (or 3 fields).  This delta time also determines how
-        // long the previous frame should be displayed (i.e. the present interval.)
-        s_FrameTime = (s_LimitTo30Hz ? 2.0f : 1.0f) / 60.0f;
-        if (s_DropRandomFrames)
+        // Limit wall-clock presentation rate, without inventing simulation time
+        // or assuming that two monitor refreshes equal 1/30 s.
+        const double remaining = 1.0 / 30.0 - SystemTime::TimeBetweenTicks(s_FrameStartTick, CurrentTick);
+        if (remaining > 0.0)
         {
-            if (std::rand() % 50 == 0)
-                s_FrameTime += (1.0f / 60.0f);
+            Sleep(static_cast<DWORD>(std::ceil(remaining * 1000.0)));
+            CurrentTick = SystemTime::GetCurrentTick();
         }
     }
-    else
-    {
-        // When running free, keep the most recent total frame time as the time step for
-        // the next frame simulation.  This is not super-accurate, but assuming a frame
-        // time varies smoothly, it should be close enough.
-        s_FrameTime = (float)SystemTime::TimeBetweenTicks(s_FrameStartTick, CurrentTick);
-    }
 
+    // Always use measured elapsed time, including Present/pacing waits. The
+    // physics accumulator keeps its own fixed 1/60 s step. The first sample only
+    // establishes the clock, excluding asset loading and time since system boot.
+    s_FrameTime = s_FrameStartTick == 0 ? 0.0f :
+        static_cast<float>(SystemTime::TimeBetweenTicks(s_FrameStartTick, CurrentTick));
     s_FrameStartTick = CurrentTick;
 
     ++s_FrameIndex;

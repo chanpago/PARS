@@ -85,7 +85,9 @@ void SkeletalMeshViewer::Cleanup()
     m_PickPose.clear();
     m_SelectedBone = -1;
     m_SelectedBody = -1;
-    m_PhysicsAsset.bodies.clear();
+    m_SelectedConstraint = -1;
+    m_ConstraintParent = -1;
+    m_PhysicsAsset = {};
     m_PhysicsDirty = false;
     m_Color.Destroy();
     m_Display.Destroy();
@@ -101,10 +103,64 @@ void SkeletalMeshViewer::Update(float deltaTime)
 
 void SkeletalMeshViewer::ResetCamera()
 {
-    m_Target = m_Mesh->GetLocalBounds().GetCenter();
-    m_Distance = m_Radius * 3.4f;
     m_Yaw = 0;
     m_Pitch = 0.12f;
+    const Vector3 target = m_Mesh->GetLocalBounds().GetCenter();
+    m_Camera.SetEyeAtUp(target + Vector3(0, std::sin(m_Pitch), std::cos(m_Pitch)) * (m_Radius * 3.4f),
+        target, Vector3(kYUnitVector));
+}
+
+void SkeletalMeshViewer::UpdateCamera(bool hovered)
+{
+    const auto& io = ImGui::GetIO();
+    if (io.AppFocusLost || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    {
+        m_Flying = false;
+        return;
+    }
+    if (hovered && m_DragAxis < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+    {
+        CancelInteraction();
+        // An ImGui Image does not take focus on RMB. Acquire the viewport before
+        // testing focus so returning from another panel works on the first press.
+        ImGui::SetWindowFocus();
+        m_Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        m_Flying = true;
+    }
+    if (!m_Focused)
+    {
+        m_Flying = false;
+        return;
+    }
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) m_Flying = false;
+    if (m_Flying)
+    {
+        // Rotate about the camera's own position; the mesh is only a framing target.
+        m_Yaw = std::remainder(m_Yaw - io.MouseDelta.x * 0.008f, XM_2PI);
+        m_Pitch = Clamp(m_Pitch + io.MouseDelta.y * 0.008f, -1.55f, 1.55f);
+        const Vector3 forward(-std::sin(m_Yaw) * std::cos(m_Pitch), -std::sin(m_Pitch),
+            -std::cos(m_Yaw) * std::cos(m_Pitch));
+        m_Camera.SetLookDirection(forward, Vector3(kYUnitVector));
+        if (!io.WantTextInput)
+        {
+            const float forwardInput = float(ImGui::IsKeyDown(ImGuiKey_W)) - float(ImGui::IsKeyDown(ImGuiKey_S));
+            const float rightInput = float(ImGui::IsKeyDown(ImGuiKey_D)) - float(ImGui::IsKeyDown(ImGuiKey_A));
+            const float upInput = float(ImGui::IsKeyDown(ImGuiKey_E)) - float(ImGui::IsKeyDown(ImGuiKey_Q));
+            const Vector3 movement = forward * forwardInput + m_Camera.GetRightVec() * rightInput + Vector3(kYUnitVector) * upInput;
+            if (float(LengthSquare(movement)) > 0.000001f)
+            {
+                // ImGui uses elapsed wall time, independently of preview animation playback.
+                const float speed = m_Radius * 1.5f * (io.KeyShift ? 3.0f : 1.0f);
+                m_Camera.SetPosition(m_Camera.GetPosition() + Normalize(movement) * (speed * io.DeltaTime));
+            }
+        }
+    }
+    if (hovered && m_DragAxis < 0 && io.MouseWheel != 0)
+    {
+        m_Overlay.CancelPick();
+        m_HasPickRequest = false;
+        m_Camera.SetPosition(m_Camera.GetPosition() + m_Camera.GetForwardVec() * (io.MouseWheel * m_Radius * 0.25f));
+    }
 }
 
 void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
@@ -113,19 +169,21 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
     if (!m_Open || !m_Mesh) { CancelInteraction(); return; }
     const auto display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(Min(1050.0f, display.x * 0.88f), Min(740.0f, display.y * 0.9f)), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(640, 420), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowSize(ImVec2(Min(1700.0f, display.x * .94f), display.y * .9f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(Min(1180.0f, display.x * .96f), Min(620.0f, display.y * .9f)), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowBgAlpha(1.0f);
     if (m_FocusRequested) { ImGui::SetNextWindowFocus(); m_FocusRequested = false; }
     if (ImGui::Begin("Skeletal Mesh Viewer", &m_Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
     {
-        m_Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        m_Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().AppFocusLost;
         if (!m_Focused) CancelInteraction();
         uint32_t pickedId;
         if (m_Overlay.PollPick(pickedId) && m_Focused) HandlePick(pickedId);
         auto& animation = m_Mesh->GetAnimInstance();
         ImGui::TextUnformatted("Mixamo character");
         ImGui::SameLine();
-        ImGui::TextDisabled("| %u joints", m_Mesh->GetSkeletalMesh()->m_NumJoints);
+        ImGui::TextDisabled("| %u bones | %zu bodies | %zu constraints", m_Mesh->GetSkeletalMesh()->m_NumJoints,
+            m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size());
         ImGui::SetNextItemWidth(130);
         if (ImGui::BeginCombo("##Animation", animation.GetAnimationName(animation.GetCurrentAnimationIndex()).c_str()))
         {
@@ -158,107 +216,83 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
         if (ImGui::Button("Animation pose")) { CancelInteraction(); m_EditPose.clear(); }
         ImGui::SameLine();
         if (ImGui::Button("Frame mesh")) { CancelInteraction(); ResetCamera(); }
-        int target = m_EditPhysics ? 1 : 0;
-        ImGui::SetNextItemWidth(170);
-        if (ImGui::Combo("Edit", &target, "Bone pose\0Physics asset\0"))
-        {
-            CancelInteraction();
-            m_EditPhysics = target == 1;
-            SelectBone(m_SelectedBone);
-            if (m_EditPhysics)
-            {
-                animation.SetPlaying(false);
-                const auto& model = *m_Mesh->GetSkeletalMesh();
-                m_EditPose.assign(model.m_SceneGraph.get(), model.m_SceneGraph.get() + model.m_NumNodes);
-            }
-        }
-        ImGui::SameLine();
         if (ImGui::Checkbox("Bones", &m_ShowBones)) CancelInteraction();
         ImGui::SameLine();
         if (ImGui::Checkbox("Bodies", &m_ShowBodies)) CancelInteraction();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(110);
         ImGui::SliderFloat("Opacity", &m_BodyOpacity, .05f, .75f, "%.2f");
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Constraints", &m_ShowConstraints)) CancelInteraction();
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Limits", &m_ShowLimits)) CancelInteraction();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Red cone: allowed swing. Green sector: allowed rotation angle. Yellow: current direction / twist. Click a limit to select its constraint.");
+        ImGui::SameLine();
         ImGui::SetNextItemWidth(120);
         int mode = m_GizmoMode;
-        if (ImGui::Combo("Local gizmo", &mode, "Move (W)\0Rotate (E)\0Scale (R)\0"))
+        if (ImGui::Combo("Local gizmo", &mode, m_EditPhysics && m_EditConstraints ? "Move (W)\0Rotate (E)\0" : "Move (W)\0Rotate (E)\0Scale (R)\0"))
         { CancelInteraction(); m_GizmoMode = mode; }
         ImGui::SameLine();
-        ImGui::TextDisabled("%s", m_EditPhysics ? "Edit collider relative to bone" : m_EditPose.empty() ? "Animation pose" : "Preview pose (Play to restore animation)");
-        ImGui::TextDisabled("Click: select | RMB: orbit | Wheel: zoom | F: frame | Esc: cancel drag");
-        if (m_Focused && !ImGui::GetIO().WantTextInput && m_DragAxis < 0 && !m_Orbiting)
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Viewport: RMB + WASD move, Q/E down/up, Shift fast\nWheel: dolly | F: frame mesh | Esc: cancel\nGraph: click a node to select, wheel to zoom, MMB drag to pan");
+        // Check the button as well as the mode: RMB and W/E may arrive in the same frame.
+        if (m_Focused && !ImGui::GetIO().WantTextInput && m_DragAxis < 0 && !m_Flying &&
+            !ImGui::IsMouseDown(ImGuiMouseButton_Right))
         {
             if (ImGui::IsKeyPressed(ImGuiKey_F, false)) { CancelInteraction(); ResetCamera(); }
             int keyMode = m_GizmoMode;
             if (ImGui::IsKeyPressed(ImGuiKey_W, false)) keyMode = 0;
             if (ImGui::IsKeyPressed(ImGuiKey_E, false)) keyMode = 1;
-            if (ImGui::IsKeyPressed(ImGuiKey_R, false)) keyMode = 2;
+            if (ImGui::IsKeyPressed(ImGuiKey_R, false) && !(m_EditPhysics && m_EditConstraints)) keyMode = 2;
             if (keyMode != m_GizmoMode) { CancelInteraction(); m_GizmoMode = keyMode; }
         }
         const ImVec2 available = ImGui::GetContentRegionAvail();
-        ImGui::BeginChild("Skeleton", ImVec2(Min(310.0f, available.x * .40f), 0), true);
-        ImGui::TextUnformatted("Bone hierarchy");
-        if (m_SelectedBone >= 0)
+        if (ImGui::BeginTable("EditorLayout", 3, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV,
+            ImVec2(0, available.y)))
         {
-            const auto& pose = m_EditPose.empty() ? animation.GetPose() : m_EditPose;
-            const auto& node = pose[m_SelectedBone];
-            ImGui::TextWrapped("%s", m_Mesh->GetSkeletalMesh()->m_NodeNames[m_SelectedBone].c_str());
-            if (!m_EditPhysics)
+            ImGui::TableSetupColumn("Navigation", ImGuiTableColumnFlags_WidthFixed, 360);
+            ImGui::TableSetupColumn("Viewport", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthFixed, 320);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::BeginChild("Navigation", ImVec2(0, available.y - 4), false, ImGuiWindowFlags_NoScrollbar);
+            DrawNavigation();
+            ImGui::EndChild();
+            // Draw details before the viewport so edits appear in this frame.
+            ImGui::TableSetColumnIndex(2);
+            ImGui::BeginChild("Details", ImVec2(0, available.y - 4), true);
+            DrawDetails();
+            ImGui::EndChild();
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginChild("PreviewViewport", ImVec2(0, available.y - 4), false,
+                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            const ImVec2 size = ImGui::GetContentRegionAvail();
+            if (size.x > 1 && size.y > 1)
             {
-                ImGui::TextUnformatted("Local position / scale");
-                ImGui::Text("%.2f  %.2f  %.2f", float(node.xform.GetW().GetX()), float(node.xform.GetW().GetY()), float(node.xform.GetW().GetZ()));
-                ImGui::Text("%.2f  %.2f  %.2f", node.scale.x, node.scale.y, node.scale.z);
+                ImGui::Image(static_cast<ImTextureID>(m_Image), size);
+                const ImVec2 origin = ImGui::GetItemRectMin();
+                const ImVec2 mouse = ImGui::GetIO().MousePos;
+                const bool hovered = ImGui::IsItemHovered();
+                UpdateGizmoDrag(mouse.x - origin.x, mouse.y - origin.y);
+                UpdateCamera(hovered);
+                RenderPreview(context, size.y / size.x);
+                UpdateBoneWorld();
+                m_ViewportHeight = size.y;
+                m_Overlay.Begin(m_Camera, size.x, size.y);
+                DrawPhysicsBodies();
+                DrawSkeleton();
+                if (hovered && !m_Flying && m_DragAxis < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    m_ClickX = mouse.x - origin.x; m_ClickY = mouse.y - origin.y;
+                    m_HasPickRequest = m_Overlay.RequestPick(m_ClickX, m_ClickY);
+                    if (m_HasPickRequest) m_PickPose = m_EditPose.empty() ? animation.GetPose() : m_EditPose;
+                }
+                m_Overlay.Render(context, m_Display);
             }
+            else CancelInteraction();
+            ImGui::EndChild();
+            ImGui::EndTable();
         }
-        if (m_EditPhysics) DrawPhysicsPanel();
-        ImGui::Separator();
-        ImGui::BeginChild("BoneTree", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
-        ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 14.0f);
-        for (int32_t root : m_BoneRoots) DrawBoneTree(root);
-        ImGui::PopStyleVar();
-        m_RevealSelection = false;
-        ImGui::EndChild();
-        ImGui::EndChild();
-        ImGui::SameLine();
-        ImGui::BeginChild("PreviewViewport", ImVec2(0, 0), false,
-            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-        const ImVec2 size = ImGui::GetContentRegionAvail();
-        if (size.x > 1 && size.y > 1)
-        {
-            ImGui::Image(static_cast<ImTextureID>(m_Image), size);
-            const ImVec2 origin = ImGui::GetItemRectMin();
-            const ImVec2 mouse = ImGui::GetIO().MousePos;
-            const bool hovered = ImGui::IsItemHovered();
-            UpdateGizmoDrag(mouse.x - origin.x, mouse.y - origin.y);
-            if (hovered && m_DragAxis < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
-            { CancelInteraction(); m_Orbiting = true; }
-            if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) m_Orbiting = false;
-            if (m_Orbiting)
-            {
-                const auto delta = ImGui::GetIO().MouseDelta;
-                m_Yaw = std::remainder(m_Yaw - delta.x * 0.008f, XM_2PI);
-                m_Pitch = Clamp(m_Pitch + delta.y * 0.008f, -1.4f, 1.4f);
-            }
-            if (hovered && m_DragAxis < 0 && ImGui::GetIO().MouseWheel != 0)
-            {
-                m_Overlay.CancelPick(); m_HasPickRequest = false;
-                m_Distance = Clamp(m_Distance * std::exp(-ImGui::GetIO().MouseWheel * 0.15f), m_Radius * 0.4f, m_Radius * 15);
-            }
-            RenderPreview(context, size.y / size.x);
-            UpdateBoneWorld();
-            m_ViewportHeight = size.y;
-            m_Overlay.Begin(m_Camera, size.x, size.y);
-            DrawPhysicsBodies();
-            DrawSkeleton();
-            if (hovered && !m_Orbiting && m_DragAxis < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-            {
-                m_ClickX = mouse.x - origin.x; m_ClickY = mouse.y - origin.y;
-                m_HasPickRequest = m_Overlay.RequestPick(m_ClickX, m_ClickY);
-                if (m_HasPickRequest) m_PickPose = m_EditPose.empty() ? animation.GetPose() : m_EditPose;
-            }
-            m_Overlay.Render(context, m_Display);
-        }
-        ImGui::EndChild();
     }
     else CancelInteraction();
     ImGui::End();
@@ -268,8 +302,6 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
 void SkeletalMeshViewer::RenderPreview(GraphicsContext& context, float aspect)
 {
     m_Camera.SetPerspectiveMatrix(XM_PIDIV4, aspect, m_Radius * 0.01f, m_Radius * 100);
-    const Vector3 direction(std::sin(m_Yaw) * std::cos(m_Pitch), std::sin(m_Pitch), std::cos(m_Yaw) * std::cos(m_Pitch));
-    m_Camera.SetEyeAtUp(m_Target + direction * m_Distance, m_Target, Vector3(kYUnitVector));
     m_Camera.Update();
     m_Mesh->UpdateRenderData(context, m_EditPose.empty() ? nullptr : &m_EditPose);
     context.TransitionResource(m_Color, D3D12_RESOURCE_STATE_RENDER_TARGET);

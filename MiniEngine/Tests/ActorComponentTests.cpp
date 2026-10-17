@@ -154,6 +154,7 @@ namespace
 void RunWorldTests();
 void RunCharacterMovementTests();
 void RunPhysicsAssetTests();
+void RunRagdollTests();
 
 int main()
 {
@@ -163,5 +164,6 @@ int main()
     RunWorldTests();
     RunCharacterMovementTests();
     RunPhysicsAssetTests();
+    RunRagdollTests();
     return 0;
 }

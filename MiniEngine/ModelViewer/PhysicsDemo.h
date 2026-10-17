@@ -19,6 +19,8 @@ public:
     void Render(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     void RenderUI();
+    void RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
+        const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
 
 private:
     void ResetBox();
@@ -34,6 +36,7 @@ private:
     physx::PxRigidDynamic* m_Box = nullptr;
     RootSignature m_RootSignature;
     GraphicsPSO m_PSO;
+    GraphicsPSO m_LinePSO;
     physx::PxRigidStatic* m_Walls[5] = {};
     bool m_DropReady = true;
     static constexpr int HistoryCapacity = 240;
@@ -46,4 +49,5 @@ private:
     uint64_t m_PvdConnectDeadline = 0;
     uint64_t m_PvdNextAttempt = 0;
     std::string m_PvdMessage;
+    bool m_PvdSceneQueries = false;
 };

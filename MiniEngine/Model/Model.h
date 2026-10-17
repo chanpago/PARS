@@ -95,7 +95,7 @@ public:
     void Render(Renderer::MeshSorter& sorter,
         const GpuBuffer& meshConstants,
         const Math::AffineTransform sphereTransforms[],
-        const Joint* skeleton) const;
+        const Joint* skeleton, const Math::BoundingSphere* skinnedWorldBounds = nullptr) const;
 
     Math::BoundingSphere m_BoundingSphere; // Object-space bounding sphere
     Math::AxisAlignedBox m_BoundingBox;
@@ -140,6 +140,8 @@ public:
     // Cached scene-node transform, valid after Update/UpdatePose. Skin roots
     // use skin space; multiply by the owning mesh transform for rendered bones.
     bool GetNodeTransform(uint32_t nodeIndex, Math::Matrix4& transform) const;
+    void SetSkinnedWorldBounds(const Math::BoundingSphere& bounds) { m_SkinnedWorldBounds = bounds; m_HasSkinnedWorldBounds = true; }
+    void ClearSkinnedWorldBounds() { m_HasSkinnedWorldBounds = false; }
     void Render(Renderer::MeshSorter& sorter) const;
 
     void Resize(float newRadius);
@@ -170,4 +172,6 @@ private:
     std::vector<AnimationState> m_AnimState;    // Per-animation (not per-curve)
     std::unique_ptr<Joint[]> m_Skeleton;
     bool m_TransformsValid = false;
+    bool m_HasSkinnedWorldBounds = false;
+    Math::BoundingSphere m_SkinnedWorldBounds{Math::kZero};
 };

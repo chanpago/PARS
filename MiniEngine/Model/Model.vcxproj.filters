@@ -200,6 +200,11 @@
   <ItemGroup>
     <ClCompile Include="AnimationPose.cpp"><Filter>GameFramework</Filter></ClCompile>
     <ClCompile Include="PhysicsAsset.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClCompile Include="PhysicsPose.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClInclude Include="PhysicsPose.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClCompile Include="Ragdoll.cpp"><Filter>GameFramework</Filter></ClCompile>
+    <ClInclude Include="Ragdoll.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClCompile Include="Components\SkeletalMeshPhysics.cpp"><Filter>GameFramework</Filter></ClCompile>
     <ClInclude Include="PhysicsAsset.h"><Filter>GameFramework</Filter></ClInclude>
     <ClCompile Include="AnimInstance.cpp"><Filter>GameFramework</Filter></ClCompile>
     <ClInclude Include="AnimInstance.h"><Filter>GameFramework</Filter></ClInclude>

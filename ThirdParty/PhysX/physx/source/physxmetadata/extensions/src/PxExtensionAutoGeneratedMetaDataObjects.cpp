@@ -152,7 +152,18 @@ PxJointLimitCone getPxD6Joint_SwingLimit( const PxD6Joint* inObj ) { return inOb
 void setPxD6Joint_PyramidSwingLimit( PxD6Joint* inObj, const PxJointLimitPyramid & inArg){ inObj->setPyramidSwingLimit( inArg ); }
 PxJointLimitPyramid getPxD6Joint_PyramidSwingLimit( const PxD6Joint* inObj ) { return inObj->getPyramidSwingLimit(); }
 void setPxD6Joint_Drive( PxD6Joint* inObj, PxD6Drive::Enum inIndex, PxD6JointDrive inArg ){ inObj->setDrive( inIndex, inArg ); }
-PxD6JointDrive getPxD6Joint_Drive( const PxD6Joint* inObj, PxD6Drive::Enum inIndex ) { return inObj->getDrive( inIndex ); }
+PxD6JointDrive getPxD6Joint_Drive( const PxD6Joint* inObj, PxD6Drive::Enum inIndex )
+{
+	// PVD enumerates every drive slot, including slots unavailable in the
+	// selected angular configuration. PhysX 5.6 rejects those public queries.
+	// Report inactive slots as disabled without issuing an invalid API call.
+	const PxD6AngularDriveConfig::Enum config = inObj->getAngularDriveConfig();
+	if (((inIndex == PxD6Drive::eSWING1 || inIndex == PxD6Drive::eSWING2) && config != PxD6AngularDriveConfig::eSWING_TWIST) ||
+		((inIndex == PxD6Drive::eSWING || inIndex == PxD6Drive::eSLERP) && config == PxD6AngularDriveConfig::eSWING_TWIST) ||
+		((inIndex == PxD6Drive::eSWING || inIndex == PxD6Drive::eTWIST) && config == PxD6AngularDriveConfig::eSLERP))
+		return PxD6JointDrive();
+	return inObj->getDrive(inIndex);
+}
 void setPxD6Joint_DrivePosition( PxD6Joint* inObj, const PxTransform & inArg){ inObj->setDrivePosition( inArg ); }
 PxTransform getPxD6Joint_DrivePosition( const PxD6Joint* inObj ) { return inObj->getDrivePosition(); }
 const char * getPxD6Joint_ConcreteTypeName( const PxD6Joint* inObj ) { return inObj->getConcreteTypeName(); }
