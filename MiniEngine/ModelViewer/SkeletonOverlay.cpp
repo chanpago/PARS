@@ -52,7 +52,9 @@ void SkeletonOverlay::Cleanup()
 {
     m_Ids.Destroy();
     m_SurfaceDepth.Destroy();
-    m_SurfaceVertices.clear();
+    m_SurfaceMesh.Destroy();
+    m_BodyDraws.clear();
+    m_ConstraintGeometry.clear();
     m_PickResult.Destroy();
     m_Readback.Destroy();
     m_PickFence = 0;
@@ -65,7 +67,7 @@ void SkeletonOverlay::Begin(const Camera& camera, float width, float height)
 {
     m_ViewProjection = camera.GetViewProjMatrix();
     m_Eye = camera.GetPosition();
-    m_SurfaceVertices.clear();
+    m_BodyDraws.clear();
     m_Width = Max(width, 1.0f);
     m_Height = Max(height, 1.0f);
     m_Vertices.clear();
@@ -104,8 +106,12 @@ void SkeletonOverlay::FillTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 colo
 
 void SkeletonOverlay::Line(Vector3 start, Vector3 end, Vector3 color, uint32_t id, float width)
 {
+    ClipLine(m_ViewProjection * start, m_ViewProjection * end, color, id, width);
+}
+
+void SkeletonOverlay::ClipLine(Vector4 a, Vector4 b, Vector3 color, uint32_t id, float width)
+{
     // Clip in homogeneous space before dividing by W (also supports reversed Z).
-    Vector4 a = m_ViewProjection * start, b = m_ViewProjection * end;
     const auto distance = [](Vector4 p, int plane) -> float {
         switch (plane) {
         case 0: return p.GetW() + p.GetX(); case 1: return p.GetW() - p.GetX();
@@ -178,7 +184,7 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
     context.ClearColor(m_Ids);
     const D3D12_CPU_DESCRIPTOR_HANDLE rtvs[] = {target.GetRTV(), m_Ids.GetRTV()};
     context.SetViewportAndScissor(0, 0, m_Resolution, m_Resolution);
-    if (!m_SurfaceVertices.empty())
+    if (!m_BodyDraws.empty())
     {
         // A separate depth buffer keeps bodies visible through the character,
         // while the nearest collider still wins the ID at each pixel.
@@ -190,8 +196,14 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
         struct Constants { Matrix4 viewProjection; Vector4 eye; } constants{m_ViewProjection, Vector4(m_Eye, 1)};
         context.SetDynamicConstantBufferView(0, sizeof(constants), &constants);
         context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context.SetDynamicVB(0, m_SurfaceVertices.size(), sizeof(SurfaceVertex), m_SurfaceVertices.data());
-        context.Draw(static_cast<uint32_t>(m_SurfaceVertices.size()));
+        context.TransitionResource(m_SurfaceMesh, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+        context.SetVertexBuffer(0, m_SurfaceMesh.VertexBufferView());
+        // Preserve the caller's far-to-near order and exact picking IDs.
+        for (const auto& body : m_BodyDraws)
+        {
+            context.SetDynamicConstantBufferView(1, offsetof(BodyDraw, firstVertex), &body);
+            context.Draw(body.vertexCount, body.firstVertex);
+        }
     }
     context.SetRenderTargets(2, rtvs);
     if (!m_FillVertices.empty() || !m_Vertices.empty())

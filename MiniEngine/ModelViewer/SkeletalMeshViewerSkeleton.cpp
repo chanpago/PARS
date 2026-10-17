@@ -283,6 +283,7 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
     {
         auto& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
         joint = m_DragConstraintOriginal;
+        const Matrix4 previousWorld = GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame);
         auto& frame = m_ConstraintFrame == 0 ? joint.parentFrame : joint.childFrame;
         if (m_GizmoMode == 0)
             XMStoreFloat3(&frame.offset, Vector3(frame.offset) + m_DragLocalDirection * (amount * m_DragLength));
@@ -294,7 +295,7 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
             const Vector3 axis(m_DragAxis == 0 ? 1.0f : 0, m_DragAxis == 1 ? 1.0f : 0, m_DragAxis == 2 ? 1.0f : 0);
             XMStoreFloat4(&frame.rotation, Normalize(Quaternion(XMLoadFloat4(&frame.rotation)) * Quaternion(axis, m_DragAngle)));
         }
-        if (m_MoveBothFrames) MatchConstraintFrames();
+        if (m_MoveBothFrames) MoveOtherConstraintFrame(previousWorld);
         m_PhysicsDirty = true;
         return;
     }

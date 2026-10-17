@@ -288,6 +288,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
                     if (m_HasPickRequest) m_PickPose = m_EditPose.empty() ? animation.GetPose() : m_EditPose;
                 }
                 m_Overlay.Render(context, m_Display);
+                DrawOrientationAxes(origin.x, origin.y, size.x, size.y);
             }
             else CancelInteraction();
             ImGui::EndChild();

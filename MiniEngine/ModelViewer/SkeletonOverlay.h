@@ -8,6 +8,7 @@
 #include "RootSignature.h"
 #include "DepthBuffer.h"
 #include "PhysicsAsset.h"
+#include <unordered_map>
 #include <vector>
 
 // Screen-sized bones/gizmos and translucent world-space collision surfaces.
@@ -33,15 +34,40 @@ public:
 
 private:
     struct Vertex { float x, y, z, w; float r, g, b, a; uint32_t id; };
-    struct SurfaceVertex { DirectX::XMFLOAT3 position, normal; DirectX::XMFLOAT4 color; uint32_t id; };
+    // Shared unit primitives. Capsule caps move along X independently of radius.
+    struct SurfaceVertex { DirectX::XMFLOAT3 position, normal; float capOffset; };
+    struct BodyDraw
+    {
+        Math::Matrix4 world;
+        DirectX::XMFLOAT4 dimensions, color;
+        uint32_t id, padding[3]{}; // Matches the vertex shader's b1 layout.
+        uint32_t firstVertex, vertexCount;
+    };
+    struct LimitLine { Math::Vector3 a, b, color; float width; };
+    struct LimitTriangle { Math::Vector3 a, b, c, color; float opacity; };
+    struct ConstraintGeometry
+    {
+        PARS::PhysicsConstraint settings;
+        bool selected = false, valid = false, projected = false;
+        std::vector<LimitLine> lines;
+        std::vector<LimitTriangle> triangles;
+        Math::Matrix4 clipTransform{Math::kIdentity};
+        float width = 0, height = 0;
+        std::vector<Vertex> projectedLines, projectedFills;
+    };
     void InitializeSurfaces();
+    static std::vector<SurfaceVertex> BuildSurfaceMesh();
+    static void BuildConstraintGeometry(const PARS::PhysicsConstraint& joint, bool selected, ConstraintGeometry& geometry);
+    void ClipLine(Math::Vector4 a, Math::Vector4 b, Math::Vector3 color, uint32_t id, float width);
     void Triangle(Math::Vector3 a, Math::Vector3 b, Math::Vector3 c, Math::Vector3 color, uint32_t id);
     Math::Matrix4 m_ViewProjection{Math::kIdentity};
     float m_Width = 1, m_Height = 1;
     uint32_t m_Resolution = 0, m_PickX = 0, m_PickY = 0;
     std::vector<Vertex> m_Vertices;
     std::vector<Vertex> m_FillVertices; // Translucent limits, drawn before all opaque lines/gizmos.
-    std::vector<SurfaceVertex> m_SurfaceVertices;
+    std::vector<BodyDraw> m_BodyDraws;
+    ByteAddressBuffer m_SurfaceMesh;
+    std::unordered_map<uint32_t, ConstraintGeometry> m_ConstraintGeometry;
     Math::Vector3 m_Eye{Math::kZero};
     DepthBuffer m_SurfaceDepth;
     RootSignature m_SurfaceRoot;

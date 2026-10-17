@@ -97,18 +97,27 @@ void SkeletalMeshViewer::CreatePhysicsBody(PhysicsShapeType shape)
 void SkeletalMeshViewer::DrawPhysicsBodies()
 {
     if (!m_ShowBodies) return;
-    std::vector<int> sorted;
+    struct VisibleBody { int index; Matrix4 world; float depth; };
+    std::vector<VisibleBody> sorted;
+    sorted.reserve(m_PhysicsAsset.bodies.size());
     for (size_t i = 0; i < m_PhysicsAsset.bodies.size(); ++i)
-        if (FindBodyNode(static_cast<int>(i)) >= 0) sorted.push_back(static_cast<int>(i));
-    // Convex surfaces are backface culled; sort bodies far-to-near for alpha.
-    std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
-        return float(Dot(Vector3(GetBodyWorld(a).GetW()) - m_Camera.GetPosition(), m_Camera.GetForwardVec())) >
-               float(Dot(Vector3(GetBodyWorld(b).GetW()) - m_Camera.GetPosition(), m_Camera.GetForwardVec()));
-    });
-    for (int index : sorted)
     {
+        const int node = FindBodyNode(static_cast<int>(i));
+        if (node < 0) continue;
+        const Matrix4 world = PhysicsBoneFrame(m_NodeWorld[node]) * m_PhysicsAsset.bodies[i].GetLocalTransform();
+        sorted.push_back({static_cast<int>(i), world,
+            Dot(Vector3(world.GetW()) - m_Camera.GetPosition(), m_Camera.GetForwardVec())});
+    }
+    // Convex surfaces are backface culled; sort bodies far-to-near for alpha.
+    // Bone lookup and rigid-frame extraction happen once per body, not per comparison.
+    std::sort(sorted.begin(), sorted.end(), [](const VisibleBody& a, const VisibleBody& b) {
+        return a.depth > b.depth;
+    });
+    for (const auto& visible : sorted)
+    {
+        const int index = visible.index;
         const bool selected = EditingBody() && index == m_SelectedBody;
-        m_Overlay.Body(m_PhysicsAsset.bodies[index], GetBodyWorld(index),
+        m_Overlay.Body(m_PhysicsAsset.bodies[index], visible.world,
             selected ? Vector3(1, .68f, .12f) : Vector3(.2f, .7f, 1),
             0x400001 + index, m_BodyOpacity);
     }

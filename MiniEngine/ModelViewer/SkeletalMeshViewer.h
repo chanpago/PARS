@@ -39,6 +39,7 @@ private:
     void DrawNavigation();
     void DrawRelationshipGraph();
     void DrawDetails();
+    void DrawOrientationAxes(float left, float top, float width, float height);
     void UpdateBoneWorld();
     void DrawSkeleton();
     void SelectBone(int32_t node);
@@ -60,7 +61,7 @@ private:
     void SelectConstraint(int index);
     void CreateConstraint();
     void ResetConstraintFrames(PARS::PhysicsConstraint& joint);
-    void MatchConstraintFrames();
+    void MoveOtherConstraintFrame(const Math::Matrix4& previousWorld);
     int FindConstraintParent() const;
     Math::Matrix4 GetConstraintBodyWorld(int frame) const;
     Math::Matrix4 GetConstraintWorld(int index, int frame) const;

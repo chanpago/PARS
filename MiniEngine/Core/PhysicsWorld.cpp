@@ -100,6 +100,10 @@ bool PhysicsWorld::Initialize(bool connectPvd)
     }
 
     PxSceneDesc desc(m_Physics->getTolerancesScale());
+    // TGS handles the anatomical ragdoll's mass/inertia ratios and narrow joint
+    // limits more accurately during contact. The external fixed step stays 1/60;
+    // this selects PhysX's constraint solver, not a frame-rate-dependent clock.
+    desc.solverType = PxSolverType::eTGS;
     desc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
     desc.cpuDispatcher = m_Dispatcher;
     desc.filterShader = ContactFilter;

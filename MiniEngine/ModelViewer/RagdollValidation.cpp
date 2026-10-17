@@ -52,8 +52,45 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
             check(hasBody != excluded, "Imported non-digit, non-terminal bone coverage");
         }
         float totalMass = 0;
-        for (const auto& body : asset.bodies) totalMass += body.mass;
-        check(std::abs(totalMass - 62.0f) < .001f, "Adding spine, neck and shoulders preserves total 62 kg mass");
+        for (const auto& body : asset.bodies)
+        {
+            check(std::isfinite(body.mass) && body.mass > 0, "Every imported body has a finite positive mass");
+            totalMass += body.mass;
+            report << "mass: " << body.bone << " = " << body.mass << " kg" << std::endl;
+        }
+        check(std::abs(totalMass - 73.0f) < .001f, "Adult male preset preserves total 73 kg mass");
+        const auto massFor = [&](const std::string& suffix) {
+            for (const auto& body : asset.bodies)
+            {
+                const auto colon = body.bone.find_last_of(':');
+                if (body.bone.substr(colon == std::string::npos ? 0 : colon + 1) == suffix) return body.mass;
+            }
+            check(false, "Mass validation can find every anatomical body");
+            return 0.0f;
+        };
+        // Check published anatomical totals independently of the implementation's
+        // volume-based split. In particular, never double-count neck or shoulders.
+        check(std::abs(massFor("Hips") - 8.1541f) < .001f, "Pelvis is 11.17 percent of body mass");
+        check(std::abs(massFor("Spine") + massFor("Spine1") - 11.9209f) < .001f,
+            "Middle trunk is 16.33 percent of body mass");
+        check(std::abs(massFor("Spine2") + massFor("LeftShoulder") + massFor("RightShoulder") - 11.6508f) < .001f,
+            "Upper trunk including shoulders is 15.96 percent of body mass");
+        check(std::abs(massFor("Head") + massFor("Neck") - 5.0662f) < .001f,
+            "Head including neck is 6.94 percent of body mass");
+        check(std::abs(massFor("Neck") / massFor("Head") - 1.66f / 4.20f) < .0001f,
+            "Neck/head split follows the male anthropometric model, independent of collision shape size");
+        for (const char* side : {"Left", "Right"})
+        {
+            const std::string prefix(side);
+            check(std::abs(massFor(prefix + "Arm") - 1.9783f) < .001f &&
+                std::abs(massFor(prefix + "ForeArm") - 1.1826f) < .001f &&
+                std::abs(massFor(prefix + "Hand") - .4453f) < .001f,
+                "Each arm uses per-side male upper-arm, forearm and hand proportions");
+            check(std::abs(massFor(prefix + "UpLeg") - 10.3368f) < .001f &&
+                std::abs(massFor(prefix + "Leg") - 3.1609f) < .001f &&
+                std::abs(massFor(prefix + "Foot") - 1.0001f) < .001f,
+                "Each leg uses per-side male thigh, shank and foot proportions");
+        }
         for (const auto& joint : asset.constraints)
         {
             const auto child = std::find(skeleton.names.begin(), skeleton.names.end(), joint.childBone);
@@ -125,6 +162,8 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
             check(transitionError < .001f, "Animation to physics transition preserves visible bone positions");
             const float startHeight = ragdoll.GetPosition().GetY();
             float maxGap = 0, maxAngular = 0;
+            size_t worstJoint = 0;
+            int worstStep = 0;
             for (int step = 0; step < 600; ++step)
             {
                 world.Tick(1.0f / 60);
@@ -132,13 +171,16 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
                 if (step > 60)
                 {
                     maxGap = Max(maxGap, ragdoll.GetMaxAnchorError());
-                    maxAngular = Max(maxAngular, ragdoll.GetMaxAngularError());
+                    size_t joint = 0;
+                    const float angular = ragdoll.GetMaxAngularError(&joint);
+                    if (angular > maxAngular) { maxAngular = angular; worstJoint = joint; worstStep = step; }
                 }
             }
             check(true, "600 simulation steps remain finite");
             report << "clip=" << clip << " initialY=" << startHeight << " finalY=" << float(ragdoll.GetPosition().GetY())
                 << " lowest=" << ragdoll.GetLowestPoint() << " maxGap=" << maxGap << " maxAngular=" << maxAngular
-                << " finalAngular=" << ragdoll.GetMaxAngularError() << std::endl;
+                << " finalAngular=" << ragdoll.GetMaxAngularError()
+                << " worstJoint=" << asset.constraints[worstJoint].childBone << " step=" << worstStep << std::endl;
             check(maxGap < .08f && maxAngular < .35f, "Joint anchors and angular limits remain bounded");
             check(float(ragdoll.GetPosition().GetY()) < startHeight - .2f && ragdoll.GetLowestPoint() > -.04f, "Character falls and colliders stay above the floor");
             check(animation.GetAnimationTime() == animationTime, "Animation cannot overwrite the simulated pose");

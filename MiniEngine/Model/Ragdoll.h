@@ -33,7 +33,7 @@ namespace PARS
         void AddVelocity(Math::Vector3 velocity);
         // Diagnostics also used by the integration test and PVD panel.
         float GetMaxAnchorError() const;
-        float GetMaxAngularError() const;
+        float GetMaxAngularError(size_t* worstJoint = nullptr) const;
         float GetLowestPoint() const;
         bool IsFinite() const;
     private:

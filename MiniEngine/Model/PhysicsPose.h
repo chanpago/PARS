@@ -19,7 +19,13 @@ namespace PARS
         const Math::Matrix4& component, const std::vector<int>& nodes,
         const std::vector<Math::Matrix4>& targets, std::vector<GraphNode>& result);
     // Full major-bone preset (20 bodies / 19 constraints): fingers, toes and
-    // terminal end markers are excluded. Angular limits are editable defaults.
+    // terminal end markers are excluded. Masses use a 73 kg adult male reference
+    // (de Leva 1996); trunk groups split by preset collider volume, head/neck
+    // by the male-model ratio from Roos et al. (2020).
+    // Limits use adult ROM references, anatomical landmark axes and biased
+    // cones for directional ranges. Spine/neck/girdle allocations and coupled
+    // motion are rig approximations; see the source notes in PhysicsPose.cpp.
+    // Requires the imported arms-out reference pose, not an animation sample.
     bool BuildMixamoPhysicsAsset(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& reference,
         PhysicsAsset& result, std::string& error);
 }

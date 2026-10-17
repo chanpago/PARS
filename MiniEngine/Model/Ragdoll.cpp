@@ -72,6 +72,11 @@ namespace PARS
             }
             auto* actor = world.CreateDynamicBody(transform, geometry.any(), body.mass, body.bone.c_str());
             if (!actor) { error = "Could not create ragdoll body: " + body.bone; Destroy(); return false; }
+            // The anatomical masses put small shoulder bodies between heavier
+            // trunk/arm bodies. Tight anatomical hinges and biased cones need
+            // more convergence on impact, without changing masses/inertia or
+            // widening ROM. This cost applies only to ragdoll bodies.
+            actor->setSolverIterationCounts(64, 16);
             actor->setLinearVelocity(initialVelocity);
             m_Bodies.push_back(actor); m_BoneNodes.push_back(node);
         }
@@ -90,6 +95,14 @@ namespace PARS
             joint->setMotion(PxD6Axis::eSWING2, Motion(data.swingZ));
             joint->setTwistLimit(PxJointAngularLimitPair(data.twistMin, data.twistMax));
             joint->setSwingLimit(PxJointLimitCone(data.swingYLimit, data.swingZLimit));
+            if (data.swingY == PhysicsJointMotion::Limited && data.swingZ == PhysicsJointMotion::Limited)
+            {
+                // PhysX supports cone + pyramid simultaneously (ExtD6Joint.cpp).
+                // These enclosing bounds add solver rows for large impacts; they
+                // do not shrink the ellipse or change the cone shown in the editor.
+                joint->setPyramidSwingLimit(PxJointLimitPyramid(
+                    -data.swingYLimit, data.swingYLimit, -data.swingZLimit, data.swingZLimit));
+            }
             joint->setConstraintFlag(PxConstraintFlag::eCOLLISION_ENABLED, data.enableCollision);
             joint->setConstraintFlag(PxConstraintFlag::eVISUALIZATION, true);
         }
@@ -201,22 +214,47 @@ namespace PARS
 #endif
         return result;
     }
-    float Ragdoll::GetMaxAngularError() const
+    float Ragdoll::GetMaxAngularError(size_t* worstJoint) const
     {
         float result = 0;
+        if (worstJoint) *worstJoint = 0;
 #if defined(_M_X64)
         for (size_t i = 0; i < m_Joints.size(); ++i)
         {
+            const float previous = result;
             const auto& data = m_Asset.constraints[i]; const auto* joint = m_Joints[i];
             // PhysX may return the equivalent angle near +/-2pi when the
             // relative quaternion changes sign. Limits use the shortest twist.
             const float twist = std::remainder(joint->getTwistAngle(), PxTwoPi);
             if (data.twist == PhysicsJointMotion::Locked) result = PxMax(result, PxAbs(twist));
             else if (data.twist == PhysicsJointMotion::Limited) result = PxMax(result, PxMax(data.twistMin - twist, twist - data.twistMax));
-            if (data.swingY != PhysicsJointMotion::Free)
-                result = PxMax(result, PxAbs(joint->getSwingYAngle()) - (data.swingY == PhysicsJointMotion::Locked ? 0 : data.swingYLimit));
-            if (data.swingZ != PhysicsJointMotion::Free)
-                result = PxMax(result, PxAbs(joint->getSwingZAngle()) - (data.swingZ == PhysicsJointMotion::Locked ? 0 : data.swingZLimit));
+            if (data.swingY == PhysicsJointMotion::Limited && data.swingZ == PhysicsJointMotion::Limited)
+            {
+                // Both coordinates can be below their separate limits while a
+                // diagonal swing is outside the actual elliptical cone. Measure
+                // radial angular excess using this SDK's ConeLimitHelperTanLess
+                // angle ellipse (an error metric, not the solver contact normal).
+                const float y = joint->getSwingYAngle(), z = joint->getSwingZAngle();
+                const float ny = y / data.swingYLimit, nz = z / data.swingZLimit;
+                const float ellipseRadius = std::sqrt(ny * ny + nz * nz);
+                if (ellipseRadius > 1)
+                {
+                    const float ty = std::tan(y * .25f), tz = std::tan(z * .25f);
+                    const float py = std::tan(y / ellipseRadius * .25f), pz = std::tan(z / ellipseRadius * .25f);
+                    const float r2 = ty * ty + tz * tz, p2 = py * py + pz * pz;
+                    // Dot product of actual and boundary pure-swing quaternions.
+                    const float dot = ((1 - r2) * (1 - p2) + 4 * (ty * py + tz * pz)) / ((1 + r2) * (1 + p2));
+                    result = PxMax(result, 2 * std::acos(PxClamp(PxAbs(dot), 0.0f, 1.0f)));
+                }
+            }
+            else
+            {
+                if (data.swingY != PhysicsJointMotion::Free)
+                    result = PxMax(result, PxAbs(joint->getSwingYAngle()) - (data.swingY == PhysicsJointMotion::Locked ? 0 : data.swingYLimit));
+                if (data.swingZ != PhysicsJointMotion::Free)
+                    result = PxMax(result, PxAbs(joint->getSwingZAngle()) - (data.swingZ == PhysicsJointMotion::Locked ? 0 : data.swingZLimit));
+            }
+            if (worstJoint && result > previous) *worstJoint = i;
         }
 #endif
         return result;

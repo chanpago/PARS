@@ -100,12 +100,15 @@ void SkeletalMeshViewer::ResetConstraintFrames(PhysicsConstraint& joint)
     joint.SetWorldFrame(GetBodyWorld(parent), GetBodyWorld(child), world);
 }
 
-void SkeletalMeshViewer::MatchConstraintFrames()
+void SkeletalMeshViewer::MoveOtherConstraintFrame(const Matrix4& previousWorld)
 {
     auto& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
-    const Matrix4 world = GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame);
+    const Matrix4 delta = GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame) * Invert(previousWorld);
     auto& other = m_ConstraintFrame == 0 ? joint.childFrame : joint.parentFrame;
-    other = PhysicsJointFrame::FromTransform(Invert(GetConstraintBodyWorld(1 - m_ConstraintFrame)) * world);
+    const Matrix4 otherBody = GetConstraintBodyWorld(1 - m_ConstraintFrame);
+    // Apply the same world-space edit, preserving the anatomical bias between
+    // the frames. Snapping the other frame to this one would erase asymmetric ROM.
+    other = PhysicsJointFrame::FromTransform(Invert(otherBody) * delta * otherBody * other.GetTransform());
 }
 
 void SkeletalMeshViewer::CreateConstraint()
@@ -178,13 +181,16 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     bool moveBoth = m_MoveBothFrames;
     if (ImGui::Checkbox("Move both frames", &moveBoth)) { CancelInteraction(); m_MoveBothFrames = moveBoth; }
     ImGui::BeginDisabled(m_DragAxis >= 0);
+    const Matrix4 previousWorld = GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame);
     if (EditFrame(m_ConstraintFrame == 0 ? joint.parentFrame : joint.childFrame))
     {
-        if (m_MoveBothFrames) MatchConstraintFrames();
+        if (m_MoveBothFrames) MoveOtherConstraintFrame(previousWorld);
         changed = true;
     }
     if (ImGui::Button("Align both to child bone")) { ResetConstraintFrames(joint); changed = true; }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Replaces both frames, including any anatomical axis calibration and asymmetric ROM bias.");
     ImGui::TextDisabled("Translation locked | X twist, Y/Z swing");
+    ImGui::TextWrapped("Swing values are cone half-angles about the parent frame. Its rotation can bias the range; zero need not be the reference pose. Move both frames preserves this bias.");
     changed |= EditMotion("Twist X", joint.twist);
     ImGui::BeginDisabled(joint.twist != PhysicsJointMotion::Limited);
     changed |= EditAngle("Minimum", joint.twistMin, -179.9f, XMConvertToDegrees(joint.twistMax) - .1f);
@@ -200,7 +206,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     ImGui::EndDisabled();
     changed |= ImGui::Checkbox("Connected bodies collide", &joint.enableCollision);
     ImGui::EndDisabled();
-    ImGui::TextWrapped("Red cone: allowed swing. Green sector: allowed rotation angle. Yellow: current child direction / twist (swing removed). The twist dial sits behind the pivot. Orange: separated anchors.");
+    ImGui::TextWrapped("Red cone/arc: allowed swing. Green sector: allowed X twist. Yellow: current child direction / twist (swing removed). Both limits share the joint pivot. Orange: separated anchors.");
     if (changed) { m_PhysicsDirty = true; m_PhysicsMessage.clear(); }
 }
 

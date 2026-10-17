@@ -1,6 +1,7 @@
 #include "SkeletalMeshViewer.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "imgui.h"
+#include <algorithm>
 #include <cmath>
 
 using namespace Math;
@@ -12,6 +13,61 @@ namespace
         const auto separator = name.find_last_of(':');
         return name.substr(separator == std::string::npos ? 0 : separator + 1);
     }
+}
+
+void SkeletalMeshViewer::DrawOrientationAxes(float left, float top, float width, float height)
+{
+    if (width < 48 || height < 48) return;
+    const float scale = Min(ImGui::GetFontSize() / 13.0f, Min(width, height) / 120.0f);
+    const float length = 28 * scale, margin = 16 * scale, extent = 43 * scale;
+    const ImVec2 center(left + margin + extent, top + height - margin - extent);
+    struct Axis { Vector3 world; ImU32 color; const char* label; float depth; };
+    Axis axes[] = {
+        {Vector3(kXUnitVector), IM_COL32(235, 70, 70, 255), "X", 0},
+        {Vector3(kYUnitVector), IM_COL32(85, 220, 90, 255), "Y", 0},
+        {Vector3(kZUnitVector), IM_COL32(75, 145, 255, 255), "Z", 0}
+    };
+    // Project world directions onto the camera basis, using rotation only.
+    // PARS is Y-up. Camera movement, FOV and zoom must not move/resize this widget.
+    for (auto& axis : axes) axis.depth = Dot(axis.world, m_Camera.GetForwardVec());
+    std::sort(std::begin(axes), std::end(axes), [](const Axis& a, const Axis& b) { return a.depth > b.depth; });
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(ImVec2(left, top), ImVec2(left + width, top + height), true);
+    constexpr ImU32 shadow = IM_COL32(0, 0, 0, 210);
+    draw->AddCircleFilled(center, 3 * scale, IM_COL32(220, 225, 230, 255));
+    for (const auto& axis : axes)
+    {
+        const float dx = Dot(axis.world, m_Camera.GetRightVec());
+        const float dy = -float(Dot(axis.world, m_Camera.GetUpVec())); // Screen Y points down.
+        const float projectedLength = std::sqrt(dx * dx + dy * dy);
+        const ImVec2 end(center.x + dx * length, center.y + dy * length);
+        ImVec2 label;
+        if (projectedLength > .15f)
+        {
+            const ImVec2 direction(dx / projectedLength, dy / projectedLength);
+            draw->AddLine(center, end, shadow, 4 * scale);
+            draw->AddLine(center, end, axis.color, 2 * scale);
+            const float head = Min(5 * scale, projectedLength * length * .4f);
+            draw->AddTriangleFilled(end,
+                ImVec2(end.x - direction.x * head - direction.y * head * .5f, end.y - direction.y * head + direction.x * head * .5f),
+                ImVec2(end.x - direction.x * head + direction.y * head * .5f, end.y - direction.y * head - direction.x * head * .5f), axis.color);
+            label = ImVec2(end.x + direction.x * 9 * scale, end.y + direction.y * 9 * scale);
+        }
+        else
+        {
+            // Looking along an axis: keep its end and letter visible without
+            // normalizing a near-zero screen direction into an unstable arrow.
+            draw->AddCircleFilled(end, 4 * scale, shadow);
+            draw->AddCircleFilled(end, 2.5f * scale, axis.color);
+            label = ImVec2(end.x + 9 * scale, end.y + 9 * scale);
+        }
+        const float fontSize = 13 * scale;
+        const ImVec2 textSize = ImGui::GetFont()->CalcTextSizeA(fontSize, 100, 0, axis.label);
+        label.x -= textSize.x * .5f; label.y -= textSize.y * .5f;
+        draw->AddText(ImGui::GetFont(), fontSize, ImVec2(label.x + scale, label.y + scale), shadow, axis.label);
+        draw->AddText(ImGui::GetFont(), fontSize, label, axis.color, axis.label);
+    }
+    draw->PopClipRect();
 }
 
 void SkeletalMeshViewer::DrawNavigation()
