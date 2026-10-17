@@ -25,8 +25,10 @@ public:
     void Point(Math::Vector3 position, Math::Vector3 color, uint32_t id, float radius = 4);
     void FillTriangle(Math::Vector3 a, Math::Vector3 b, Math::Vector3 c, Math::Vector3 color, uint32_t id, float opacity);
     void Body(const PARS::PhysicsBody& body, const Math::Matrix4& world, Math::Vector3 color, uint32_t id, float opacity);
+    // Unit zero-angle reference in the joint's YZ plane; changes the dial only.
     void ConstraintLimits(const PARS::PhysicsConstraint& joint, const Math::Matrix4& parent,
-        const Math::Matrix4& child, uint32_t id, bool selected);
+        const Math::Matrix4& child, uint32_t id, bool selected,
+        Math::Vector3 twistReference = Math::Vector3(Math::kYUnitVector));
     void Render(GraphicsContext& context, ColorBuffer& target);
     bool RequestPick(float x, float y);
     bool PollPick(uint32_t& id);
@@ -48,6 +50,7 @@ private:
     struct ConstraintGeometry
     {
         PARS::PhysicsConstraint settings;
+        Math::Vector3 twistReference{Math::kYUnitVector};
         bool selected = false, valid = false, projected = false;
         std::vector<LimitLine> lines;
         std::vector<LimitTriangle> triangles;
@@ -57,7 +60,8 @@ private:
     };
     void InitializeSurfaces();
     static std::vector<SurfaceVertex> BuildSurfaceMesh();
-    static void BuildConstraintGeometry(const PARS::PhysicsConstraint& joint, bool selected, ConstraintGeometry& geometry);
+    static void BuildConstraintGeometry(const PARS::PhysicsConstraint& joint, bool selected,
+        Math::Vector3 twistReference, ConstraintGeometry& geometry);
     void ClipLine(Math::Vector4 a, Math::Vector4 b, Math::Vector3 color, uint32_t id, float width);
     void Triangle(Math::Vector3 a, Math::Vector3 b, Math::Vector3 c, Math::Vector3 color, uint32_t id);
     Math::Matrix4 m_ViewProjection{Math::kIdentity};

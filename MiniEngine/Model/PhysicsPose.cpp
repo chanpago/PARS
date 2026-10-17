@@ -28,13 +28,23 @@ namespace PARS
             return true;
         }
 
-        // X is the segment's longitudinal/twist axis; Y is its flexion axis.
+        // X is the twist axis: longitudinal for axial joints, the hinge axis
+        // for hinges. Y fixes the remaining orientation of the joint frame.
         // Build a right-handed frame from landmarks, not the importer's bone axes.
         Matrix3 AnatomicalAxes(Vector3 x, Vector3 y)
         {
             x = Normalize(x);
             y = Normalize(y - x * Dot(x, y));
             return Matrix3(x, y, Cross(x, y));
+        }
+
+        Matrix3 HingeAxes(Vector3 segment, Vector3 hingeHint)
+        {
+            // Preserve the segment's direction and project the hinge axis
+            // perpendicular to it, including slightly splayed imported limbs.
+            // D6 twist X is the hinge; Y follows the distal segment for its dial.
+            const Matrix3 axes = AnatomicalAxes(segment, hingeHint);
+            return Matrix3(axes.GetY(), axes.GetX(), -axes.GetZ());
         }
 
         struct AnatomicalCone
@@ -228,7 +238,7 @@ namespace PARS
             const std::string prefix = side == 0 ? "Left" : "Right";
             const int index = find(prefix + "HandIndex1"), pinky = find(prefix + "HandPinky1");
             if (index < 0 || pinky < 0 || float(LengthSquare(position(index) - position(pinky))) < 1e-8f)
-            { error = "Mixamo PA preset needs hand landmarks to calibrate forearm rotation."; return false; }
+            { error = "Mixamo PA preset needs hand landmarks to calibrate wrist orientation."; return false; }
             radial[side] = Normalize(position(index) - position(pinky));
             // The preset is calibrated from the imported T-pose, never a sampled
             // animation frame. Reject degenerate flexion axes instead of making NaNs.
@@ -243,7 +253,7 @@ namespace PARS
 
         // ROM sources (degrees):
         // CDC/Soucie 2011, passive means, males 20-44: elbow -0.8..144.6,
-        // pronation 76.9 / supination 85, knee -1..137.7, hip -17.4..130.4,
+        // knee -1..137.7, hip -17.4..130.4,
         // ankle plantarflexion 54.6 / dorsiflexion 12.7.
         // https://archive.cdc.gov/www_cdc_gov/ncbddd/jointrom/index.html
         // Moromizato 2016, Table 1, passive male means (42 men aged 20-29):
@@ -257,6 +267,8 @@ namespace PARS
         // https://doi.org/10.1007/s00586-009-0894-z
         // These are editable reference envelopes, not universal hard stops.
         // Fixed cones cannot reproduce posture-dependent coupled human limits.
+        // Elbows/knees use pure hinges. Forearm pronation/supination needs a
+        // separate roll joint; it is not part of the elbow's flexion limit.
         //
         // Two-axis cone coefficients below fit the four pure-plane endpoints in
         // this SDK's ConeLimitHelperTanLess angle space:
@@ -327,15 +339,17 @@ namespace PARS
             }
             else if (name.find("ForeArm") != std::string::npos)
             {
-                parentAxes = AnatomicalAxes(parentX, Cross(parentX, forward));
-                // Thumb-side hand landmarks define neutral pronation/supination.
-                // The Mixamo palm-down T-pose is already pronated; never declare
-                // that bind rotation to be zero and add another 85 degrees to it.
-                childAxes = AnatomicalAxes(x, radial[isLeft ? 0 : 1] * -side);
-                cone = {71.9f, 0, 72.7f, 1}; // -0.8 extension .. 144.6 flexion.
-                joint.swingZ = PhysicsJointMotion::Locked; // No elbow side-bending.
-                twistMin = isLeft ? -85.0f : -76.9f;
-                twistMax = isLeft ? 76.9f : 85.0f;
+                // Match the knee's single-twist hinge. Mirrored X axes make
+                // positive twist bend both forearms forward; Y follows each
+                // forearm so the green dial traces actual elbow flexion.
+                parentAxes = HingeAxes(parentX, Cross(parentX, forward));
+                childAxes = HingeAxes(x, Cross(x, forward));
+                cone = {0, 0, 1, 1}; // Valid but unused locked-swing limits.
+                twistMin = -.8f; twistMax = 144.6f;
+                // Keep the imported forearm roll as the hinge reference. This
+                // pure hinge locks side-bending AND independent pronation /
+                // supination; neither is silently transferred to the wrist.
+                joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
             }
             else if (name.find("Hand") != std::string::npos)
             {
@@ -345,8 +359,8 @@ namespace PARS
                 // -79 extension .. 87 flexion. Radial/ulnar 20/30 are conservative
                 // rig caps, not values measured by the above wrist study.
                 cone = {3.959488f, 5.002095f * side, 83.083931f, 25.045937f};
-                // Forearm carries pronation/supination. This small allowance is
-                // for the biased cone's coordinate coupling, not another +/-85.
+                // This small allowance covers the biased cone's coordinate
+                // coupling. It does not replace the deferred forearm roll joint.
                 twistMin = -5; twistMax = 5;
             }
             else if (name.find("UpLeg") != std::string::npos)
@@ -359,12 +373,18 @@ namespace PARS
             }
             else if (name.find("Leg") != std::string::npos)
             {
-                parentAxes = AnatomicalAxes(parentX, left);
-                childAxes = AnatomicalAxes(x, left);
-                cone = {68.35f, 0, 69.35f, 1}; // -1 hyperextension .. 137.7 flexion.
-                // Hinge approximation. Knee laxity/axial rotation depends strongly
-                // on flexion; do not give a fully extended knee a free twist cone.
-                joint.twist = joint.swingZ = PhysicsJointMotion::Locked;
+                // Use D6's single-twist hinge: X runs across the knee, while Y
+                // follows the leg. Positive X rotation bends the shin backward
+                // on both sides. These joint axes are independent of capsule X.
+                parentAxes = HingeAxes(parentX, left);
+                childAxes = HingeAxes(x, left);
+                // Twist supports asymmetric endpoints directly, so no parent
+                // swing bias is needed. Keep valid (unused) locked-swing limits.
+                cone = {0, 0, 1, 1};
+                twistMin = -1; twistMax = 137.7f;
+                // Pure hinge approximation; side-bending and shank axial
+                // rotation are now swing motions and remain locked.
+                joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
             }
             else // Foot: use a virtual downward axis, not ankle-to-toe capsule X.
             {

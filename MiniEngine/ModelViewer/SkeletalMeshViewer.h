@@ -58,6 +58,7 @@ private:
     bool EditingConstraint() const { return m_EditPhysics && m_EditConstraints && m_SelectedConstraint >= 0; }
     void DrawConstraintPanel();
     void DrawConstraints();
+    static Math::Vector3 GetTwistDisplayReference(const PARS::PhysicsConstraint& joint);
     void SelectConstraint(int index);
     void CreateConstraint();
     void ResetConstraintFrames(PARS::PhysicsConstraint& joint);

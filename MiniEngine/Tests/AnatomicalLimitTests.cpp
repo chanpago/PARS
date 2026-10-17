@@ -90,6 +90,46 @@ void RunAnatomicalLimitTests()
             Near(asset.constraints[i].childFrame.GetTransform(), rotated.constraints[i].childFrame.GetTransform()),
             "Both anatomical frames are invariant under rigid import transform");
 
+    // A slightly splayed bind pose still needs each hinge's green twist dial
+    // to follow its distal segment, with the hinge perpendicular to that segment.
+    {
+        Fixture splayed;
+        for (float side : {1.0f, -1.0f})
+        {
+            const std::string prefix = side > 0 ? "Left" : "Right";
+            for (const char* suffix : {"Leg", "Foot"})
+            {
+                auto& transform = splayed.pose[splayed.Find(prefix + suffix)].xform;
+                transform.SetW(Vector4(Vector3(transform.GetW()) + Vector3(side * .025f, 0, 0), 1));
+            }
+            for (const char* suffix : {"ForeArm", "Hand"})
+            {
+                auto& transform = splayed.pose[splayed.Find(prefix + suffix)].xform;
+                transform.SetW(Vector4(Vector3(transform.GetW()) + Vector3(0, -.02f, .015f), 1));
+            }
+        }
+        PhysicsAsset splayedAsset;
+        std::vector<Matrix4> splayedWorld;
+        Check(BuildMixamoPhysicsAsset(splayed.skeleton, splayed.pose, splayedAsset, error) &&
+            EvaluatePhysicsPose(splayed.skeleton, splayed.pose, Matrix4(kIdentity), splayedWorld, error),
+            "Generate a splayed reference pose");
+        for (const auto& joint : splayedAsset.constraints)
+            if (joint.childBone == "LeftLeg" || joint.childBone == "RightLeg" ||
+                joint.childBone == "LeftForeArm" || joint.childBone == "RightForeArm")
+            {
+                const auto& body = splayedAsset.bodies[splayedAsset.FindBody(joint.childBone)];
+                const bool elbow = joint.childBone.find("ForeArm") != std::string::npos;
+                const std::string prefix = joint.childBone.find("Left") == 0 ? "Left" : "Right";
+                const int node = splayed.Find(joint.childBone);
+                const int end = splayed.Find(prefix + (elbow ? "Hand" : "Foot"));
+                const Vector3 direction = Normalize(Vector3(splayedWorld[end].GetW()) - Vector3(splayedWorld[node].GetW()));
+                const Matrix4 frame = PhysicsBoneFrame(splayedWorld[node]) * body.GetLocalTransform() * joint.childFrame.GetTransform();
+                Check(float(Length(Vector3(frame.GetY()) - direction)) < 1e-4f &&
+                    std::abs(float(Dot(Vector3(frame.GetX()), direction))) < 1e-4f,
+                    "Splayed elbow/knee twist references follow their distal segments with perpendicular hinge axes");
+            }
+    }
+
     PhysicsWorld physics;
     Check(physics.Initialize(false), "Initialize anatomical limit tests");
     const Vector3 left(kXUnitVector), up(kYUnitVector), forward(kZUnitVector);
@@ -116,23 +156,38 @@ void RunAnatomicalLimitTests()
             if (std::string(suffix) == "ForeArm")
             {
                 x = left * side; y = up * -side; low = -.8f; high = 144.6f;
-                // A palm-down bind pose is already pronated ~90 degrees. Its
-                // departure from the clinical mean must not be hidden by a
-                // reset-to-zero frame, which would permit double pronation.
-                Check(runtime.GetMaxAngularError() > XMConvertToRadians(10), "Forearm bind pronation is calibrated from hand landmarks");
             }
-            else if (std::string(suffix) == "Leg") { y = left; low = -1; high = 137.7f; }
+            else if (std::string(suffix) == "Leg")
+            {
+                y = left; low = -1; high = 137.7f;
+            }
             else if (std::string(suffix) == "UpLeg") { low = -17.4f; high = 130.4f; }
             else if (std::string(suffix) == "Hand")
             { x = left * side; y = forward * -side; low = -79; high = 87; }
             else { low = -54.6f; high = 12.7f; }
+            const bool hinge = std::string(suffix) == "Leg" || std::string(suffix) == "ForeArm";
+            if (hinge)
+                Check(joint->twist == PhysicsJointMotion::Limited &&
+                    joint->swingY == PhysicsJointMotion::Locked && joint->swingZ == PhysicsJointMotion::Locked,
+                    "Elbows and knees use single-twist hinges with both swing axes locked");
             const Matrix3 neutral(x, y, Cross(x, y));
             const auto sample = [&](float bend, float lateral, float twist) {
                 const Matrix3 rotation(Quaternion(Vector3(kYUnitVector), XMConvertToRadians(bend)) *
                     Quaternion(Vector3(kZUnitVector), XMConvertToRadians(lateral)) *
                     Quaternion(Vector3(kXUnitVector), XMConvertToRadians(twist)));
-                const Matrix4 desiredFrame(neutral * rotation, Vector3(world[childNode].GetW()));
-                bones[1] = desiredFrame * Invert(joint->childFrame.GetTransform()) * Invert(child.GetLocalTransform());
+                if (hinge)
+                {
+                    // Move the actual limb about the anatomical hinge pivot,
+                    // independently of the generated constraint frames. This
+                    // catches swapping limits without rotating the hinge axis.
+                    const Matrix4 anatomicalFrame(neutral, Vector3(world[childNode].GetW()));
+                    bones[1] = anatomicalFrame * Matrix4(rotation) * Invert(anatomicalFrame) * world[childNode];
+                }
+                else
+                {
+                    const Matrix4 desiredFrame(neutral * rotation, Vector3(world[childNode].GetW()));
+                    bones[1] = desiredFrame * Invert(joint->childFrame.GetTransform()) * Invert(child.GetLocalTransform());
+                }
                 Check(runtime.UpdateKinematicPose(bones, true, error), "Set anatomical test orientation");
                 return runtime.GetMaxAngularError();
             };
@@ -140,16 +195,15 @@ void RunAnatomicalLimitTests()
                 Check(sample(angle, 0, 0) < .001f, "Neutral and published sagittal endpoints lie inside the real D6 limit");
             Check(sample(low - 3, 0, 0) > .01f && sample(high + 3, 0, 0) > .01f,
                 "D6 rejects both hyperextension and excessive flexion beyond anatomical endpoints");
-            if (std::string(suffix) == "ForeArm")
+            if (hinge)
             {
-                const float min = side > 0 ? -85 : -76.9f, max = side > 0 ? 76.9f : 85;
-                Check(sample(90, 0, min) < .001f && sample(90, 0, max) < .001f &&
-                    sample(90, 0, min - 5) > .05f && sample(90, 0, max + 5) > .05f,
-                    "Mirrored forearms allow measured pronation/supination and reject excess rotation");
-                Check(sample(90, 10, 0) > .1f, "Elbows reject lateral bending");
+                for (float bend : {0.0f, 45.0f, 90.0f, 130.0f})
+                {
+                    Check(sample(bend, 0, 0) < .001f, "Twist hinges allow anatomical flexion throughout their range");
+                    Check(sample(bend, 10, 0) > .1f && sample(bend, 0, 15) > .15f,
+                        "Pure elbow/knee hinges reject side-bending and longitudinal rotation throughout flexion");
+                }
             }
-            if (std::string(suffix) == "Leg")
-                Check(sample(90, 10, 0) > .1f && sample(90, 0, 15) > .2f, "Knees reject side-bending and axial twisting");
             if (std::string(suffix) == "UpLeg")
             {
                 const float abduction = -32.1f * side, adduction = 13.7f * side;

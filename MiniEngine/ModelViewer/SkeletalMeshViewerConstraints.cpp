@@ -2,6 +2,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "imgui.h"
 #include <cmath>
+#include <cstring>
 
 using namespace Math;
 using namespace PARS;
@@ -207,7 +208,34 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     changed |= ImGui::Checkbox("Connected bodies collide", &joint.enableCollision);
     ImGui::EndDisabled();
     ImGui::TextWrapped("Red cone/arc: allowed swing. Green sector: allowed X twist. Yellow: current child direction / twist (swing removed). Both limits share the joint pivot. Orange: separated anchors.");
+    ImGui::TextWrapped("Twist zero follows the body's front, the hand's palm, or the forearm/shin direction for elbow/knee hinges. The sector and needle show X rotation with swing removed.");
     if (changed) { m_PhysicsDirty = true; m_PhysicsMessage.clear(); }
+}
+
+Vector3 SkeletalMeshViewer::GetTwistDisplayReference(const PhysicsConstraint& joint)
+{
+    const auto colon = joint.childBone.find_last_of(':');
+    const char* bone = joint.childBone.c_str() + (colon == std::string::npos ? 0 : colon + 1);
+
+    // Match BuildMixamoPhysicsAsset's anatomical CHILD frames, not world axes:
+    // -Z is front for the trunk/neck/head, shoulder/upper arm, thigh and foot;
+    // for the hand it is the palm normal (down in the imported T-pose).
+    // The same reference rotates the parent dial and the child twist needle.
+    // It stays attached to the joint during animation and frame editing.
+    for (const char* name : {"Spine", "Spine1", "Spine2", "Neck", "Head",
+        "LeftShoulder", "RightShoulder", "LeftArm", "RightArm",
+        "LeftHand", "RightHand",
+        "LeftUpLeg", "RightUpLeg", "LeftFoot", "RightFoot"})
+        if (std::strcmp(bone, name) == 0) return Vector3(0, 0, -1);
+
+    // Hinge X is the elbow/knee flexion axis and Y follows the forearm/shin.
+    // The green twist sector therefore follows the actual bending motion.
+    if (std::strcmp(bone, "LeftLeg") == 0 || std::strcmp(bone, "RightLeg") == 0 ||
+        std::strcmp(bone, "LeftForeArm") == 0 || std::strcmp(bone, "RightForeArm") == 0)
+        return Vector3(kYUnitVector);
+
+    // Unrecognized rigs retain the joint-local convention; do not guess their anatomy.
+    return Vector3(kYUnitVector);
 }
 
 void SkeletalMeshViewer::DrawConstraints()
@@ -229,6 +257,7 @@ void SkeletalMeshViewer::DrawConstraints()
             m_Overlay.Point(pivot, color, id, selected ? 6.0f : 3.0f);
             m_Overlay.Point(childPivot, color, id, selected ? 5.0f : 3.0f);
         }
-        if (m_ShowLimits) m_Overlay.ConstraintLimits(joint, parent, child, id, selected);
+        if (m_ShowLimits)
+            m_Overlay.ConstraintLimits(joint, parent, child, id, selected, GetTwistDisplayReference(joint));
     }
 }

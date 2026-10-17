@@ -73,10 +73,11 @@ namespace PARS
             auto* actor = world.CreateDynamicBody(transform, geometry.any(), body.mass, body.bone.c_str());
             if (!actor) { error = "Could not create ragdoll body: " + body.bone; Destroy(); return false; }
             // The anatomical masses put small shoulder bodies between heavier
-            // trunk/arm bodies. Tight anatomical hinges and biased cones need
-            // more convergence on impact, without changing masses/inertia or
-            // widening ROM. This cost applies only to ragdoll bodies.
-            actor->setSolverIterationCounts(64, 16);
+            // trunk/arm bodies. Tight twist hinges and biased cones need extra
+            // convergence when the falling chain hits the floor, especially at
+            // the light hands. Keep masses/inertia and ROM unchanged; the higher
+            // iteration budget applies only to ragdoll bodies.
+            actor->setSolverIterationCounts(128, 32);
             actor->setLinearVelocity(initialVelocity);
             m_Bodies.push_back(actor); m_BoneNodes.push_back(node);
         }

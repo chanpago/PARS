@@ -16,15 +16,16 @@ namespace
 }
 
 void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, const Matrix4& parent,
-    const Matrix4& child, uint32_t id, bool selected)
+    const Matrix4& child, uint32_t id, bool selected, Vector3 twistReference)
 {
     auto& geometry = m_ConstraintGeometry[id];
     const auto& previous = geometry.settings;
     if (!geometry.valid || geometry.selected != selected || previous.twist != joint.twist ||
         previous.swingY != joint.swingY || previous.swingZ != joint.swingZ ||
         previous.twistMin != joint.twistMin || previous.twistMax != joint.twistMax ||
-        previous.swingYLimit != joint.swingYLimit || previous.swingZLimit != joint.swingZLimit)
-        BuildConstraintGeometry(joint, selected, geometry);
+        previous.swingYLimit != joint.swingYLimit || previous.swingZLimit != joint.swingZLimit ||
+        float(LengthSquare(geometry.twistReference - twistReference)) != 0)
+        BuildConstraintGeometry(joint, selected, twistReference, geometry);
 
     // Cache local geometry across animation/camera movement. When the projected
     // frame is unchanged too, reuse the clipped screen-width lines and fills.
@@ -79,13 +80,16 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
     {
         const float invLength = 1 / std::sqrt(twistNorm);
         const Quaternion twist(XMVectorSet(q.x * invLength, 0, 0, q.w * invLength));
-        pointer(twist * y, .062f);
+        // The needle and sector use the same zero, preserving signed PhysX angles.
+        pointer(twist * twistReference, .062f);
     }
 }
 
-void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joint, bool selected, ConstraintGeometry& geometry)
+void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joint, bool selected,
+    Vector3 twistReference, ConstraintGeometry& geometry)
 {
     geometry.settings = joint;
+    geometry.twistReference = twistReference;
     geometry.selected = selected;
     geometry.valid = true;
     geometry.projected = false;
@@ -189,19 +193,20 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
     }
 
     // Swing and twist share the joint pivot, including their current-angle pointers.
-    // Its zero is parent Y, positive angles rotate toward parent Z about parent X.
+    // Rotate the sector's reference and its needle together, never the physical
+    // joint frames or angle limits. Positive twist still rotates about local X.
     const Vector3 twistCenter = origin;
     const float twistRadius = radius * .62f;
     const float low = joint.twist == Motion::Free ? -XM_PI : joint.twist == Motion::Locked ? 0 : joint.twistMin;
     const float high = joint.twist == Motion::Free ? XM_PI : joint.twist == Motion::Locked ? 0 : joint.twistMax;
     if (joint.twist == Motion::Locked)
     {
-        const Vector3 tip = twistCenter + y * twistRadius;
+        const Vector3 tip = twistCenter + twistReference * twistRadius;
+        const Vector3 tangent = Cross(x, twistReference) * .008f;
         line(twistCenter, tip, green, width);
-        line(tip - z * .008f, tip + z * .008f, green, width);
+        line(tip - tangent, tip + tangent, green, width);
     }
-    else sector(twistCenter, x, y * twistRadius, low, high, joint.twist == Motion::Free ? 0 : opacity, green);
-
+    else sector(twistCenter, x, twistReference * twistRadius, low, high, joint.twist == Motion::Free ? 0 : opacity, green);
 }
 
 void SkeletonOverlay::InitializeSurfaces()
