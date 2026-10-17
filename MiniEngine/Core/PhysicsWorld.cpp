@@ -1,5 +1,9 @@
 #include "PhysicsWorld.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
 #include <cmath>
 #include <algorithm>
 
@@ -76,7 +80,18 @@ bool PhysicsWorld::Initialize(bool connectPvd)
         return false;
     }
 
-    m_Dispatcher = PxDefaultCpuDispatcherCreate(2);
+    // 물리 코어 수가 아니라, Windows가 보고하는 논리 프로세서 수를 조회한다.
+    SYSTEM_INFO systemInfo{};
+    GetSystemInfo(&systemInfo);
+    const uint32_t logicalProcessorCount = systemInfo.dwNumberOfProcessors;
+
+    // 레퍼런스처럼 메인 스레드의 작업 여유를 고려해 PhysX 워커를 하나 적게 만든다.
+    // 예: 8코어 / 16논리 프로세서 CPU라면 워커 15개. 특정 코어를 전용으로 예약하는 것은 아니다.
+    // 논리 프로세서가 1개이거나 조회값이 0이어도 최소 1개를 유지하고, unsigned 뺄셈 언더플로를 막는다.
+    const uint32_t workerCount = logicalProcessorCount > 1 ? logicalProcessorCount - 1 : 1;
+
+    // 이 디스패처가 PhysX 내부 작업을 워커에 분배한다. 아래에서 Scene의 cpuDispatcher로 연결한다.
+    m_Dispatcher = PxDefaultCpuDispatcherCreate(workerCount);
     m_Material = m_Physics->createMaterial(0.6f, 0.5f, 0.1f);
     if (!m_Dispatcher || !m_Material)
     {

@@ -122,16 +122,41 @@ namespace PARS
     {
         if (!m_Playing || m_IterationDepth != 0 || !std::isfinite(deltaTime) || deltaTime < 0.0f)
             return;
-        // Inputs -> fixed movement/physics -> animation. A new actor is configured
+        // Inputs -> fixed movement/animation/physics -> final poses. A new actor is configured
         // before BeginPlay and never joins a tick pass halfway through spawning.
-        ForEachActor([](Actor& actor) { if (!actor.HasBegunPlay()) actor.BeginPlay(); });
+        {
+            IterationScope scope(m_IterationDepth);
+            const size_t count = m_Actors.size();
+            for (size_t i = 0; i < count; ++i)
+            {
+                Actor* actor = m_Actors[i].get();
+                if (!actor->IsPendingDestroy() && !actor->HasBegunPlay())
+                    actor->BeginPlay();
+            }
+        }
         if (!m_Playing) return;
-        ForEachActor([&](Actor& actor) {
-            if (actor.HasBegunPlay() && actor.GetTickGroup() == Actor::TickGroup::PrePhysics)
-                actor.Tick(deltaTime);
-        });
+        {
+            IterationScope scope(m_IterationDepth);
+            const size_t count = m_Actors.size();
+            for (size_t i = 0; i < count; ++i)
+            {
+                Actor* actor = m_Actors[i].get();
+                if (!actor->IsPendingDestroy() && actor->HasBegunPlay() &&
+                    actor->GetTickGroup() == Actor::TickGroup::PrePhysics)
+                    actor->Tick(deltaTime);
+            }
+        }
         if (!m_Playing) return;
-        ForEachActor([&](Actor& actor) { actor.PreparePhysics(deltaTime); });
+        {
+            IterationScope scope(m_IterationDepth);
+            const size_t count = m_Actors.size();
+            for (size_t i = 0; i < count; ++i)
+            {
+                Actor* actor = m_Actors[i].get();
+                if (!actor->IsPendingDestroy())
+                    actor->PreparePhysics(deltaTime);
+            }
+        }
         if (!m_Playing) return;
         float animationDelta = deltaTime;
 #if defined(_M_X64)
@@ -139,7 +164,14 @@ namespace PARS
         {
             m_Physics->Update(0.0); // Reset per-frame statistics, preserving the fractional step.
             const auto stepActors = [&](float dt) {
-                ForEachActor([&](Actor& actor) { actor.FixedTick(dt); });
+                IterationScope scope(m_IterationDepth);
+                const size_t count = m_Actors.size();
+                for (size_t i = 0; i < count; ++i)
+                {
+                    Actor* actor = m_Actors[i].get();
+                    if (!actor->IsPendingDestroy())
+                        actor->FixedTick(dt);
+                }
             };
             animationDelta = m_PhysicsPaused ? 0.0f : deltaTime * m_PhysicsTimeScale;
             if (m_PhysicsPaused && m_StepRequested)
@@ -157,10 +189,17 @@ namespace PARS
         }
 #endif
         if (!m_Playing) return;
-        ForEachActor([&](Actor& actor) {
-            if (actor.HasBegunPlay() && actor.GetTickGroup() == Actor::TickGroup::PostPhysics)
-                actor.Tick(animationDelta);
-        });
+        {
+            IterationScope scope(m_IterationDepth);
+            const size_t count = m_Actors.size();
+            for (size_t i = 0; i < count; ++i)
+            {
+                Actor* actor = m_Actors[i].get();
+                if (!actor->IsPendingDestroy() && actor->HasBegunPlay() &&
+                    actor->GetTickGroup() == Actor::TickGroup::PostPhysics)
+                    actor->Tick(animationDelta);
+            }
+        }
     }
 
     void World::CollectGarbage()
