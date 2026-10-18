@@ -72,12 +72,10 @@ namespace PARS
             }
             auto* actor = world.CreateDynamicBody(transform, geometry.any(), body.mass, body.bone.c_str());
             if (!actor) { error = "Could not create ragdoll body: " + body.bone; Destroy(); return false; }
-            // The anatomical masses put small shoulder bodies between heavier
-            // trunk/arm bodies. Tight twist hinges and biased cones need extra
-            // convergence when the falling chain hits the floor, especially at
-            // the light hands. Keep masses/inertia and ROM unchanged; the higher
-            // iteration budget applies only to ragdoll bodies.
-            actor->setSolverIterationCounts(128, 32);
+            // Use a moderate increase over the reference's 4/1 for tighter joints.
+            // Override CreateDynamicBody's 32/8 explicitly and stay below the
+            // former 128/32 budget, which stalled fixed-step simulation in Debug.
+            actor->setSolverIterationCounts(16, 4);
             actor->setLinearVelocity(initialVelocity);
             m_Bodies.push_back(actor); m_BoneNodes.push_back(node);
         }
