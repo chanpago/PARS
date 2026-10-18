@@ -30,6 +30,14 @@ namespace PARS
 
     enum class PhysicsJointMotion { Locked, Limited, Free };
 
+    // Force-based angular PD drive. Torque limits are Nm per driven axis;
+    // stiffness/damping use radians and radians/second. Legacy PAs stay passive.
+    struct PhysicsAngularDrive
+    {
+        bool enabled = false;
+        float stiffness = 0, damping = 0, maxTorque = 0;
+    };
+
     struct PhysicsJointFrame
     {
         DirectX::XMFLOAT3 offset{0, 0, 0};
@@ -51,6 +59,9 @@ namespace PARS
         float twistMin = -DirectX::XM_PIDIV4, twistMax = DirectX::XM_PIDIV4;
         float swingYLimit = DirectX::XM_PI / 6, swingZLimit = DirectX::XM_PI / 6;
         bool enableCollision = false;
+        PhysicsAngularDrive drives[3]; // Twist X, Swing Y, Swing Z.
+        // SLERP uses drives[0] for all rotations and requires no locked angular axis.
+        bool useSlerpDrive = false;
 
         void SetWorldFrame(const Math::Matrix4& parentBodyWorld,
             const Math::Matrix4& childBodyWorld, const Math::Matrix4& jointWorld);
@@ -70,4 +81,7 @@ namespace PARS
         // Transactional: a rejected file leaves this asset untouched.
         bool Load(const std::string& path, std::string& error);
     };
+    // Initial, tunable control gains; these are not measured human muscle strengths.
+    void ConfigureDefaultDrives(PhysicsAsset& asset);
+    bool HasEnabledAngularDrive(const PhysicsConstraint& joint);
 }

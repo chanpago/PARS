@@ -85,6 +85,38 @@ namespace PARS
         return true;
     }
 
+    Quaternion EvaluateJointDriveTarget(const PhysicsConstraint& joint, const Matrix4& parentBodyTarget,
+        const Matrix4& childBodyTarget, bool clampToLimits)
+    {
+        Quaternion q = Normalize(Quaternion(Invert(parentBodyTarget * joint.parentFrame.GetTransform()) *
+            (childBodyTarget * joint.childFrame.GetTransform())));
+        if (!clampToLimits) return q;
+        XMFLOAT4 v; XMStoreFloat4(&v, q);
+        if (v.w < 0) { q = -q; XMStoreFloat4(&v, q); }
+        const float norm = std::sqrt(v.x * v.x + v.w * v.w);
+        const Quaternion twist = norm > 1e-7f ? Quaternion(XMVectorSet(v.x / norm, 0, 0, v.w / norm)) : Quaternion(kIdentity);
+        XMFLOAT4 s; XMStoreFloat4(&s, Normalize(q * ~twist));
+        if (s.w < 0) { s.y = -s.y; s.z = -s.z; s.w = -s.w; }
+        float x = norm > 1e-7f ? 2 * std::atan2(v.x, v.w) : 0;
+        float y = 4 * std::atan2(s.y, 1 + s.w), z = 4 * std::atan2(s.z, 1 + s.w);
+        if (joint.twist == PhysicsJointMotion::Locked) x = 0;
+        else if (joint.twist == PhysicsJointMotion::Limited) x = std::max(joint.twistMin, std::min(joint.twistMax, x));
+        if (joint.swingY == PhysicsJointMotion::Locked) y = 0;
+        else if (joint.swingY == PhysicsJointMotion::Limited) y = std::max(-joint.swingYLimit, std::min(joint.swingYLimit, y));
+        if (joint.swingZ == PhysicsJointMotion::Locked) z = 0;
+        else if (joint.swingZ == PhysicsJointMotion::Limited) z = std::max(-joint.swingZLimit, std::min(joint.swingZLimit, z));
+        if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited)
+        {
+            // Matches PhysX ConeLimitHelperTanLess's ellipse in swing-angle
+            // coordinates; independent clamps alone miss diagonal violations.
+            const float r = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) + z * z / (joint.swingZLimit * joint.swingZLimit));
+            if (r > 1) { y /= r; z /= r; }
+        }
+        const float ty = std::tan(y * .25f), tz = std::tan(z * .25f), r2 = ty * ty + tz * tz;
+        const Quaternion swing(XMVectorSet(0, 2 * ty / (1 + r2), 2 * tz / (1 + r2), (1 - r2) / (1 + r2)));
+        return Normalize(swing * Quaternion(Vector3(kXUnitVector), x));
+    }
+
     bool OverridePhysicsPose(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& source,
         const Matrix4& component, const std::vector<int>& nodes, const std::vector<Matrix4>& targets,
         std::vector<GraphNode>& result)
@@ -322,7 +354,10 @@ namespace PARS
                 // Allocate horizontal -10..20 and elevation -10..30 to it;
                 // subtract those budgets from the humerus below. Approximation.
                 parentAxes = childAxes = AnatomicalAxes(left * side, up * -side);
-                cone = {4.973932f, -9.956774f * side, 17.052221f, 20.855535f};
+                // Add 10 degrees to each half-angle for the imported animation
+                // tracks. Keep the calibrated frame/bias; this is tuning margin,
+                // not additional measured anatomical ROM.
+                cone = {4.973932f, -9.956774f * side, 27.052221f, 30.855535f};
                 // Small allowance for swing/twist coupling in the biased frame.
                 twistMin = -3; twistMax = 3;
             }
@@ -359,9 +394,10 @@ namespace PARS
                 // -79 extension .. 87 flexion. Radial/ulnar 20/30 are conservative
                 // rig caps, not values measured by the above wrist study.
                 cone = {3.959488f, 5.002095f * side, 83.083931f, 25.045937f};
-                // This small allowance covers the biased cone's coordinate
-                // coupling. It does not replace the deferred forearm roll joint.
-                twistMin = -5; twistMax = 5;
+                // Relax the original +/-5-degree coupling allowance to +/-20
+                // for animation roll. This is a rig tuning compromise, not
+                // physiological wrist pronation or a separate forearm roll joint.
+                twistMin = -20; twistMax = 20;
             }
             else if (name.find("UpLeg") != std::string::npos)
             {
@@ -392,14 +428,18 @@ namespace PARS
                 childAxes = AnatomicalAxes(-up, -left);
                 // Sagittal -54.6 plantar .. 12.7 dorsi. Inversion/eversion 30/15
                 // are rig caps for the combined ankle/subtalar proxy, not CDC data.
-                cone = {-20.754667f, 7.333241f * side, 34.654347f, 27.971366f};
-                twistMin = -6; twistMax = 6; // Biased-frame coupling, not free foot yaw.
+                // Walking/running targets need more room than the reference
+                // envelope: +10 degrees in swing Y and +5 in swing Z, retaining
+                // the frame bias. These are animation tuning margins.
+                cone = {-20.754667f, 7.333241f * side, 44.654347f, 32.971366f};
+                twistMin = -10; twistMax = 10; // +/-4 degrees beyond the original coupling allowance.
             }
             SetAnatomicalFrames(joint, parentWorld, childWorld, position(nodes[i]),
                 parentAxes, childAxes, cone, twistMin, twistMax);
             candidate.constraints.push_back(joint);
         }
         if (!candidate.Validate(error)) return false;
+        ConfigureDefaultDrives(candidate);
         result = std::move(candidate);
         return true;
     }

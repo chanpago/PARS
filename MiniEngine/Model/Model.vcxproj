@@ -197,6 +197,7 @@
     <ClCompile Include="PhysicsPose.cpp" />
     <ClInclude Include="PhysicsPose.h" />
     <ClCompile Include="Ragdoll.cpp" />
+    <ClCompile Include="RagdollDrive.cpp" />
     <ClInclude Include="Ragdoll.h" />
     <ClInclude Include="Components\SkeletalMeshComponent.h" />
     <ClInclude Include="Components\SkinnedMeshComponent.h" />

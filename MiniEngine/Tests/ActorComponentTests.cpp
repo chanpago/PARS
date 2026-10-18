@@ -156,6 +156,7 @@ void RunCharacterMovementTests();
 void RunPhysicsAssetTests();
 void RunRagdollTests();
 void RunAnatomicalLimitTests();
+void RunActiveRagdollTests();
 
 int main()
 {
@@ -167,5 +168,6 @@ int main()
     RunPhysicsAssetTests();
     RunRagdollTests();
     RunAnatomicalLimitTests();
+    RunActiveRagdollTests();
     return 0;
 }

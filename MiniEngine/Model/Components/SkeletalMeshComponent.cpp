@@ -38,6 +38,7 @@ namespace PARS
         m_Ragdoll.Swap(candidate);
         m_PhysicsSkeleton = std::move(skeleton);
         m_PhysicsAsset = std::make_unique<const PhysicsAsset>(asset);
+        m_PendingDriveSettings.reset();
         m_PhysicsError.clear(); error.clear();
         return true;
     }
@@ -62,11 +63,32 @@ namespace PARS
 
     void SkeletalMeshComponent::FixedTickComponent(float deltaTime)
     {
-        if (!m_Ragdoll.IsActive() || IsRagdoll()) return;
+        if (!m_Ragdoll.IsActive()) return;
+        if (m_PendingDriveSettings)
+        {
+            if (m_Ragdoll.ApplyDriveSettings(*m_PendingDriveSettings, m_PhysicsError))
+                m_PhysicsAsset = std::move(m_PendingDriveSettings);
+            else m_PendingDriveSettings.reset();
+        }
+        if (m_PhysicsMode == PhysicsAnimationMode::PassiveRagdoll) return;
         // Character movement has already updated the component root. Sample the
         // animation before simulate(), so both PVD and rendering see this pose.
         m_AnimInstance->UpdateAnimation(deltaTime);
-        UpdateKinematicPose(false);
+        if (IsActiveRagdoll())
+        {
+            std::vector<Math::Matrix4> target;
+            if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError) ||
+                !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
+            {
+                // A failed target falls back to full-body passive dynamics.
+                // Preserve the target error while releasing the kinematic pelvis.
+                m_Ragdoll.SetDrivesEnabled(false);
+                std::string supportError;
+                m_Ragdoll.SetRootSupported(false, supportError);
+                m_PhysicsMode = PhysicsAnimationMode::PassiveRagdoll;
+            }
+        }
+        else UpdateKinematicPose(false);
     }
 
     bool SkeletalMeshComponent::UpdateRenderData(GraphicsContext& context, const std::vector<GraphNode>* poseOverride)

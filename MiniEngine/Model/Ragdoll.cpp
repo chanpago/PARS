@@ -38,6 +38,8 @@ namespace PARS
         for (auto* body : m_Bodies) body->release();
 #endif
         m_Joints.clear(); m_Bodies.clear(); m_BoneNodes.clear(); m_Asset = {}; m_Simulating = false;
+        m_DrivesEnabled = m_HasDriveTargets = false; m_SupportBody = -1; m_MaxTargetClampAngle = 0;
+        m_DriveTargets.clear(); m_LastKinematicTargets.clear(); m_AnimatedLinearVelocity.clear(); m_AnimatedAngularVelocity.clear();
     }
 
     void Ragdoll::Swap(Ragdoll& other) noexcept
@@ -46,6 +48,10 @@ namespace PARS
         m_Asset.bodies.swap(other.m_Asset.bodies); m_Asset.constraints.swap(other.m_Asset.constraints);
         m_BoneNodes.swap(other.m_BoneNodes); m_Bodies.swap(other.m_Bodies); m_Joints.swap(other.m_Joints);
         std::swap(m_Simulating, other.m_Simulating);
+        std::swap(m_DrivesEnabled, other.m_DrivesEnabled); std::swap(m_HasDriveTargets, other.m_HasDriveTargets);
+        std::swap(m_SupportBody, other.m_SupportBody); std::swap(m_MaxTargetClampAngle, other.m_MaxTargetClampAngle);
+        m_DriveTargets.swap(other.m_DriveTargets); m_LastKinematicTargets.swap(other.m_LastKinematicTargets);
+        m_AnimatedLinearVelocity.swap(other.m_AnimatedLinearVelocity); m_AnimatedAngularVelocity.swap(other.m_AnimatedAngularVelocity);
     }
 
     bool Ragdoll::Create(PhysicsWorld& world, const PhysicsAsset& asset, const std::vector<std::string>& names,
@@ -86,6 +92,8 @@ namespace PARS
             if (!joint) { error = "Could not create ragdoll joint."; Destroy(); return false; }
             m_Joints.push_back(joint);
             joint->setName(data.childBone.c_str());
+            joint->setAngularDriveConfig(PxD6AngularDriveConfig::eSWING_TWIST);
+            joint->setConstraintFlag(PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
             joint->setMotion(PxD6Axis::eX, PxD6Motion::eLOCKED);
             joint->setMotion(PxD6Axis::eY, PxD6Motion::eLOCKED);
             joint->setMotion(PxD6Axis::eZ, PxD6Motion::eLOCKED);
@@ -112,14 +120,20 @@ namespace PARS
 #endif
     }
 
-    bool Ragdoll::SetSimulating(bool simulate, Vector3 velocity, std::string& error)
+    bool Ragdoll::SetSimulating(bool simulate, Vector3 velocity, std::string& error, bool inheritAnimationVelocity)
     {
         if (!IsActive()) { error = "No PA bodies are registered."; return false; }
 #if defined(_M_X64)
         const PxVec3 initialVelocity(float(velocity.GetX()), float(velocity.GetY()), float(velocity.GetZ()));
         if (!initialVelocity.isFinite()) { error = "Invalid initial velocity."; return false; }
-        for (auto* body : m_Bodies)
+        if (!simulate)
         {
+            SetDrivesEnabled(false); SetRootSupported(false, error);
+            m_LastKinematicTargets.clear(); m_AnimatedLinearVelocity.clear(); m_AnimatedAngularVelocity.clear();
+        }
+        for (size_t i = 0; i < m_Bodies.size(); ++i)
+        {
+            auto* body = m_Bodies[i];
             body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, !simulate);
             // Movement sweeps must not hit the character's own animated bone shapes.
             // Simulation shapes remain enabled, and stay visible in PVD in both modes.
@@ -128,15 +142,16 @@ namespace PARS
             if (shape) shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, simulate);
             if (simulate)
             {
-                body->setLinearVelocity(initialVelocity);
-                body->setAngularVelocity(PxVec3(0));
+                const auto toPx = [](Vector3 v) { return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ())); };
+                body->setLinearVelocity(inheritAnimationVelocity && m_AnimatedLinearVelocity.size() == m_Bodies.size() ? toPx(m_AnimatedLinearVelocity[i]) : initialVelocity);
+                body->setAngularVelocity(inheritAnimationVelocity && m_AnimatedAngularVelocity.size() == m_Bodies.size() ? toPx(m_AnimatedAngularVelocity[i]) : PxVec3(0));
                 body->wakeUp();
             }
         }
         m_Simulating = simulate;
         error.clear(); return true;
 #else
-        (void)simulate; (void)velocity;
+        (void)simulate; (void)velocity; (void)inheritAnimationVelocity;
         error = "Ragdoll requires an x64 PhysX build."; return false;
 #endif
     }
@@ -157,9 +172,31 @@ namespace PARS
         }
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
+            if (teleport && m_LastKinematicTargets.size() == m_Bodies.size())
+            {
+                const auto previous = ToPx(m_LastKinematicTargets[i]);
+                // Teleport/clip reset invalidates finite-difference velocities;
+                // the ordinary post-tick refresh of the same pose preserves them.
+                if ((poses[i].p - previous.p).magnitudeSquared() > 1e-8f || PxAbs(poses[i].q.dot(previous.q)) < .999999f)
+                { m_AnimatedLinearVelocity.clear(); m_AnimatedAngularVelocity.clear(); }
+            }
+            if (!teleport && m_LastKinematicTargets.size() == m_Bodies.size())
+            {
+                const auto previous = ToPx(m_LastKinematicTargets[i]);
+                const PxVec3 linear = (poses[i].p - previous.p) / float(PhysicsWorld::FixedDeltaTime);
+                PxQuat delta = poses[i].q * previous.q.getConjugate();
+                if (delta.w < 0) delta = -delta;
+                PxReal angle; PxVec3 axis; delta.toRadiansAndUnitAxis(angle, axis);
+                m_AnimatedLinearVelocity.resize(m_Bodies.size()); m_AnimatedAngularVelocity.resize(m_Bodies.size());
+                m_AnimatedLinearVelocity[i] = Vector3(linear.x, linear.y, linear.z);
+                const auto angular = axis * PxMin(angle / float(PhysicsWorld::FixedDeltaTime), 20.0f);
+                m_AnimatedAngularVelocity[i] = Vector3(angular.x, angular.y, angular.z);
+            }
             if (teleport) m_Bodies[i]->setGlobalPose(poses[i]);
             m_Bodies[i]->setKinematicTarget(poses[i]);
         }
+        m_LastKinematicTargets.resize(m_Bodies.size());
+        for (size_t i = 0; i < poses.size(); ++i) m_LastKinematicTargets[i] = FromPx(poses[i]);
         error.clear(); return true;
 #else
         (void)boneWorld; (void)teleport;
@@ -194,7 +231,8 @@ namespace PARS
         if (!IsSimulating()) return;
 #if defined(_M_X64)
         const PxVec3 delta(float(velocity.GetX()), float(velocity.GetY()), float(velocity.GetZ()));
-        if (delta.isFinite()) for (auto* body : m_Bodies) body->addForce(delta, PxForceMode::eVELOCITY_CHANGE);
+        if (delta.isFinite()) for (auto* body : m_Bodies)
+            if (!(body->getRigidBodyFlags() & PxRigidBodyFlag::eKINEMATIC)) body->addForce(delta, PxForceMode::eVELOCITY_CHANGE);
 #else
         (void)velocity;
 #endif

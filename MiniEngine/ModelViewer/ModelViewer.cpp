@@ -149,6 +149,7 @@ private:
     bool m_PreviewReady = false;
     std::string m_PreviewError;
     std::string m_RagdollMessage;
+    bool m_ActiveSupport = true;
     char m_CharacterPAPath[260] = "Mixamo.physics.json";
     bool m_RagdollTestDone = false;
     unique_ptr<SkeletalMeshViewer> m_MeshViewer;
@@ -634,7 +635,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     ImGui::Text("PhysX: %zu bodies / %zu joints", runtime.GetBodyCount(), runtime.GetJointCount());
     if (runtime.IsActive())
     {
-        ImGui::Text("Mode: %s", character.IsRagdoll() ? "Dynamic ragdoll" : "Animation");
+        ImGui::Text("Mode: %s", mesh.IsActiveRagdoll() ? "Active Ragdoll" : character.IsRagdoll() ? "Passive Ragdoll" : "Animation");
         ImGui::Text("Kinematic bodies: %zu", runtime.GetKinematicBodyCount());
     }
     if (!mesh.GetPhysicsError().empty()) ImGui::TextWrapped("%s", mesh.GetPhysicsError().c_str());
@@ -652,28 +653,71 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     if (ImGui::Button("Use editor PA") && mesh.SetPhysicsAsset(m_MeshViewer->GetPhysicsAsset(), m_RagdollMessage))
         m_RagdollMessage = "Current editor PA assigned to the play character.";
     ImGui::EndDisabled();
-    ImGui::BeginDisabled(!asset);
+    ImGui::EndDisabled();
+    ImGui::BeginDisabled(!asset || mesh.HasPendingDriveSettings());
     if (ImGui::Button("Save character PA"))
     {
         if (mesh.GetPhysicsAsset()->Save(m_CharacterPAPath, m_RagdollMessage)) m_RagdollMessage = "Character PA saved.";
     }
     ImGui::EndDisabled();
-    ImGui::EndDisabled();
     asset = mesh.GetPhysicsAsset();
-    if (!character.IsRagdoll())
+    ImGui::BeginDisabled(!asset || asset->bodies.empty() || !m_World.GetPhysicsWorld());
+    ImGui::BeginDisabled(mesh.GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll);
+    if (ImGui::Button("Passive Ragdoll") && character.StartRagdoll(m_RagdollMessage))
+        m_RagdollMessage = "Passive ragdoll: angular drives off, pelvis released.";
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(mesh.IsActiveRagdoll() || mesh.HasPendingDriveSettings());
+    if (ImGui::Button("Active Ragdoll"))
     {
-        ImGui::BeginDisabled(!asset || asset->bodies.empty() || !m_World.GetPhysicsWorld());
-        if (ImGui::Button("Start ragdoll") && character.StartRagdoll(m_RagdollMessage))
-            m_RagdollMessage = "Ragdoll running. Character movement and capsule collision are disabled.";
-        ImGui::EndDisabled();
+        const bool entering = !character.IsRagdoll();
+        if (character.SetPhysicsMode(PARS::PhysicsAnimationMode::ActiveRagdoll, m_RagdollMessage))
+        {
+            if (auto* animation = GetPreviewAnimation()) animation->SetAutoCycleEnabled(false);
+            if (!entering || mesh.GetRagdoll().SetRootSupported(m_ActiveSupport, m_RagdollMessage))
+                m_RagdollMessage = "Active ragdoll: animation targets drive the physical joints.";
+        }
     }
-    else
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    bool supported = character.IsRagdoll() ? runtime.IsRootSupported() : m_ActiveSupport;
+    ImGui::BeginDisabled(mesh.GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll);
+    if (ImGui::Checkbox("Support pelvis (validation)", &supported))
+    {
+        if (!character.IsRagdoll() || mesh.GetRagdoll().SetRootSupported(supported, m_RagdollMessage)) m_ActiveSupport = supported;
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Active: pelvis follows animation position and rotation. Passive always releases the pelvis for full-body dynamics.");
+    if (mesh.IsActiveRagdoll())
+    {
+        bool drives = runtime.AreDrivesEnabled();
+        if (ImGui::Checkbox("Angular drives", &drives)) mesh.GetRagdoll().SetDrivesEnabled(drives);
+        ImGui::Text("Driven joints: %zu", runtime.GetDrivenJointCount());
+        ImGui::Text("Max target error: %.1f deg", XMConvertToDegrees(runtime.GetMaxDriveError()));
+        ImGui::Text("Target limit correction: %.1f deg", XMConvertToDegrees(runtime.GetMaxTargetClampAngle()));
+    }
+    ImGui::BeginDisabled(!asset);
+    if (ImGui::Button("Use default PD gains"))
+    {
+        auto candidate = *asset; PARS::ConfigureDefaultDrives(candidate);
+        if (mesh.QueueDriveSettings(candidate, m_RagdollMessage)) m_RagdollMessage = "Default gains queued for the next physics step.";
+    }
+    ImGui::BeginDisabled(!m_MeshViewer || m_MeshViewer->GetPhysicsAsset().bodies.empty());
+    if (ImGui::Button("Apply editor drive settings") && mesh.QueueDriveSettings(m_MeshViewer->GetPhysicsAsset(), m_RagdollMessage))
+        m_RagdollMessage = "Drive settings queued. Frames, shapes and limits use the assigned character PA.";
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    if (mesh.HasPendingDriveSettings()) ImGui::TextUnformatted("Drive settings pending next physics step.");
+    if (character.IsRagdoll())
     {
         if (ImGui::Button("Stop / return to start") && character.StopRagdoll(m_RagdollMessage))
             m_RagdollMessage = "Returned to animation and character control at the start position.";
         if (ImGui::Button("Restart ragdoll"))
         {
-            if (character.StopRagdoll(m_RagdollMessage)) character.StartRagdoll(m_RagdollMessage);
+            const auto mode = mesh.GetPhysicsMode(); const bool support = runtime.IsRootSupported();
+            if (character.StopRagdoll(m_RagdollMessage) && character.SetPhysicsMode(mode, m_RagdollMessage) &&
+                mode == PARS::PhysicsAnimationMode::ActiveRagdoll)
+                mesh.GetRagdoll().SetRootSupported(support, m_RagdollMessage);
         }
         if (character.IsRagdoll())
         {
@@ -732,12 +776,14 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 }
                 if (auto character = GetPreviewCharacter()) DrawRagdollPanel(*character);
                 ImGui::Separator();
-                ImGui::BeginDisabled(GetPreviewCharacter() && GetPreviewCharacter()->IsRagdoll());
+                ImGui::BeginDisabled(GetPreviewCharacter() && GetPreviewCharacter()->GetMesh().GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll);
                 if (GetPlayerController())
                 {
                     bool automatic = animation->IsLocomotionEnabled();
+                    ImGui::BeginDisabled(GetPreviewCharacter() && GetPreviewCharacter()->IsRagdoll());
                     if (ImGui::Checkbox("Animation follows movement", &automatic))
                         animation->SetLocomotionEnabled(automatic);
+                    ImGui::EndDisabled();
                     bool freeCamera = m_FreeCamera;
                     if (ImGui::Checkbox("Free camera (Tab)", &freeCamera))
                         SetFreeCamera(freeCamera);

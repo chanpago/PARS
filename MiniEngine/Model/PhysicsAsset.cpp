@@ -177,6 +177,12 @@ namespace PARS
             for (auto motion : {joint.twist, joint.swingY, joint.swingZ})
                 if (motion != PhysicsJointMotion::Locked && motion != PhysicsJointMotion::Limited && motion != PhysicsJointMotion::Free)
                     error = "Unknown joint motion.";
+            for (const auto& drive : joint.drives)
+                if (!std::isfinite(drive.stiffness) || !std::isfinite(drive.damping) || !std::isfinite(drive.maxTorque) ||
+                    drive.stiffness < 0 || drive.damping < 0 || drive.maxTorque < 0)
+                    error = "Drive gains and torque limits must be finite and nonnegative.";
+            if (joint.useSlerpDrive && (joint.twist == PhysicsJointMotion::Locked || joint.swingY == PhysicsJointMotion::Locked || joint.swingZ == PhysicsJointMotion::Locked))
+                error = "SLERP drive requires all three angular axes unlocked.";
             if (!std::isfinite(joint.twistMin) || !std::isfinite(joint.twistMax) ||
                 !std::isfinite(joint.swingYLimit) || !std::isfinite(joint.swingZLimit) ||
                 joint.twistMin <= -DirectX::XM_PI || joint.twistMax >= DirectX::XM_PI || joint.twistMin >= joint.twistMax ||
@@ -197,7 +203,8 @@ namespace PARS
             const auto destination = WidePath(path);
             temporary = destination + L".tmp";
             json root;
-            root["version"] = 2;
+            root["version"] = 3;
+            root["driveUnits"] = "Nm-radians-seconds";
             root["units"] = "metres";
             root["angleUnits"] = "radians";
             root["bodies"] = json::array();
@@ -225,6 +232,11 @@ namespace PARS
                 entry["twistMin"] = joint.twistMin; entry["twistMax"] = joint.twistMax;
                 entry["swingYLimit"] = joint.swingYLimit; entry["swingZLimit"] = joint.swingZLimit;
                 entry["enableCollision"] = joint.enableCollision;
+                entry["driveMode"] = joint.useSlerpDrive ? "slerp" : "swingTwist";
+                entry["drives"] = json::array();
+                for (const auto& drive : joint.drives)
+                    entry["drives"].push_back({{"enabled", drive.enabled}, {"stiffness", drive.stiffness},
+                        {"damping", drive.damping}, {"maxTorque", drive.maxTorque}});
                 root["constraints"].push_back(entry);
             }
             std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
@@ -245,8 +257,10 @@ namespace PARS
             if (!input) throw std::runtime_error("Could not open PhysicsAsset file.");
             json root; input >> root;
             const int version = root.at("version").get<int>();
-            if ((version != 1 && version != 2) || root.at("units").get<std::string>() != "metres")
+            if ((version < 1 || version > 3) || root.at("units").get<std::string>() != "metres")
                 throw std::runtime_error("Unsupported PhysicsAsset version or units.");
+            if (version == 3 && root.at("driveUnits").get<std::string>() != "Nm-radians-seconds")
+                throw std::runtime_error("Unsupported angular drive units.");
             const auto& entries = root.at("bodies");
             if (!entries.is_array() || entries.size() > 4096) throw std::runtime_error("Invalid body list.");
             PhysicsAsset candidate;
@@ -270,7 +284,7 @@ namespace PARS
                 body.mass = entry.at("mass").get<float>();
                 candidate.bodies.push_back(body);
             }
-            if (version == 2)
+            if (version >= 2)
             {
                 if (root.at("angleUnits").get<std::string>() != "radians") throw std::runtime_error("Joint angles must use radians.");
                 const auto& joints = root.at("constraints");
@@ -286,6 +300,22 @@ namespace PARS
                     joint.twistMin = entry.at("twistMin").get<float>(); joint.twistMax = entry.at("twistMax").get<float>();
                     joint.swingYLimit = entry.at("swingYLimit").get<float>(); joint.swingZLimit = entry.at("swingZLimit").get<float>();
                     joint.enableCollision = entry.at("enableCollision").get<bool>();
+                    if (version == 3)
+                    {
+                        const auto mode = entry.at("driveMode").get<std::string>();
+                        if (mode != "slerp" && mode != "swingTwist") throw std::runtime_error("Unknown angular drive mode.");
+                        joint.useSlerpDrive = mode == "slerp";
+                        const auto& drives = entry.at("drives");
+                        if (!drives.is_array() || drives.size() != 3) throw std::runtime_error("Expected three angular drives.");
+                        for (size_t axis = 0; axis < 3; ++axis)
+                        {
+                            auto& drive = joint.drives[axis]; const auto& value = drives.at(axis);
+                            drive.enabled = value.at("enabled").get<bool>();
+                            drive.stiffness = value.at("stiffness").get<float>();
+                            drive.damping = value.at("damping").get<float>();
+                            drive.maxTorque = value.at("maxTorque").get<float>();
+                        }
+                    }
                     candidate.constraints.push_back(joint);
                 }
             }
@@ -295,5 +325,37 @@ namespace PARS
             return true;
         }
         catch (const std::exception& exception) { error = exception.what(); return false; }
+    }
+
+    void ConfigureDefaultDrives(PhysicsAsset& asset)
+    {
+        for (auto& joint : asset.constraints)
+        {
+            // A proximal joint carries its descendants. Scale initial gains by
+            // their mass rather than driving a hand as strongly as the trunk.
+            std::set<std::string> descendants{joint.childBone};
+            for (size_t pass = 0; pass < asset.bodies.size(); ++pass)
+                for (const auto& link : asset.constraints)
+                    if (descendants.count(link.parentBone)) descendants.insert(link.childBone);
+            float mass = 0;
+            for (const auto& body : asset.bodies) if (descendants.count(body.bone)) mass += body.mass;
+            const float stiffness = (std::max)(1600.0f, (std::min)(96000.0f, mass * 1600.0f));
+            const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
+            joint.useSlerpDrive = joint.twist != PhysicsJointMotion::Locked && joint.swingY != PhysicsJointMotion::Locked && joint.swingZ != PhysicsJointMotion::Locked;
+            for (int axis = 0; axis < 3; ++axis)
+                joint.drives[axis] = {motions[axis] != PhysicsJointMotion::Locked, stiffness,
+                    stiffness * .005f, (std::max)(32.0f, (std::min)(1400.0f, mass * 32.0f))};
+        }
+    }
+
+    bool HasEnabledAngularDrive(const PhysicsConstraint& joint)
+    {
+        const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
+        for (int axis = 0; axis < (joint.useSlerpDrive ? 1 : 3); ++axis)
+        {
+            const auto& drive = joint.drives[axis];
+            if (motions[axis] != PhysicsJointMotion::Locked && drive.enabled && drive.maxTorque > 0 && (drive.stiffness > 0 || drive.damping > 0)) return true;
+        }
+        return false;
     }
 }

@@ -11,6 +11,7 @@
 #include <algorithm>
 
 using namespace Math;
+void RunActiveRagdollValidation(PARS::World& world, PARS::Character& character, std::ostream& report);
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath)
 {
     std::ofstream report(reportPath);
@@ -244,7 +245,8 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
             "Valid PA replacement does not duplicate joints");
         check(otherMesh.ClearPhysicsAsset() && otherMesh.GetRagdoll().GetBodyCount() == 0 && physics->GetConstraintCount() == jointsBefore,
             "Clearing PA releases kinematic objects");
-        check(otherMesh.SetPhysicsAsset(*mesh.GetPhysicsAsset(), error) && disposable->StartRagdoll(error), "Start a second independent ragdoll");
+        check(otherMesh.SetPhysicsAsset(*mesh.GetPhysicsAsset(), error) &&
+            disposable->SetPhysicsMode(PARS::PhysicsAnimationMode::ActiveRagdoll, error), "Start a second independent active ragdoll");
         check(!disposable->GetMesh().SetPhysicsAsset(*mesh.GetPhysicsAsset(), error), "Reject PA replacement while bodies are active");
         disposable->Destroy();
         Graphics::g_CommandManager.IdleGPU();
@@ -252,6 +254,7 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
         check(physics->GetDynamicBodyCount() == bodiesBefore && physics->GetConstraintCount() == jointsBefore &&
             physics->GetQueryCapsuleCount() == initialCapsuleCount, "Destroying an active ragdoll releases every body and joint");
         check(physics->GetErrorCount() == 0, "No PhysX errors through three animation/ragdoll cycles");
+        RunActiveRagdollValidation(world, character, report);
         report << "PVD connected=" << physics->IsPvdConnected() << std::endl;
         report << "PASS: all character ragdoll integration checks" << std::endl;
         return true;

@@ -59,6 +59,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ThirdParty\PhysX\Build.p
 The headless smoke test checks SDK/PVD initialization, a dynamic box falling onto
 a floor at a fixed 1/60 second step, triangle mesh cooking, and a capsule controller
 moving along the floor. It fails on SDK errors/warnings or incorrect final positions.
+Debug also checks D6 limit visualization with two kinematic bodies: inside/outside
+colors, return to the allowed range, asymmetric twist, diagonal swing, single-axis
+swing fans, quaternion signs, visualization scale, and PVD's serialized active flag.
 It is separate from ModelViewer. The engine now has `MiniEngine/Core/PhysicsWorld`
 and a visible floor/box test scene, plus `MiniEngine/Tests/PhysicsWorldTests.vcxproj`
 for the production wrapper. See the root README for usage. Imported level
@@ -80,9 +83,16 @@ failures are displayed in the panel. Use **Reconnect PVD** after a debugger rest
 and **Start drop** or **Step** to record simulation frames. Release SDK builds
 disable PVD instrumentation.
 
+For PA inspection, set **Settings > Joints** to **All** and reduce **Joints scale**
+(for example, 0.04 for this metre-based scene). D6 limits use the actual body pose:
+inside the range is green, and violations are red, including kinematic animation.
+This is visualization only; kinematic bodies are not forced back inside the limits.
+Reconnect and record fresh frames after rebuilding: existing PVD recordings retain
+their previously transmitted visualization events.
+
 ## Upstream changes
 
-Three local patches are applied:
+The following local patches are applied:
 
 - `physx/source/compiler/cmake/windows/CMakeLists.txt`: the public-release external
   DLL copy is conditioned on `PX_BUILDSNIPPETS`, unless explicitly requested through
@@ -100,6 +110,18 @@ Three local patches are applied:
   D6 joint in Debug/Profile. This changes metadata only, not joint drive behavior.
   Reapply this guard if regenerating the metadata. `ModelViewer -ragdolltest <report>`
   checks live D6 creation, simulation, PVD reconnect and cleanup without SDK errors.
+- D6 constraint visualization restores limit-state reporting for angular fans,
+  swing cones, and double cones. `PxConstraintVisualizer` and `PvdUserRenderer`
+  carry an optional `active` argument through `NpPvdSceneClient` to the existing
+  PVD wire-format field. D6 evaluates actual relative body rotations, including
+  kinematic bodies; it uses the solver's quarter-angle ellipse for two-axis swing.
+  The immediate debug renderer also uses green for allowed angles and red for
+  violations. This changes local visualization interfaces, so rebuild the SDK and
+  consumers together; the normal ModelViewer build handles this automatically.
+- When a D6 cone has an enclosing pyramid limit, its visualization draws only the
+  scalable cone. The SDK's additional pyramid lines have a fixed one-unit radius
+  and bypass PVD's Joints scale/visibility settings. Tighter or standalone pyramids
+  remain visible. All solver limits, masses, drives, and iteration counts are unchanged.
 
 To update the SDK, copy the paths listed above from the selected upstream commit,
 reapply these patches, update the version/commit here, and run the smoke test plus

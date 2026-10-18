@@ -210,19 +210,19 @@ namespace
 				mRenderer.visualizeLinearLimit(t0, t1, PxF32(value));
 			}
 
-			virtual void visualizeAngularLimit(const PxTransform& t0, PxReal lower, PxReal upper)	PX_OVERRIDE
+			virtual void visualizeAngularLimit(const PxTransform& t0, PxReal lower, PxReal upper, bool active)	PX_OVERRIDE
 			{
-				mRenderer.visualizeAngularLimit(t0, PxF32(lower), PxF32(upper));
+				mRenderer.visualizeAngularLimit(t0, PxF32(lower), PxF32(upper), active);
 			}
 
-			virtual void visualizeLimitCone(const PxTransform& t, PxReal tanQSwingY, PxReal tanQSwingZ)	PX_OVERRIDE
+			virtual void visualizeLimitCone(const PxTransform& t, PxReal tanQSwingY, PxReal tanQSwingZ, bool active)	PX_OVERRIDE
 			{
-				mRenderer.visualizeLimitCone(t, PxF32(tanQSwingY), PxF32(tanQSwingZ));
+				mRenderer.visualizeLimitCone(t, PxF32(tanQSwingY), PxF32(tanQSwingZ), active);
 			}
 
-			virtual void visualizeDoubleCone(const PxTransform& t, PxReal angle)	PX_OVERRIDE
+			virtual void visualizeDoubleCone(const PxTransform& t, PxReal angle, bool active)	PX_OVERRIDE
 			{
-				mRenderer.visualizeDoubleCone(t, PxF32(angle));
+				mRenderer.visualizeDoubleCone(t, PxF32(angle), active);
 			}
 
 			virtual void visualizeLine( const PxVec3& p0, const PxVec3& p1, PxU32 color)	PX_OVERRIDE

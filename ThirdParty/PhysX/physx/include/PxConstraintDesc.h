@@ -314,23 +314,26 @@ public:
 	\param[in] t0		Transformation for the visualization
 	\param[in] lower	Lower limit angle
 	\param[in] upper	Upper limit angle
+	\param[in] active	PARS: true when the current angle violates the limit
 	*/
-	virtual void visualizeAngularLimit(const PxTransform& t0, PxReal lower, PxReal upper) = 0;
+	virtual void visualizeAngularLimit(const PxTransform& t0, PxReal lower, PxReal upper, bool active = true) = 0;
 
 	/** \brief Visualize limit cone
 
 	\param[in] t			Transformation for the visualization
 	\param[in] tanQSwingY	Tangent of the quarter Y angle 
 	\param[in] tanQSwingZ	Tangent of the quarter Z angle 
+	\param[in] active	PARS: true when the current swing violates the limit
 	*/
-	virtual void visualizeLimitCone(const PxTransform& t, PxReal tanQSwingY, PxReal tanQSwingZ) = 0;
+	virtual void visualizeLimitCone(const PxTransform& t, PxReal tanQSwingY, PxReal tanQSwingZ, bool active = true) = 0;
 
 	/** \brief Visualize joint double cone
 
 	\param[in] t		Transformation for the visualization
 	\param[in] angle	Limit angle
+	\param[in] active	PARS: true when the current swing violates the limit
 	*/
-	virtual void visualizeDoubleCone(const PxTransform& t, PxReal angle) = 0;
+	virtual void visualizeDoubleCone(const PxTransform& t, PxReal angle, bool active = true) = 0;
 
 	/** \brief Visualize line
 

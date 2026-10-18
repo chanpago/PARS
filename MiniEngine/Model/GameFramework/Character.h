@@ -15,6 +15,7 @@ namespace PARS
         CharacterMovementComponent& GetCharacterMovement() const { return *m_Movement; }
         SkeletalMeshComponent& GetMesh() const { return *m_Mesh; }
         bool StartRagdoll(std::string& error);
+        bool SetPhysicsMode(PhysicsAnimationMode mode, std::string& error);
         bool StopRagdoll(std::string& error);
         bool IsRagdoll() const { return m_Mesh->IsRagdoll(); }
 

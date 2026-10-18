@@ -21,7 +21,18 @@ namespace PARS
         void Swap(Ragdoll& other) noexcept;
         bool IsActive() const { return !m_Bodies.empty(); }
         bool IsSimulating() const { return m_Simulating; }
-        bool SetSimulating(bool simulate, Math::Vector3 velocity, std::string& error);
+        bool SetSimulating(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity = false);
+        // Drive switches preserve dynamic poses/velocities, unlike entry from animation.
+        void SetDrivesEnabled(bool enabled);
+        bool AreDrivesEnabled() const { return m_DrivesEnabled; }
+        bool ApplyDriveSettings(const PhysicsAsset& asset, std::string& error);
+        bool UpdateDriveTargets(const std::vector<Math::Matrix4>& boneWorld, float deltaTime, std::string& error);
+        // Kinematic pelvis follows UpdateDriveTargets; without updates it holds.
+        bool SetRootSupported(bool supported, std::string& error);
+        bool IsRootSupported() const { return m_SupportBody >= 0; }
+        size_t GetDrivenJointCount() const;
+        float GetMaxDriveError(size_t* worstJoint = nullptr) const;
+        float GetMaxTargetClampAngle() const { return m_MaxTargetClampAngle; }
         // Fixed steps use targets; teleport also refreshes paused/editor poses immediately.
         bool UpdateKinematicPose(const std::vector<Math::Matrix4>& boneWorld, bool teleport, std::string& error);
         size_t GetKinematicBodyCount() const;
@@ -42,5 +53,11 @@ namespace PARS
         std::vector<physx::PxRigidDynamic*> m_Bodies;
         std::vector<physx::PxD6Joint*> m_Joints;
         bool m_Simulating = false;
+        bool m_DrivesEnabled = false, m_HasDriveTargets = false;
+        int m_SupportBody = -1;
+        float m_MaxTargetClampAngle = 0;
+        std::vector<Math::Quaternion> m_DriveTargets;
+        std::vector<Math::Matrix4> m_LastKinematicTargets;
+        std::vector<Math::Vector3> m_AnimatedLinearVelocity, m_AnimatedAngularVelocity;
     };
 }

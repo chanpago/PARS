@@ -57,12 +57,12 @@ void Cm::visualizeLinearLimit(PxRenderOutput& out, PxReal scale, const PxTransfo
 	out << r << PxDebugCircle(20, scale*0.3f);
 }
 
-void Cm::visualizeAngularLimit(PxRenderOutput& out, PxReal scale, const PxTransform& t, PxReal lower, PxReal upper)
+void Cm::visualizeAngularLimit(PxRenderOutput& out, PxReal scale, const PxTransform& t, PxReal lower, PxReal upper, bool active)
 {
 	if(scale==0.0f)
 		return;
 
-	out << t << gLimitColor;
+	out << t << PxU32(active ? PxDebugColor::eARGB_RED : PxDebugColor::eARGB_GREEN);
 	
 	out << PxRenderOutput::LINES 
 		<< PxVec3(0) << PxVec3(0, PxCos(lower), PxSin(lower)) * scale
@@ -75,12 +75,12 @@ void Cm::visualizeAngularLimit(PxRenderOutput& out, PxReal scale, const PxTransf
 		out << PxVec3(0, PxCos(angle), PxSin(angle)) * scale;
 }
 
-void Cm::visualizeLimitCone(PxRenderOutput& out, PxReal scale, const PxTransform& t, PxReal tanQSwingY, PxReal tanQSwingZ)
+void Cm::visualizeLimitCone(PxRenderOutput& out, PxReal scale, const PxTransform& t, PxReal tanQSwingY, PxReal tanQSwingZ, bool active)
 {
 	if(scale==0.0f)
 		return;
 
-	out << t << gLimitColor;
+	out << t << PxU32(active ? PxDebugColor::eARGB_RED : PxDebugColor::eARGB_GREEN);
 	out << PxRenderOutput::LINES;
 
 	PxVec3 prev(0,0,0);
@@ -101,12 +101,12 @@ void Cm::visualizeLimitCone(PxRenderOutput& out, PxReal scale, const PxTransform
 	}
 }
 
-void Cm::visualizeDoubleCone(PxRenderOutput& out, PxReal scale, const PxTransform& t, PxReal angle)
+void Cm::visualizeDoubleCone(PxRenderOutput& out, PxReal scale, const PxTransform& t, PxReal angle, bool active)
 {
 	if(scale==0.0f)
 		return;
 
-	out << t << gLimitColor;
+	out << t << PxU32(active ? PxDebugColor::eARGB_RED : PxDebugColor::eARGB_GREEN);
 
 	const PxReal height = PxTan(angle);
 

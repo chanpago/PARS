@@ -708,19 +708,33 @@ static PX_FORCE_INLINE PxReal computePhi(const PxQuat& q)
 	return angle;
 }
 
-static void visualizeAngularLimit(PxConstraintVisualizer& viz, const PxTransform& t, float swingLimitYZ)
+static bool outsideAngularLimit(PxReal angle, PxReal lower, PxReal upper)
 {
-	viz.visualizeAngularLimit(t, -swingLimitYZ, swingLimitYZ);
+	// PARS: report actual limit violations, including fully kinematic joints.
+	// Ignore rounding noise at the boundary; this does not alter the solver.
+	return angle < lower - 1e-5f || angle > upper + 1e-5f;
 }
 
-static void visualizeDoubleCone(PxConstraintVisualizer& viz, const PxTransform& t, float swingLimitYZ)
+static void visualizeAngularLimit(PxConstraintVisualizer& viz, const PxTransform& t, float swingYZ, float swingW, float swingLimitYZ)
 {
-	viz.visualizeDoubleCone(t, swingLimitYZ);
+	viz.visualizeAngularLimit(t, -swingLimitYZ, swingLimitYZ,
+		outsideAngularLimit(computeSwingAngle(swingYZ, swingW), -swingLimitYZ, swingLimitYZ));
 }
 
-static void visualizeCone(PxConstraintVisualizer& viz, const D6JointData& data, const PxTransform& cA2w)
+static void visualizeDoubleCone(PxConstraintVisualizer& viz, const PxTransform& t, float sinSwing, float swingLimitYZ)
 {
-	viz.visualizeLimitCone(cA2w, PxTan(data.swingLimit.zAngle / 4), PxTan(data.swingLimit.yAngle / 4));
+	viz.visualizeDoubleCone(t, swingLimitYZ,
+		outsideAngularLimit(PxAsin(PxClamp(sinSwing, -1.0f, 1.0f)), -swingLimitYZ, swingLimitYZ));
+}
+
+static void visualizeCone(PxConstraintVisualizer& viz, const D6JointData& data, const PxTransform& cA2w, const PxQuat& swing)
+{
+	// Use the same quarter-angle ellipse as ConeLimitHelperTanLess, including
+	// diagonal violations where each individual swing angle is still in range.
+	const PxReal y = 4.0f * PxAtan2(swing.y, 1.0f + swing.w) / data.swingLimit.yAngle;
+	const PxReal z = 4.0f * PxAtan2(swing.z, 1.0f + swing.w) / data.swingLimit.zAngle;
+	viz.visualizeLimitCone(cA2w, PxTan(data.swingLimit.zAngle / 4), PxTan(data.swingLimit.yAngle / 4),
+		y*y + z*z > 1.0f + 1e-5f);
 }
 
 static void visualizeLine(PxConstraintVisualizer& viz, const PxVec3& origin, const PxVec3& axis, const PxJointLinearLimitPair& limit)
@@ -910,18 +924,35 @@ static void D6JointVisualize(PxConstraintVisualizer& viz, const void* constantBl
 
 		PxQuat swing, twist;
 		PxSeparateSwingTwist(cB2cA.q, swing, twist);
+		if(swing.w < 0.0f)
+			swing = -swing;
 
 		if(data.limited&TWIST_FLAG)
-			viz.visualizeAngularLimit(cA2w, data.twistLimit.lower, data.twistLimit.upper);
+		{
+			// Ordinary ragdoll limits use the principal rotation. Equivalent q/-q
+			// poses must have the same color; preserve extended twist intervals.
+			if(data.twistLimit.lower >= -PxPi && data.twistLimit.upper <= PxPi && twist.w < 0.0f)
+				twist = -twist;
+			viz.visualizeAngularLimit(cA2w, data.twistLimit.lower, data.twistLimit.upper,
+				outsideAngularLimit(computePhi(twist), data.twistLimit.lower, data.twistLimit.upper));
+		}
 
 		const bool swing1Limited = (data.limited & SWING1_FLAG)!=0, swing2Limited = (data.limited & SWING2_FLAG)!=0;
 
 		if(swing1Limited && swing2Limited)
 		{
 			if(data.mUseConeLimit)
-				visualizeCone(viz, data, cA2w);
+				visualizeCone(viz, data, cA2w, swing);
 
-			if(data.mUsePyramidLimits)
+			// PARS: an enclosing pyramid only reinforces the cone in the solver.
+			// Its raw 1-unit debug lines ignore PVD's Joints scale and visibility.
+			// Show the scalable cone once; retain pyramid visualization when it
+			// supplies a tighter boundary. This does not change any solver limits.
+			const PxJointLimitPyramid& pyramid = data.pyramidSwingLimit;
+			const bool enclosingPyramid = data.mUseConeLimit &&
+				pyramid.yAngleMin <= -data.swingLimit.yAngle && pyramid.yAngleMax >= data.swingLimit.yAngle &&
+				pyramid.zAngleMin <= -data.swingLimit.zAngle && pyramid.zAngleMax >= data.swingLimit.zAngle;
+			if(data.mUsePyramidLimits && !enclosingPyramid)
 				drawPyramid(viz, data, cA2w, swing, true, true);
 		}
 		else if(swing1Limited ^ swing2Limited)
@@ -937,12 +968,12 @@ static void D6JointVisualize(PxConstraintVisualizer& viz, const void* constantBl
 						drawPyramid(viz, data, cA2w, swing, true, false);
 					else
 						// PT:: tag: scalar transform*transform
-						visualizeAngularLimit(viz, cA2w * yToX, data.swingLimit.yAngle);	// PT: swing Y limited, swing Z locked
+						visualizeAngularLimit(viz, cA2w * yToX, swing.y, swing.w, data.swingLimit.yAngle);	// PT: swing Y limited, swing Z locked
 				}
 				else
 					if(!data.mUsePyramidLimits)
 						// PT:: tag: scalar transform*transform
-						visualizeDoubleCone(viz, cA2w * zToX, data.swingLimit.yAngle);		// PT: swing Y limited, swing Z free
+						visualizeDoubleCone(viz, cA2w * zToX, cA2w_m.column2.dot(cB2w_m.column0), data.swingLimit.yAngle);	// PT: swing Y limited, swing Z free
 			}
 			else 
 			{
@@ -952,12 +983,12 @@ static void D6JointVisualize(PxConstraintVisualizer& viz, const void* constantBl
 						drawPyramid(viz, data, cA2w, swing, false, true);
 					else
 						// PT:: tag: scalar transform*transform
-						visualizeAngularLimit(viz, cA2w * zToX, data.swingLimit.zAngle);	// PT: swing Z limited, swing Y locked
+						visualizeAngularLimit(viz, cA2w * zToX, swing.z, swing.w, data.swingLimit.zAngle);	// PT: swing Z limited, swing Y locked
 				}
 				else
 					if(!data.mUsePyramidLimits)
 						// PT:: tag: scalar transform*transform
-						visualizeDoubleCone(viz, cA2w * yToX, data.swingLimit.zAngle);		// PT: swing Z limited, swing Y free
+						visualizeDoubleCone(viz, cA2w * yToX, cA2w_m.column1.dot(cB2w_m.column0), data.swingLimit.zAngle);	// PT: swing Z limited, swing Y free
 			}
 		}
 	}

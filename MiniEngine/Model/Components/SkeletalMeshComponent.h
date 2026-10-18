@@ -8,6 +8,7 @@
 
 namespace PARS
 {
+    enum class PhysicsAnimationMode { Animation, PassiveRagdoll, ActiveRagdoll };
     class SkeletalMeshComponent : public SkinnedMeshComponent
     {
     public:
@@ -22,6 +23,12 @@ namespace PARS
         bool ClearPhysicsAsset();
         bool BuildPhysicsSkeleton(PhysicsSkeleton& skeleton, std::string& error) const;
         bool StartRagdoll(Math::Vector3 velocity, std::string& error);
+        bool SetPhysicsMode(PhysicsAnimationMode mode, Math::Vector3 velocity, std::string& error);
+        PhysicsAnimationMode GetPhysicsMode() const { return m_PhysicsMode; }
+        bool IsActiveRagdoll() const { return m_PhysicsMode == PhysicsAnimationMode::ActiveRagdoll; }
+        // Copy only drive values by joint names. Applied before the next fixed step.
+        bool QueueDriveSettings(const PhysicsAsset& source, std::string& error);
+        bool HasPendingDriveSettings() const { return m_PendingDriveSettings != nullptr; }
         void StopRagdoll();
         bool IsRagdoll() const { return m_Ragdoll.IsSimulating(); }
         Ragdoll& GetRagdoll() { return m_Ragdoll; }
@@ -53,5 +60,8 @@ namespace PARS
         std::vector<GraphNode> m_RagdollSourcePose, m_PhysicsPose;
         std::vector<Math::Matrix4> m_BoneStretch;
         std::string m_PhysicsError;
+        PhysicsAnimationMode m_PhysicsMode = PhysicsAnimationMode::Animation;
+        std::unique_ptr<const PhysicsAsset> m_PendingDriveSettings;
+        bool m_SavedLocomotion = false, m_HasSavedLocomotion = false;
     };
 }

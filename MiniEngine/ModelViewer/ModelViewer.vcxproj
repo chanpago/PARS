@@ -84,6 +84,9 @@
     <ClCompile Include="RagdollValidation.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="ActiveRagdollValidation.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PhysicsDemo.h" />

@@ -58,18 +58,18 @@ namespace Cm
 							   PxReal scale,
 							   const PxTransform& t0,
 							   PxReal lower,
-							   PxReal upper);
+							   PxReal upper, bool active = true);
 
 	PX_PHYSX_COMMON_API void visualizeLimitCone(PxRenderOutput& out,
 							PxReal scale,
 							const PxTransform& t,
 							PxReal ySwing,
-							PxReal zSwing);
+							PxReal zSwing, bool active = true);
 
 	PX_PHYSX_COMMON_API void visualizeDoubleCone(PxRenderOutput& out,
 							 PxReal scale,
 							 const PxTransform& t,
-							 PxReal angle);
+							 PxReal angle, bool active = true);
 	
 	struct ConstraintImmediateVisualizer : public PxConstraintVisualizer
 	{
@@ -97,19 +97,19 @@ namespace Cm
 			Cm::visualizeLinearLimit(mCmOutput, mLimitScale, t0, t1, value);
 		}
 
-		virtual void visualizeAngularLimit(const PxTransform& t0, PxReal lower, PxReal upper)	PX_OVERRIDE
+		virtual void visualizeAngularLimit(const PxTransform& t0, PxReal lower, PxReal upper, bool active = true)	PX_OVERRIDE
 		{
-			Cm::visualizeAngularLimit(mCmOutput, mLimitScale, t0, lower, upper);
+			Cm::visualizeAngularLimit(mCmOutput, mLimitScale, t0, lower, upper, active);
 		}
 
-		virtual void visualizeLimitCone(const PxTransform& t, PxReal tanQSwingY, PxReal tanQSwingZ)	PX_OVERRIDE
+		virtual void visualizeLimitCone(const PxTransform& t, PxReal tanQSwingY, PxReal tanQSwingZ, bool active = true)	PX_OVERRIDE
 		{
-			Cm::visualizeLimitCone(mCmOutput, mLimitScale, t, tanQSwingY, tanQSwingZ);
+			Cm::visualizeLimitCone(mCmOutput, mLimitScale, t, tanQSwingY, tanQSwingZ, active);
 		}
 
-		virtual void visualizeDoubleCone(const PxTransform& t, PxReal angle)	PX_OVERRIDE
+		virtual void visualizeDoubleCone(const PxTransform& t, PxReal angle, bool active = true)	PX_OVERRIDE
 		{
-			Cm::visualizeDoubleCone(mCmOutput, mLimitScale, t, angle);
+			Cm::visualizeDoubleCone(mCmOutput, mLimitScale, t, angle, active);
 		}
 
 		virtual void visualizeLine( const PxVec3& p0, const PxVec3& p1, PxU32 color)	PX_OVERRIDE

@@ -206,6 +206,31 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     changed |= EditAngle("Z limit", joint.swingZLimit, .1f, 179.9f);
     ImGui::EndDisabled();
     changed |= ImGui::Checkbox("Connected bodies collide", &joint.enableCollision);
+    const bool locked = joint.twist == PhysicsJointMotion::Locked || joint.swingY == PhysicsJointMotion::Locked || joint.swingZ == PhysicsJointMotion::Locked;
+    // Motion edits must leave a valid PA even while the drive panel is collapsed.
+    if (locked && joint.useSlerpDrive) { joint.useSlerpDrive = false; changed = true; }
+    if (ImGui::CollapsingHeader("Active Ragdoll drives", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::TextWrapped("Force-based PD. Torque limit is Nm per axis. Apply editor drive settings in Character Animation to update the running character.");
+        if (ImGui::Button("Default PD gains (all joints)")) { ConfigureDefaultDrives(m_PhysicsAsset); changed = true; }
+        ImGui::BeginDisabled(locked);
+        changed |= ImGui::Checkbox("SLERP (shared angular gains)", &joint.useSlerpDrive);
+        ImGui::EndDisabled();
+        const char* names[] = {"Twist X drive", "Swing Y drive", "Swing Z drive"};
+        const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
+        for (int axis = 0; axis < (joint.useSlerpDrive ? 1 : 3); ++axis)
+        {
+            ImGui::PushID(axis);
+            auto& drive = joint.drives[axis];
+            ImGui::BeginDisabled(motions[axis] == PhysicsJointMotion::Locked);
+            changed |= ImGui::Checkbox(joint.useSlerpDrive ? "Angular drive" : names[axis], &drive.enabled);
+            ImGui::BeginDisabled(!drive.enabled);
+            changed |= ImGui::DragFloat("Stiffness", &drive.stiffness, 1, 0, 100000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::DragFloat("Damping", &drive.damping, .1f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::DragFloat("Max torque (Nm)", &drive.maxTorque, .5f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::EndDisabled(); ImGui::EndDisabled(); ImGui::PopID();
+        }
+    }
     ImGui::EndDisabled();
     ImGui::TextWrapped("Red cone/arc: allowed swing. Green sector: allowed X twist. Yellow: current child direction / twist (swing removed). Both limits share the joint pivot. Orange: separated anchors.");
     ImGui::TextWrapped("Twist zero follows the body's front, the hand's palm, or the forearm/shin direction for elbow/knee hinges. The sector and needle show X rotation with swing removed.");

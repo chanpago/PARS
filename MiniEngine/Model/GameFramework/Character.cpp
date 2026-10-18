@@ -4,7 +4,15 @@ namespace PARS
 {
     bool Character::StartRagdoll(std::string& error)
     {
-        if (!m_Mesh->StartRagdoll(m_Movement->GetVelocity(), error)) return false;
+        return SetPhysicsMode(PhysicsAnimationMode::PassiveRagdoll, error);
+    }
+
+    bool Character::SetPhysicsMode(PhysicsAnimationMode mode, std::string& error)
+    {
+        if (mode == PhysicsAnimationMode::Animation) return StopRagdoll(error);
+        const bool wasSimulating = IsRagdoll();
+        if (!m_Mesh->SetPhysicsMode(mode, m_Movement->GetVelocity(), error)) return false;
+        if (wasSimulating) return true;
         m_MovementWasEnabled = m_Movement->IsTickEnabled();
         m_CapsuleWasEnabled = m_Capsule->IsPhysicsEnabled();
         m_Movement->StopMovementImmediately();

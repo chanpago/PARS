@@ -237,6 +237,7 @@
     <ClInclude Include="PhysicsDemo.h"><Filter>Source Files</Filter></ClInclude>
     <ClCompile Include="PhysicsDemo.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="RagdollValidation.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="ActiveRagdollValidation.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="SkeletalMeshViewer.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="SkeletalMeshViewerSkeleton.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="SkeletonOverlay.cpp"><Filter>Source Files</Filter></ClCompile>

@@ -64,6 +64,7 @@ void RunPhysicsAssetTests()
     joint.twistMin = -.65f; joint.twistMax = .8f; joint.swingYLimit = .4f; joint.swingZLimit = .9f;
     joint.swingY = PhysicsJointMotion::Locked; joint.swingZ = PhysicsJointMotion::Free;
     joint.enableCollision = true;
+    joint.drives[0] = {true, 135.0f, 12.0f, 28.0f};
     original.constraints.push_back(joint);
     Check(SameFrame(parentBody * joint.parentFrame.GetTransform(), jointWorld) &&
         SameFrame(childBody * joint.childFrame.GetTransform(), jointWorld),
@@ -87,6 +88,8 @@ void RunPhysicsAssetTests()
     }
     Check(loaded.constraints.size() == 1, "Round trip preserves joint count");
     const auto& savedJoint = loaded.constraints[0];
+    Check(savedJoint.drives[0].enabled && savedJoint.drives[0].stiffness == 135 && savedJoint.drives[0].damping == 12 &&
+        savedJoint.drives[0].maxTorque == 28 && !savedJoint.drives[1].enabled, "Drive settings and disabled axes survive PA v3 round trip");
     Check(savedJoint.parentBone == joint.parentBone && savedJoint.childBone == joint.childBone &&
         SameFrame(savedJoint.parentFrame.GetTransform(), joint.parentFrame.GetTransform()) &&
         SameFrame(savedJoint.childFrame.GetTransform(), joint.childFrame.GetTransform()) &&
@@ -96,6 +99,20 @@ void RunPhysicsAssetTests()
         "Joint round trip preserves frames, radians, all motion modes and collision setting");
     Check(loaded.FindConstraint(joint.childBone, joint.parentBone) == 0, "Joint pair lookup ignores order");
     PhysicsAsset invalid = loaded;
+    invalid.constraints[0].drives[0].maxTorque = -1;
+    Check(!invalid.Validate(error), "Reject negative drive torque");
+    invalid = loaded; invalid.constraints[0].drives[0].stiffness = std::numeric_limits<float>::quiet_NaN();
+    Check(!invalid.Validate(error), "Reject non-finite drive gains");
+    invalid = loaded; invalid.constraints[0].useSlerpDrive = true;
+    Check(!invalid.Validate(error), "Reject SLERP with a locked angular axis");
+    auto slerp = loaded;
+    slerp.constraints[0].swingY = PhysicsJointMotion::Limited;
+    slerp.constraints[0].useSlerpDrive = true;
+    PhysicsAsset slerpLoaded;
+    Check(slerp.Save(path, error) && slerpLoaded.Load(path, error) && slerpLoaded.constraints[0].useSlerpDrive,
+        "SLERP drive mode survives PA v3 round trip");
+    Check(original.Save(path, error), "Restore fixture for legacy format tests");
+    invalid = loaded;
     invalid.constraints[0].childBone = "missing";
     Check(!invalid.Validate(error), "Reject dangling joint body reference");
     invalid = loaded; invalid.constraints[0].childBone = joint.parentBone;
@@ -134,7 +151,11 @@ void RunPhysicsAssetTests()
     corruptJoint = saved; corruptJoint["angleUnits"] = "degrees";
     writeJson(corruptJoint);
     Check(!loaded.Load(path, error) && loaded.constraints.size() == 1, "Reject ambiguous angular units");
-    auto legacy = saved; legacy["version"] = 1; legacy.erase("constraints"); legacy.erase("angleUnits");
+    auto legacy = saved; legacy["version"] = 2; legacy.erase("driveUnits");
+    for (auto& entry : legacy["constraints"]) entry.erase("drives");
+    writeJson(legacy);
+    Check(loaded.Load(path, error) && !loaded.constraints[0].drives[0].enabled, "Legacy v2 PA loads with angular drives disabled");
+    legacy["version"] = 1; legacy.erase("constraints"); legacy.erase("angleUnits");
     writeJson(legacy);
     Check(loaded.Load(path, error) && loaded.bodies.size() == 3 && loaded.constraints.empty(),
         "Legacy version 1 body-only file loads and clears previous joints");
@@ -155,5 +176,5 @@ void RunPhysicsAssetTests()
     { std::ofstream corrupt(path); corrupt << "{broken json"; }
     Check(!loaded.Load(path, error) && loaded.bodies.size() == 3, "Malformed asset preserves editor state");
     DeleteFileA(path);
-    std::puts("PASS: PhysicsAsset body/joint transforms, angular limits, v1/v2 round trip, skeleton compatibility and transactional validation");
+    std::puts("PASS: PhysicsAsset body/joint transforms, angular limits, v1/v2/v3 round trip, skeleton compatibility and transactional validation");
 }

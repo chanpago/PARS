@@ -192,17 +192,17 @@ struct UserRenderer : public PvdUserRenderer
 	{
 		handleEvent(LinearLimitRenderEvent(t0, t1, value, true));
 	}
-	virtual void visualizeAngularLimit(const PxTransform& t0, float lower, float upper)	PX_OVERRIDE
+	virtual void visualizeAngularLimit(const PxTransform& t0, float lower, float upper, bool active)	PX_OVERRIDE
 	{
-		handleEvent(AngularLimitRenderEvent(t0, lower, upper, true));
+		handleEvent(AngularLimitRenderEvent(t0, lower, upper, active));
 	}
-	virtual void visualizeLimitCone(const PxTransform& t, float tanQSwingY, float tanQSwingZ)	PX_OVERRIDE
+	virtual void visualizeLimitCone(const PxTransform& t, float tanQSwingY, float tanQSwingZ, bool active)	PX_OVERRIDE
 	{
-		handleEvent(LimitConeRenderEvent(t, tanQSwingY, tanQSwingZ, true));
+		handleEvent(LimitConeRenderEvent(t, tanQSwingY, tanQSwingZ, active));
 	}
-	virtual void visualizeDoubleCone(const PxTransform& t, float angle)	PX_OVERRIDE
+	virtual void visualizeDoubleCone(const PxTransform& t, float angle, bool active)	PX_OVERRIDE
 	{
-		handleEvent(DoubleConeRenderEvent(t, angle, true));
+		handleEvent(DoubleConeRenderEvent(t, angle, active));
 	}
 	// Clear the immedate buffer.
 	virtual void flushRenderEvents()

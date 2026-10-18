@@ -18,6 +18,9 @@ namespace PARS
     bool OverridePhysicsPose(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& source,
         const Math::Matrix4& component, const std::vector<int>& nodes,
         const std::vector<Math::Matrix4>& targets, std::vector<GraphNode>& result);
+    // Target child joint rotation in the parent joint frame, with PA offsets applied.
+    Math::Quaternion EvaluateJointDriveTarget(const PhysicsConstraint& joint,
+        const Math::Matrix4& parentBodyTarget, const Math::Matrix4& childBodyTarget, bool clampToLimits = true);
     // Full major-bone preset (20 bodies / 19 constraints): fingers, toes and
     // terminal end markers are excluded. Masses use a 73 kg adult male reference
     // (de Leva 1996); trunk groups split by preset collider volume, head/neck

@@ -193,8 +193,12 @@ void RunAnatomicalLimitTests()
             };
             for (float angle : {low, 0.0f, high})
                 Check(sample(angle, 0, 0) < .001f, "Neutral and published sagittal endpoints lie inside the real D6 limit");
-            Check(sample(low - 3, 0, 0) > .01f && sample(high + 3, 0, 0) > .01f,
-                "D6 rejects both hyperextension and excessive flexion beyond anatomical endpoints");
+            // The ankle now has an explicit animation margin around its ROM
+            // envelope. Probe beyond that margin; the published endpoints above
+            // must still be reachable with the same calibrated frames.
+            const float outsideMargin = std::string(suffix) == "Foot" ? 15.0f : 3.0f;
+            Check(sample(low - outsideMargin, 0, 0) > .01f && sample(high + outsideMargin, 0, 0) > .01f,
+                "D6 rejects excessive flexion/extension beyond the reference envelope and tuning margin");
             if (hinge)
             {
                 for (float bend : {0.0f, 45.0f, 90.0f, 130.0f})

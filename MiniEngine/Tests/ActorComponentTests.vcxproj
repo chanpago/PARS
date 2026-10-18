@@ -44,7 +44,9 @@
     <ClCompile Include="..\Model\PhysicsAsset.cpp" />
     <ClCompile Include="..\Model\PhysicsPose.cpp" />
     <ClCompile Include="..\Model\Ragdoll.cpp" />
+    <ClCompile Include="..\Model\RagdollDrive.cpp" />
     <ClCompile Include="RagdollTests.cpp" />
+    <ClCompile Include="ActiveRagdollTests.cpp" />
     <ClCompile Include="AnatomicalLimitTests.cpp" />
     <ClCompile Include="WorldTests.cpp" />
     <ClCompile Include="..\Core\GameFramework\CapsuleComponent.cpp" />

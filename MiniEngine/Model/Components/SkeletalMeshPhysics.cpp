@@ -1,6 +1,7 @@
 #include "SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
+#include "../LocomotionAnimInstance.h"
 #include <cmath>
 
 using namespace Math;
@@ -52,6 +53,8 @@ namespace PARS
         m_Ragdoll.Destroy(); m_PhysicsSkeleton = {};
         m_PhysicsPose.clear(); m_RagdollSourcePose.clear(); m_BoneStretch.clear(); m_PhysicsError.clear();
         m_ModelInstance.ClearSkinnedWorldBounds();
+        m_PhysicsMode = PhysicsAnimationMode::Animation;
+        m_PendingDriveSettings.reset();
     }
 
     void SkeletalMeshComponent::UpdateKinematicPose(bool teleport)
@@ -99,28 +102,90 @@ namespace PARS
 
     bool SkeletalMeshComponent::StartRagdoll(Vector3 velocity, std::string& error)
     {
-        if (IsRagdoll()) { error = "Ragdoll is already running."; return false; }
+        return SetPhysicsMode(PhysicsAnimationMode::PassiveRagdoll, velocity, error);
+    }
+
+    bool SkeletalMeshComponent::SetPhysicsMode(PhysicsAnimationMode mode, Vector3 velocity, std::string& error)
+    {
+        if (mode == PhysicsAnimationMode::Animation) { StopRagdoll(); error.clear(); return true; }
+        if (mode != PhysicsAnimationMode::PassiveRagdoll && mode != PhysicsAnimationMode::ActiveRagdoll)
+        { error = "Unknown physics animation mode."; return false; }
+        if (mode == m_PhysicsMode) { error.clear(); return true; }
         if (!m_PhysicsAsset) { error = "Assign a PhysicsAsset first."; return false; }
         if (m_PhysicsAsset->bodies.empty()) { error = "The PhysicsAsset has no bodies."; return false; }
         auto* world = GetOwner().GetWorld();
         auto* physics = world ? world->GetPhysicsWorld() : nullptr;
         if (!physics) { error = "The world has no physics scene."; return false; }
         if (!m_Ragdoll.IsActive() && !CreatePhysicsState(*m_PhysicsAsset, m_Ragdoll, m_PhysicsSkeleton, error)) return false;
-        m_RagdollSourcePose = m_AnimInstance->GetPose();
+        const bool active = mode == PhysicsAnimationMode::ActiveRagdoll;
+        if (active)
+        {
+            bool hasDrive = false;
+            for (const auto& joint : m_PhysicsAsset->constraints)
+                hasDrive |= HasEnabledAngularDrive(joint);
+            if (!hasDrive) { error = "No enabled angular drives. Configure PA drives and apply them first."; return false; }
+        }
         std::vector<Matrix4> worldPose;
-        if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, worldPose, error) ||
-            !m_Ragdoll.UpdateKinematicPose(worldPose, true, error) || !m_Ragdoll.SetSimulating(true, velocity, error)) return false;
-        m_BoneStretch.clear();
-        for (int node : m_Ragdoll.GetBoneNodes()) m_BoneStretch.push_back(Invert(PhysicsBoneFrame(worldPose[node])) * worldPose[node]);
+        if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, worldPose, error)) return false;
+        if (active && !m_Ragdoll.UpdateDriveTargets(worldPose, 0, error)) return false;
+        if (!IsRagdoll())
+        {
+            if (!m_Ragdoll.UpdateKinematicPose(worldPose, true, error) || !m_Ragdoll.SetSimulating(true, velocity, error, active)) return false;
+            m_BoneStretch.clear();
+            for (int node : m_Ragdoll.GetBoneNodes()) m_BoneStretch.push_back(Invert(PhysicsBoneFrame(worldPose[node])) * worldPose[node]);
+        }
+        // Passive simulation releases the supported pelvis as well as the motors.
+        // Keep the existing bodies and poses instead of re-entering from animation.
+        if (!active && !m_Ragdoll.SetRootSupported(false, error)) return false;
+        m_RagdollSourcePose = m_AnimInstance->GetPose();
+        m_PhysicsMode = mode;
+        m_Ragdoll.SetDrivesEnabled(active);
+        if (active)
+            if (auto* locomotion = dynamic_cast<LocomotionAnimInstance*>(m_AnimInstance.get()))
+            {
+                if (!m_HasSavedLocomotion) { m_SavedLocomotion = locomotion->IsLocomotionEnabled(); m_HasSavedLocomotion = true; }
+                locomotion->SetLocomotionEnabled(false);
+            }
         UpdatePhysicsPose();
+        error.clear();
         return true;
+    }
+
+    bool SkeletalMeshComponent::QueueDriveSettings(const PhysicsAsset& source, std::string& error)
+    {
+        if (!m_PhysicsAsset) { error = "Assign a PhysicsAsset first."; return false; }
+        if (!source.Validate(error)) return false;
+        auto candidate = std::make_unique<PhysicsAsset>(*m_PhysicsAsset);
+        if (source.constraints.size() != candidate->constraints.size()) { error = "Editor and character PA joints differ."; return false; }
+        for (auto& target : candidate->constraints)
+        {
+            const int index = source.FindConstraint(target.parentBone, target.childBone);
+            if (index < 0 || source.constraints[index].parentBone != target.parentBone)
+            { error = "Editor and character joint parent/child mappings differ."; return false; }
+            for (int axis = 0; axis < 3; ++axis) target.drives[axis] = source.constraints[index].drives[axis];
+            target.useSlerpDrive = source.constraints[index].useSlerpDrive;
+        }
+        if (!candidate->Validate(error)) return false;
+        m_PendingDriveSettings = std::move(candidate);
+        error.clear(); return true;
     }
 
     void SkeletalMeshComponent::UpdatePhysicsPose()
     {
+        const auto& source = IsActiveRagdoll() ? m_AnimInstance->GetPose() : m_RagdollSourcePose;
+        if (IsActiveRagdoll())
+        {
+            std::vector<Matrix4> animated;
+            if (EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, animated, m_PhysicsError))
+                for (size_t i = 0; i < m_Ragdoll.GetBodyCount(); ++i)
+                {
+                    const int node = m_Ragdoll.GetBoneNodes()[i];
+                    m_BoneStretch[i] = Invert(PhysicsBoneFrame(animated[node])) * animated[node];
+                }
+        }
         std::vector<Matrix4> targets;
         for (size_t i = 0; i < m_Ragdoll.GetBodyCount(); ++i) targets.push_back(m_Ragdoll.GetBoneWorld(i) * m_BoneStretch[i]);
-        OverridePhysicsPose(m_PhysicsSkeleton, m_RagdollSourcePose, Matrix4(GetComponentTransform()),
+        OverridePhysicsPose(m_PhysicsSkeleton, source, Matrix4(GetComponentTransform()),
             m_Ragdoll.GetBoneNodes(), targets, m_PhysicsPose);
         // Culling must follow the falling mesh, rather than the frozen actor root.
         const Vector3 center = m_Ragdoll.GetPosition();
@@ -133,6 +198,10 @@ namespace PARS
     {
         if (!IsRagdoll()) return;
         m_Ragdoll.SetSimulating(false, Vector3(kZero), m_PhysicsError);
+        m_PhysicsMode = PhysicsAnimationMode::Animation;
+        if (m_HasSavedLocomotion)
+            if (auto* locomotion = dynamic_cast<LocomotionAnimInstance*>(m_AnimInstance.get())) locomotion->SetLocomotionEnabled(m_SavedLocomotion);
+        m_HasSavedLocomotion = false;
         m_PhysicsPose.clear(); m_RagdollSourcePose.clear(); m_BoneStretch.clear();
         m_ModelInstance.ClearSkinnedWorldBounds();
         UpdateKinematicPose(true);
