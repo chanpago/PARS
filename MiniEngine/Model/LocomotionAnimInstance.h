@@ -1,10 +1,10 @@
-#pragma once
+﻿#pragma once
 
 #include "AnimInstance.h"
 
 namespace PARS
 {
-    // Clip order: Idle, Walk, Run. Reads actual capsule velocity after physics.
+    // 클립 순서는 Idle, Walk, Run이다. 물리 처리 이후의 실제 캡슐 속도를 읽는다.
     class LocomotionAnimInstance : public AnimInstance
     {
     public:

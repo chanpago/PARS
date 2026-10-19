@@ -1,4 +1,4 @@
-#include "SkeletalMeshViewer.h"
+﻿#include "SkeletalMeshViewer.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "imgui.h"
 #include <cmath>
@@ -213,14 +213,14 @@ void SkeletalMeshViewer::UpdateBoneWorld()
     const auto& model = *m_Mesh->GetSkeletalMesh();
     const auto& instance = m_Mesh->GetModelInstance();
     std::vector<bool> assigned(model.m_NumNodes, false);
-    // Follow the SAME mesh * animated-joint space composition as DefaultVS.
-    // In particular, the armature's .01 scale must not be applied twice.
+    // DefaultVS와 동일한 메시 * 애니메이션 조인트 공간 변환 순서를 따른다.
+    // 특히 Armature의 0.01 스케일이 두 번 적용되지 않도록 한다.
     const uint8_t* meshData = model.m_MeshData.get();
     for (uint32_t i = 0; i < model.m_NumMeshes; ++i)
     {
         const Mesh& mesh = *reinterpret_cast<const Mesh*>(meshData);
         Matrix4 meshWorld(kIdentity);
-        // matrixIdx and node index are aligned by the importer.
+        // matrixIdx와 노드 인덱스는 임포터에서 서로 맞춰 둔다.
         if (mesh.numJoints && instance.GetNodeTransform(mesh.meshCBV, meshWorld))
         {
             for (uint32_t j = mesh.startJoint; j < uint32_t(mesh.startJoint) + mesh.numJoints && j < model.m_NumJoints; ++j)

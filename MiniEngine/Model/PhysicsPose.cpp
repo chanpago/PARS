@@ -1,4 +1,4 @@
-#include "PhysicsPose.h"
+﻿#include "PhysicsPose.h"
 #include <algorithm>
 #include <cmath>
 
@@ -37,9 +37,9 @@ namespace PARS
             return true;
         }
 
-        // X is the twist axis: longitudinal for axial joints, the hinge axis
-        // for hinges. Y fixes the remaining orientation of the joint frame.
-        // Build a right-handed frame from landmarks, not the importer's bone axes.
+        // X는 트위스트 축이다. 축 관절에서는 길이 방향이고, 힌지에서는 굽힘 회전축이다.
+        // Y는 조인트 좌표계의 나머지 방향을 결정한다.
+        // 임포터의 본 축 대신 해부학적 기준점을 이용해 오른손 좌표계를 구성한다.
         Matrix3 AnatomicalAxes(Vector3 x, Vector3 y)
         {
             x = Normalize(x);
@@ -49,16 +49,16 @@ namespace PARS
 
         Matrix3 HingeAxes(Vector3 segment, Vector3 hingeHint)
         {
-            // Preserve the segment's direction and project the hinge axis
-            // perpendicular to it, including slightly splayed imported limbs.
-            // D6 twist X is the hinge; Y follows the distal segment for its dial.
+            // 부위의 길이 방향은 유지하고 힌지 축을 그 방향에 수직으로 투영한다.
+            // 가져온 팔다리가 약간 벌어진 경우도 같은 방식으로 처리한다.
+            // D6의 트위스트 X축을 힌지로 사용하고, Y축은 말단 쪽 부위를 따라 각도 표시의 기준이 된다.
             const Matrix3 axes = AnatomicalAxes(segment, hingeHint);
             return Matrix3(axes.GetY(), axes.GetX(), -axes.GetZ());
         }
 
         struct AnatomicalCone
         {
-            // Centre is a pure swing rotation vector (degrees), NOT Euler angles.
+            // 중심은 도 단위의 순수 스윙 회전 벡터이며, 오일러 각이 아니다.
             float centerY, centerZ, halfY, halfZ;
         };
 
@@ -69,9 +69,9 @@ namespace PARS
             const Vector3 bias(0, XMConvertToRadians(cone.centerY), XMConvertToRadians(cone.centerZ));
             const float angle = Length(bias);
             const Quaternion rotation = angle > 1e-6f ? Quaternion(bias / angle, angle) : Quaternion(kIdentity);
-            // A symmetric PhysX cone can have asymmetric anatomical endpoints:
-            // rotate ONLY its parent frame toward the middle of the allowed ROM.
-            // Do not align the child frame with that bias, which would cancel it.
+            // 대칭인 PhysX 원뿔도 해부학적으로 비대칭인 가동 범위를 표현할 수 있다.
+            // 부모 좌표계만 허용 가동 범위(ROM)의 중앙 쪽으로 회전시킨다.
+            // 자식 좌표계까지 같은 편향에 맞추면 효과가 상쇄되므로 그대로 둔다.
             joint.parentFrame = PhysicsJointFrame::FromTransform(
                 Invert(parentBody) * Matrix4(parentNeutral * Matrix3(rotation), pivot));
             joint.childFrame = PhysicsJointFrame::FromTransform(Invert(childBody) * Matrix4(childNeutral, pivot));
@@ -157,8 +157,8 @@ namespace PARS
         }
         if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited)
         {
-            // Matches PhysX ConeLimitHelperTanLess's ellipse in swing-angle
-            // coordinates; independent clamps alone miss diagonal violations.
+            // 스윙 각도 좌표에서 PhysX ConeLimitHelperTanLess의 타원과 일치하도록 처리한다.
+            // 각 축을 따로 제한하는 것만으로는 대각선 방향의 범위 초과를 잡을 수 없다.
             const float r = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) + z * z / (joint.swingZLimit * joint.swingZLimit));
             if (r > 1)
             {
@@ -197,10 +197,10 @@ namespace PARS
             const Matrix4 parentWorld = parent < 0 ? component : scene[parent];
             if (bodyAtNode[i] >= 0)
             {
-                // Skeleton roots deliberately skip their scene parent in Model.cpp.
+                // Model.cpp에서 스켈레톤 루트는 의도적으로 씬 부모를 건너뛴다.
                 const Matrix4 desired = Invert(sourceScene[mesh]) * targets[bodyAtNode[i]];
                 result[i].xform = result[i].skeletonRoot ? desired : Invert(parentWorld) * desired;
-                result[i].staleMatrix = false; // Preserve exact scale/shear, including centimetre imports.
+                result[i].staleMatrix = false; // 센티미터 단위로 가져온 경우까지 포함해 원래 스케일과 전단을 정확히 보존한다.
             }
             scene[i] = result[i].skeletonRoot ? Local(result[i]) : parentWorld * Local(result[i]);
         }
@@ -227,17 +227,17 @@ namespace PARS
             }
             return -1;
         };
-        // de Leva (1996), Table 4, male sample: 73 kg; each limb fraction is
-        // for ONE side. DOI: https://doi.org/10.1016/0021-9290(95)00178-6
-        // Head/neck and trunk/shoulder grouping follows Karatsidis et al. (2017),
-        // Table 1: https://doi.org/10.3390/s17010075
-        // This is a young-adult male reference, not a Korean/world population mean.
+        // de Leva(1996) 표 4의 남성 표본을 사용하며 기준 체중은 73kg이다. 팔다리 질량 비율은
+        // 각각 한쪽 기준이다. DOI: https://doi.org/10.1016/0021-9290(95)00178-6
+        // 머리/목과 몸통/어깨의 그룹 구분은 Karatsidis 외(2017)의 표 1을 따른다.
+        // 표 1 출처: https://doi.org/10.3390/s17010075
+        // 젊은 성인 남성의 참고값이며, 한국인이나 세계 인구 전체의 평균은 아니다.
         constexpr float totalMassKg = 73.0f;
-        // Roos et al. (2020), Table 3: male model head 4.20 kg, neck 1.66 kg.
+        // Roos 외(2020) 표 3: 남성 모델의 머리 4.20kg, 목 1.66kg.
         // https://doi.org/10.1371/journal.pone.0219954
-        // Borrow only their within-group ratio, retaining de Leva's 6.94% total.
-        // This cross-study mapping is an approximation; a small collision capsule
-        // is not a reliable estimate of the whole neck's tissue volume.
+        // 이 연구에서는 그룹 내부 비율만 가져오고, de Leva의 전체 비율 6.94%는 유지한다.
+        // 서로 다른 연구를 연결한 근사값이다. 작은 충돌 캡슐의 부피만으로
+        // 목 전체 조직의 부피를 신뢰성 있게 추정할 수는 없다.
         constexpr float neckShare = 1.66f / (4.20f + 1.66f);
         enum MassGroup
         {
@@ -272,10 +272,10 @@ namespace PARS
             MassGroup massGroup;
             PhysicsShapeType shape;
         };
-        // All articulated Mixamo bones except fingers, toes and terminal end
-        // markers. Keep spine/neck/clavicle bodies so joints follow the actual
-        // hierarchy instead of attaching the head and upper arms to Spine2.
-        // Fingers/toes have no separate bodies; their mass stays in hands/feet.
+        // 손가락, 발가락, 말단 표시 노드를 제외한 Mixamo의 모든 관절 본을 포함한다.
+        // 척추/목/쇄골 바디를 유지해 머리와 위팔을 Spine2에 바로 붙이는 대신
+        // 조인트가 실제 본 계층을 따르도록 한다.
+        // 손가락/발가락은 별도 바디를 만들지 않으며, 해당 질량은 손/발에 포함한다.
         const Part parts[] = {
             {"Hips", "Spine", .13f, Pelvis, PhysicsShapeType::Box},
             {"Spine", "Spine1", .115f, MiddleTrunk, PhysicsShapeType::Box},
@@ -332,8 +332,8 @@ namespace PARS
             body.shape = part.shape;
             body.radius = part.radius;
             body.halfLength = Max(.0f, length * .5f - body.radius);
-            // Torso boxes cover their own bone segment. A fixed minimum of
-            // 7 cm per half-length would overlap the added short spine bodies.
+            // 몸통 박스는 각자 담당하는 본 구간만 덮는다. 반길이에 고정 최솟값 7cm를 적용하면
+            // 추가된 짧은 척추 바디끼리 겹치게 된다.
             body.halfExtents = XMFLOAT3(length * .45f, part.radius, part.radius * .7f);
             XMStoreFloat3(&body.offset, endpoint * .5f);
             XMStoreFloat4(&body.rotation, rotation);
@@ -346,12 +346,12 @@ namespace PARS
             candidate.bodies.push_back(body);
             nodes.push_back(node);
         }
-        // de Leva has 16 segments; this rig has 20 bodies. Head/neck are split
-        // above. Preserve each trunk group mass and split only within that group
-        // by collider volume (uniform density). This extra trunk split and the
-        // Mixamo anatomical boundaries are approximations, not measured bone ratios.
-        // Shoulders belong to the upper trunk, so they add no extra body mass.
-        // PhysX still derives COM/inertia from primitives, not the study's tensors.
+        // de Leva 모델은 16개 부위이고 이 리그는 20개 바디다. 머리/목은 위에서 나눈다.
+        // 몸통의 각 그룹 질량은 보존하고, 그룹 내부에서만 콜라이더 부피에 비례해 나눈다.
+        // 이때 밀도는 균일하다고 가정한다. 추가적인 몸통 분할과 Mixamo의 해부학적 경계는
+        // 근사값이며, 측정된 뼈별 질량 비율은 아니다.
+        // 어깨는 상부 몸통에 속하므로 전체 체중에 별도 질량을 더하지 않는다.
+        // PhysX의 질량 중심/관성은 연구의 텐서가 아니라 기본 형상에서 계산한다.
         for (size_t i = 0; i < candidate.bodies.size(); ++i)
         {
             const MassGroup group = parts[i].massGroup;
@@ -387,8 +387,8 @@ namespace PARS
                 return false;
             }
             radial[side] = Normalize(position(index) - position(pinky));
-            // The preset is calibrated from the imported T-pose, never a sampled
-            // animation frame. Reject degenerate flexion axes instead of making NaNs.
+            // 프리셋은 가져온 T 포즈를 기준으로 보정하며, 샘플링한 애니메이션 프레임은 사용하지 않는다.
+            // 굽힘 축을 정할 수 없는 퇴화된 경우에는 NaN을 만드는 대신 거부한다.
             for (const char* suffix : {"Arm", "ForeArm", "Hand"})
             {
                 const int body = candidate.FindBody(skeleton.names[find(prefix + suffix)]);
@@ -401,32 +401,32 @@ namespace PARS
             }
         }
 
-        // ROM sources (degrees):
-        // CDC/Soucie 2011, passive means, males 20-44: elbow -0.8..144.6,
-        // knee -1..137.7, hip -17.4..130.4,
-        // ankle plantarflexion 54.6 / dorsiflexion 12.7.
+        // 관절 가동 범위(ROM)의 출처이며, 각도 단위는 도다.
+        // CDC/Soucie 2011, 20~44세 남성의 수동 가동 범위 평균: 팔꿈치 -0.8~144.6,
+        // 무릎 -1~137.7, 고관절 -17.4~130.4,
+        // 발목 족저굴곡(발끝 내리기) 54.6 / 배측굴곡(발끝 올리기) 12.7.
         // https://archive.cdc.gov/www_cdc_gov/ncbddd/jointrom/index.html
-        // Moromizato 2016, Table 1, passive male means (42 men aged 20-29):
-        // wrist extension/flexion 79/87; trunk extension/flexion 28.2/37.3,
-        // lateral bend 24.8, rotation 52.2; hip ab/adduction 32.1/13.7,
-        // external/internal rotation 46.7/37.1; shoulder horizontal extension/
-        // flexion 54.3/130.7, abduction 179.8, external/internal rotation 91.5/58.4.
+        // Moromizato 2016 표 1, 남성의 수동 가동 범위 평균(20~29세 남성 42명):
+        // 손목 신전/굴곡 79/87, 몸통 신전/굴곡 28.2/37.3,
+        // 몸통 측굴 24.8, 회전 52.2, 고관절 외전/내전 32.1/13.7,
+        // 고관절 외회전/내회전 46.7/37.1, 어깨 수평 신전/굴곡 54.3/130.7,
+        // 어깨 외전 179.8, 외회전/내회전 91.5/58.4.
         // https://doi.org/10.1186/s40101-016-0112-8
-        // Reynolds 2009, Table 5, mixed-sex ACTIVE whole-neck totals:
-        // flexion+extension 125, lateral bending 79.8, rotation 131.
+        // Reynolds 2009 표 5, 남녀 혼합 표본에서 측정한 목 전체의 능동 가동 범위 합계:
+        // 굴곡+신전 125, 좌우 측굴 79.8, 회전 131.
         // https://doi.org/10.1007/s00586-009-0894-z
-        // These are editable reference envelopes, not universal hard stops.
-        // Fixed cones cannot reproduce posture-dependent coupled human limits.
-        // Elbows/knees use pure hinges. Forearm pronation/supination needs a
-        // separate roll joint; it is not part of the elbow's flexion limit.
+        // 편집 가능한 참고 범위이며, 모든 사람에게 적용되는 절대적인 한계는 아니다.
+        // 고정 원뿔만으로는 자세에 따라 달라지는 인체의 결합 운동 제한을 재현할 수 없다.
+        // 팔꿈치/무릎은 순수 힌지를 사용한다. 아래팔 회내/회외에는 별도의 축 회전 조인트가
+        // 필요하며, 이는 팔꿈치 굽힘 제한에 포함되지 않는다.
         //
-        // Two-axis cone coefficients below fit the four pure-plane endpoints in
-        // this SDK's ConeLimitHelperTanLess angle space:
-        // (swingY/halfY)^2 + (swingZ/halfZ)^2 = 1, with swingY/Z =
-        // 4*atan2(q.y/z, 1+q.w) after removing twist. The biased parent frame is a pure swing so
-        // neutral has zero twist. Simply using half(range) on both axes would
-        // incorrectly shrink lateral ROM when flexion has a large bias.
-        // Mirroring centerZ and twist signs preserves left/right anatomy.
+        // 아래의 두 축 원뿔 계수는 이 SDK의 ConeLimitHelperTanLess 각도 공간에서
+        // 각 평면 방향의 네 끝점에 맞춘 값이다.
+        // (swingY/halfY)^2 + (swingZ/halfZ)^2 = 1이며, 트위스트를 제거한 뒤
+        // swingY/Z = 4*atan2(q.y/z, 1+q.w)로 계산한다. 편향된 부모 좌표계는 순수 스윙이므로
+        // 중립 자세의 트위스트는 0이다. 두 축 모두 단순히 가동 범위의 절반을 사용하면
+        // 굴곡 편향이 클 때 측면 가동 범위가 잘못 줄어든다.
+        // centerZ와 트위스트의 부호를 반전해 좌우의 해부학적 대칭을 유지한다.
         for (size_t i = 1; i < nodes.size(); ++i)
         {
             int parent = skeleton.parents[nodes[i]], parentBody = -1;
@@ -455,21 +455,21 @@ namespace PARS
             const Vector3 x = longitudinal[i], parentX = longitudinal[parentBody];
             Matrix3 parentAxes = AnatomicalAxes(up, left), childAxes = parentAxes;
             AnatomicalCone cone{};
-            float twistMin = -1, twistMax = 1; // Ignored on locked axes.
+            float twistMin = -1, twistMax = 1; // 잠긴 축에서는 무시된다.
             if (name.find("Spine") == 0)
             {
-                // Three rig joints share the WHOLE trunk budget equally. The
-                // allocation is a rig approximation, not per-vertebra ROM data.
+                // 리그의 조인트 3개가 몸통 전체의 가동 범위를 동일하게 나눠 가진다.
+                // 리그에 맞춘 근사 배분이며, 척추뼈별 가동 범위 측정값은 아니다.
                 cone = {1.516667f, 0, 10.916667f, 8.347644f};
                 twistMax = 52.2f / 3;
                 twistMin = -twistMax;
             }
             else if (name == "Neck" || name == "Head")
             {
-                // Conservative active envelope: choose 55 flexion / 70 extension
-                // within the measured 125 total; split 60:40 across the rig's
-                // Neck/Head joints. Directional split and rig allocation are
-                // modelling choices; these are NOT two anatomical vertebrae.
+                // 보수적인 능동 가동 범위로, 측정된 총 125도 안에서 굴곡 55도 / 신전 70도를 선택한다.
+                // 이 범위를 리그의 Neck/Head 조인트에 60:40으로 나눈다.
+                // 방향별 범위와 리그 내 배분은 모델링상의 선택이다.
+                // 이 두 조인트는 해부학적으로 실제 척추뼈 두 개를 나타내는 것이 아니다.
                 const bool neck = name == "Neck";
                 cone = neck ? AnatomicalCone{-4.5f, 0, 37.5f, 24.121613f}
                             : AnatomicalCone{-3, 0, 25, 16.078565f};
@@ -478,15 +478,15 @@ namespace PARS
             }
             else if (name.find("Shoulder") != std::string::npos)
             {
-                // Shoulder bone proxies the girdle (no scapula body in this rig).
-                // Allocate horizontal -10..20 and elevation -10..30 to it;
-                // subtract those budgets from the humerus below. Approximation.
+                // Shoulder 본이 어깨이음을 대신한다. 이 리그에는 별도의 견갑골 바디가 없다.
+                // 여기에 수평 -10~20도와 거상 -10~30도를 배분하고,
+                // 아래의 위팔뼈 범위에서 그만큼 뺀다. 근사 방식이다.
                 parentAxes = childAxes = AnatomicalAxes(left * side, up * -side);
-                // Add 10 degrees to each half-angle for the imported animation
-                // tracks. Keep the calibrated frame/bias; this is tuning margin,
-                // not additional measured anatomical ROM.
+                // 가져온 애니메이션 트랙을 수용하도록 각 반각에 10도를 추가한다.
+                // 보정된 좌표계와 편향은 유지한다. 이는 튜닝용 여유 범위이며,
+                // 추가로 측정된 해부학적 가동 범위가 아니다.
                 cone = {4.973932f, -9.956774f * side, 27.052221f, 30.855535f};
-                // Small allowance for swing/twist coupling in the biased frame.
+                // 편향된 좌표계에서 스윙/트위스트가 결합되는 효과에 작은 여유를 둔다.
                 twistMin = -3;
                 twistMax = 3;
             }
@@ -494,26 +494,26 @@ namespace PARS
             {
                 parentAxes = AnatomicalAxes(left * side, up * -side);
                 childAxes = AnatomicalAxes(x, Cross(x, forward));
-                // Humerus horizontal -44.3..110.7; lower 90 / raise 59.8
-                // from T-pose. Together with the girdle this approximates the
-                // measured total shoulder envelope, without double-counting it.
+                // 위팔뼈는 수평 -44.3~110.7도, T 포즈에서 내리기 90도 / 올리기 59.8도를 사용한다.
+                // 어깨이음의 범위와 합쳐 측정된 전체 어깨 가동 범위를 근사하며,
+                // 동일한 가동 범위를 중복으로 계산하지 않는다.
                 cone = {32.595316f, 13.336539f * side, 77.849753f, 77.409744f};
                 twistMin = isLeft ? -91.5f : -58.4f;
                 twistMax = isLeft ? 58.4f : 91.5f;
             }
             else if (name.find("ForeArm") != std::string::npos)
             {
-                // Match the knee's single-twist hinge. Mirrored X axes make
-                // positive twist bend both forearms forward; Y follows each
-                // forearm so the green dial traces actual elbow flexion.
+                // 무릎과 같은 단일 트위스트 힌지를 사용한다. 좌우 X축을 대칭으로 잡아
+                // 양쪽 모두 양의 트위스트에서 아래팔이 앞으로 굽혀지게 한다. Y축은 각 아래팔을 따라
+                // 초록색 각도 표시가 실제 팔꿈치 굽힘을 나타내도록 한다.
                 parentAxes = HingeAxes(parentX, Cross(parentX, forward));
                 childAxes = HingeAxes(x, Cross(x, forward));
-                cone = {0, 0, 1, 1}; // Valid but unused locked-swing limits.
+                cone = {0, 0, 1, 1}; // 잠긴 스윙축의 제한값은 유효하지만 실제로 사용하지 않는다.
                 twistMin = -.8f;
                 twistMax = 144.6f;
-                // Keep the imported forearm roll as the hinge reference. This
-                // pure hinge locks side-bending AND independent pronation /
-                // supination; neither is silently transferred to the wrist.
+                // 가져온 아래팔의 축 회전 방향을 힌지 기준으로 유지한다. 이 순수 힌지는
+                // 측면 굽힘과 독립적인 회내/회외를 모두 잠그며,
+                // 이 운동들을 손목으로 암묵적으로 넘기지 않는다.
                 joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
             }
             else if (name.find("Hand") != std::string::npos)
@@ -521,12 +521,12 @@ namespace PARS
                 const Vector3 hinge = radial[isLeft ? 0 : 1] * -side;
                 parentAxes = AnatomicalAxes(parentX, hinge);
                 childAxes = AnatomicalAxes(x, hinge);
-                // -79 extension .. 87 flexion. Radial/ulnar 20/30 are conservative
-                // rig caps, not values measured by the above wrist study.
+                // 신전 -79도~굴곡 87도다. 요측/척측 편위 20/30도는 보수적인 리그 제한값이며,
+                // 위에서 인용한 손목 연구에서 측정된 값은 아니다.
                 cone = {3.959488f, 5.002095f * side, 83.083931f, 25.045937f};
-                // Relax the original +/-5-degree coupling allowance to +/-20
-                // for animation roll. This is a rig tuning compromise, not
-                // physiological wrist pronation or a separate forearm roll joint.
+                // 애니메이션의 축 회전을 수용하기 위해 기존 결합 운동 허용치 +/-5도를 +/-20도로 넓힌다.
+                // 리그 튜닝을 위한 절충이며, 생리학적인 손목 회내 동작이나
+                // 별도의 아래팔 축 회전 조인트를 의미하지 않는다.
                 twistMin = -20;
                 twistMax = 20;
             }
@@ -540,32 +540,32 @@ namespace PARS
             }
             else if (name.find("Leg") != std::string::npos)
             {
-                // Use D6's single-twist hinge: X runs across the knee, while Y
-                // follows the leg. Positive X rotation bends the shin backward
-                // on both sides. These joint axes are independent of capsule X.
+                // D6의 단일 트위스트 힌지를 사용한다. X축은 무릎을 가로지르고 Y축은 다리를 따른다.
+                // 양쪽 모두 양의 X 회전에서 정강이가 뒤로 굽혀진다.
+                // 이 조인트 축들은 캡슐의 X축과 별개다.
                 parentAxes = HingeAxes(parentX, left);
                 childAxes = HingeAxes(x, left);
-                // Twist supports asymmetric endpoints directly, so no parent
-                // swing bias is needed. Keep valid (unused) locked-swing limits.
+                // 트위스트는 비대칭 끝점을 직접 지원하므로 부모의 스윙 편향이 필요 없다.
+                // 잠긴 스윙축의 제한값은 유효한 값으로 유지하되 실제로 사용하지 않는다.
                 cone = {0, 0, 1, 1};
                 twistMin = -1;
                 twistMax = 137.7f;
-                // Pure hinge approximation; side-bending and shank axial
-                // rotation are now swing motions and remain locked.
+                // 순수 힌지 근사다. 측면 굽힘과 정강이의 축 회전은
+                // 이 좌표계에서 스윙 운동에 해당하며 잠긴 상태를 유지한다.
                 joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
             }
-            else // Foot: use a virtual downward axis, not ankle-to-toe capsule X.
+            else // 발은 발목에서 발가락으로 향하는 캡슐 X축 대신 가상의 아래쪽 축을 사용한다.
             {
                 parentAxes = AnatomicalAxes(parentX, -left);
                 childAxes = AnatomicalAxes(-up, -left);
-                // Sagittal -54.6 plantar .. 12.7 dorsi. Inversion/eversion 30/15
-                // are rig caps for the combined ankle/subtalar proxy, not CDC data.
-                // Walking/running targets need more room than the reference
-                // envelope: +10 degrees in swing Y and +5 in swing Z, retaining
-                // the frame bias. These are animation tuning margins.
+                // 시상면 범위는 족저굴곡 -54.6도~배측굴곡 12.7도다. 내번/외번 30/15도는
+                // 발목/거골하관절을 합친 대체 바디의 리그 제한값이며 CDC 측정값은 아니다.
+                // 걷기/달리기 목표에는 참고 범위보다 여유가 필요하므로, 좌표계 편향을 유지하면서
+                // 스윙 Y에 10도, 스윙 Z에 5도를 추가한다.
+                // 애니메이션 튜닝을 위한 여유 범위다.
                 cone = {-20.754667f, 7.333241f * side, 44.654347f, 32.971366f};
                 twistMin = -10;
-                twistMax = 10; // +/-4 degrees beyond the original coupling allowance.
+                twistMax = 10; // 기존 결합 운동 허용치에서 양쪽으로 4도씩 추가한다.
             }
             SetAnatomicalFrames(joint, parentWorld, childWorld, position(nodes[i]),
                 parentAxes, childAxes, cone, twistMin, twistMax);

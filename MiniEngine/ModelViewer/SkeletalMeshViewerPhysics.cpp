@@ -1,4 +1,4 @@
-#include "SkeletalMeshViewer.h"
+﻿#include "SkeletalMeshViewer.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "imgui.h"
 #include <algorithm>
@@ -93,7 +93,7 @@ void SkeletalMeshViewer::CreatePhysicsBody(PhysicsShapeType shape)
     body.shape = shape;
     const Matrix4 frame = PhysicsBoneFrame(m_NodeWorld[m_SelectedBone]);
     Vector3 endpoint(.15f, 0, 0);
-    // Fit to the nearest child joint; leaf joints get a small editable body.
+    // 가장 가까운 자식 조인트에 맞춘다. 말단 조인트에는 편집 가능한 작은 바디를 만든다.
     float shortest = 1e10f;
     for (uint32_t i = 0; i < m_BoneParents.size(); ++i)
     {
@@ -157,8 +157,8 @@ void SkeletalMeshViewer::DrawPhysicsBodies()
         sorted.push_back({static_cast<int>(i), world,
             Dot(Vector3(world.GetW()) - m_Camera.GetPosition(), m_Camera.GetForwardVec())});
     }
-    // Convex surfaces are backface culled; sort bodies far-to-near for alpha.
-    // Bone lookup and rigid-frame extraction happen once per body, not per comparison.
+    // 볼록 표면은 뒷면을 컬링한다. 알파 블렌딩을 위해 바디를 먼 순서부터 정렬한다.
+    // 본 검색과 강체 좌표계 추출은 정렬 비교마다 수행하지 않고 바디마다 한 번만 수행한다.
     std::sort(sorted.begin(), sorted.end(), [](const VisibleBody& a, const VisibleBody& b) {
         return a.depth > b.depth;
     });

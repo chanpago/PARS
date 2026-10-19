@@ -1,4 +1,4 @@
-#include "SkeletonOverlay.h"
+﻿#include "SkeletonOverlay.h"
 #include "CommandContext.h"
 #include "CommandListManager.h"
 #include "GraphicsCommon.h"
@@ -27,9 +27,9 @@ void SkeletonOverlay::Initialize(uint32_t resolution)
     m_DrawPSO.SetRasterizerState(RasterizerTwoSided);
     auto blend = BlendTraditional;
     blend.IndependentBlendEnable = TRUE;
-    blend.RenderTarget[1] = BlendDisable.RenderTarget[0]; // IDs stay exact even on translucent limits.
+    blend.RenderTarget[1] = BlendDisable.RenderTarget[0]; // 반투명 제한 영역에서도 ID 값을 정확하게 유지한다.
     m_DrawPSO.SetBlendState(blend);
-    m_DrawPSO.SetDepthStencilState(DepthStateDisabled); // X-ray bones, as in the reference viewer.
+    m_DrawPSO.SetDepthStencilState(DepthStateDisabled); // 참고 뷰어처럼 본이 가려져도 투시해서 보여준다.
     m_DrawPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
     const DXGI_FORMAT formats[] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM};
     m_DrawPSO.SetRenderTargetFormats(2, formats, DXGI_FORMAT_UNKNOWN);
@@ -102,8 +102,8 @@ void SkeletonOverlay::Triangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color, u
 
 void SkeletonOverlay::FillTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color, uint32_t id, float opacity)
 {
-    // Keep homogeneous coordinates: the GPU clips triangles crossing the near
-    // plane instead of dropping the entire cone when its pivot leaves view.
+    // 동차 좌표를 유지한다. 피벗이 시야 밖으로 나갔다고 원뿔 전체를 버리는 대신,
+    // 근평면을 가로지르는 삼각형을 GPU에서 클리핑한다.
     for (Vector3 p : {a, b, c})
     {
         const Vector4 clip = m_ViewProjection * p;
@@ -119,7 +119,7 @@ void SkeletonOverlay::Line(Vector3 start, Vector3 end, Vector3 color, uint32_t i
 
 void SkeletonOverlay::ClipLine(Vector4 a, Vector4 b, Vector3 color, uint32_t id, float width)
 {
-    // Clip in homogeneous space before dividing by W (also supports reversed Z).
+    // W로 나누기 전에 동차 공간에서 클리핑한다. 역방향 Z도 지원한다.
     const auto distance = [](Vector4 p, int plane) -> float {
         switch (plane)
         {
@@ -235,8 +235,8 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
     context.SetViewportAndScissor(0, 0, m_Resolution, m_Resolution);
     if (!m_BodyDraws.empty())
     {
-        // A separate depth buffer keeps bodies visible through the character,
-        // while the nearest collider still wins the ID at each pixel.
+        // 별도 깊이 버퍼로 캐릭터 너머의 바디를 표시하되, 각 픽셀의 ID는
+        // 가장 가까운 콜라이더가 차지하도록 한다.
         context.TransitionResource(m_SurfaceDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
         context.ClearDepth(m_SurfaceDepth);
         context.SetRenderTargets(2, rtvs, m_SurfaceDepth.GetDSV());
@@ -251,7 +251,7 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
         context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context.TransitionResource(m_SurfaceMesh, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
         context.SetVertexBuffer(0, m_SurfaceMesh.VertexBufferView());
-        // Preserve the caller's far-to-near order and exact picking IDs.
+        // 호출자가 정한 먼 순서부터의 정렬과 정확한 피킹 ID를 유지한다.
         for (const auto& body : m_BodyDraws)
         {
             context.SetDynamicConstantBufferView(1, offsetof(BodyDraw, firstVertex), &body);

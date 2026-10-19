@@ -1,4 +1,4 @@
-#include "PhysicsWorld.h"
+﻿#include "PhysicsWorld.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -52,7 +52,7 @@ PhysicsWorld::~PhysicsWorld()
 
 bool PhysicsWorld::SupportsPvd()
 {
-    // Matches the vendored SDK configurations: Release disables PVD instrumentation.
+    // 저장소에 포함된 SDK 설정에 맞춘다. Release에서는 PVD 계측을 사용하지 않는다.
 #if defined(_DEBUG) || defined(PROFILE)
     return true;
 #else
@@ -80,7 +80,7 @@ bool PhysicsWorld::Initialize(bool connectPvd)
         m_Transport = PxDefaultPvdSocketTransportCreate("127.0.0.1", 5425, 100);
         if (connectPvd)
         {
-            ConnectPvd(); // A missing debugger must never prevent simulation.
+            ConnectPvd(); // 디버거가 없어도 시뮬레이션은 실행할 수 있어야 한다.
         }
     }
 
@@ -116,9 +116,9 @@ bool PhysicsWorld::Initialize(bool connectPvd)
     }
 
     PxSceneDesc desc(m_Physics->getTolerancesScale());
-    // TGS handles the anatomical ragdoll's mass/inertia ratios and narrow joint
-    // limits more accurately during contact. The external fixed step stays 1/60;
-    // this selects PhysX's constraint solver, not a frame-rate-dependent clock.
+    // TGS는 접촉 상황에서 인체형 래그돌의 질량/관성 비율과 좁은 관절 제한을 더 정확히 처리한다.
+    // 외부 고정 스텝은 계속 1/60이다. 여기서는 프레임률에 따른 시계가 아니라
+    // PhysX의 제약 솔버를 선택한다.
     desc.solverType = PxSolverType::eTGS;
     desc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
     desc.cpuDispatcher = m_Dispatcher;
@@ -133,7 +133,7 @@ bool PhysicsWorld::Initialize(bool connectPvd)
     {
         client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
         client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
-        // Movement queries otherwise overlay the PA with swept capsule volumes.
+        // 이동 쿼리를 전송하면 스윕한 캡슐 영역이 PA 위에 겹쳐 표시되므로 제외한다.
         client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, false);
     }
     ResetClock();
@@ -143,7 +143,7 @@ bool PhysicsWorld::Initialize(bool connectPvd)
 void PhysicsWorld::Shutdown()
 {
     m_QueryCapsules.clear();
-    Release(m_Scene); // Also releases actors and their exclusive shapes.
+    Release(m_Scene); // Actor와 각 Actor가 독점 소유하는 형상도 함께 해제한다.
     Release(m_Material);
     Release(m_Dispatcher);
     if (m_ExtensionsInitialized)
@@ -173,7 +173,7 @@ bool PhysicsWorld::ConnectPvd(bool reconnect)
     {
         return false;
     }
-    // Deliver initial scene data even when the demo is waiting for Start drop.
+    // 데모가 Start drop 입력을 기다리는 동안에도 초기 씬 데이터를 전달한다.
     m_Transport->lock().flush();
     m_Transport->unlock();
     return IsPvdConnected();
@@ -181,8 +181,8 @@ bool PhysicsWorld::ConnectPvd(bool reconnect)
 
 bool PhysicsWorld::IsPvdConnected() const
 {
-    // Socket status is updated by I/O. Explicit reconnect also handles a debugger
-    // closed during a pause, when there may have been no writes to detect it.
+    // 소켓 상태는 입출력 시 갱신된다. 일시정지 중에는 쓰기가 없어 디버거 종료를
+    // 감지하지 못할 수 있으므로, 명시적 재연결로 이 경우도 처리한다.
     return m_Pvd && m_Pvd->isConnected(false);
 }
 
@@ -244,8 +244,8 @@ uint32_t PhysicsWorld::Update(double elapsedSeconds, const BeforeStep& beforeSte
         return 0;
     }
 
-    // Keep at most eight steps from this frame. Discard long debugger/window stalls
-    // instead of creating a growing backlog; preserve the previous fractional step.
+    // 현재 프레임에서는 최대 8스텝만 반영한다. 디버거나 창 조작으로 오래 멈춘 시간은 버려
+    // 미처리 시간이 계속 쌓이지 않게 하되, 이전의 고정 스텝 미만 누적 시간은 보존한다.
     const double maxElapsed = FixedDeltaTime * MaxSubsteps;
     if (elapsedSeconds > maxElapsed)
     {
@@ -285,7 +285,7 @@ PxRigidStatic* PhysicsWorld::CreateStaticBox(const PxTransform& pose,
     PxRigidStatic* actor = PxCreateStatic(*m_Physics, pose, PxBoxGeometry(halfExtents), *m_Material);
     if (actor)
     {
-        actor->setName(name); // PhysX keeps this pointer; names must outlive their actors.
+        actor->setName(name); // PhysX가 이 포인터를 보관하므로 이름 문자열은 Actor보다 오래 유지되어야 한다.
         m_Scene->addActor(*actor);
     }
     return actor;
@@ -344,7 +344,7 @@ namespace
     PxTransform CapsulePose(const PxVec3& centre)
     {
         return PxTransform(centre, PxQuat(PxHalfPi, PxVec3(0, 0, 1)));
-    } // PhysX local X -> PARS +Y.
+    } // PhysX의 로컬 X축을 PARS의 +Y축에 맞춘다.
 
     class CapsuleQueryFilter : public PxQueryFilterCallback
     {
@@ -367,12 +367,12 @@ namespace
             const PxShape*, const PxRigidActor*) override
         {
             const auto& sweep = static_cast<const PxSweepHit&>(hit);
-            // Touching the floor must not block tangential travel or moving away.
+            // 바닥과 접촉해도 접선 방향 이동이나 바닥에서 멀어지는 이동은 막지 않는다.
             return sweep.normal.dot(direction) < -1e-5f ? PxQueryHitType::eBLOCK : PxQueryHitType::eNONE;
         }
     };
 
-    // Process all overlaps, including scenes with more hits than the local buffer.
+    // 로컬 버퍼 용량보다 충돌 결과가 많은 씬에서도 모든 겹침을 처리한다.
     class CapsulePenetration : public PxOverlapCallback
     {
     public:
@@ -421,7 +421,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         return result;
     }
     CapsuleQueryFilter filter(capsule.owner);
-    // Recover spawn/teleport penetration before attempting any sweep.
+    // 스윕을 시도하기 전에 생성/순간이동으로 발생한 파고듦을 해결한다.
     for (int iteration = 0; iteration < 8; ++iteration)
     {
         CapsulePenetration overlaps(capsule);
@@ -459,7 +459,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         {
             hit = buffer.block;
         }
-        // Other characters also remain query geometry, without registering proxies.
+        // 다른 캐릭터도 프록시 바디를 등록하지 않고 쿼리 형상으로만 처리한다.
         for (const auto& other : m_QueryCapsules)
         {
             if (other.get() == &capsule)
@@ -478,8 +478,8 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         return found;
     };
     const auto travel = [](const PxVec3& delta, const PxGeomSweepHit& hit) {
-        // The sweep geometry already includes the contact skin. Stop exactly
-        // there; adding another gap changes the established character foot height.
+        // 스윕 형상에 이미 접촉 여유 두께가 포함되어 있으므로 충돌 지점에서 정확히 멈춘다.
+        // 간격을 추가하면 기존 캐릭터의 발 높이가 달라진다.
         return delta.getNormalized() * PxMax(0.0f, hit.distance);
     };
     PxGeomSweepHit floor;
@@ -490,12 +490,12 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
     PxGeomSweepHit obstruction;
     if (floorContact && floor.normal.y > .01f && sweep(capsule.centre, horizontal, obstruction) && obstruction.normal.y < WalkableNormal)
     {
-        // Keep the old 25 cm step allowance. All three legs must be clear and
-        // the landing must be walkable; never lift through a low ceiling.
+        // 기존의 25cm 계단 허용 높이를 유지한다. 세 이동 구간이 모두 막히지 않아야 하고
+        // 착지면도 걸을 수 있어야 한다. 낮은 천장을 뚫고 올라가지 않도록 한다.
         const float stepHeight = PxMin(.25f, capsule.halfHeight);
         const PxVec3 up(0, stepHeight, 0), down(0, -stepHeight - .04f, 0);
-        // Probe a full footprint ahead to find the tread rather than rejecting
-        // the rounded capsule/step edge normal on very short fixed-step moves.
+        // 매우 짧은 고정 스텝 이동에서 둥근 캡슐/계단 모서리의 법선 때문에 거부하지 않도록,
+        // 발판에 캡슐 바닥 영역 전체가 걸리도록 더 앞쪽까지 탐색한다.
         const PxVec3 forward = horizontal + horizontal.getNormalized() * (capsule.radius + CapsuleSkin);
         PxGeomSweepHit hit;
         if (!sweep(capsule.centre, up, hit) && !sweep(capsule.centre + up, forward, hit) &&
@@ -524,7 +524,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
                 result.grounded = true;
                 if (vertical)
                 {
-                    break; // Ground support absorbs gravity, without sliding downhill.
+                    break; // 지면 지지가 중력을 받아내므로 내리막으로 미끄러지지 않는다.
                 }
             }
             else if (normal.y < -.01f)
@@ -538,8 +538,8 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
             else
             {
                 result.wall = true;
-                // Steep slopes behave as walls instead of turning forward input
-                // into upward velocity. Walkable slopes retain their true normal.
+                // 가파른 경사는 벽처럼 처리해 전진 입력이 상승 속도로 바뀌지 않게 한다.
+                // 걸을 수 있는 경사는 실제 법선을 유지한다.
                 if (!vertical)
                 {
                     normal.y = 0;

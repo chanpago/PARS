@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "GraphicsCore.h"
 #include "GameFramework/World.h"
@@ -18,8 +18,8 @@ namespace PARS
     class SkeletalMeshComponent;
 }
 
-// An editor preview scene. It shares immutable assets with the game, but owns
-// its pose, camera and render targets and has no physics/controller attached.
+// 에디터 미리보기 씬이다. 게임과 불변 에셋을 공유하지만 포즈, 카메라, 렌더 타깃은
+// 직접 소유하며, 물리나 컨트롤러는 연결하지 않는다.
 class SkeletalMeshViewer
 {
 public:
@@ -28,7 +28,7 @@ public:
         Cleanup();
     }
     bool Initialize(const std::shared_ptr<const Model>* models, const char* const* names, uint32_t count);
-    void Cleanup(); // Call after the GPU is idle, before renderer/ImGui shutdown.
+    void Cleanup(); // GPU가 유휴 상태가 된 후, 렌더러/ImGui를 종료하기 전에 호출한다.
     void Update(float deltaTime);
     void RenderUI(GraphicsContext& context);
     void Open()
@@ -92,7 +92,7 @@ private:
     Math::Matrix4 GetBodyWorld(int index) const;
     int FindBodyNode(int index) const;
     PARS::World m_World;
-    PARS::SkeletalMeshComponent* m_Mesh = nullptr; // Owned by the preview World.
+    PARS::SkeletalMeshComponent* m_Mesh = nullptr; // 미리보기 World가 소유한다.
     Math::Camera m_Camera;
     float m_Radius = 1;
     float m_Yaw = 0;
@@ -116,14 +116,14 @@ private:
     std::vector<bool> m_IsJoint, m_InSkeleton;
     std::vector<Math::Matrix4> m_NodeWorld, m_NodeMeshWorld;
     std::vector<GraphNode> m_EditPose;
-    std::vector<GraphNode> m_PickPose; // Pose rendered when the GPU pick was requested.
+    std::vector<GraphNode> m_PickPose; // GPU 피킹을 요청했을 때 렌더링한 포즈다.
     bool m_ShowBones = true, m_RevealSelection = false;
     bool m_PhysicsTreeOnly = true;
     float m_HierarchyFraction = .57f;
     float m_GraphZoom = 1, m_GraphPanX = 0, m_GraphPanY = 0;
     int m_GraphSelection = -1;
     int32_t m_SelectedBone = -1;
-    int m_GizmoMode = 0; // 0 = move, 1 = rotate, 2 = scale; local axes.
+    int m_GizmoMode = 0; // 0 = 이동, 1 = 회전, 2 = 스케일이며, 로컬 축을 사용한다.
     int m_DragAxis = -1;
     GraphNode m_DragOriginal{};
     Math::Vector3 m_DragLocalDirection{Math::kZero};

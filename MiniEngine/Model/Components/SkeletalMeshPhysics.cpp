@@ -1,4 +1,4 @@
-#include "SkeletalMeshComponent.h"
+﻿#include "SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
 #include <cmath>
@@ -22,7 +22,7 @@ namespace PARS
     {
         auto* world = GetOwner().GetWorld();
         auto* physics = world ? world->GetPhysicsWorld() : nullptr;
-        // Asset editing also uses this component in a world without physics.
+        // 에셋 편집 시에도 물리가 없는 월드에서 이 컴포넌트를 사용한다.
         if (!physics || asset.bodies.empty())
         {
             error.clear();
@@ -245,8 +245,8 @@ namespace PARS
                 m_BoneStretch.push_back(Invert(PhysicsBoneFrame(worldPose[node])) * worldPose[node]);
             }
         }
-        // Passive simulation releases the supported pelvis as well as the motors.
-        // Keep the existing bodies and poses instead of re-entering from animation.
+        // 패시브 시뮬레이션에서는 모터뿐 아니라 골반 지지도 해제한다.
+        // 애니메이션에서 다시 진입하지 않고 기존 바디와 포즈를 유지한다.
         if (!active && !m_Ragdoll.SetRootSupported(false, error))
         {
             return false;
@@ -321,7 +321,7 @@ namespace PARS
         }
         OverridePhysicsPose(m_PhysicsSkeleton, source, Matrix4(GetComponentTransform()),
             m_Ragdoll.GetBoneNodes(), targets, m_PhysicsPose);
-        // Culling must follow the falling mesh, rather than the frozen actor root.
+        // 컬링 영역은 멈춰 있는 Actor 루트가 아니라 떨어지는 메시를 따라가야 한다.
         const Vector3 center = m_Ragdoll.GetPosition();
         float radius = 0;
         for (const auto& target : targets)

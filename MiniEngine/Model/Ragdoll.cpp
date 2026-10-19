@@ -1,4 +1,4 @@
-#include "Ragdoll.h"
+﻿#include "Ragdoll.h"
 #include <algorithm>
 #include <cmath>
 #if defined(_M_X64)
@@ -69,7 +69,7 @@ namespace PARS
 
     void Ragdoll::Swap(Ragdoll& other) noexcept
     {
-        // Swap vector storage, preserving the name pointers retained by PhysX/PVD.
+        // 벡터 저장 공간을 교환해 PhysX/PVD가 보관 중인 이름 포인터를 유지한다.
         m_Asset.bodies.swap(other.m_Asset.bodies);
         m_Asset.constraints.swap(other.m_Asset.constraints);
         m_BoneNodes.swap(other.m_BoneNodes);
@@ -142,9 +142,9 @@ namespace PARS
                 Destroy();
                 return false;
             }
-            // Use a moderate increase over the reference's 4/1 for tighter joints.
-            // Override CreateDynamicBody's 32/8 explicitly and stay below the
-            // former 128/32 budget, which stalled fixed-step simulation in Debug.
+            // 관절을 더 단단하게 유지하도록 참고 구현의 4/1보다 반복 횟수를 적당히 높인다.
+            // CreateDynamicBody의 32/8 설정을 명시적으로 덮어쓰되, Debug의 고정 스텝 시뮬레이션을
+            // 지연시켰던 이전의 128/32보다는 낮게 유지한다.
             actor->setSolverIterationCounts(16, 4);
             actor->setLinearVelocity(initialVelocity);
             m_Bodies.push_back(actor);
@@ -174,9 +174,9 @@ namespace PARS
             joint->setSwingLimit(PxJointLimitCone(data.swingYLimit, data.swingZLimit));
             if (data.swingY == PhysicsJointMotion::Limited && data.swingZ == PhysicsJointMotion::Limited)
             {
-                // PhysX supports cone + pyramid simultaneously (ExtD6Joint.cpp).
-                // These enclosing bounds add solver rows for large impacts; they
-                // do not shrink the ellipse or change the cone shown in the editor.
+                // PhysX는 원뿔과 피라미드 제한을 동시에 지원한다(ExtD6Joint.cpp).
+                // 바깥쪽 경계는 큰 충격에 대응하는 솔버 제약 행을 추가한다.
+                // 타원을 줄이거나 에디터에 표시되는 원뿔을 변경하지는 않는다.
                 joint->setPyramidSwingLimit(PxJointLimitPyramid(
                     -data.swingYLimit, data.swingYLimit, -data.swingZLimit, data.swingZLimit));
             }
@@ -219,8 +219,8 @@ namespace PARS
         {
             auto* body = m_Bodies[i];
             body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, !simulate);
-            // Movement sweeps must not hit the character's own animated bone shapes.
-            // Simulation shapes remain enabled, and stay visible in PVD in both modes.
+            // 이동 스윕이 캐릭터 자신의 애니메이션 본 형상에 충돌하지 않도록 한다.
+            // 시뮬레이션 형상은 계속 활성화하며, 두 모드 모두 PVD에 표시한다.
             PxShape* shape = nullptr;
             body->getShapes(&shape, 1);
             if (shape)
@@ -280,8 +280,8 @@ namespace PARS
             if (teleport && m_LastKinematicTargets.size() == m_Bodies.size())
             {
                 const auto previous = ToPx(m_LastKinematicTargets[i]);
-                // Teleport/clip reset invalidates finite-difference velocities;
-                // the ordinary post-tick refresh of the same pose preserves them.
+                // 순간이동이나 클립 초기화 시에는 유한차분으로 구한 속도를 무효화한다.
+                // 일반적인 틱 이후에 같은 포즈를 갱신할 때는 해당 속도를 보존한다.
                 if ((poses[i].p - previous.p).magnitudeSquared() > 1e-8f || PxAbs(poses[i].q.dot(previous.q)) < .999999f)
                 {
                     m_AnimatedLinearVelocity.clear();
@@ -416,8 +416,8 @@ namespace PARS
             const float previous = result;
             const auto& data = m_Asset.constraints[i];
             const auto* joint = m_Joints[i];
-            // PhysX may return the equivalent angle near +/-2pi when the
-            // relative quaternion changes sign. Limits use the shortest twist.
+            // 상대 쿼터니언의 부호가 바뀌면 PhysX가 +/-2pi 부근의 동등한 각도를 반환할 수 있다.
+            // 제한을 검사할 때는 최단 트위스트 각도를 사용한다.
             const float twist = std::remainder(joint->getTwistAngle(), PxTwoPi);
             if (data.twist == PhysicsJointMotion::Locked)
             {
@@ -429,10 +429,10 @@ namespace PARS
             }
             if (data.swingY == PhysicsJointMotion::Limited && data.swingZ == PhysicsJointMotion::Limited)
             {
-                // Both coordinates can be below their separate limits while a
-                // diagonal swing is outside the actual elliptical cone. Measure
-                // radial angular excess using this SDK's ConeLimitHelperTanLess
-                // angle ellipse (an error metric, not the solver contact normal).
+                // 각 좌표가 개별 제한 이내여도 대각선 스윙은 실제 타원형 원뿔을 벗어날 수 있다.
+                // 이 SDK의 ConeLimitHelperTanLess가 사용하는 각도 타원을 기준으로
+                // 방사 방향의 각도 초과량을 측정한다.
+                // 이는 오차 지표이며 솔버의 접촉 법선은 아니다.
                 const float y = joint->getSwingYAngle(), z = joint->getSwingZAngle();
                 const float ny = y / data.swingYLimit, nz = z / data.swingZLimit;
                 const float ellipseRadius = std::sqrt(ny * ny + nz * nz);
@@ -441,7 +441,7 @@ namespace PARS
                     const float ty = std::tan(y * .25f), tz = std::tan(z * .25f);
                     const float py = std::tan(y / ellipseRadius * .25f), pz = std::tan(z / ellipseRadius * .25f);
                     const float r2 = ty * ty + tz * tz, p2 = py * py + pz * pz;
-                    // Dot product of actual and boundary pure-swing quaternions.
+                    // 실제 순수 스윙 쿼터니언과 경계의 순수 스윙 쿼터니언을 내적한다.
                     const float dot = ((1 - r2) * (1 - p2) + 4 * (ty * py + tz * pz)) / ((1 + r2) * (1 + p2));
                     result = PxMax(result, 2 * std::acos(PxClamp(PxAbs(dot), 0.0f, 1.0f)));
                 }

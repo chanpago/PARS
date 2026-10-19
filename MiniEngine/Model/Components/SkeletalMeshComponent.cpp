@@ -126,8 +126,8 @@ namespace PARS
             return;
         }
 
-        // Character movement has already updated the component root. Sample the
-        // animation before simulate(), so both PVD and rendering see this pose.
+        // 캐릭터 이동이 컴포넌트 루트를 이미 갱신한 상태다. simulate() 전에 애니메이션을
+        // 샘플링해 PVD와 렌더링이 모두 이 포즈를 사용하도록 한다.
         m_AnimInstance->UpdateAnimation(deltaTime);
         if (IsActiveRagdoll())
         {
@@ -135,8 +135,8 @@ namespace PARS
             if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError) ||
                 !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {
-                // A failed target falls back to full-body passive dynamics.
-                // Preserve the target error while removing pelvis force/torque support.
+                // 목표 갱신에 실패하면 전신 패시브 물리 시뮬레이션으로 전환한다.
+                // 골반의 힘/토크 지지를 제거하면서 목표 갱신 오류 메시지는 보존한다.
                 m_Ragdoll.SetDrivesEnabled(false);
                 std::string supportError;
                 m_Ragdoll.SetRootSupported(false, supportError);

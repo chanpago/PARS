@@ -1,6 +1,6 @@
-#include "PhysicsAsset.h"
+﻿#include "PhysicsAsset.h"
 #pragma warning(push)
-#pragma warning(disable : 4100) // Vendored JSON header has an unused diagnostic parameter.
+#pragma warning(disable : 4100) // 저장소에 포함된 JSON 헤더에는 사용하지 않는 진단용 매개변수가 있다.
 #include "json.hpp"
 #pragma warning(pop)
 #include <Windows.h>
@@ -115,7 +115,7 @@ namespace PARS
 
     Matrix4 PhysicsBoneFrame(const Matrix4& boneWorld)
     {
-        // Gram-Schmidt also removes shear caused by parent nonuniform scale.
+        // Gram-Schmidt 직교화로 부모의 비균일 스케일에서 생기는 전단도 제거한다.
         Vector3 x(boneWorld.GetX()), y(boneWorld.GetY());
         x = LengthSquare(x) > 1e-12f ? Normalize(x) : Vector3(kXUnitVector);
         y -= x * Dot(x, y);
@@ -489,8 +489,8 @@ namespace PARS
     {
         for (auto& joint : asset.constraints)
         {
-            // A proximal joint carries its descendants. Scale initial gains by
-            // their mass rather than driving a hand as strongly as the trunk.
+            // 몸통에 가까운 관절은 하위 부위의 무게도 지탱한다. 하위 부위 질량에 비례해 초기 게인을
+            // 설정하므로 손을 몸통과 같은 세기로 구동하지 않는다.
             std::set<std::string> descendants{joint.childBone};
             for (size_t pass = 0; pass < asset.bodies.size(); ++pass)
             {

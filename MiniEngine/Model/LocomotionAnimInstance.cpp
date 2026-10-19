@@ -1,4 +1,4 @@
-#include "LocomotionAnimInstance.h"
+﻿#include "LocomotionAnimInstance.h"
 #include "GameFramework/Character.h"
 
 namespace PARS
@@ -12,7 +12,7 @@ namespace PARS
         }
         const float speed = character->GetCharacterMovement().GetGroundSpeed();
         const uint32_t current = GetCurrentAnimationIndex();
-        // Hysteresis avoids repeated transitions around the thresholds.
+        // 히스테리시스를 적용해 임계값 근처에서 상태 전환이 반복되지 않게 한다.
         const uint32_t next = speed < (current == 0 ? 0.15f : 0.08f) ? 0 : speed > (current == 2 ? 2.1f : 2.4f) ? 2
                                                                                                                 : 1;
         if (next != current)

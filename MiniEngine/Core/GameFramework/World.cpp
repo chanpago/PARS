@@ -8,8 +8,8 @@
 
 namespace
 {
-    // Process-wide identities prevent stale handles from aliasing a later spawn
-    // or an actor belonging to another World.
+    // 프로세스 전체에서 고유한 ID를 사용해 오래된 핸들이 나중에 생성된 Actor나
+    // 다른 World의 Actor를 잘못 가리키지 않도록 한다.
     std::atomic<uint64_t> s_NextActorId{1};
 
     struct IterationScope
@@ -128,8 +128,8 @@ namespace PARS
         const size_t count = m_Actors.size();
         for (size_t i = 0; i < count; ++i)
         {
-            // Indexing, rather than retaining a vector iterator, permits spawning
-            // from a callback even if the ownership vector reallocates.
+            // 벡터 반복자를 유지하지 않고 인덱스로 접근하므로, 콜백에서 Actor를 생성해
+            // 소유 벡터가 재할당되어도 안전하게 순회할 수 있다.
             Actor* actor = m_Actors[i].get();
             if (!actor->IsPendingDestroy())
             {
@@ -159,8 +159,8 @@ namespace PARS
         {
             return;
         }
-        // Inputs -> fixed movement/animation/physics -> final poses. A new actor is configured
-        // before BeginPlay and never joins a tick pass halfway through spawning.
+        // 입력 -> 고정 간격 이동/애니메이션/물리 -> 최종 포즈 순서다. 새 Actor는 BeginPlay 전에
+        // 설정을 마치며, 생성 도중 진행 중인 틱 순회에 끼어들지 않는다.
         {
             IterationScope scope(m_IterationDepth);
             const size_t count = m_Actors.size();
@@ -229,7 +229,7 @@ namespace PARS
             // 이 update에서는 실제로 물리를 실행하지않는다. 대신 m_LastSubsteps의 값을 0으로 초기화하고 끝낸다.
             // m_LastSubsteps는 물리 시뮬레이션에서 마지막으로 실행된 substep의 수를 나타낸다. 이 값을 0으로 초기화하면,
             // 다음 프레임에서 물리 시뮬레이션이 시작될 때, 이전 프레임에서 남아있던 substep이 없음을 의미한다.
-            m_Physics->Update(0.0); // Reset per-frame statistics, preserving the fractional step.
+            m_Physics->Update(0.0); // 고정 스텝 미만의 누적 시간은 유지하고, 프레임별 통계만 초기화한다.
 
             const auto stepActors = [&](float dt) {
                 IterationScope scope(m_IterationDepth);
@@ -259,7 +259,7 @@ namespace PARS
                 // 일반적으로 일시정지 되지않았다면 이 부분에서 물리 시뮬레이션을 진행한다.
                 m_Physics->Update(animationDelta, stepActors);
 
-                // Animation discards the same long stall as the physics clock.
+                // 애니메이션도 물리 시간과 동일하게 장시간 정지 구간을 버린다.
                 animationDelta = std::min(animationDelta, static_cast<float>(PhysicsWorld::FixedDeltaTime * PhysicsWorld::MaxSubsteps));
             }
             m_StepRequested = false;
@@ -301,8 +301,8 @@ namespace PARS
             return true;
         });
         m_Actors.erase(end, m_Actors.end());
-        // Remove ownership entries before callbacks: EndPlay may request another
-        // destruction or spawn a replacement, without modifying this retired list.
+        // 콜백 전에 소유 목록에서 제거한다. EndPlay에서 다른 객체를 파괴하거나 대체 객체를
+        // 생성해도, 이미 분리한 삭제 대상 목록은 바뀌지 않는다.
         for (auto it = retired.rbegin(); it != retired.rend(); ++it)
         {
             (*it)->EndPlay();

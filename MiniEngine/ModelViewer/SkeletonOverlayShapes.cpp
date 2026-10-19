@@ -1,4 +1,4 @@
-#include "SkeletonOverlay.h"
+﻿#include "SkeletonOverlay.h"
 #include "GraphicsCommon.h"
 #include "CompiledShaders/PhysicsAssetVS.h"
 #include "CompiledShaders/PhysicsAssetPS.h"
@@ -29,8 +29,8 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
         BuildConstraintGeometry(joint, selected, twistReference, geometry);
     }
 
-    // Cache local geometry across animation/camera movement. When the projected
-    // frame is unchanged too, reuse the clipped screen-width lines and fills.
+    // 애니메이션/카메라가 움직여도 로컬 형상은 캐시에 보관한다. 투영된 좌표계도 같으면
+    // 클리핑을 마친 화면 두께의 선과 채움 영역까지 재사용한다.
     const Matrix4 clipTransform = m_ViewProjection * parent;
     if (!geometry.projected || geometry.width != m_Width || geometry.height != m_Height ||
         std::memcmp(&geometry.clipTransform, &clipTransform, sizeof(Matrix4)) != 0)
@@ -62,8 +62,8 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
         m_FillVertices.insert(m_FillVertices.end(), geometry.projectedFills.begin(), geometry.projectedFills.end());
     }
 
-    // Current-angle pointers follow the child every frame, even when the parent
-    // frame and its cached limit geometry stay still.
+    // 부모 좌표계와 캐시된 제한 형상이 멈춰 있어도, 현재 각도 바늘은
+    // 매 프레임 자식을 따라간다.
     const Vector3 origin(kZero), x(kXUnitVector), y(kYUnitVector), z(kZUnitVector), yellow(1, .85f, .05f);
     const float width = selected ? 2.5f : 1.25f;
     const auto pointer = [&](Vector3 direction, float length) {
@@ -81,12 +81,12 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
     XMFLOAT4 q;
     XMStoreFloat4(&q, relative);
     const float twistNorm = q.x * q.x + q.w * q.w;
-    // q = swing * twist. At a 180-degree swing the twist is undefined.
+    // q = swing * twist다. 스윙이 180도이면 트위스트는 정의되지 않는다.
     if (twistNorm > 1e-10f)
     {
         const float invLength = 1 / std::sqrt(twistNorm);
         const Quaternion twist(XMVectorSet(q.x * invLength, 0, 0, q.w * invLength));
-        // The needle and sector use the same zero, preserving signed PhysX angles.
+        // 바늘과 부채꼴이 같은 0도 기준을 사용해 PhysX 각도의 부호를 유지한다.
         pointer(twist * twistReference, .062f);
     }
 }
@@ -124,7 +124,7 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
                 fill(center, a, b, color, alpha);
             }
         }
-        // A free axis is a full ring, with no misleading minimum/maximum spoke.
+        // 자유 축은 완전한 원으로 표시하며, 오해를 부르는 최소/최대 경계선은 그리지 않는다.
         if (high - low < XM_2PI - .001f)
         {
             line(center, center + Quaternion(axis, low) * start, color, width);
@@ -134,9 +134,9 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
 
     if (joint.swingY == Motion::Limited && joint.swingZ == Motion::Limited)
     {
-        // This SDK uses ConeLimitHelperTanLess: the ellipse is in swing-angle
-        // coordinates, then converted to tan(angle/4), NOT the other way round.
-        // The boundary is a pure swing quaternion applied to local X.
+        // 이 SDK는 ConeLimitHelperTanLess를 사용한다. 스윙 각도 좌표에서 타원을 구한 뒤
+        // tan(angle/4)로 변환하며, 반대 순서로 계산하지 않는다.
+        // 경계는 순수 스윙 쿼터니언을 로컬 X축에 적용해 구한다.
         const auto cone = [&](float angle) {
             const float sy = std::tan(joint.swingYLimit * std::cos(angle) * .25f);
             const float sz = std::tan(joint.swingZLimit * std::sin(angle) * .25f);
@@ -156,7 +156,7 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
     }
     else if (joint.swingY == Motion::Locked && joint.swingZ == Motion::Locked)
     {
-        // Zero angular area: a cross marks the sole allowed direction.
+        // 허용 각도 영역이 0이면 유일하게 허용되는 방향을 십자 표시로 나타낸다.
         line(origin, x * radius, red, width);
         line(x * radius - y * .008f, x * radius + y * .008f, red, width);
         line(x * radius - z * .008f, x * radius + z * .008f, red, width);
@@ -171,15 +171,15 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
     }
     else if (joint.swingY == Motion::Free && joint.swingZ == Motion::Free)
     {
-        // No swing restriction: an unfilled sphere, not a finite cone.
+        // 스윙 제한이 없으면 유한한 원뿔 대신 내부를 채우지 않은 구를 표시한다.
         sector(origin, x, y * radius, -XM_PI, XM_PI, 0, red);
         sector(origin, y, x * radius, -XM_PI, XM_PI, 0, red);
         sector(origin, z, x * radius, -XM_PI, XM_PI, 0, red);
     }
     else
     {
-        // One swing free, the other limited: D6 constrains the elevation of
-        // child X (asin), leaving azimuth free. Show the allowed spherical band.
+        // 한 스윙축은 자유롭고 다른 축은 제한되면, D6는 자식 X축의 고도각(asin)을 제한하고
+        // 방위각은 자유롭게 둔다. 허용되는 구면 띠를 표시한다.
         const bool limitedY = joint.swingY == Motion::Limited;
         const float limit = Min(limitedY ? joint.swingYLimit : joint.swingZLimit, XM_PIDIV2);
         const auto band = [&](float elevation, float azimuth) {
@@ -208,9 +208,9 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
         }
     }
 
-    // Swing and twist share the joint pivot, including their current-angle pointers.
-    // Rotate the sector's reference and its needle together, never the physical
-    // joint frames or angle limits. Positive twist still rotates about local X.
+    // 스윙과 트위스트는 현재 각도 바늘까지 포함해 조인트 피벗을 공유한다.
+    // 부채꼴의 기준과 바늘을 함께 회전시키되, 물리 조인트 좌표계나
+    // 각도 제한은 바꾸지 않는다. 양의 트위스트는 계속 로컬 X축을 중심으로 회전한다.
     const Vector3 twistCenter = origin;
     const float twistRadius = radius * .62f;
     const float low = joint.twist == Motion::Free ? -XM_PI : joint.twist == Motion::Locked ? 0
@@ -245,7 +245,7 @@ void SkeletonOverlay::InitializeSurfaces()
         {"TEXCOORD", 0, DXGI_FORMAT_R32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
     auto blend = BlendTraditional;
     blend.IndependentBlendEnable = TRUE;
-    blend.RenderTarget[1] = BlendDisable.RenderTarget[0]; // Exact IDs, regardless of opacity.
+    blend.RenderTarget[1] = BlendDisable.RenderTarget[0]; // 불투명도와 관계없이 ID 값을 정확하게 유지한다.
     m_SurfacePSO.SetRootSignature(m_SurfaceRoot);
     m_SurfacePSO.SetInputLayout(_countof(layout), layout);
     m_SurfacePSO.SetRasterizerState(RasterizerDefault);
@@ -269,8 +269,8 @@ void SkeletonOverlay::Body(const PARS::PhysicsBody& body, const Matrix4& world, 
 
 std::vector<SkeletonOverlay::SurfaceVertex> SkeletonOverlay::BuildSurfaceMesh()
 {
-    // Build once, preserving the original tessellation and winding. Sizes and
-    // rigid transforms are applied by the vertex shader, including live PA edits.
+    // 원래의 테셀레이션과 정점 감기 순서를 유지하며 한 번만 생성한다. 크기와 강체 변환은
+    // 버텍스 셰이더에서 적용하므로 실시간 PA 편집도 반영된다.
     std::vector<SurfaceVertex> vertices;
     vertices.reserve(BoxVertices + CapsuleVertices);
     const auto vertex = [&](Vector3 p, Vector3 n, float capOffset) {
@@ -292,8 +292,8 @@ std::vector<SkeletonOverlay::SurfaceVertex> SkeletonOverlay::BuildSurfaceMesh()
             }
         }
     }
-    // Two hemispheres and an explicit cylinder band. Duplicated equators keep
-    // the capsule's cylindrical section straight, including halfLength == 0.
+    // 두 반구와 별도의 원통 띠로 구성한다. 적도 정점을 중복해 원통 부분이
+    // 곧게 유지되도록 하며, halfLength == 0인 경우에도 동일하게 처리한다.
     const auto sample = [&](int ring, int side, Vector3& n, float& capOffset) {
         const bool positive = ring > CapsuleHemisphere;
         const int latitude = positive ? ring - 1 : ring;

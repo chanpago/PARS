@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -62,8 +62,8 @@ namespace
     const char* const kPreviewNames[] = {"Idle", "Walking", "Slow Run"};
     constexpr uint32_t kPreviewCount = 3;
 
-    // Find the project assets from either the executable or the working directory.
-    // This also works when launching directly from the build output folder.
+    // 실행 파일 위치와 작업 디렉터리 양쪽을 기준으로 프로젝트 에셋을 찾는다.
+    // 빌드 출력 폴더에서 직접 실행한 경우에도 동작한다.
     std::wstring FindPreviewAssetRoot()
     {
         wchar_t path[32768];
@@ -128,7 +128,7 @@ public:
         {
             return true;
         }
-        // Escape belongs to the preview while it is focused (cancel a gizmo drag).
+        // 미리보기에 포커스가 있으면 Escape를 미리보기에서 처리한다(기즈모 드래그 취소).
         return !(m_MeshViewer && m_MeshViewer->WantsInput()) && GameCore::IGameApp::IsDone();
     }
 
@@ -159,7 +159,7 @@ private:
 
     ModelInstance m_ModelInst;
     PARS::World m_World;
-    PARS::ActorHandle m_PreviewCharacter; // Observation only; World owns the Actor.
+    PARS::ActorHandle m_PreviewCharacter; // 참조만 보관하며, Actor의 소유자는 World다.
     PARS::ActorHandle m_PlayerController;
     bool m_FreeCamera = false;
     float m_ControlYaw = XM_PI;
@@ -211,7 +211,7 @@ void ChangeIBLBias(EngineVar::ActionType)
     Renderer::SetIBLBias(g_IBLBias);
 }
 
-#include <direct.h> // for _getcwd() to check data root path
+#include <direct.h> // _getcwd()로 데이터 루트 경로를 확인하기 위해 사용한다.
 
 void LoadIBLTextures()
 {
@@ -274,8 +274,8 @@ void ModelViewer::Startup(void)
     Renderer::Initialize();
     m_World.BeginPlay();
 
-    // The default scene combines the physics map and the animated character.
-    // -physics 0 selects Sponza; -model still selects a standalone model.
+    // 기본 씬은 물리 맵과 애니메이션 캐릭터를 함께 사용한다.
+    // -physics 0은 Sponza를 선택하며, -model은 기존처럼 단일 모델을 선택한다.
     uint32_t physicsMode = 1;
     const bool hasPhysicsOption = CommandLineArgs::GetInteger(L"physics", physicsMode);
     std::wstring gltfFileName;
@@ -296,7 +296,7 @@ void ModelViewer::Startup(void)
         if (m_PhysicsDemo && m_PhysicsDemo->Startup())
         {
             MotionBlur::Enable = false;
-            TemporalEffects::EnableTAA = false; // This simple pass has no object velocity buffer.
+            TemporalEffects::EnableTAA = false; // 이 단순 렌더링 패스에는 객체 속도 버퍼가 없다.
             PostEffects::EnableAdaptation = false;
             SSAO::Enable = false;
             LoadIBLTextures();
@@ -346,7 +346,7 @@ void ModelViewer::Startup(void)
         m_ModelInst.Resize(10.0f);
 
         MotionBlur::Enable = false;
-        // Skinned meshes do not yet write object velocities for temporal reprojection.
+        // 스키닝 메시는 아직 시간적 재투영에 사용할 객체 속도를 기록하지 않는다.
         if (m_ModelInst.GetNumAnimations() > 0)
         {
             TemporalEffects::EnableTAA = false;
@@ -392,7 +392,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
 
-    // Configure the world-owned Character before its first BeginPlay/Tick.
+    // World가 소유하는 Character를 첫 BeginPlay/Tick 전에 설정한다.
     auto* character = m_World.SpawnActor<PARS::Character>("MixamoCharacter");
     if (!character)
     {
@@ -520,7 +520,7 @@ void ModelViewer::ResetPreviewCamera()
         m_CameraController.reset(new OrbitCamera(m_Camera, BoundingSphere(Vector3(0, 8, 0), 14.0f)));
         return;
     }
-    // Leave room for the hands and feet throughout all three animations.
+    // 세 애니메이션 모두에서 손과 발이 화면에 들어오도록 여유 공간을 둔다.
     const BoundingSphere bounds = character->GetMesh().GetModelInstance().GetBoundingSphere();
     m_CameraController.reset(new OrbitCamera(m_Camera,
         BoundingSphere(bounds.GetCenter(), bounds.GetRadius() * 1.4f), Vector3(kYUnitVector)));
@@ -601,8 +601,8 @@ void ModelViewer::UpdateFollowCamera()
 
 void ModelViewer::Cleanup(void)
 {
-    // GameCore waits for the GPU before Cleanup. End actor lifetimes while the
-    // renderer and physics services are still available to their components.
+    // GameCore는 Cleanup 전에 GPU 작업 완료를 기다린다. 컴포넌트가 렌더러와 물리 서비스를
+    // 아직 사용할 수 있는 동안 Actor의 수명을 종료한다.
     m_MeshViewer.reset();
     m_PreviewCharacter = {};
     m_PlayerController = {};
@@ -639,8 +639,8 @@ void ModelViewer::Update(float deltaT)
 
     if (m_World.HasPendingDestroy())
     {
-        // Actor meshes may still be referenced by the previous GPU frame. Only
-        // deletion waits; ordinary world updates do not force a GPU idle.
+        // 이전 GPU 프레임이 Actor 메시를 아직 참조할 수 있다. 삭제할 때만 완료를 기다리며,
+        // 일반적인 월드 갱신에서는 GPU가 유휴 상태가 되도록 강제하지 않는다.
         g_CommandManager.IdleGPU();
         m_World.CollectGarbage();
     }
@@ -687,14 +687,14 @@ void ModelViewer::Update(float deltaT)
 
     gfxContext.Finish();
 
-    // We use viewport offsets to jitter sample positions from frame to frame (for TAA.)
-    // D3D has a design quirk with fractional offsets such that the implicit scissor
-    // region of a viewport is floor(TopLeftXY) and floor(TopLeftXY + WidthHeight), so
-    // having a negative fractional top left, e.g. (-0.25, -0.25) would also shift the
-    // BottomRight corner up by a whole integer.  One solution is to pad your viewport
-    // dimensions with an extra pixel.  My solution is to only use positive fractional offsets,
-    // but that means that the average sample position is +0.5, which I use when I disable
-    // temporal AA.
+    // TAA를 위해 뷰포트 오프셋으로 프레임마다 샘플 위치를 조금씩 이동시킨다.
+    // D3D에서는 소수 오프셋을 사용할 때 뷰포트의 암묵적인 시저 영역이
+    // floor(TopLeftXY)와 floor(TopLeftXY + WidthHeight)로 정해진다.
+    // 따라서 왼쪽 위 좌표가 (-0.25, -0.25)처럼 음의 소수이면
+    // 오른쪽 아래 좌표도 정수 한 칸만큼 위로 이동한다. 뷰포트 크기에
+    // 한 픽셀을 더하는 방법도 있지만, 여기서는 양의 소수 오프셋만 사용한다.
+    // 이때 평균 샘플 위치는 +0.5가 되므로, 시간적 안티앨리어싱을 끈 경우에도
+    // 이 값을 사용한다.
     TemporalEffects::GetJitterOffset(m_MainViewport.TopLeftX, m_MainViewport.TopLeftY);
 
     m_MainViewport.Width = (float)g_SceneColorBuffer.GetWidth();
@@ -1099,7 +1099,7 @@ void ModelViewer::RenderScene(void)
     }
     else
     {
-        // Update global constants
+        // 전역 상수를 갱신한다.
         float costheta = cosf(g_SunOrientation);
         float sintheta = sinf(g_SunOrientation);
         float cosphi = cosf(g_SunInclination * 3.14159f * 0.5f);
@@ -1118,9 +1118,9 @@ void ModelViewer::RenderScene(void)
         globals.SunDirection = SunDirection;
         globals.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
 
-        // Begin rendering depth
+        // 깊이 렌더링을 시작한다.
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
-        // Preserve the floor and box depth so they correctly occlude the character.
+        // 바닥과 상자의 깊이를 유지해 캐릭터를 올바르게 가리도록 한다.
         if (!physicsScene)
         {
             gfxContext.ClearDepth(g_SceneDepthBuffer);
@@ -1193,9 +1193,9 @@ void ModelViewer::RenderScene(void)
         m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
     }
 #endif
-    // Some systems generate a per-pixel velocity buffer to better track dynamic and skinned meshes.  Everything
-    // is static in our scene, so we generate velocity from camera motion and the depth buffer.  A velocity buffer
-    // is necessary for all temporal effects (and motion blur).
+    // 일부 시스템은 동적/스키닝 메시를 더 잘 추적하려고 픽셀별 속도 버퍼를 생성한다.
+    // 이 경로는 물체를 정적으로 가정하고 카메라 움직임과 깊이 버퍼로 속도를 생성한다.
+    // 속도 버퍼는 모든 시간적 효과와 모션 블러에 필요하다.
     MotionBlur::GenerateCameraVelocityBuffer(gfxContext, m_Camera, true);
 
     if (TemporalEffects::EnableTAA)
@@ -1205,7 +1205,7 @@ void ModelViewer::RenderScene(void)
 
     ParticleEffectManager::Render(gfxContext, m_Camera, g_SceneColorBuffer, g_SceneDepthBuffer, g_LinearDepth[FrameIndex]);
 
-    // Until I work out how to couple these two, it's "either-or".
+    // 두 효과를 함께 사용하는 방법을 마련하기 전까지는 둘 중 하나만 사용한다.
     if (DepthOfField::Enable)
     {
         DepthOfField::Render(gfxContext, m_Camera.GetNearClip(), m_Camera.GetFarClip());

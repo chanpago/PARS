@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Animation.h"
 #include <memory>
@@ -10,8 +10,8 @@ namespace PARS
 {
     class SkeletalMeshComponent;
 
-    // Owned by SkeletalMeshComponent, not by Actor's component list.
-    // Evaluates CPU poses; GPU skinning/upload belongs to the mesh component.
+    // Actor의 컴포넌트 목록이 아니라 SkeletalMeshComponent가 소유한다.
+    // CPU 포즈를 계산하며, GPU 스키닝과 업로드는 메시 컴포넌트가 담당한다.
     class AnimInstance
     {
     public:

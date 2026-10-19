@@ -1,11 +1,11 @@
-#pragma once
+﻿#pragma once
 
 #include "SceneComponent.h"
 #include "../Math/BoundingSphere.h"
 
 namespace PARS
 {
-    // Spatial component with geometry. Physics registration is a separate concern.
+    // 형상을 가진 공간 컴포넌트다. 물리 등록은 별도로 처리한다.
     class PrimitiveComponent : public SceneComponent
     {
     public:

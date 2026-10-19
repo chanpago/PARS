@@ -1,9 +1,9 @@
-#pragma once
+﻿#pragma once
 #include "Controller.h"
 
 namespace PARS
 {
-    // Platform input is supplied by the application. AI can use another Controller.
+    // 플랫폼 입력은 애플리케이션에서 전달한다. AI는 별도의 Controller를 사용할 수 있다.
     class PlayerController : public Controller
     {
     public:

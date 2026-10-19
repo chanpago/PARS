@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "SkinnedMeshComponent.h"
 #include "../AnimInstance.h"
@@ -18,14 +18,14 @@ namespace PARS
     {
     public:
         SkeletalMeshComponent(Actor& owner, const std::string& name);
-        // Assign assets before rendering starts (or while the GPU is idle).
+        // 렌더링 시작 전이나 GPU가 유휴 상태일 때 에셋을 지정한다.
         bool SetSkeletalMesh(std::shared_ptr<const Model> mesh) override;
         bool SetAnimInstance(std::unique_ptr<AnimInstance> instance);
         AnimInstance& GetAnimInstance() const
         {
             return *m_AnimInstance;
         }
-        // Validated snapshot. A playing physics world registers kinematic bodies immediately.
+        // 검증된 복사본을 보관한다. 실행 중인 물리 월드에서는 키네마틱 바디를 즉시 등록한다.
         bool SetPhysicsAsset(const PhysicsAsset& asset, std::string& error);
         const PhysicsAsset* GetPhysicsAsset() const
         {
@@ -43,7 +43,7 @@ namespace PARS
         {
             return m_PhysicsMode == PhysicsAnimationMode::ActiveRagdoll;
         }
-        // Copy only drive values by joint names. Applied before the next fixed step.
+        // 조인트 이름을 기준으로 드라이브 값만 복사한다. 다음 고정 스텝 전에 적용된다.
         bool QueueDriveSettings(const PhysicsAsset& source, std::string& error);
         bool HasPendingDriveSettings() const
         {
@@ -67,7 +67,7 @@ namespace PARS
             return IsRagdoll() ? m_PhysicsPose : m_AnimInstance->GetPose();
         }
 
-        // Optional final pose override, owned by the caller (e.g. an editor preview).
+        // 선택적으로 최종 포즈를 덮어쓴다. 해당 포즈는 호출자(예: 에디터 미리보기)가 소유한다.
         bool UpdateRenderData(GraphicsContext& context, const std::vector<GraphNode>* poseOverride = nullptr);
         void Render(Renderer::MeshSorter& sorter) const;
         const ModelInstance& GetModelInstance() const

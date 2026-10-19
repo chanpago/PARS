@@ -1,4 +1,4 @@
-#include "Actor.h"
+﻿#include "Actor.h"
 #include "SceneComponent.h"
 #include "World.h"
 #include <cmath>
@@ -9,7 +9,7 @@ namespace PARS
     {
         EndPlay();
         m_RootComponent = nullptr;
-        // Unlink while every sibling is still alive, independent of creation order.
+        // 생성 순서와 관계없이 다른 컴포넌트들이 모두 살아 있을 때 연결을 해제한다.
         for (const auto& component : m_Components)
         {
             if (auto scene = dynamic_cast<SceneComponent*>(component.get()))

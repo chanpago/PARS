@@ -1,4 +1,4 @@
-#include "Ragdoll.h"
+﻿#include "Ragdoll.h"
 #include "PhysicsPose.h"
 #include <algorithm>
 #include <cmath>
@@ -49,16 +49,16 @@ namespace PARS
             for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
             {
                 const auto& drive = data.drives[axis];
-                // Force-based PD, with a per-axis Nm limit. PhysX performs the
-                // solve; do not apply another manual torque controller on top.
+                // 축별 Nm 제한을 사용하는 힘 기반 PD 제어다. 실제 계산은 PhysX가 수행하므로
+                // 별도의 수동 토크 제어기를 중복 적용하지 않는다.
                 const bool on = m_DrivesEnabled && Enabled(drive, motions[axis]);
                 m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], on ? PxD6JointDrive(drive.stiffness, drive.damping, drive.maxTorque, false) : PxD6JointDrive());
             }
         }
         for (auto* body : m_Bodies)
         {
-            // Active motors use 32 position / 8 velocity iterations to balance
-            // animated tracking with Debug solve cost. Passive uses 16/4.
+            // 액티브 모터는 애니메이션 추종과 Debug 계산 비용의 균형을 위해 위치 32회 / 속도 8회의
+            // 솔버 반복을 사용한다. 패시브 모드는 16/4를 사용한다.
             body->setSolverIterationCounts(m_DrivesEnabled ? 32 : 16, m_DrivesEnabled ? 8 : 4);
             if (!(body->getRigidBodyFlags() & PxRigidBodyFlag::eKINEMATIC))
             {
@@ -101,8 +101,8 @@ namespace PARS
                 candidate.constraints[i].drives[axis] = asset.constraints[i].drives[axis];
             }
         }
-        // Validate against the LIVE joint motions, not the editor's potentially
-        // different limits. This update deliberately does not replace frames.
+        // 다를 수 있는 에디터 제한값 대신 현재 실행 중인 조인트의 운동 설정을 기준으로 검증한다.
+        // 이 갱신에서는 의도적으로 조인트 좌표계를 교체하지 않는다.
         if (!candidate.Validate(error))
         {
             return false;
@@ -179,9 +179,9 @@ namespace PARS
         }
         if (m_SupportJoint)
         {
-            // The pelvis stays dynamic. A world-anchored D6 applies bounded
-            // forces/torques in the same implicit solve as joints and contacts.
-            // Both velocities are child-minus-world for linear/SLERP drives.
+            // 골반은 동적 상태를 유지한다. 월드에 고정된 D6 조인트가 제한된 힘/토크를 가하며,
+            // 다른 조인트와 접촉 제약도 같은 암시적 풀이 과정에서 함께 계산한다.
+            // 선형/SLERP 드라이브의 두 속도는 모두 자식 속도에서 월드 속도를 뺀 값이다.
             PxVec3 linear(0), angular(0);
             if (m_HasSupportTarget && deltaTime > 0)
             {
@@ -216,8 +216,8 @@ namespace PARS
                 m_Joints[i]->getActors(a, b);
                 const PxQuat parent = a->getGlobalPose().q * m_Joints[i]->getLocalPose(PxJointActorIndex::eACTOR0).q;
                 const PxQuat child = b->getGlobalPose().q * m_Joints[i]->getLocalPose(PxJointActorIndex::eACTOR1).q;
-                // Small limb inertia can satisfy PhysX's energy sleep threshold
-                // while still far from a static motor target. Keep solving that error.
+                // 작은 팔다리는 관성이 작아 정지된 모터 목표에서 멀리 떨어져 있어도 PhysX의 에너지 기반
+                // 수면 임계값을 만족할 수 있다. 이 경우에도 목표 오차를 계속 해결하도록 한다.
                 changed |= Angle(parent.getConjugate() * child, q) > .03f;
             }
             if (history)
@@ -231,8 +231,8 @@ namespace PARS
                 PxVec3 axis;
                 delta.toRadiansAndUnitAxis(angle, axis);
                 angular = axis * PxMin(angle / deltaTime, 20.0f);
-                // This SDK's SWING_TWIST rows use parent-minus-child velocity;
-                // SLERP uses child-minus-parent (see ExtD6JointSolverPrep).
+                // 이 SDK의 SWING_TWIST 제약 행은 부모 속도에서 자식 속도를 뺀 값을 사용한다.
+                // SLERP는 자식 속도에서 부모 속도를 뺀 값을 사용한다(ExtD6JointSolverPrep 참고).
                 if (!data.useSlerpDrive)
                 {
                     angular = -angular;
@@ -293,7 +293,7 @@ namespace PARS
         }
         if (!supported)
         {
-            // Removing the drive leaves every body's pose and velocity intact.
+            // 드라이브를 제거해도 모든 바디의 포즈와 속도는 유지한다.
             m_SupportJoint->release();
             m_SupportJoint = nullptr;
             m_Bodies[m_SupportBody]->wakeUp();
@@ -309,8 +309,8 @@ namespace PARS
             error = "Could not create pelvis force/torque drive.";
             return false;
         }
-        // All six axes are free: only finite motor forces support the pelvis.
-        // This runtime joint is separate from the PA's anatomical constraints.
+        // 6개 축을 모두 자유롭게 둔다. 크기가 제한된 모터의 힘만으로 골반을 지지한다.
+        // 이 런타임 조인트는 PA의 인체 관절 제약과 별개다.
         drive->setName("PelvisForceTorque");
         for (int axis = 0; axis < PxD6Axis::eCOUNT; ++axis)
         {
@@ -323,16 +323,16 @@ namespace PARS
         {
             mass += part->getMass();
         }
-        // Whole-ragdoll mass scales these initial support gains. Linear limits
-        // are N per world axis; SLERP limits are Nm per solver angular row.
+        // 래그돌 전체 질량에 비례해 초기 지지 게인을 설정한다. 선형 힘 제한은 월드 축마다 N 단위,
+        // SLERP 토크 제한은 솔버의 각도 제약 행마다 Nm 단위다.
         const PxD6JointDrive position(mass * 900.0f, mass * 60.0f, mass * 60.0f, false);
         for (auto axis : {PxD6Drive::eX, PxD6Drive::eY, PxD6Drive::eZ})
         {
             drive->setDrive(axis, position);
         }
         drive->setDrive(PxD6Drive::eSLERP, PxD6JointDrive(mass * 200.0f, mass * 10.0f, mass * 20.0f, false));
-        // Hold the current pose until the next animation target, without a snap
-        // or a finite-difference velocity spike when support is re-enabled.
+        // 다음 애니메이션 목표가 들어올 때까지 현재 포즈를 유지한다. 지지를 다시 켤 때
+        // 포즈가 갑자기 바뀌거나 유한차분 속도가 급증하는 것을 방지한다.
         drive->setDrivePosition(body->getGlobalPose());
         drive->setDriveVelocity(PxVec3(0), PxVec3(0));
         m_SupportJoint = drive;

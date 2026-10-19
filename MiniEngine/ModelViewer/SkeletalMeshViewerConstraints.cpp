@@ -1,4 +1,4 @@
-#include "SkeletalMeshViewer.h"
+﻿#include "SkeletalMeshViewer.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "imgui.h"
 #include <cmath>
@@ -61,7 +61,7 @@ int SkeletalMeshViewer::FindConstraintParent() const
         return -1;
     }
     const auto& model = *m_Mesh->GetSkeletalMesh();
-    // Skip helper nodes and bones without bodies, rather than requiring every bone.
+    // 모든 본을 요구하지 않고 보조 노드와 바디가 없는 본은 건너뛴다.
     for (int node = model.m_NodeParents[m_SelectedBone]; node >= 0; node = model.m_NodeParents[node])
     {
         const int body = m_PhysicsAsset.FindBody(model.m_NodeNames[node]);
@@ -110,9 +110,9 @@ void SkeletalMeshViewer::SelectConstraint(int index)
 void SkeletalMeshViewer::ResetConstraintFrames(PhysicsConstraint& joint)
 {
     const int parent = m_PhysicsAsset.FindBody(joint.parentBone), child = m_PhysicsAsset.FindBody(joint.childBone);
-    // Capsule X already follows the limb in PARS. Use that orientation, with
-    // the pivot at the child bone origin. Mundi's fixed -90 degree rotations
-    // would be wrong here (Y-up, column-vector Parent * Local convention).
+    // PARS의 캡슐 X축은 이미 팔다리를 따른다. 이 방향을 사용하고 피벗은 자식 본 원점에 둔다.
+    // 여기에 Mundi의 고정 -90도 회전을 적용하면 맞지 않는다.
+    // PARS는 Y가 위쪽이며, 열벡터에 Parent * Local 순서를 사용하는 규칙이기 때문이다.
     Matrix4 world = GetBodyWorld(child);
     world.SetW(m_NodeWorld[FindBodyNode(child)].GetW());
     joint.SetWorldFrame(GetBodyWorld(parent), GetBodyWorld(child), world);
@@ -124,8 +124,8 @@ void SkeletalMeshViewer::MoveOtherConstraintFrame(const Matrix4& previousWorld)
     const Matrix4 delta = GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame) * Invert(previousWorld);
     auto& other = m_ConstraintFrame == 0 ? joint.childFrame : joint.parentFrame;
     const Matrix4 otherBody = GetConstraintBodyWorld(1 - m_ConstraintFrame);
-    // Apply the same world-space edit, preserving the anatomical bias between
-    // the frames. Snapping the other frame to this one would erase asymmetric ROM.
+    // 두 좌표계 사이의 해부학적 편향을 유지하면서 동일한 월드 공간 편집을 적용한다.
+    // 반대쪽 좌표계를 이쪽에 그대로 맞추면 비대칭 가동 범위가 사라진다.
     other = PhysicsJointFrame::FromTransform(Invert(otherBody) * delta * otherBody * other.GetTransform());
 }
 
@@ -274,7 +274,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     ImGui::EndDisabled();
     changed |= ImGui::Checkbox("Connected bodies collide", &joint.enableCollision);
     const bool locked = joint.twist == PhysicsJointMotion::Locked || joint.swingY == PhysicsJointMotion::Locked || joint.swingZ == PhysicsJointMotion::Locked;
-    // Motion edits must leave a valid PA even while the drive panel is collapsed.
+    // 드라이브 패널이 접혀 있어도 운동 설정 편집 후 PA는 유효해야 한다.
     if (locked && joint.useSlerpDrive)
     {
         joint.useSlerpDrive = false;
@@ -323,11 +323,11 @@ Vector3 SkeletalMeshViewer::GetTwistDisplayReference(const PhysicsConstraint& jo
     const auto colon = joint.childBone.find_last_of(':');
     const char* bone = joint.childBone.c_str() + (colon == std::string::npos ? 0 : colon + 1);
 
-    // Match BuildMixamoPhysicsAsset's anatomical CHILD frames, not world axes:
-    // -Z is front for the trunk/neck/head, shoulder/upper arm, thigh and foot;
-    // for the hand it is the palm normal (down in the imported T-pose).
-    // The same reference rotates the parent dial and the child twist needle.
-    // It stays attached to the joint during animation and frame editing.
+    // 월드 축 대신 BuildMixamoPhysicsAsset의 해부학적 자식 좌표계에 맞춘다.
+    // 몸통/목/머리, 어깨/위팔, 허벅지, 발에서는 -Z가 앞쪽이다.
+    // 손에서는 손바닥 법선이며, 가져온 T 포즈에서는 아래쪽이다.
+    // 같은 기준으로 부모의 각도 표시와 자식의 트위스트 바늘을 회전시킨다.
+    // 애니메이션 재생과 좌표계 편집 중에도 조인트에 붙어 있도록 한다.
     for (const char* name : {"Spine", "Spine1", "Spine2", "Neck", "Head",
              "LeftShoulder", "RightShoulder", "LeftArm", "RightArm",
              "LeftHand", "RightHand",
@@ -339,15 +339,15 @@ Vector3 SkeletalMeshViewer::GetTwistDisplayReference(const PhysicsConstraint& jo
         }
     }
 
-    // Hinge X is the elbow/knee flexion axis and Y follows the forearm/shin.
-    // The green twist sector therefore follows the actual bending motion.
+    // 힌지 X축은 팔꿈치/무릎의 굽힘 축이고, Y축은 아래팔/정강이를 따른다.
+    // 따라서 초록색 트위스트 부채꼴이 실제 굽힘 동작을 따라간다.
     if (std::strcmp(bone, "LeftLeg") == 0 || std::strcmp(bone, "RightLeg") == 0 ||
         std::strcmp(bone, "LeftForeArm") == 0 || std::strcmp(bone, "RightForeArm") == 0)
     {
         return Vector3(kYUnitVector);
     }
 
-    // Unrecognized rigs retain the joint-local convention; do not guess their anatomy.
+    // 알 수 없는 리그는 조인트 로컬 규칙을 유지하며, 해부학적 구조를 추측하지 않는다.
     return Vector3(kYUnitVector);
 }
 

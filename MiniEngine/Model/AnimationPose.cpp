@@ -1,5 +1,5 @@
-// Copyright (c) Microsoft. All rights reserved.
-// Licensed under the MIT License. Sampling helpers adapted from Animation.cpp.
+﻿// Copyright (c) Microsoft. All rights reserved.
+// Licensed under the MIT License. 샘플링 보조 함수는 Animation.cpp를 바탕으로 작성했다.
 
 #include "Animation.h"
 #include <cmath>
@@ -122,7 +122,7 @@ static inline void Slerp(float* Dest, const void* Key1, const void* Key2, float 
         break;
     }
     default:
-        // The caller validates the key format.
+        // 키 데이터 형식은 호출자가 검증한다.
         break;
     }
 }
@@ -192,7 +192,7 @@ void BlendAnimationPoses(const GraphNode* source, GraphNode* target, uint32_t co
     {
         const auto& from = source[i];
         auto& to = target[i];
-        // Preserve matrix-only static nodes; rebuild TRS only for animated nodes.
+        // 행렬만 가진 정적 노드는 보존하고, 애니메이션이 적용되는 노드만 TRS를 다시 구성한다.
         if (from.staleMatrix || to.staleMatrix ||
             std::memcmp(&from.rotation, &to.rotation, sizeof(to.rotation)) != 0 ||
             std::memcmp(&from.scale, &to.scale, sizeof(to.scale)) != 0)

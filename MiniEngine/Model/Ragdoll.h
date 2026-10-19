@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "PhysicsAsset.h"
 
 class PhysicsWorld;
@@ -10,8 +10,8 @@ namespace physx
 
 namespace PARS
 {
-    // Owns live PhysX objects. Destroy before the owning PhysicsWorld shuts down.
-    // The asset snapshot also owns the names retained by PhysX/PVD.
+    // 실행 중인 PhysX 객체를 소유한다. 소속 PhysicsWorld가 종료되기 전에 파괴해야 한다.
+    // 에셋 복사본은 PhysX/PVD가 참조하는 이름 문자열도 소유한다.
     class Ragdoll
     {
     public:
@@ -32,7 +32,7 @@ namespace PARS
             return m_Simulating;
         }
         bool SetSimulating(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity = false);
-        // Drive switches preserve dynamic poses/velocities, unlike entry from animation.
+        // 애니메이션에서 새로 진입할 때와 달리, 드라이브 전환 시에는 동적 포즈와 속도를 유지한다.
         void SetDrivesEnabled(bool enabled);
         bool AreDrivesEnabled() const
         {
@@ -40,8 +40,8 @@ namespace PARS
         }
         bool ApplyDriveSettings(const PhysicsAsset& asset, std::string& error);
         bool UpdateDriveTargets(const std::vector<Math::Matrix4>& boneWorld, float deltaTime, std::string& error);
-        // A world-space force/torque drive supports the DYNAMIC pelvis.
-        // Independent of the anatomical angular drives; updates arrive before simulate().
+        // 월드 공간의 힘/토크 드라이브로 동적 골반을 지지한다.
+        // 인체 관절의 각도 드라이브와 독립적이며, simulate() 전에 갱신한다.
         bool SetRootSupported(bool supported, std::string& error);
         bool IsRootSupported() const
         {
@@ -55,7 +55,7 @@ namespace PARS
         {
             return m_MaxTargetClampAngle;
         }
-        // Fixed steps use targets; teleport also refreshes paused/editor poses immediately.
+        // 고정 스텝에서는 목표를 사용한다. 순간이동 시에는 일시정지/에디터 포즈도 즉시 갱신한다.
         bool UpdateKinematicPose(const std::vector<Math::Matrix4>& boneWorld, bool teleport, std::string& error);
         size_t GetKinematicBodyCount() const;
         size_t GetBodyCount() const
@@ -73,9 +73,9 @@ namespace PARS
         Math::Matrix4 GetBoneWorld(size_t body) const;
         Math::Vector3 GetPosition() const;
         void AddVelocity(Math::Vector3 velocity);
-        // PxActor::userData identifies the owner for self-excluding movement queries.
+        // PxActor::userData로 소유자를 식별해 이동 쿼리에서 자기 자신을 제외한다.
         void SetQueryOwner(void* owner);
-        // Diagnostics also used by the integration test and PVD panel.
+        // 통합 테스트와 PVD 패널에서도 사용하는 진단 정보다.
         float GetMaxAnchorError() const;
         float GetMaxAngularError(size_t* worstJoint = nullptr) const;
         float GetLowestPoint() const;

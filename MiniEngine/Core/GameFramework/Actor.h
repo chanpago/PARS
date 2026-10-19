@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "ActorComponent.h"
 #include "../VectorMath.h"
@@ -37,7 +37,7 @@ namespace PARS
         Actor(const Actor&) = delete;
         Actor& operator=(const Actor&) = delete;
 
-        // Construction-time subobjects have stable addresses and Actor-owned lifetimes.
+        // 생성 시점에 만드는 하위 객체는 주소가 유지되며, 수명은 Actor가 관리한다.
         template<class T, class... Args>
         T& CreateDefaultSubobject(const std::string& name, Args&&... args)
         {
@@ -117,7 +117,7 @@ namespace PARS
 
     private:
         friend class World;
-        World* m_World = nullptr; // World owns this Actor.
+        World* m_World = nullptr; // 이 Actor의 소유자는 World다.
         ActorHandle m_Handle;
         bool m_PendingDestroy = false;
         std::string m_Name;

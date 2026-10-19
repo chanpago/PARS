@@ -1,4 +1,4 @@
-#include "PhysicsDemo.h"
+﻿#include "PhysicsDemo.h"
 #include "GameFramework/World.h"
 #include "BufferManager.h"
 #include "Camera.h"
@@ -87,14 +87,14 @@ namespace
         {
             return;
         }
-        // A stale debugger must not block ModelViewer's message/render thread.
+        // 응답하지 않는 디버거가 ModelViewer의 메시지/렌더 스레드를 막지 않도록 한다.
         ShowWindowAsync(window, SW_RESTORE);
         SetForegroundWindow(window);
     }
 
     std::wstring FindPvdExecutable()
     {
-        // Locate the repository from the executable, independent of VS's working directory.
+        // VS의 작업 디렉터리에 의존하지 않고 실행 파일 위치에서 저장소를 찾는다.
         std::wstring directory(32768, L'\0');
         const DWORD length = GetModuleFileNameW(nullptr, &directory[0], static_cast<DWORD>(directory.size()));
         if (!length || length >= directory.size())
@@ -230,7 +230,7 @@ void PhysicsDemo::ResetBox()
         m_Box->release();
     }
     m_Box = m_World.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), BoxHalfExtents, 10.0f, "Falling box");
-    // Hold only the demonstration box; character physics remains active.
+    // 데모 상자만 고정하며, 캐릭터 물리는 계속 동작한다.
     if (m_Box)
     {
         m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
@@ -247,8 +247,8 @@ void PhysicsDemo::StartDrop()
     if (m_Box)
     {
         m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
-        // Clearing eKINEMATIC preserves sleep. Explicitly wake the released box
-        // so gravity starts acting on the very next world step.
+        // eKINEMATIC을 해제해도 수면 상태는 유지된다. 해제한 상자를 명시적으로 깨워
+        // 바로 다음 월드 스텝부터 중력이 작용하게 한다.
         m_Box->wakeUp();
     }
     m_DropReady = m_Box == nullptr;
@@ -263,8 +263,8 @@ void PhysicsDemo::KickBox()
     }
     m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
     m_DropReady = false;
-    // Apply a real impulse and torque; PhysX handles the ensuing flight,
-    // rotation and collision with the floor from the current pose.
+    // 실제 충격량과 토크를 적용한다. 이후의 비행, 회전, 바닥 충돌은
+    // 현재 포즈를 기준으로 PhysX가 처리한다.
     m_Box->addForce(PxVec3(0, 60, 0), PxForceMode::eIMPULSE);
     m_Box->addTorque(PxVec3(5, 0, 3), PxForceMode::eIMPULSE);
     m_GameWorld.SetPhysicsPaused(false);
@@ -286,7 +286,7 @@ void PhysicsDemo::RecordHeight()
 
 void PhysicsDemo::Update(float)
 {
-    UpdatePvdConnection(); // Connection retries must also run while physics is paused.
+    UpdatePvdConnection(); // 물리가 일시정지된 동안에도 연결 재시도를 수행해야 한다.
     if (!m_DropReady && m_World.GetLastSubsteps() && m_Box && !m_Box->isSleeping())
     {
         RecordHeight();
@@ -307,7 +307,7 @@ void PhysicsDemo::ConnectPvd()
         return;
     }
     ShowPvdWindow(window);
-    // Force a fresh connection: the SDK may retain a stale socket status while paused.
+    // 일시정지 중에는 SDK가 오래된 소켓 상태를 유지할 수 있으므로 새 연결을 강제한다.
     if (m_World.ConnectPvd(true))
     {
         return;
@@ -325,7 +325,7 @@ void PhysicsDemo::ConnectPvd()
         STARTUPINFOW startup = {};
         startup.cb = sizeof(startup);
         startup.dwFlags = STARTF_USESHOWWINDOW;
-        startup.wShowWindow = SW_SHOWNORMAL; // This is the interactive debugger requested by the button.
+        startup.wShowWindow = SW_SHOWNORMAL; // 버튼으로 실행을 요청한 대화형 디버거다.
         PROCESS_INFORMATION process = {};
         if (!CreateProcessW(executable.c_str(), nullptr, nullptr, nullptr, FALSE, 0, nullptr,
                 workingDirectory.c_str(), &startup, &process))
@@ -351,8 +351,8 @@ void PhysicsDemo::ConnectPvd()
 
 void PhysicsDemo::RestartPvd()
 {
-    // Only the explicit recovery button may terminate a hung debugger, and only
-    // the bundled executable we know. Never terminate an arbitrary PVD process.
+    // 멈춘 디버거의 종료는 명시적인 복구 버튼에서만 수행하며, 저장소에 포함된 것으로
+    // 확인한 실행 파일만 대상으로 한다. 임의의 PVD 프로세스는 종료하지 않는다.
     const HWND window = FindPvdWindow(m_PvdProcessId);
     if (!window || !IsPvdUnresponsive(window))
     {
@@ -401,8 +401,8 @@ void PhysicsDemo::UpdatePvdConnection()
                                                                                                       "using PVD's rightmost toolbar button, then retry.";
         return;
     }
-    // PVD can temporarily stop pumping window messages while starting OpenGL.
-    // Keep retrying during startup instead of treating that as a hung debugger.
+    // PVD가 OpenGL을 시작할 때 창 메시지 처리를 일시적으로 멈출 수 있다.
+    // 시작 중에는 이를 멈춘 디버거로 판단하지 않고 계속 재시도한다.
     if (now < m_PvdNextAttempt)
     {
         return;
@@ -430,7 +430,7 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
     context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
 
-    // Copy authoritative PhysX position AND rotation after fetchResults().
+    // fetchResults() 이후 PhysX의 실제 위치와 회전을 모두 복사한다.
     alignas(16) Vertex vertices[36 * 7];
     Vertex* output = vertices;
     if (m_Floor)

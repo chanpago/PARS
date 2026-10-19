@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Actor.h"
 #include <functional>
@@ -7,8 +7,8 @@ class PhysicsWorld;
 
 namespace PARS
 {
-    // Owns gameplay actors and the optional PhysX simulation they share.
-    // Main-thread only; mutations during callbacks never invalidate a live Actor.
+    // 게임플레이 Actor와 이들이 공유하는 선택적 PhysX 시뮬레이션을 소유한다.
+    // 메인 스레드에서만 사용한다. 콜백 도중 목록이 바뀌어도 살아 있는 Actor는 무효화되지 않는다.
     class World
     {
     public:
@@ -31,7 +31,7 @@ namespace PARS
             return result;
         }
 
-        // Handles can outlive an Actor. Resolving a destroyed actor returns null.
+        // 핸들은 Actor보다 오래 유지될 수 있다. 파괴된 Actor를 조회하면 null을 반환한다.
         Actor* FindActor(ActorHandle handle) const;
         template<class T>
         T* FindActor(ActorHandle handle) const
@@ -68,14 +68,14 @@ namespace PARS
             }
         }
 
-        // New actors join on the next pass; pending destruction is skipped.
+        // 새 Actor는 다음 순회부터 참여하며, 파괴 대기 중인 Actor는 건너뛴다.
         void ForEachActor(const std::function<void(Actor&)>& visitor);
 
-        // Call at a safe frame boundary, after rendering has released references
-        // and GPU work using the actors' resources has finished. Calls during
-        // actor enumeration/callbacks defer reclamation until a later call.
+        // 렌더러가 참조를 놓고 Actor 리소스를 사용하는 GPU 작업도 끝난 안전한 프레임 경계에서
+        // 호출한다. Actor 순회나 콜백 중에 호출하면 실제 메모리 회수는
+        // 나중에 다시 호출할 때까지 미룬다.
         void CollectGarbage();
-        void Clear(); // EndPlay and destroy all actors; same safe-boundary rule.
+        void Clear(); // 모든 Actor에 EndPlay를 호출하고 파괴한다. 동일한 안전한 프레임 경계 규칙을 따른다.
 
     private:
         void RegisterActor(std::unique_ptr<Actor> actor);

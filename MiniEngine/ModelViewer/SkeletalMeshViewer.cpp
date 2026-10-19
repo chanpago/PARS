@@ -1,4 +1,4 @@
-#include "SkeletalMeshViewer.h"
+﻿#include "SkeletalMeshViewer.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Renderer.h"
 #include "ConstantBuffers.h"
@@ -47,8 +47,8 @@ bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>* models,
     m_Radius = Max(0.1f, float(m_Mesh->GetLocalBounds().GetRadius()));
     ResetCamera();
 
-    // Fixed backing textures keep resize/close/reopen free of descriptor and
-    // resource lifetime hazards. The camera uses the displayed image's aspect.
+    // 고정 크기 렌더 텍스처를 사용해 크기 변경/닫기/다시 열기 중 디스크립터와 리소스 수명
+    // 문제를 방지한다. 카메라는 화면에 표시되는 이미지의 종횡비를 사용한다.
     m_Color.SetClearColor(Color(0.025f, 0.035f, 0.055f, 1));
     m_Color.Create(L"Mesh preview HDR", PreviewResolution, PreviewResolution, 1, g_SceneColorBuffer.GetFormat());
     m_Display.Create(L"Mesh preview image", PreviewResolution, PreviewResolution, 1, DXGI_FORMAT_R8G8B8A8_UNORM);
@@ -56,8 +56,8 @@ bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>* models,
     m_AmbientOcclusion.Create(L"Mesh preview AO", PreviewResolution, PreviewResolution, 1, DXGI_FORMAT_R8_UNORM);
     m_Unshadowed.Create(L"Mesh preview shadow", 1, 1, DXGI_FORMAT_D32_FLOAT);
 
-    // Keep IBL/material lighting, with independent AO/shadow inputs. This table
-    // shares the renderer heap so material and skinning descriptors stay valid.
+    // IBL/머티리얼 조명은 유지하면서 AO/그림자 입력은 독립적으로 사용한다. 이 테이블은
+    // 렌더러 힙을 공유하므로 머티리얼과 스키닝 디스크립터가 유효하게 유지된다.
     m_Textures = Renderer::CreateCommonTextureTable(m_AmbientOcclusion.GetSRV(), m_Unshadowed.GetDepthSRV());
 
     m_PresentRoot.Reset(1, 1);
@@ -138,8 +138,8 @@ void SkeletalMeshViewer::UpdateCamera(bool hovered)
     if (hovered && m_DragAxis < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
     {
         CancelInteraction();
-        // An ImGui Image does not take focus on RMB. Acquire the viewport before
-        // testing focus so returning from another panel works on the first press.
+        // ImGui Image는 마우스 오른쪽 버튼으로 포커스를 얻지 않는다. 포커스 검사 전에
+        // 뷰포트에 포커스를 줘서 다른 패널에서 돌아왔을 때 첫 클릭부터 동작하도록 한다.
         ImGui::SetWindowFocus();
         m_Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
         m_Flying = true;
@@ -155,7 +155,7 @@ void SkeletalMeshViewer::UpdateCamera(bool hovered)
     }
     if (m_Flying)
     {
-        // Rotate about the camera's own position; the mesh is only a framing target.
+        // 카메라 자신의 위치를 중심으로 회전한다. 메시는 화면 구도를 잡는 대상으로만 사용한다.
         m_Yaw = std::remainder(m_Yaw - io.MouseDelta.x * 0.008f, XM_2PI);
         m_Pitch = Clamp(m_Pitch + io.MouseDelta.y * 0.008f, -1.55f, 1.55f);
         const Vector3 forward(-std::sin(m_Yaw) * std::cos(m_Pitch), -std::sin(m_Pitch),
@@ -169,7 +169,7 @@ void SkeletalMeshViewer::UpdateCamera(bool hovered)
             const Vector3 movement = forward * forwardInput + m_Camera.GetRightVec() * rightInput + Vector3(kYUnitVector) * upInput;
             if (float(LengthSquare(movement)) > 0.000001f)
             {
-                // ImGui uses elapsed wall time, independently of preview animation playback.
+                // ImGui는 미리보기 애니메이션 재생과 별개로 실제 경과 시간을 사용한다.
                 const float speed = m_Radius * 1.5f * (io.KeyShift ? 3.0f : 1.0f);
                 m_Camera.SetPosition(m_Camera.GetPosition() + Normalize(movement) * (speed * io.DeltaTime));
             }
@@ -303,7 +303,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
         {
             ImGui::SetTooltip("Viewport: RMB + WASD move, Q/E down/up, Shift fast\nWheel: dolly | F: frame mesh | Esc: cancel\nGraph: click a node to select, wheel to zoom, MMB drag to pan");
         }
-        // Check the button as well as the mode: RMB and W/E may arrive in the same frame.
+        // 같은 프레임에 마우스 오른쪽 버튼과 W/E가 들어올 수 있으므로 모드와 버튼을 함께 검사한다.
         if (m_Focused && !ImGui::GetIO().WantTextInput && m_DragAxis < 0 && !m_Flying &&
             !ImGui::IsMouseDown(ImGuiMouseButton_Right))
         {
@@ -343,7 +343,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
             ImGui::BeginChild("Navigation", ImVec2(0, available.y - 4), false, ImGuiWindowFlags_NoScrollbar);
             DrawNavigation();
             ImGui::EndChild();
-            // Draw details before the viewport so edits appear in this frame.
+            // 현재 프레임에 편집 결과가 표시되도록 세부 설정 패널을 뷰포트보다 먼저 그린다.
             ImGui::TableSetColumnIndex(2);
             ImGui::BeginChild("Details", ImVec2(0, available.y - 4), true);
             DrawDetails();

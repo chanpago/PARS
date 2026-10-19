@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "PrimitiveComponent.h"
 #include <cmath>
@@ -7,8 +7,8 @@ class PhysicsWorld;
 
 namespace PARS
 {
-    // +Y-up capsule in metres. Half-height includes the hemispherical ends.
-    // Owns query-only movement geometry; its debug representation is a wire capsule.
+    // 미터 단위의 +Y 위쪽 캡슐이다. 반높이에는 양 끝의 반구도 포함된다.
+    // 이동 쿼리 전용 형상을 소유하며, 디버그 화면에서는 와이어 캡슐로 표시한다.
     class CapsuleComponent : public PrimitiveComponent
     {
     public:

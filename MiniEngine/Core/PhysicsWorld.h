@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <PxPhysicsAPI.h>
 #include <atomic>
@@ -7,17 +7,17 @@
 #include <memory>
 #include <vector>
 
-// Query geometry only: never creates a PxActor/PxShape or a CCT proxy body.
+// 쿼리용 형상만 사용한다. PxActor/PxShape나 CCT 프록시 바디는 생성하지 않는다.
 struct PhysicsQueryCapsule
 {
     physx::PxVec3 centre;
     float radius, halfHeight;
-    const void* owner = nullptr; // Ignore only rigid actors tagged with this owner in movement queries.
+    const void* owner = nullptr; // 이동 쿼리에서는 이 소유자로 표시된 강체 Actor만 제외한다.
 };
 
-// CPU physics in metres, kilograms and seconds; +Y is up. Use on the game thread.
-// Actors returned by Create* are owned by the scene until explicitly released or
-// Shutdown() is called. Finish all reads/writes before calling Update()/Step().
+// 미터, 킬로그램, 초 단위의 CPU 물리이며 +Y가 위쪽이다. 게임 스레드에서 사용한다.
+// Create*가 반환한 Actor는 명시적으로 해제하거나 Shutdown()을 호출할 때까지 씬이 소유한다.
+// Update()/Step()을 호출하기 전에 모든 읽기와 쓰기를 끝내야 한다.
 class PhysicsWorld
 {
 public:

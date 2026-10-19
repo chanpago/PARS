@@ -1,4 +1,4 @@
-#include "AnimInstance.h"
+﻿#include "AnimInstance.h"
 #include "Model.h"
 #include <cmath>
 #include <cstring>
@@ -19,8 +19,8 @@ namespace
         return true;
     }
 
-    // Imported clips must address the same node/joint layout and bind pose as the
-    // mesh. Matching bone counts alone cannot establish this compatibility.
+    // 가져온 클립은 메시와 동일한 노드/조인트 구성 및 바인드 포즈를 사용해야 한다.
+    // 본 개수가 같다는 것만으로는 이 호환성을 보장할 수 없다.
     bool CompatibleSkeletons(const Model& mesh, const Model& clip)
     {
         if (mesh.m_NumNodes != clip.m_NumNodes || mesh.m_NumJoints != clip.m_NumJoints)
@@ -112,8 +112,8 @@ namespace PARS
         {
             return PlayAnimation(index, loop);
         }
-        // Snapshot the displayed pose, including an interrupted blend. Starting
-        // another transition therefore never snaps back to a previous clip.
+        // 블렌딩 도중 중단된 상태까지 포함해 현재 표시 중인 포즈를 저장한다.
+        // 따라서 새 전환을 시작해도 이전 클립의 포즈로 갑자기 돌아가지 않는다.
         m_BlendSource = m_Pose;
         m_BlendElapsed = 0.0f;
         m_BlendDuration = duration;
@@ -157,7 +157,7 @@ namespace PARS
         {
             NativeUpdateAnimation(deltaTime);
         }
-        // A derived instance may stop playback or change its clips in the hook.
+        // 파생 인스턴스는 훅 안에서 재생을 멈추거나 클립을 변경할 수 있다.
         if (m_Playing && !m_Clips.empty())
         {
             m_Time += deltaTime;

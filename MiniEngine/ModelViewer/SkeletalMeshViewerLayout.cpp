@@ -1,4 +1,4 @@
-#include "SkeletalMeshViewer.h"
+﻿#include "SkeletalMeshViewer.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "imgui.h"
 #include <algorithm>
@@ -35,8 +35,8 @@ void SkeletalMeshViewer::DrawOrientationAxes(float left, float top, float width,
         {Vector3(kXUnitVector), IM_COL32(235, 70, 70, 255), "X", 0},
         {Vector3(kYUnitVector), IM_COL32(85, 220, 90, 255), "Y", 0},
         {Vector3(kZUnitVector), IM_COL32(75, 145, 255, 255), "Z", 0}};
-    // Project world directions onto the camera basis, using rotation only.
-    // PARS is Y-up. Camera movement, FOV and zoom must not move/resize this widget.
+    // 회전만 사용해 월드 방향을 카메라 기저에 투영한다.
+    // PARS는 Y가 위쪽이다. 카메라 이동, FOV, 줌으로 이 위젯의 위치나 크기가 바뀌면 안 된다.
     for (auto& axis : axes)
     {
         axis.depth = Dot(axis.world, m_Camera.GetForwardVec());
@@ -51,7 +51,7 @@ void SkeletalMeshViewer::DrawOrientationAxes(float left, float top, float width,
     for (const auto& axis : axes)
     {
         const float dx = Dot(axis.world, m_Camera.GetRightVec());
-        const float dy = -float(Dot(axis.world, m_Camera.GetUpVec())); // Screen Y points down.
+        const float dy = -float(Dot(axis.world, m_Camera.GetUpVec())); // 화면 Y축은 아래쪽을 향한다.
         const float projectedLength = std::sqrt(dx * dx + dy * dy);
         const ImVec2 end(center.x + dx * length, center.y + dy * length);
         ImVec2 label;
@@ -68,8 +68,8 @@ void SkeletalMeshViewer::DrawOrientationAxes(float left, float top, float width,
         }
         else
         {
-            // Looking along an axis: keep its end and letter visible without
-            // normalizing a near-zero screen direction into an unstable arrow.
+            // 축 방향을 정면으로 바라볼 때는 길이가 거의 0인 화면 방향을 정규화해 불안정한 화살표를
+            // 만드는 대신, 축 끝점과 글자가 보이도록 유지한다.
             draw->AddCircleFilled(end, 4 * scale, shadow);
             draw->AddCircleFilled(end, 2.5f * scale, axis.color);
             label = ImVec2(end.x + 9 * scale, end.y + 9 * scale);
@@ -167,8 +167,8 @@ void SkeletalMeshViewer::DrawDetails()
 
 void SkeletalMeshViewer::DrawRelationshipGraph()
 {
-    // Rebuild from the PA each frame: create/delete/load cannot leave stale
-    // node pointers or connections. Selection is shared with tree and viewport.
+    // 매 프레임 PA에서 다시 구성해 생성/삭제/로드 후 오래된 노드 포인터나 연결이 남지 않게 한다.
+    // 선택 상태는 트리와 뷰포트가 공유한다.
     struct Node
     {
         bool joint;

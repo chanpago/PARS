@@ -1,4 +1,4 @@
-#include "Character.h"
+﻿#include "Character.h"
 
 namespace PARS
 {
@@ -57,7 +57,7 @@ namespace PARS
 
     void Character::PreparePhysics(float deltaTime)
     {
-        // Support may have been toggled in the UI since the previous frame.
+        // 이전 프레임 이후 UI에서 골반 지지 설정이 바뀌었을 수 있다.
         SyncRagdollMovement();
         Pawn::PreparePhysics(deltaTime);
     }
@@ -65,8 +65,8 @@ namespace PARS
     void Character::FixedTick(float deltaTime)
     {
         SyncRagdollMovement();
-        Pawn::FixedTick(deltaTime); // Movement first, then animation and drive targets.
-        // Target evaluation can fall back to Passive during this same substep.
+        Pawn::FixedTick(deltaTime); // 이동을 먼저 처리한 다음 애니메이션과 드라이브 목표를 갱신한다.
+        // 목표 계산 중 같은 서브스텝 안에서 Passive 모드로 전환될 수 있다.
         SyncRagdollMovement();
     }
 
@@ -77,7 +77,7 @@ namespace PARS
             error.clear();
             return true;
         }
-        // Return to animation at the latest movement target (no get-up blend).
+        // 최신 이동 목표 위치에서 애니메이션으로 복귀한다. 일어서기 블렌딩은 수행하지 않는다.
         if (!m_Capsule->SetPhysicsEnabled(m_CapsuleWasEnabled))
         {
             error = "Could not restore the character capsule.";
@@ -99,7 +99,7 @@ namespace PARS
         m_Movement->SetUpdatedComponent(*m_Capsule);
         m_Mesh = &CreateDefaultSubobject<SkeletalMeshComponent>("SkeletalMeshComponent");
         m_Mesh->AttachToComponent(*m_Capsule);
-        // Actor origin is capsule centre; the imported mesh origin is at its feet.
+        // Actor 원점은 캡슐 중심이며, 가져온 메시의 원점은 발 위치에 있다.
         m_Mesh->SetRelativeLocation(Math::Vector3(0, -m_Capsule->GetHalfHeight(), 0));
     }
 }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "ActorComponent.h"
 #include "../VectorMath.h"
@@ -18,7 +18,7 @@ namespace PARS
         using ActorComponent::ActorComponent;
         ~SceneComponent() override;
 
-        // Same-Actor attachments only for now; cycles and attached roots are rejected.
+        // 현재는 같은 Actor 안에서만 부착할 수 있다. 순환 부착과 루트의 부모 부착은 거부한다.
         bool AttachToComponent(SceneComponent& parent, AttachmentRule rule = AttachmentRule::KeepRelative);
         void DetachFromParent(AttachmentRule rule = AttachmentRule::KeepWorld);
         SceneComponent* GetAttachParent() const

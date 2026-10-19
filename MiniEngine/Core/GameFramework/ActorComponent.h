@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <string>
 #include <utility>
@@ -7,7 +7,7 @@ namespace PARS
 {
     class Actor;
 
-    // Actor owns components. Components never own their Actor or attachment parent.
+    // Actor가 컴포넌트를 소유한다. 컴포넌트는 자신의 Actor나 부착 부모를 소유하지 않는다.
     class ActorComponent
     {
     public:

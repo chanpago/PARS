@@ -1,4 +1,4 @@
-#include "CapsuleComponent.h"
+﻿#include "CapsuleComponent.h"
 #include "Actor.h"
 #include "World.h"
 #if defined(_M_X64)
@@ -33,7 +33,7 @@ namespace PARS
         {
             return;
         }
-        // Character capsules are upright, use metres, and have unit scale.
+        // 캐릭터 캡슐은 수직으로 서 있으며, 미터 단위와 단위 스케일을 사용한다.
         if (GetAttachParent() || GetOwner().GetRootComponent() != this)
         {
             return;
@@ -102,8 +102,8 @@ namespace PARS
         {
             return result;
         }
-        // Actor edits are teleports. Normal movement sweeps query geometry and
-        // copies the collision-resolved centre back to the component hierarchy.
+        // Actor를 직접 수정하면 순간이동으로 처리한다. 일반 이동은 쿼리용 형상을 스윕한 뒤
+        // 충돌을 해결한 중심 위치를 컴포넌트 계층에 다시 반영한다.
         m_QueryCapsule->centre = requested;
         const auto flags = m_PhysicsWorld->MoveQueryCapsule(*m_QueryCapsule, delta);
         result.grounded = flags.grounded;
