@@ -1,100 +1,47 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="ModelH3D.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="SponzaRenderer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Renderer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="TextureConvert.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ParticleEffects.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MeshConvert.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ModelConvert.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ModelLoader.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="glTF.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="IndexOptimizePostTransform.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Model.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="BuildH3D.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="LightManager.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Animation.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <Filter Include="Source Files">
-      <UniqueIdentifier>{3e74f37f-1e1e-47ed-9c44-213389384278}</UniqueIdentifier>
+    <Filter Include="Components">
+      <UniqueIdentifier>{A4EE965F-A6BD-5086-B5C9-6C8B694D646B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="GameFramework">
+      <UniqueIdentifier>{CC8E3EE7-E40A-58F7-A159-4E2C70A7FC5C}</UniqueIdentifier>
     </Filter>
     <Filter Include="Shaders">
       <UniqueIdentifier>{9169b7c9-f1a7-41d4-9098-58de36da850c}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="SponzaRenderer.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Renderer.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="TextureConvert.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="json.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ParticleEffects.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MeshConvert.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ConstantBuffers.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="glTF.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="IndexOptimizePostTransform.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ModelH3D.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Model.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ModelLoader.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="LightManager.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Animation.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
+    <ClCompile Include="ModelH3D.cpp" />
+    <ClCompile Include="SponzaRenderer.cpp" />
+    <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="TextureConvert.cpp" />
+    <ClCompile Include="ParticleEffects.cpp" />
+    <ClCompile Include="MeshConvert.cpp" />
+    <ClCompile Include="ModelConvert.cpp" />
+    <ClCompile Include="ModelLoader.cpp" />
+    <ClCompile Include="glTF.cpp" />
+    <ClCompile Include="IndexOptimizePostTransform.cpp" />
+    <ClCompile Include="Model.cpp" />
+    <ClCompile Include="BuildH3D.cpp" />
+    <ClCompile Include="LightManager.cpp" />
+    <ClCompile Include="Animation.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="SponzaRenderer.h" />
+    <ClInclude Include="Renderer.h" />
+    <ClInclude Include="TextureConvert.h" />
+    <ClInclude Include="json.hpp" />
+    <ClInclude Include="ParticleEffects.h" />
+    <ClInclude Include="MeshConvert.h" />
+    <ClInclude Include="ConstantBuffers.h" />
+    <ClInclude Include="glTF.h" />
+    <ClInclude Include="IndexOptimizePostTransform.h" />
+    <ClInclude Include="ModelH3D.h" />
+    <ClInclude Include="Model.h" />
+    <ClInclude Include="ModelLoader.h" />
+    <ClInclude Include="LightManager.h" />
+    <ClInclude Include="Animation.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\Common.hlsli">
@@ -109,7 +56,6 @@
     <None Include="Shaders\Lighting.hlsli">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\DefaultVS.hlsl">
@@ -195,33 +141,44 @@
     </FxCompile>
   </ItemGroup>
   <ItemGroup>
-    <Filter Include="GameFramework"><UniqueIdentifier>{CC8E3EE7-E40A-58F7-A159-4E2C70A7FC5C}</UniqueIdentifier></Filter>
+    <ClCompile Include="AnimationPose.cpp" />
+    <ClCompile Include="PhysicsAsset.cpp" />
+    <ClCompile Include="PhysicsPose.cpp" />
+    <ClInclude Include="PhysicsPose.h" />
+    <ClCompile Include="Ragdoll.cpp" />
+    <ClCompile Include="RagdollDrive.cpp" />
+    <ClInclude Include="Ragdoll.h" />
+    <ClCompile Include="Components\SkeletalMeshPhysics.cpp">
+      <Filter>Components</Filter>
+    </ClCompile>
+    <ClInclude Include="PhysicsAsset.h" />
+    <ClCompile Include="AnimInstance.cpp" />
+    <ClInclude Include="AnimInstance.h" />
+    <ClInclude Include="Components\MeshComponent.h">
+      <Filter>Components</Filter>
+    </ClInclude>
+    <ClCompile Include="Components\SkeletalMeshComponent.cpp">
+      <Filter>Components</Filter>
+    </ClCompile>
+    <ClInclude Include="Components\SkeletalMeshComponent.h">
+      <Filter>Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Components\SkinnedMeshComponent.h">
+      <Filter>Components</Filter>
+    </ClInclude>
+    <ClCompile Include="GameFramework\Character.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClInclude Include="GameFramework\Character.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="AnimationPose.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClCompile Include="PhysicsAsset.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClCompile Include="PhysicsPose.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="PhysicsPose.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClCompile Include="Ragdoll.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClCompile Include="RagdollDrive.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="Ragdoll.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClCompile Include="Components\SkeletalMeshPhysics.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="PhysicsAsset.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClCompile Include="AnimInstance.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="AnimInstance.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="Components\MeshComponent.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClCompile Include="Components\SkeletalMeshComponent.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="Components\SkeletalMeshComponent.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="Components\SkinnedMeshComponent.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClCompile Include="GameFramework\Character.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="GameFramework\Character.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="WorldRenderer.h" />
+    <ClCompile Include="WorldRenderer.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="WorldRenderer.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClCompile Include="WorldRenderer.cpp"><Filter>GameFramework</Filter></ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="LocomotionAnimInstance.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="LocomotionAnimInstance.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClCompile Include="LocomotionAnimInstance.cpp" />
+    <ClInclude Include="LocomotionAnimInstance.h" />
   </ItemGroup>
 </Project>

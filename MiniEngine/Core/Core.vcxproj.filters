@@ -1,6 +1,35 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="GameFramework">
+      <UniqueIdentifier>{B7C6FDBC-09E2-5543-99F4-3ED14EB32622}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Math">
+      <UniqueIdentifier>{14CB58CA-8495-5D6F-8722-00DB7FAEBF7C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{c5df3e3a-73f5-4b5b-8688-112163941bea}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ThirdParty">
+      <UniqueIdentifier>{0AAEA545-6E89-54F7-B341-14007B7B8123}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ThirdParty\ImGui">
+      <UniqueIdentifier>{711CB69F-49FC-57F5-861A-A2F28C5E4EA2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ThirdParty\ImGui\backends">
+      <UniqueIdentifier>{E2B61F44-551A-5802-BF41-56BBA3A50D07}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ThirdParty\ImGui\misc">
+      <UniqueIdentifier>{B1939266-8EAD-5B25-889C-024480187162}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ThirdParty\ImGui\misc\cpp">
+      <UniqueIdentifier>{1A3DFB04-3285-5BF5-9630-1A0FD86E669A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Util">
+      <UniqueIdentifier>{163AFD9E-79AC-5370-949E-2F5E67D88AFE}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
     <FxCompile Include="Shaders\AdaptExposureCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
@@ -482,9 +511,15 @@
     <ClCompile Include="GraphRenderer.cpp" />
     <ClCompile Include="ImageScaling.cpp" />
     <ClCompile Include="LinearAllocator.cpp" />
-    <ClCompile Include="Math\BoundingSphere.cpp" />
-    <ClCompile Include="Math\Frustum.cpp" />
-    <ClCompile Include="Math\Random.cpp" />
+    <ClCompile Include="Math\BoundingSphere.cpp">
+      <Filter>Math</Filter>
+    </ClCompile>
+    <ClCompile Include="Math\Frustum.cpp">
+      <Filter>Math</Filter>
+    </ClCompile>
+    <ClCompile Include="Math\Random.cpp">
+      <Filter>Math</Filter>
+    </ClCompile>
     <ClCompile Include="MotionBlur.cpp" />
     <ClCompile Include="ParticleEffect.cpp" />
     <ClCompile Include="ParticleEffectManager.cpp" />
@@ -507,7 +542,9 @@
     <ClCompile Include="TextureManager.cpp" />
     <ClCompile Include="UploadBuffer.cpp" />
     <ClCompile Include="Utility.cpp" />
-    <ClCompile Include="Util\CommandLineArg.cpp" />
+    <ClCompile Include="Util\CommandLineArg.cpp">
+      <Filter>Util</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BitonicSort.h" />
@@ -543,18 +580,42 @@
     <ClInclude Include="Hash.h" />
     <ClInclude Include="ImageScaling.h" />
     <ClInclude Include="LinearAllocator.h" />
-    <ClInclude Include="Math\BoundingBox.h" />
-    <ClInclude Include="Math\BoundingPlane.h" />
-    <ClInclude Include="Math\BoundingSphere.h" />
-    <ClInclude Include="Math\Common.h" />
-    <ClInclude Include="Math\Frustum.h" />
-    <ClInclude Include="Math\Matrix3.h" />
-    <ClInclude Include="Math\Matrix4.h" />
-    <ClInclude Include="Math\Quaternion.h" />
-    <ClInclude Include="Math\Random.h" />
-    <ClInclude Include="Math\Scalar.h" />
-    <ClInclude Include="Math\Transform.h" />
-    <ClInclude Include="Math\Vector.h" />
+    <ClInclude Include="Math\BoundingBox.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\BoundingPlane.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\BoundingSphere.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Common.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Frustum.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Matrix3.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Matrix4.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Quaternion.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Random.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Scalar.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Transform.h">
+      <Filter>Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\Vector.h">
+      <Filter>Math</Filter>
+    </ClInclude>
     <ClInclude Include="MotionBlur.h" />
     <ClInclude Include="ParticleEffect.h" />
     <ClInclude Include="ParticleEffectManager.h" />
@@ -579,11 +640,15 @@
     <ClInclude Include="TextureManager.h" />
     <ClInclude Include="UploadBuffer.h" />
     <ClInclude Include="Utility.h" />
-    <ClInclude Include="Util\CommandLineArg.h" />
+    <ClInclude Include="Util\CommandLineArg.h">
+      <Filter>Util</Filter>
+    </ClInclude>
     <ClInclude Include="VectorMath.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Math\Functions.inl" />
+    <None Include="Math\Functions.inl">
+      <Filter>Math</Filter>
+    </None>
     <None Include="Shaders\AoBlurAndUpsampleCS.hlsli">
       <Filter>Shaders</Filter>
     </None>
@@ -635,9 +700,7 @@
     <None Include="Shaders\MotionBlurRS.hlsli">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="packages.config">
-      <Filter>Shaders</Filter>
-    </None>
+    <None Include="packages.config" />
     <None Include="Shaders\ParticleRS.hlsli">
       <Filter>Shaders</Filter>
     </None>
@@ -670,17 +733,6 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <Filter Include="Shaders">
-      <UniqueIdentifier>{c5df3e3a-73f5-4b5b-8688-112163941bea}</UniqueIdentifier>
-    </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <Filter Include="ThirdParty" />
-    <Filter Include="ThirdParty\ImGui" />
-    <Filter Include="ThirdParty\ImGui\Backends" />
-    <Filter Include="ThirdParty\ImGui\Cpp" />
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="ImGuiOverlay.cpp" />
     <ClInclude Include="ImGuiOverlay.h" />
     <ClCompile Include="..\..\ThirdParty\ImGui\imgui.cpp">
@@ -699,13 +751,13 @@
       <Filter>ThirdParty\ImGui</Filter>
     </ClCompile>
     <ClCompile Include="..\..\ThirdParty\ImGui\backends\imgui_impl_win32.cpp">
-      <Filter>ThirdParty\ImGui\Backends</Filter>
+      <Filter>ThirdParty\ImGui\backends</Filter>
     </ClCompile>
     <ClCompile Include="..\..\ThirdParty\ImGui\backends\imgui_impl_dx12.cpp">
-      <Filter>ThirdParty\ImGui\Backends</Filter>
+      <Filter>ThirdParty\ImGui\backends</Filter>
     </ClCompile>
     <ClCompile Include="..\..\ThirdParty\ImGui\misc\cpp\imgui_stdlib.cpp">
-      <Filter>ThirdParty\ImGui\Cpp</Filter>
+      <Filter>ThirdParty\ImGui\misc\cpp</Filter>
     </ClCompile>
     <ClInclude Include="..\..\ThirdParty\ImGui\imconfig.h">
       <Filter>ThirdParty\ImGui</Filter>
@@ -726,13 +778,13 @@
       <Filter>ThirdParty\ImGui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\ThirdParty\ImGui\backends\imgui_impl_win32.h">
-      <Filter>ThirdParty\ImGui\Backends</Filter>
+      <Filter>ThirdParty\ImGui\backends</Filter>
     </ClInclude>
     <ClInclude Include="..\..\ThirdParty\ImGui\backends\imgui_impl_dx12.h">
-      <Filter>ThirdParty\ImGui\Backends</Filter>
+      <Filter>ThirdParty\ImGui\backends</Filter>
     </ClInclude>
     <ClInclude Include="..\..\ThirdParty\ImGui\misc\cpp\imgui_stdlib.h">
-      <Filter>ThirdParty\ImGui\Cpp</Filter>
+      <Filter>ThirdParty\ImGui\misc\cpp</Filter>
     </ClInclude>
     <None Include="..\..\ThirdParty\ImGui\LICENSE.txt">
       <Filter>ThirdParty\ImGui</Filter>
@@ -746,32 +798,69 @@
     <ClCompile Include="PhysicsWorld.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <Filter Include="GameFramework"><UniqueIdentifier>{B7C6FDBC-09E2-5543-99F4-3ED14EB32622}</UniqueIdentifier></Filter>
+    <ClCompile Include="GameFramework\Actor.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClInclude Include="GameFramework\Actor.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFramework\ActorComponent.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFramework\CapsuleComponent.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFramework\Pawn.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFramework\PrimitiveComponent.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClCompile Include="GameFramework\SceneComponent.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClInclude Include="GameFramework\SceneComponent.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="GameFramework\Actor.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="GameFramework\Actor.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="GameFramework\ActorComponent.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="GameFramework\CapsuleComponent.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="GameFramework\Pawn.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="GameFramework\PrimitiveComponent.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClCompile Include="GameFramework\SceneComponent.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="GameFramework\SceneComponent.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClInclude Include="GameFramework\World.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClCompile Include="GameFramework\World.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="GameFramework\World.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClCompile Include="GameFramework\World.cpp"><Filter>GameFramework</Filter></ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="GameFramework\CapsuleComponent.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClCompile Include="GameFramework\Pawn.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClCompile Include="GameFramework\Controller.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClCompile Include="GameFramework\PlayerController.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClCompile Include="GameFramework\CharacterMovementComponent.cpp"><Filter>GameFramework</Filter></ClCompile>
-    <ClInclude Include="GameFramework\Controller.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="GameFramework\PlayerController.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="GameFramework\MovementComponent.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="GameFramework\PawnMovementComponent.h"><Filter>GameFramework</Filter></ClInclude>
-    <ClInclude Include="GameFramework\CharacterMovementComponent.h"><Filter>GameFramework</Filter></ClInclude>
+    <ClCompile Include="GameFramework\CapsuleComponent.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClCompile Include="GameFramework\Pawn.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClCompile Include="GameFramework\Controller.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClCompile Include="GameFramework\PlayerController.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClCompile Include="GameFramework\CharacterMovementComponent.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClInclude Include="GameFramework\Controller.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFramework\PlayerController.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFramework\MovementComponent.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFramework\PawnMovementComponent.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="GameFramework\CharacterMovementComponent.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

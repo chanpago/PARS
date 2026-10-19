@@ -28,8 +28,11 @@ For Visual Studio 2022 versions that cannot open `.slnx`, open
 the same projects and configurations; keep both solution files in sync when
 changing them. The build prerequisites above still apply.
 
-`Core` and `Model` are grouped under the `Engine` solution folder. The main
-solution targets Windows x64; for native ARM64 development, open
+`Core`, `Model`, and `ModelViewer` appear side by side in Solution Explorer.
+Project filters follow the source directories; files in a project's root appear
+directly under that project. Shared ImGui files retain their repository layout
+under `Core/ThirdParty/ImGui`.
+The main solution targets Windows x64; for native ARM64 development, open
 `MiniEngine/ModelViewer/ModelViewer.ARM64.slnx` with the ARM64 C++ tools installed.
 
 Visual Studio remembers selections for solutions you have already opened. If an

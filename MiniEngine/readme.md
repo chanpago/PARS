@@ -3,7 +3,7 @@
 ## Getting started:
 * Install Visual Studio 2022 17.14 or later with **Desktop development with C++**, the **MSVC v143** tools, and a Windows SDK (tested with 10.0.26100.0).
 * Clone this repository, then open `ModelViewer/ModelViewer.slnx`.
-* A fresh checkout selects configuration `Debug`, solution platform `Windows` (x64), and startup project `ModelViewer` automatically. `Core` and `Model` appear under the `Engine` solution folder.
+* A fresh checkout selects configuration `Debug`, solution platform `Windows` (x64), and startup project `ModelViewer` automatically. `Core`, `Model`, and `ModelViewer` appear side by side; project filters follow the source directories, with root files directly under each project.
 * Press **F5** to build and run. NuGet restores the SDK/runtime packages. If vcpkg is not already installed, the build downloads a pinned copy into `.tools/vcpkg` and restores DirectXTK12, DirectXTex, and DirectXMesh automatically.
 
 If your Visual Studio 2022 version cannot open `.slnx`, use `ModelViewer/ModelViewer.sln` to open the same projects and configurations. Keep the two solution files in sync when changing them. This only provides solution-format compatibility; the build prerequisites above still apply.
