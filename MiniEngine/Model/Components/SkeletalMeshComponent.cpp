@@ -81,7 +81,7 @@ namespace PARS
                 !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {
                 // A failed target falls back to full-body passive dynamics.
-                // Preserve the target error while releasing the kinematic pelvis.
+                // Preserve the target error while removing pelvis force/torque support.
                 m_Ragdoll.SetDrivesEnabled(false);
                 std::string supportError;
                 m_Ragdoll.SetRootSupported(false, supportError);

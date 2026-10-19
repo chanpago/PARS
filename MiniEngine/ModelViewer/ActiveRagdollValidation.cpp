@@ -31,12 +31,14 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             float(Length(Vector3(a.GetX()) - Vector3(b.GetX()))) < .0001f &&
             float(Length(Vector3(a.GetY()) - Vector3(b.GetY()))) < .0001f;
     };
-    const auto pelvisMatchesAnimation = [&]() {
+    const auto pelvisTracksAnimation = [&]() {
         std::vector<Matrix4> target;
         if (!EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), target, error)) return false;
-        return samePose(ragdoll.GetBoneWorld(0), PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[0]]));
+        const auto actual = ragdoll.GetBoneWorld(0), desired = PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[0]]);
+        return float(Length(Vector3(actual.GetW()) - Vector3(desired.GetW()))) < .08f &&
+            std::abs(XMVectorGetX(XMVector4Dot(Quaternion(actual), Quaternion(desired)))) > std::cos(.35f * .5f);
     };
-    const auto prepare = [&](uint32_t clip) {
+    const auto prepare = [&](uint32_t clip, bool suspended = true) {
         check(character.StopRagdoll(error), "Active: return to animation");
         character.SetActorLocation(start);
         animation.SetLocomotionEnabled(false); animation.SetAutoCycleEnabled(false);
@@ -45,12 +47,13 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
         for (int i = 0; i < 24; ++i) world.Tick(1.0f / 60);
         // Isolate joint tracking from floor obstruction: a supported, hanging
         // character can reach the animation targets. Test floor contact separately.
-        character.SetActorLocation(character.GetActorLocation() + Vector3(0, 1, 0));
+        if (suspended) character.SetActorLocation(character.GetActorLocation() + Vector3(0, 1, 0));
         world.Tick(0);
         check(character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) && ragdoll.SetRootSupported(true, error),
             "Active: enter supported dynamic drive mode");
-        check(ragdoll.GetDrivenJointCount() == 19 && ragdoll.GetKinematicBodyCount() == 1,
-            "Active: 19 driven joints and one independently supported pelvis");
+        check(ragdoll.GetDrivenJointCount() == 19 && ragdoll.GetKinematicBodyCount() == 0 &&
+            physics.GetConstraintCount() == jointCount + 1,
+            "Active: 20 dynamic bodies, 19 driven joints and one pelvis force/torque support constraint");
     };
     for (uint32_t clip = 0; clip < 3; ++clip)
     {
@@ -61,6 +64,7 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
         check(animation.GetAnimationTime() != initialTime, "Active: target animation continues during physics");
         float maxError = 0, maxGap = 0, maxLimit = 0;
         float pelvisTravel = 0, pelvisRotation = 0;
+        float pelvisPositionError = 0, pelvisRotationError = 0;
         size_t worst = 0; int worstStep = 0;
         double elapsedMs = 0;
         for (int step = 0; step < 360; ++step)
@@ -69,7 +73,9 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             world.Tick(1.0f / 60);
             elapsedMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - before).count();
             if (!ragdoll.IsFinite()) check(false, "Active: finite dynamic state");
-            if (!pelvisMatchesAnimation()) check(false, "Active: supported pelvis matches sampled animation after every fixed step");
+            if (!pelvisTracksAnimation()) check(false, "Active: dynamic pelvis tracks animation within 8 cm / 0.35 rad");
+            pelvisPositionError = Max(pelvisPositionError, ragdoll.GetRootPositionError());
+            pelvisRotationError = Max(pelvisRotationError, ragdoll.GetRootRotationError());
             const auto pelvis = ragdoll.GetBoneWorld(0);
             pelvisTravel = Max(pelvisTravel, float(Length(Vector3(pelvis.GetW()) - Vector3(initialPelvis.GetW()))));
             pelvisRotation = Max(pelvisRotation, Max(float(Length(Vector3(pelvis.GetX()) - Vector3(initialPelvis.GetX()))),
@@ -86,25 +92,30 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             << " max_gap_m=" << maxGap << " max_limit_error_rad=" << maxLimit
             << " target_clamp_rad=" << ragdoll.GetMaxTargetClampAngle() << " PVD=" << physics.IsPvdConnected() << std::endl;
         report << "active_worst=" << originalAsset.constraints[worst].childBone << " step=" << worstStep << std::endl;
-        report << "active_pelvis=" << clip << " travel_m=" << pelvisTravel << " rotation_basis_delta=" << pelvisRotation << std::endl;
-        check(pelvisTravel > .0001f && pelvisRotation > .0001f && ragdoll.GetKinematicBodyCount() == 1,
-            "Active: only pelvis is kinematic and follows animated translation and rotation instead of holding the entry pose");
+        report << "active_pelvis=" << clip << " travel_m=" << pelvisTravel << " rotation_basis_delta=" << pelvisRotation
+            << " position_error_m=" << pelvisPositionError << " rotation_error_rad=" << pelvisRotationError << std::endl;
+        check(pelvisTravel > .0001f && pelvisRotation > .0001f && ragdoll.GetKinematicBodyCount() == 0,
+            "Active: pelvis follows animated translation and rotation while every body remains dynamic");
         check(maxError < .35f && maxGap < .08f && maxLimit < .35f, "Active: animated tracking, anchors and limits within declared tolerances");
         // Hold a real sampled pose, disturb the physical body, and let motors recover.
         animation.SetPlaying(false);
         for (int i = 0; i < 180; ++i) world.Tick(1.0f / 60);
         const float restError = ragdoll.GetMaxDriveError();
+        const float restPelvisError = ragdoll.GetRootPositionError();
         const float frozenTime = animation.GetAnimationTime();
         const auto targetBeforePush = animation.GetPose();
         ragdoll.AddVelocity(Vector3(0, 1, 2));
-        float peak = 0;
+        float peak = 0, pelvisPeak = 0;
         for (int i = 0; i < 240; ++i)
         {
             world.Tick(1.0f / 60);
             peak = Max(peak, ragdoll.GetMaxDriveError());
+            pelvisPeak = Max(pelvisPeak, ragdoll.GetRootPositionError());
         }
         report << "active_recovery=" << clip << " rest=" << restError << " peak=" << peak << " final=" << ragdoll.GetMaxDriveError() << std::endl;
         check(peak > restError + .01f && ragdoll.GetMaxDriveError() < .35f, "Active: impulse response and static target recovery");
+        check(pelvisPeak > restPelvisError + .005f && pelvisTracksAnimation(),
+            "Active: impulse displaces the pelvis and force/torque support recovers");
         check(animation.GetAnimationTime() == frozenTime && targetBeforePush.size() == animation.GetPose().size(), "Active: physics does not advance or replace a frozen target");
         for (size_t i = 0; i < targetBeforePush.size(); ++i)
             check(float(Length(Vector3(targetBeforePush[i].xform.GetW()) - Vector3(animation.GetPose()[i].xform.GetW()))) < 1e-6f &&
@@ -147,7 +158,8 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             samePose(pausedPelvis, ragdoll.GetBoneWorld(0)), "Active: pause holds animation, pelvis, physics and queued drive settings");
         world.RequestPhysicsStep(); world.Tick(0);
         check(physics.GetStepCount() == steps + 1 && animation.GetAnimationTime() != time &&
-            !mesh.HasPendingDriveSettings() && ragdoll.GetDrivenJointCount() == 0 && pelvisMatchesAnimation(),
+            !mesh.HasPendingDriveSettings() && ragdoll.GetDrivenJointCount() == 0 && pelvisTracksAnimation() &&
+            ragdoll.GetKinematicBodyCount() == 0 && ragdoll.IsRootSupported() && !samePose(pausedPelvis, ragdoll.GetBoneWorld(0)),
             "Active: single step advances the animated pelvis even with angular drives disabled");
         check(mesh.QueueDriveSettings(originalAsset, error), "Active: queue original drives");
         world.SetPhysicsPaused(false); world.Tick(1.0f / 60);
@@ -184,6 +196,26 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             if (!ragdoll.IsFinite() || ragdoll.GetMaxAnchorError() >= .08f)
                 check(false, "Active: fallen-pose activation stays finite and connected");
         }
+    }
+
+    // The viewer normally enables support while the feet contact the floor.
+    // Exercise this separately from the suspended tracking measurements.
+    for (uint32_t clip = 0; clip < 3; ++clip)
+    {
+        prepare(clip, false);
+        float positionError = 0, rotationError = 0;
+        for (int step = 0; step < 180; ++step)
+        {
+            world.Tick(1.0f / 60);
+            if (!ragdoll.IsFinite() || ragdoll.GetMaxAnchorError() >= .08f || ragdoll.GetLowestPoint() < -.04f)
+                check(false, "Active: supported floor contact remains finite, connected and above the floor");
+            positionError = Max(positionError, ragdoll.GetRootPositionError());
+            rotationError = Max(rotationError, ragdoll.GetRootRotationError());
+        }
+        report << "active_floor=" << clip << " pelvis_position_error_m=" << positionError
+            << " pelvis_rotation_error_rad=" << rotationError << std::endl;
+        check(ragdoll.GetKinematicBodyCount() == 0 && positionError < .12f && rotationError < .5f,
+            "Active: all-dynamic pelvis support remains bounded during animated floor contact");
     }
 
     std::vector<Matrix4> reference;

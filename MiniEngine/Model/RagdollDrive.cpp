@@ -19,6 +19,11 @@ namespace PARS
             return PxQuat(value.x, value.y, value.z, value.w);
         }
         float Angle(PxQuat a, PxQuat b) { return 2 * std::acos(PxClamp(PxAbs(a.dot(b)), 0.0f, 1.0f)); }
+        PxVec3 LimitMagnitude(PxVec3 v, float limit)
+        {
+            const float length = v.magnitude();
+            return length > limit ? v * (limit / length) : v;
+        }
         bool Enabled(const PhysicsAngularDrive& drive, PhysicsJointMotion motion)
         {
             return drive.enabled && motion != PhysicsJointMotion::Locked && drive.maxTorque > 0 &&
@@ -118,11 +123,25 @@ namespace PARS
             targets.push_back(target);
             m_MaxTargetClampAngle = PxMax(m_MaxTargetClampAngle, Angle(ToPx(target), ToPx(EvaluateJointDriveTarget(data, a, b, false))));
         }
-        // Only the supported pelvis follows the animated world pose directly.
-        // Its PA body offset is already included above. Queue the target before
-        // simulate(), so PhysX derives the motion that drives connected limbs;
-        // the other bodies remain dynamic and follow their joint motors.
-        if (m_SupportBody >= 0) m_Bodies[m_SupportBody]->setKinematicTarget(supportedPose);
+        if (m_SupportJoint)
+        {
+            // The pelvis stays dynamic. A world-anchored D6 applies bounded
+            // forces/torques in the same implicit solve as joints and contacts.
+            // Both velocities are child-minus-world for linear/SLERP drives.
+            PxVec3 linear(0), angular(0);
+            if (m_HasSupportTarget && deltaTime > 0)
+            {
+                const auto previous = m_SupportJoint->getDrivePosition();
+                linear = LimitMagnitude((supportedPose.p - previous.p) / deltaTime, 10.0f);
+                PxQuat delta = supportedPose.q * previous.q.getConjugate();
+                if (delta.w < 0) delta = -delta;
+                PxReal angle; PxVec3 axis; delta.toRadiansAndUnitAxis(angle, axis);
+                angular = axis * PxMin(angle / deltaTime, 20.0f);
+            }
+            m_SupportJoint->setDrivePosition(supportedPose);
+            m_SupportJoint->setDriveVelocity(linear, angular);
+            m_HasSupportTarget = true;
+        }
         for (size_t i = 0; i < targets.size(); ++i)
         {
             const PxQuat q = ToPx(targets[i]);
@@ -179,27 +198,58 @@ namespace PARS
             }
             if (root < 0) { error = "PA has no root body to support."; return false; }
         }
-        if (m_SupportBody >= 0)
+        if (!supported)
         {
-            auto* body = m_Bodies[m_SupportBody];
-            // Carry the last simulated animation motion into passive dynamics.
-            const auto linear = body->getLinearVelocity(), angular = body->getAngularVelocity();
-            body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
-            body->setLinearVelocity(linear); body->setAngularVelocity(angular); body->wakeUp();
+            // Removing the drive leaves every body's pose and velocity intact.
+            m_SupportJoint->release(); m_SupportJoint = nullptr;
+            m_Bodies[m_SupportBody]->wakeUp();
+            m_SupportBody = -1; m_HasSupportTarget = false;
+            error.clear(); return true;
         }
-        m_SupportBody = root;
-        if (root >= 0)
-        {
-            auto* body = m_Bodies[root];
-            const auto pose = body->getGlobalPose();
-            body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-            // Hold until the next active animation update supplies a target.
-            body->setKinematicTarget(pose);
-        }
+        auto* body = m_Bodies[root];
+        auto* drive = PxD6JointCreate(body->getScene()->getPhysics(), nullptr, PxTransform(PxIdentity), body, PxTransform(PxIdentity));
+        if (!drive) { error = "Could not create pelvis force/torque drive."; return false; }
+        // All six axes are free: only finite motor forces support the pelvis.
+        // This runtime joint is separate from the PA's anatomical constraints.
+        drive->setName("PelvisForceTorque");
+        for (int axis = 0; axis < PxD6Axis::eCOUNT; ++axis) drive->setMotion(PxD6Axis::Enum(axis), PxD6Motion::eFREE);
+        drive->setAngularDriveConfig(PxD6AngularDriveConfig::eSLERP);
+        drive->setConstraintFlag(PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
+        float mass = 0;
+        for (const auto* part : m_Bodies) mass += part->getMass();
+        // Whole-ragdoll mass scales these initial support gains. Linear limits
+        // are N per world axis; SLERP limits are Nm per solver angular row.
+        const PxD6JointDrive position(mass * 900.0f, mass * 60.0f, mass * 60.0f, false);
+        for (auto axis : {PxD6Drive::eX, PxD6Drive::eY, PxD6Drive::eZ}) drive->setDrive(axis, position);
+        drive->setDrive(PxD6Drive::eSLERP, PxD6JointDrive(mass * 200.0f, mass * 10.0f, mass * 20.0f, false));
+        // Hold the current pose until the next animation target, without a snap
+        // or a finite-difference velocity spike when support is re-enabled.
+        drive->setDrivePosition(body->getGlobalPose());
+        drive->setDriveVelocity(PxVec3(0), PxVec3(0));
+        m_SupportJoint = drive; m_SupportBody = root; m_HasSupportTarget = false;
+        body->wakeUp();
         error.clear(); return true;
 #else
         (void)supported; error = "Support requires x64 PhysX."; return false;
 #endif
+    }
+
+    float Ragdoll::GetRootPositionError() const
+    {
+#if defined(_M_X64)
+        if (m_SupportJoint)
+            return (m_SupportJoint->getDrivePosition().p - m_Bodies[m_SupportBody]->getGlobalPose().p).magnitude();
+#endif
+        return 0;
+    }
+
+    float Ragdoll::GetRootRotationError() const
+    {
+#if defined(_M_X64)
+        if (m_SupportJoint)
+            return Angle(m_SupportJoint->getDrivePosition().q, m_Bodies[m_SupportBody]->getGlobalPose().q);
+#endif
+        return 0;
     }
 
     size_t Ragdoll::GetDrivenJointCount() const

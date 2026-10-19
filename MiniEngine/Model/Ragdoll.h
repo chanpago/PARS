@@ -27,9 +27,12 @@ namespace PARS
         bool AreDrivesEnabled() const { return m_DrivesEnabled; }
         bool ApplyDriveSettings(const PhysicsAsset& asset, std::string& error);
         bool UpdateDriveTargets(const std::vector<Math::Matrix4>& boneWorld, float deltaTime, std::string& error);
-        // Kinematic pelvis follows UpdateDriveTargets; without updates it holds.
+        // A world-space force/torque drive supports the DYNAMIC pelvis.
+        // Independent of the anatomical angular drives; updates arrive before simulate().
         bool SetRootSupported(bool supported, std::string& error);
         bool IsRootSupported() const { return m_SupportBody >= 0; }
+        float GetRootPositionError() const;
+        float GetRootRotationError() const;
         size_t GetDrivenJointCount() const;
         float GetMaxDriveError(size_t* worstJoint = nullptr) const;
         float GetMaxTargetClampAngle() const { return m_MaxTargetClampAngle; }
@@ -55,6 +58,8 @@ namespace PARS
         bool m_Simulating = false;
         bool m_DrivesEnabled = false, m_HasDriveTargets = false;
         int m_SupportBody = -1;
+        physx::PxD6Joint* m_SupportJoint = nullptr;
+        bool m_HasSupportTarget = false;
         float m_MaxTargetClampAngle = 0;
         std::vector<Math::Quaternion> m_DriveTargets;
         std::vector<Math::Matrix4> m_LastKinematicTargets;

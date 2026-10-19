@@ -682,12 +682,12 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     ImGui::EndDisabled();
     bool supported = character.IsRagdoll() ? runtime.IsRootSupported() : m_ActiveSupport;
     ImGui::BeginDisabled(mesh.GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll);
-    if (ImGui::Checkbox("Support pelvis (validation)", &supported))
+    if (ImGui::Checkbox("Pelvis force / torque support", &supported))
     {
         if (!character.IsRagdoll() || mesh.GetRagdoll().SetRootSupported(supported, m_RagdollMessage)) m_ActiveSupport = supported;
     }
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Active: pelvis follows animation position and rotation. Passive always releases the pelvis for full-body dynamics.");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Dynamic pelvis: limited forces follow animation position, limited torques follow rotation. Contacts and impacts can displace it. Passive disables this support.");
     if (mesh.IsActiveRagdoll())
     {
         bool drives = runtime.AreDrivesEnabled();
@@ -695,6 +695,9 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
         ImGui::Text("Driven joints: %zu", runtime.GetDrivenJointCount());
         ImGui::Text("Max target error: %.1f deg", XMConvertToDegrees(runtime.GetMaxDriveError()));
         ImGui::Text("Target limit correction: %.1f deg", XMConvertToDegrees(runtime.GetMaxTargetClampAngle()));
+        if (runtime.IsRootSupported())
+            ImGui::Text("Pelvis target error: %.1f cm / %.1f deg", runtime.GetRootPositionError() * 100.0f,
+                XMConvertToDegrees(runtime.GetRootRotationError()));
     }
     ImGui::BeginDisabled(!asset);
     if (ImGui::Button("Use default PD gains"))

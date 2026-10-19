@@ -34,11 +34,13 @@ namespace PARS
     void Ragdoll::Destroy()
     {
 #if defined(_M_X64)
+        if (m_SupportJoint) m_SupportJoint->release();
         for (auto* joint : m_Joints) joint->release();
         for (auto* body : m_Bodies) body->release();
 #endif
         m_Joints.clear(); m_Bodies.clear(); m_BoneNodes.clear(); m_Asset = {}; m_Simulating = false;
         m_DrivesEnabled = m_HasDriveTargets = false; m_SupportBody = -1; m_MaxTargetClampAngle = 0;
+        m_SupportJoint = nullptr; m_HasSupportTarget = false;
         m_DriveTargets.clear(); m_LastKinematicTargets.clear(); m_AnimatedLinearVelocity.clear(); m_AnimatedAngularVelocity.clear();
     }
 
@@ -50,6 +52,7 @@ namespace PARS
         std::swap(m_Simulating, other.m_Simulating);
         std::swap(m_DrivesEnabled, other.m_DrivesEnabled); std::swap(m_HasDriveTargets, other.m_HasDriveTargets);
         std::swap(m_SupportBody, other.m_SupportBody); std::swap(m_MaxTargetClampAngle, other.m_MaxTargetClampAngle);
+        std::swap(m_SupportJoint, other.m_SupportJoint); std::swap(m_HasSupportTarget, other.m_HasSupportTarget);
         m_DriveTargets.swap(other.m_DriveTargets); m_LastKinematicTargets.swap(other.m_LastKinematicTargets);
         m_AnimatedLinearVelocity.swap(other.m_AnimatedLinearVelocity); m_AnimatedAngularVelocity.swap(other.m_AnimatedAngularVelocity);
     }
