@@ -62,6 +62,5 @@ namespace PARS
         std::string m_PhysicsError;
         PhysicsAnimationMode m_PhysicsMode = PhysicsAnimationMode::Animation;
         std::unique_ptr<const PhysicsAsset> m_PendingDriveSettings;
-        bool m_SavedLocomotion = false, m_HasSavedLocomotion = false;
     };
 }

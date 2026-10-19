@@ -240,6 +240,15 @@ namespace PARS
         (void)velocity;
 #endif
     }
+    void Ragdoll::SetQueryOwner(void* owner)
+    {
+#if defined(_M_X64)
+        for (auto* body : m_Bodies) body->userData = owner;
+#else
+        (void)owner;
+#endif
+    }
+
     float Ragdoll::GetMaxAnchorError() const
     {
         float result = 0;

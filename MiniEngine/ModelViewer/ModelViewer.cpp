@@ -503,7 +503,8 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
         return;
     }
     if (IsFirstPressed(kKey_tab)) SetFreeCamera(!m_FreeCamera);
-    player->SetInputEnabled(!m_FreeCamera && !(GetPreviewCharacter() && GetPreviewCharacter()->IsRagdoll()));
+    auto* character = GetPreviewCharacter();
+    player->SetInputEnabled(!m_FreeCamera && character && character->CanControlMovement());
     if (m_FreeCamera) return;
     m_ControlYaw -= GetAnalogInput(kAnalogRightStickX) * deltaTime * 2.0f;
     m_ControlPitch -= GetAnalogInput(kAnalogRightStickY) * deltaTime * 2.0f;
@@ -698,6 +699,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
         if (runtime.IsRootSupported())
             ImGui::Text("Pelvis target error: %.1f cm / %.1f deg", runtime.GetRootPositionError() * 100.0f,
                 XMConvertToDegrees(runtime.GetRootRotationError()));
+        ImGui::TextUnformatted(character.CanControlMovement() ? "WASD: move | Shift: run" : "Movement requires pelvis support.");
     }
     ImGui::BeginDisabled(!asset);
     if (ImGui::Button("Use default PD gains"))
@@ -713,8 +715,8 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     if (mesh.HasPendingDriveSettings()) ImGui::TextUnformatted("Drive settings pending next physics step.");
     if (character.IsRagdoll())
     {
-        if (ImGui::Button("Stop / return to start") && character.StopRagdoll(m_RagdollMessage))
-            m_RagdollMessage = "Returned to animation and character control at the start position.";
+        if (ImGui::Button("Stop / return to animation") && character.StopRagdoll(m_RagdollMessage))
+            m_RagdollMessage = "Returned to animation and character control at the current movement target.";
         if (ImGui::Button("Restart ragdoll"))
         {
             const auto mode = mesh.GetPhysicsMode(); const bool support = runtime.IsRootSupported();
@@ -783,10 +785,8 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 if (GetPlayerController())
                 {
                     bool automatic = animation->IsLocomotionEnabled();
-                    ImGui::BeginDisabled(GetPreviewCharacter() && GetPreviewCharacter()->IsRagdoll());
                     if (ImGui::Checkbox("Animation follows movement", &automatic))
                         animation->SetLocomotionEnabled(automatic);
-                    ImGui::EndDisabled();
                     bool freeCamera = m_FreeCamera;
                     if (ImGui::Checkbox("Free camera (Tab)", &freeCamera))
                         SetFreeCamera(freeCamera);

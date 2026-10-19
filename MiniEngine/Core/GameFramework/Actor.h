@@ -62,8 +62,8 @@ namespace PARS
         virtual void BeginPlay();
         virtual void EndPlay();
         virtual void Tick(float deltaTime);
-        void PreparePhysics(float deltaTime);
-        void FixedTick(float deltaTime);
+        virtual void PreparePhysics(float deltaTime);
+        virtual void FixedTick(float deltaTime);
         enum class TickGroup { PrePhysics, PostPhysics };
         TickGroup GetTickGroup() const { return m_TickGroup; }
         void SetTickGroup(TickGroup group) { m_TickGroup = group; }

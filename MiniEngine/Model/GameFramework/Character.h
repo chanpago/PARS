@@ -18,8 +18,12 @@ namespace PARS
         bool SetPhysicsMode(PhysicsAnimationMode mode, std::string& error);
         bool StopRagdoll(std::string& error);
         bool IsRagdoll() const { return m_Mesh->IsRagdoll(); }
+        bool CanControlMovement() const;
+        void PreparePhysics(float deltaTime) override;
+        void FixedTick(float deltaTime) override;
 
     private:
+        void SyncRagdollMovement();
         CapsuleComponent* m_Capsule;
         CharacterMovementComponent* m_Movement;
         SkeletalMeshComponent* m_Mesh;

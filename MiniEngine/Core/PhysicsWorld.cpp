@@ -277,10 +277,15 @@ namespace
     class CapsuleQueryFilter : public PxQueryFilterCallback
     {
     public:
+        explicit CapsuleQueryFilter(const void* owner) : ignoredOwner(owner) {}
+        const void* ignoredOwner;
         PxVec3 direction{0};
         PxQueryHitType::Enum preFilter(const PxFilterData&, const PxShape* shape,
-            const PxRigidActor*, PxHitFlags&) override
-        { return shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ? PxQueryHitType::eNONE : PxQueryHitType::eBLOCK; }
+            const PxRigidActor* actor, PxHitFlags&) override
+        {
+            return shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ||
+                (ignoredOwner && actor->userData == ignoredOwner) ? PxQueryHitType::eNONE : PxQueryHitType::eBLOCK;
+        }
         PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit& hit,
             const PxShape*, const PxRigidActor*) override
         {
@@ -322,7 +327,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
 {
     CapsuleMoveResult result;
     if (!m_Scene || !capsule.centre.isFinite() || !displacement.isFinite()) return result;
-    CapsuleQueryFilter filter;
+    CapsuleQueryFilter filter(capsule.owner);
     // Recover spawn/teleport penetration before attempting any sweep.
     for (int iteration = 0; iteration < 8; ++iteration)
     {

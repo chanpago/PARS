@@ -12,19 +12,50 @@ namespace PARS
         if (mode == PhysicsAnimationMode::Animation) return StopRagdoll(error);
         const bool wasSimulating = IsRagdoll();
         if (!m_Mesh->SetPhysicsMode(mode, m_Movement->GetVelocity(), error)) return false;
-        if (wasSimulating) return true;
-        m_MovementWasEnabled = m_Movement->IsTickEnabled();
-        m_CapsuleWasEnabled = m_Capsule->IsPhysicsEnabled();
-        m_Movement->StopMovementImmediately();
-        m_Movement->SetTickEnabled(false);
-        m_Capsule->SetPhysicsEnabled(false);
+        if (!wasSimulating)
+        {
+            m_MovementWasEnabled = m_Movement->IsTickEnabled();
+            m_CapsuleWasEnabled = m_Capsule->IsPhysicsEnabled();
+        }
+        SyncRagdollMovement();
         return true;
+    }
+
+    bool Character::CanControlMovement() const
+    {
+        if (!IsRagdoll()) return m_Movement->IsTickEnabled() && m_Capsule->IsPhysicsEnabled();
+        return m_Mesh->IsActiveRagdoll() && m_Mesh->GetRagdoll().IsRootSupported() &&
+            m_MovementWasEnabled && m_CapsuleWasEnabled;
+    }
+
+    void Character::SyncRagdollMovement()
+    {
+        if (!IsRagdoll()) return;
+        const bool enabled = CanControlMovement();
+        if (!enabled) m_Movement->StopMovementImmediately();
+        if (m_Capsule->IsPhysicsEnabled() != enabled) m_Capsule->SetPhysicsEnabled(enabled);
+        m_Movement->SetTickEnabled(enabled && m_Capsule->HasPhysicsCollision());
+    }
+
+    void Character::PreparePhysics(float deltaTime)
+    {
+        // Support may have been toggled in the UI since the previous frame.
+        SyncRagdollMovement();
+        Pawn::PreparePhysics(deltaTime);
+    }
+
+    void Character::FixedTick(float deltaTime)
+    {
+        SyncRagdollMovement();
+        Pawn::FixedTick(deltaTime); // Movement first, then animation and drive targets.
+        // Target evaluation can fall back to Passive during this same substep.
+        SyncRagdollMovement();
     }
 
     bool Character::StopRagdoll(std::string& error)
     {
         if (!IsRagdoll()) { error.clear(); return true; }
-        // The actor root stayed at the start position. Restore query collision there.
+        // Return to animation at the latest movement target (no get-up blend).
         if (!m_Capsule->SetPhysicsEnabled(m_CapsuleWasEnabled))
         { error = "Could not restore the character capsule."; return false; }
         m_Mesh->StopRagdoll();

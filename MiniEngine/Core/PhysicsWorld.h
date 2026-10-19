@@ -12,6 +12,7 @@ struct PhysicsQueryCapsule
 {
     physx::PxVec3 centre;
     float radius, halfHeight;
+    const void* owner = nullptr; // Ignore only rigid actors tagged with this owner in movement queries.
 };
 
 // CPU physics in metres, kilograms and seconds; +Y is up. Use on the game thread.

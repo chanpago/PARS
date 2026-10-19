@@ -45,6 +45,8 @@ namespace PARS
         Math::Matrix4 GetBoneWorld(size_t body) const;
         Math::Vector3 GetPosition() const;
         void AddVelocity(Math::Vector3 velocity);
+        // PxActor::userData identifies the owner for self-excluding movement queries.
+        void SetQueryOwner(void* owner);
         // Diagnostics also used by the integration test and PVD panel.
         float GetMaxAnchorError() const;
         float GetMaxAngularError(size_t* worstJoint = nullptr) const;

@@ -213,6 +213,39 @@ namespace
         std::puts("PASS: query-only capsule, wire outline, steps, ceiling, depenetration, long sweeps and character collision");
     }
 
+    void TestMovementQueryOwners()
+    {
+        Fixture f;
+        auto* physics = f.world.GetPhysicsWorld();
+        auto* own = physics->CreateDynamicBody(PxTransform(PxVec3(0, 1, 0)), PxBoxGeometry(.2f, .6f, .2f), 10, "Own PA body");
+        Check(own != nullptr, "Create owned query shape");
+        own->userData = f.character;
+        own->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+        const auto before = f.character->GetActorLocation();
+        f.character->capsule->Move(Vector3(kZero), 1.0f / 60);
+        Check(float(Length(f.character->GetActorLocation() - before)) < .001f,
+            "Movement depenetration ignores overlapping bodies of the same owner");
+        f.player->SetMoveInput(1, 0, false); f.Frames(60);
+        Check(float(f.character->GetActorLocation().GetZ()) > 1.4f &&
+            std::abs(float(f.character->GetActorLocation().GetX())) < .001f,
+            "Movement sweeps pass through their own PA without moving sideways");
+        auto* other = physics->CreateDynamicBody(PxTransform(PxVec3(0, 1, 3)), PxBoxGeometry(1, 1, .2f), 10, "Other PA body");
+        Check(other != nullptr, "Create foreign query shape");
+        other->userData = f.player; // A different live owner must still block.
+        other->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+        f.Frames(120);
+        Check(float(f.character->GetActorLocation().GetZ()) > 2.4f && float(f.character->GetActorLocation().GetZ()) < 2.5f,
+            "Other owners' PA bodies continue to block movement queries");
+        other->release();
+        own->userData = nullptr;
+        f.character->SetActorLocation(before);
+        f.character->capsule->Move(Vector3(kZero), 1.0f / 60);
+        Check(float(Length(f.character->GetActorLocation() - before)) > .3f,
+            "Untagged rigid bodies are not accidentally excluded from depenetration");
+        own->release();
+        std::puts("PASS: movement queries exclude only their own PA, preserving foreign and untagged collision");
+    }
+
     void TestSkeletonHierarchy()
     {
         // Two scene roots, nested children and siblings. Joint indices need not
@@ -267,6 +300,7 @@ void RunCharacterMovementTests()
     TestMovement();
     TestCollisionAndLifetime();
     TestQueryCapsules();
+    TestMovementQueryOwners();
     TestPoseBlending();
     TestSkeletonHierarchy();
 }

@@ -32,6 +32,7 @@ namespace PARS
         const auto position = transform.GetTranslation();
         m_QueryCapsule = physics->CreateQueryCapsule(
             physx::PxVec3(float(position.GetX()), float(position.GetY()), float(position.GetZ())), m_Radius, m_HalfHeight);
+        if (m_QueryCapsule) m_QueryCapsule->owner = &GetOwner();
         m_PhysicsWorld = physics;
 #endif
     }

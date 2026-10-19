@@ -1,7 +1,6 @@
 #include "SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
-#include "../LocomotionAnimInstance.h"
 #include <cmath>
 
 using namespace Math;
@@ -24,7 +23,9 @@ namespace PARS
         if (!BuildPhysicsSkeleton(skeleton, error)) return false;
         std::vector<Matrix4> worldPose;
         if (!EvaluateAnimationPhysicsPose(skeleton, worldPose, error)) return false;
-        return candidate.Create(*physics, asset, skeleton.names, worldPose, Vector3(kZero), error, false);
+        if (!candidate.Create(*physics, asset, skeleton.names, worldPose, Vector3(kZero), error, false)) return false;
+        candidate.SetQueryOwner(&GetOwner());
+        return true;
     }
 
     bool SkeletalMeshComponent::EvaluateAnimationPhysicsPose(const PhysicsSkeleton& skeleton,
@@ -140,12 +141,6 @@ namespace PARS
         m_RagdollSourcePose = m_AnimInstance->GetPose();
         m_PhysicsMode = mode;
         m_Ragdoll.SetDrivesEnabled(active);
-        if (active)
-            if (auto* locomotion = dynamic_cast<LocomotionAnimInstance*>(m_AnimInstance.get()))
-            {
-                if (!m_HasSavedLocomotion) { m_SavedLocomotion = locomotion->IsLocomotionEnabled(); m_HasSavedLocomotion = true; }
-                locomotion->SetLocomotionEnabled(false);
-            }
         UpdatePhysicsPose();
         error.clear();
         return true;
@@ -199,9 +194,6 @@ namespace PARS
         if (!IsRagdoll()) return;
         m_Ragdoll.SetSimulating(false, Vector3(kZero), m_PhysicsError);
         m_PhysicsMode = PhysicsAnimationMode::Animation;
-        if (m_HasSavedLocomotion)
-            if (auto* locomotion = dynamic_cast<LocomotionAnimInstance*>(m_AnimInstance.get())) locomotion->SetLocomotionEnabled(m_SavedLocomotion);
-        m_HasSavedLocomotion = false;
         m_PhysicsPose.clear(); m_RagdollSourcePose.clear(); m_BoneStretch.clear();
         m_ModelInstance.ClearSkinnedWorldBounds();
         UpdateKinematicPose(true);
