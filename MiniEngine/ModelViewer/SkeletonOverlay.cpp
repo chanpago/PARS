@@ -78,9 +78,15 @@ bool SkeletonOverlay::Project(Vector3 position, Vector3& pixel) const
 {
     const Vector4 clip = m_ViewProjection * position;
     const float w = clip.GetW(), z = clip.GetZ();
-    if (w <= 1e-6f || z < 0 || z > w) return false;
+    if (w <= 1e-6f || z < 0 || z > w)
+    {
+        return false;
+    }
     const float x = clip.GetX() / w, y = clip.GetY() / w;
-    if (!std::isfinite(x) || !std::isfinite(y)) return false;
+    if (!std::isfinite(x) || !std::isfinite(y))
+    {
+        return false;
+    }
     pixel = Vector3((x + 1) * .5f * m_Width, (1 - y) * .5f * m_Height, z / w);
     return true;
 }
@@ -88,8 +94,10 @@ bool SkeletonOverlay::Project(Vector3 position, Vector3& pixel) const
 void SkeletonOverlay::Triangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color, uint32_t id)
 {
     for (Vector3 p : {a, b, c})
+    {
         m_Vertices.push_back({float(p.GetX()) * 2 / m_Width - 1, 1 - float(p.GetY()) * 2 / m_Height, 0, 1,
             color.GetX(), color.GetY(), color.GetZ(), 1, id});
+    }
 }
 
 void SkeletonOverlay::FillTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color, uint32_t id, float opacity)
@@ -113,30 +121,56 @@ void SkeletonOverlay::ClipLine(Vector4 a, Vector4 b, Vector3 color, uint32_t id,
 {
     // Clip in homogeneous space before dividing by W (also supports reversed Z).
     const auto distance = [](Vector4 p, int plane) -> float {
-        switch (plane) {
-        case 0: return p.GetW() + p.GetX(); case 1: return p.GetW() - p.GetX();
-        case 2: return p.GetW() + p.GetY(); case 3: return p.GetW() - p.GetY();
-        case 4: return p.GetZ(); default: return p.GetW() - p.GetZ();
+        switch (plane)
+        {
+        case 0:
+            return p.GetW() + p.GetX();
+        case 1:
+            return p.GetW() - p.GetX();
+        case 2:
+            return p.GetW() + p.GetY();
+        case 3:
+            return p.GetW() - p.GetY();
+        case 4:
+            return p.GetZ();
+        default:
+            return p.GetW() - p.GetZ();
         }
     };
     for (int plane = 0; plane < 6; ++plane)
     {
         const float da = distance(a, plane), db = distance(b, plane);
-        if (da < 0 && db < 0) return;
+        if (da < 0 && db < 0)
+        {
+            return;
+        }
         if ((da < 0) != (db < 0))
         {
             const Vector4 intersection = a + (b - a) * (da / (da - db));
-            if (da < 0) a = intersection; else b = intersection;
+            if (da < 0)
+            {
+                a = intersection;
+            }
+            else
+            {
+                b = intersection;
+            }
         }
     }
-    if (float(a.GetW()) <= 1e-6f || float(b.GetW()) <= 1e-6f) return;
+    if (float(a.GetW()) <= 1e-6f || float(b.GetW()) <= 1e-6f)
+    {
+        return;
+    }
     Vector3 p((float(a.GetX() / a.GetW()) + 1) * .5f * m_Width,
         (1 - float(a.GetY() / a.GetW())) * .5f * m_Height, 0);
     Vector3 q((float(b.GetX() / b.GetW()) + 1) * .5f * m_Width,
         (1 - float(b.GetY() / b.GetW())) * .5f * m_Height, 0);
     const float dx = q.GetX() - p.GetX(), dy = q.GetY() - p.GetY();
     const float length = std::sqrt(dx * dx + dy * dy);
-    if (!std::isfinite(length) || length < .01f) return;
+    if (!std::isfinite(length) || length < .01f)
+    {
+        return;
+    }
     const Vector3 side(-dy * width / (2 * length), dx * width / (2 * length), 0);
     Triangle(p + side, p - side, q + side, color, id);
     Triangle(q + side, p - side, q - side, color, id);
@@ -145,7 +179,10 @@ void SkeletonOverlay::ClipLine(Vector4 a, Vector4 b, Vector3 color, uint32_t id,
 void SkeletonOverlay::Point(Vector3 position, Vector3 color, uint32_t id, float radius)
 {
     Vector3 center;
-    if (!Project(position, center)) return;
+    if (!Project(position, center))
+    {
+        return;
+    }
     constexpr int segments = 12;
     for (int i = 0; i < segments; ++i)
     {
@@ -157,18 +194,30 @@ void SkeletonOverlay::Point(Vector3 position, Vector3 color, uint32_t id, float 
 
 bool SkeletonOverlay::RequestPick(float x, float y)
 {
-    if (m_PickFence || x < 0 || y < 0 || x >= m_Width || y >= m_Height) return false;
+    if (m_PickFence || x < 0 || y < 0 || x >= m_Width || y >= m_Height)
+    {
+        return false;
+    }
     m_PickX = static_cast<uint32_t>(x / m_Width * float(m_Resolution));
     m_PickY = static_cast<uint32_t>(y / m_Height * float(m_Resolution));
-    if (m_PickX >= m_Resolution) m_PickX = m_Resolution - 1;
-    if (m_PickY >= m_Resolution) m_PickY = m_Resolution - 1;
+    if (m_PickX >= m_Resolution)
+    {
+        m_PickX = m_Resolution - 1;
+    }
+    if (m_PickY >= m_Resolution)
+    {
+        m_PickY = m_Resolution - 1;
+    }
     m_PickRequested = m_AcceptPick = true;
     return true;
 }
 
 bool SkeletonOverlay::PollPick(uint32_t& id)
 {
-    if (!m_PickFence || !g_CommandManager.IsFenceComplete(m_PickFence)) return false;
+    if (!m_PickFence || !g_CommandManager.IsFenceComplete(m_PickFence))
+    {
+        return false;
+    }
     id = *static_cast<const uint32_t*>(m_Readback.Map());
     m_Readback.Unmap();
     m_PickFence = 0;
@@ -193,7 +242,11 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
         context.SetRenderTargets(2, rtvs, m_SurfaceDepth.GetDSV());
         context.SetRootSignature(m_SurfaceRoot);
         context.SetPipelineState(m_SurfacePSO);
-        struct Constants { Matrix4 viewProjection; Vector4 eye; } constants{m_ViewProjection, Vector4(m_Eye, 1)};
+        struct Constants
+        {
+            Matrix4 viewProjection;
+            Vector4 eye;
+        } constants{m_ViewProjection, Vector4(m_Eye, 1)};
         context.SetDynamicConstantBufferView(0, sizeof(constants), &constants);
         context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context.TransitionResource(m_SurfaceMesh, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
@@ -213,7 +266,10 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
         context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         for (const auto* vertices : {&m_FillVertices, &m_Vertices})
         {
-            if (vertices->empty()) continue;
+            if (vertices->empty())
+            {
+                continue;
+            }
             context.SetDynamicVB(0, vertices->size(), sizeof(Vertex), vertices->data());
             context.Draw(static_cast<uint32_t>(vertices->size()));
         }

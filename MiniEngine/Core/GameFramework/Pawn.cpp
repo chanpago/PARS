@@ -11,7 +11,12 @@ namespace PARS
     void Pawn::EndPlay()
     {
         if (auto controller = GetController())
-            if (controller->m_Pawn == GetHandle()) controller->UnPossess();
+        {
+            if (controller->m_Pawn == GetHandle())
+            {
+                controller->UnPossess();
+            }
+        }
         m_Controller = {};
         ConsumeMovementInput();
         m_RunRequested = false;

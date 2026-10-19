@@ -9,11 +9,24 @@ using namespace PARS;
 
 bool SkeletalMeshViewer::SetPhysicsAsset(const PhysicsAsset& asset, std::string& error)
 {
-    if (!m_Mesh) { error = "Preview mesh is unavailable."; return false; }
+    if (!m_Mesh)
+    {
+        error = "Preview mesh is unavailable.";
+        return false;
+    }
     std::vector<std::string> joints;
     const auto& model = *m_Mesh->GetSkeletalMesh();
-    for (uint32_t i = 0; i < model.m_NumNodes; ++i) if (m_IsJoint[i]) joints.push_back(model.m_NodeNames[i]);
-    if (!asset.ValidateSkeleton(joints, error)) return false;
+    for (uint32_t i = 0; i < model.m_NumNodes; ++i)
+    {
+        if (m_IsJoint[i])
+        {
+            joints.push_back(model.m_NodeNames[i]);
+        }
+    }
+    if (!asset.ValidateSkeleton(joints, error))
+    {
+        return false;
+    }
     CancelInteraction();
     m_PhysicsAsset = asset;
     m_PhysicsDirty = true;
@@ -37,7 +50,10 @@ Matrix4 SkeletalMeshViewer::GetBodyWorld(int index) const
 
 Matrix4 SkeletalMeshViewer::GetGizmoWorld() const
 {
-    if (EditingConstraint()) return GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame);
+    if (EditingConstraint())
+    {
+        return GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame);
+    }
     return EditingBody() ? GetBodyWorld(m_SelectedBody) : m_NodeWorld[m_SelectedBone];
 }
 
@@ -54,14 +70,24 @@ void SkeletalMeshViewer::SelectBody(int index)
 
 void SkeletalMeshViewer::CreatePhysicsBody(PhysicsShapeType shape)
 {
-    if (m_SelectedBone < 0) return;
+    if (m_SelectedBone < 0)
+    {
+        return;
+    }
     CancelInteraction();
     const auto& names = m_Mesh->GetSkeletalMesh()->m_NodeNames;
     const int existing = m_PhysicsAsset.FindBody(names[m_SelectedBone]);
-    if (existing >= 0) { SelectBody(existing); return; }
+    if (existing >= 0)
+    {
+        SelectBody(existing);
+        return;
+    }
     auto& animation = m_Mesh->GetAnimInstance();
     animation.SetPlaying(false);
-    if (m_EditPose.empty()) m_EditPose = animation.GetPose();
+    if (m_EditPose.empty())
+    {
+        m_EditPose = animation.GetPose();
+    }
     PhysicsBody body;
     body.bone = names[m_SelectedBone];
     body.shape = shape;
@@ -70,18 +96,30 @@ void SkeletalMeshViewer::CreatePhysicsBody(PhysicsShapeType shape)
     // Fit to the nearest child joint; leaf joints get a small editable body.
     float shortest = 1e10f;
     for (uint32_t i = 0; i < m_BoneParents.size(); ++i)
+    {
         if (m_IsJoint[i] && m_BoneParents[i] == m_SelectedBone)
         {
             const Vector3 local(Invert(frame) * Vector3(m_NodeWorld[i].GetW()));
             const float length = Length(local);
-            if (length > .005f && length < shortest) { shortest = length; endpoint = local; }
+            if (length > .005f && length < shortest)
+            {
+                shortest = length;
+                endpoint = local;
+            }
         }
+    }
     const float length = Length(endpoint);
     const Vector3 axis = endpoint / length;
     const float dot = Clamp(float(axis.GetX()), -1.0f, 1.0f);
     Quaternion rotation(kIdentity);
-    if (dot < -.9999f) rotation = Quaternion(Vector3(kYUnitVector), XM_PI);
-    else if (dot < .9999f) rotation = Quaternion(Normalize(Cross(Vector3(kXUnitVector), axis)), std::acos(dot));
+    if (dot < -.9999f)
+    {
+        rotation = Quaternion(Vector3(kYUnitVector), XM_PI);
+    }
+    else if (dot < .9999f)
+    {
+        rotation = Quaternion(Normalize(Cross(Vector3(kXUnitVector), axis)), std::acos(dot));
+    }
     XMStoreFloat4(&body.rotation, rotation);
     XMStoreFloat3(&body.offset, endpoint * .5f);
     body.radius = Clamp(length * .22f, .015f, .18f);
@@ -96,14 +134,25 @@ void SkeletalMeshViewer::CreatePhysicsBody(PhysicsShapeType shape)
 
 void SkeletalMeshViewer::DrawPhysicsBodies()
 {
-    if (!m_ShowBodies) return;
-    struct VisibleBody { int index; Matrix4 world; float depth; };
+    if (!m_ShowBodies)
+    {
+        return;
+    }
+    struct VisibleBody
+    {
+        int index;
+        Matrix4 world;
+        float depth;
+    };
     std::vector<VisibleBody> sorted;
     sorted.reserve(m_PhysicsAsset.bodies.size());
     for (size_t i = 0; i < m_PhysicsAsset.bodies.size(); ++i)
     {
         const int node = FindBodyNode(static_cast<int>(i));
-        if (node < 0) continue;
+        if (node < 0)
+        {
+            continue;
+        }
         const Matrix4 world = PhysicsBoneFrame(m_NodeWorld[node]) * m_PhysicsAsset.bodies[i].GetLocalTransform();
         sorted.push_back({static_cast<int>(i), world,
             Dot(Vector3(world.GetW()) - m_Camera.GetPosition(), m_Camera.GetForwardVec())});
@@ -128,25 +177,45 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     ImGui::Text("PA | %zu bodies / %zu joints%s", m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size(), m_PhysicsDirty ? " *" : "");
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##PhysicsAssetPath", m_PhysicsPath, sizeof(m_PhysicsPath));
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("PhysicsAsset JSON path (relative to the working directory or absolute)");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("PhysicsAsset JSON path (relative to the working directory or absolute)");
+    }
     if (ImGui::Button("Save PA"))
     {
         CancelInteraction();
-        if (m_PhysicsAsset.Save(m_PhysicsPath, m_PhysicsMessage)) { m_PhysicsDirty = false; m_PhysicsMessage = "Saved."; }
+        if (m_PhysicsAsset.Save(m_PhysicsPath, m_PhysicsMessage))
+        {
+            m_PhysicsDirty = false;
+            m_PhysicsMessage = "Saved.";
+        }
     }
     ImGui::SameLine();
     bool load = false;
     if (ImGui::Button("Load PA"))
     {
-        if (m_PhysicsDirty) ImGui::OpenPopup("Load and replace edits?");
-        else load = true;
+        if (m_PhysicsDirty)
+        {
+            ImGui::OpenPopup("Load and replace edits?");
+        }
+        else
+        {
+            load = true;
+        }
     }
     if (ImGui::BeginPopupModal("Load and replace edits?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
         ImGui::TextUnformatted("Replace the unsaved PA edits with this file?");
-        if (ImGui::Button("Load")) { load = true; ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("Load"))
+        {
+            load = true;
+            ImGui::CloseCurrentPopup();
+        }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        if (ImGui::Button("Cancel"))
+        {
+            ImGui::CloseCurrentPopup();
+        }
         ImGui::EndPopup();
     }
     if (load)
@@ -158,7 +227,12 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
             const auto& model = *m_Mesh->GetSkeletalMesh();
             std::vector<std::string> joints;
             for (uint32_t i = 0; i < model.m_NumNodes; ++i)
-                if (m_IsJoint[i]) joints.push_back(model.m_NodeNames[i]);
+            {
+                if (m_IsJoint[i])
+                {
+                    joints.push_back(model.m_NodeNames[i]);
+                }
+            }
             if (candidate.ValidateSkeleton(joints, m_PhysicsMessage))
             {
                 m_PhysicsAsset = std::move(candidate);
@@ -174,34 +248,73 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     {
         CancelInteraction();
         if (m_Mesh->SetPhysicsAsset(m_PhysicsAsset, m_PhysicsMessage))
+        {
             m_PhysicsMessage = "Assigned current PA to preview mesh. Simulation is not enabled.";
+        }
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Copies the current PA settings to this SkeletalMeshComponent. Reassign after further edits.");
-    if (!m_PhysicsMessage.empty()) ImGui::TextWrapped("%s", m_PhysicsMessage.c_str());
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Copies the current PA settings to this SkeletalMeshComponent. Reassign after further edits.");
+    }
+    if (!m_PhysicsMessage.empty())
+    {
+        ImGui::TextWrapped("%s", m_PhysicsMessage.c_str());
+    }
     ImGui::Separator();
-    if (ImGui::RadioButton("Bodies##PA", !m_EditConstraints)) { CancelInteraction(); m_EditConstraints = false; }
+    if (ImGui::RadioButton("Bodies##PA", !m_EditConstraints))
+    {
+        CancelInteraction();
+        m_EditConstraints = false;
+    }
     ImGui::SameLine();
     if (ImGui::RadioButton("Joints##PA", m_EditConstraints))
     {
-        CancelInteraction(); m_EditConstraints = true;
-        if (m_GizmoMode == 2) m_GizmoMode = 0;
+        CancelInteraction();
+        m_EditConstraints = true;
+        if (m_GizmoMode == 2)
+        {
+            m_GizmoMode = 0;
+        }
         m_ConstraintParent = FindConstraintParent();
     }
-    if (m_EditConstraints) { DrawConstraintPanel(); return; }
-    if (m_SelectedBone < 0) ImGui::TextWrapped("Select a bone in the hierarchy to add a body.");
+    if (m_EditConstraints)
+    {
+        DrawConstraintPanel();
+        return;
+    }
+    if (m_SelectedBone < 0)
+    {
+        ImGui::TextWrapped("Select a bone in the hierarchy to add a body.");
+    }
     ImGui::BeginDisabled(m_SelectedBone < 0 || m_SelectedBody >= 0);
-    if (ImGui::Button("+ Capsule")) CreatePhysicsBody(PhysicsShapeType::Capsule);
+    if (ImGui::Button("+ Capsule"))
+    {
+        CreatePhysicsBody(PhysicsShapeType::Capsule);
+    }
     ImGui::SameLine();
-    if (ImGui::Button("+ Box")) CreatePhysicsBody(PhysicsShapeType::Box);
+    if (ImGui::Button("+ Box"))
+    {
+        CreatePhysicsBody(PhysicsShapeType::Box);
+    }
     ImGui::SameLine();
-    if (ImGui::Button("+ Sphere")) CreatePhysicsBody(PhysicsShapeType::Sphere);
+    if (ImGui::Button("+ Sphere"))
+    {
+        CreatePhysicsBody(PhysicsShapeType::Sphere);
+    }
     ImGui::EndDisabled();
-    if (!EditingBody()) return;
+    if (!EditingBody())
+    {
+        return;
+    }
     auto& body = m_PhysicsAsset.bodies[m_SelectedBody];
     bool changed = false;
     ImGui::SetNextItemWidth(100);
     int shape = static_cast<int>(body.shape);
-    if (ImGui::Combo("Shape", &shape, "Capsule\0Box\0Sphere\0")) { body.shape = static_cast<PhysicsShapeType>(shape); changed = true; }
+    if (ImGui::Combo("Shape", &shape, "Capsule\0Box\0Sphere\0"))
+    {
+        body.shape = static_cast<PhysicsShapeType>(shape);
+        changed = true;
+    }
     ImGui::TextUnformatted("Bone offset (m)");
     ImGui::SetNextItemWidth(-1);
     changed |= ImGui::DragFloat3("##BodyOffset", &body.offset.x, .002f, -100, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
@@ -224,7 +337,11 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     }
     ImGui::SetNextItemWidth(110);
     changed |= ImGui::DragFloat("Mass (kg)", &body.mass, .1f, .001f, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-    if (ImGui::Button("Reset rotation")) { body.rotation = XMFLOAT4(0, 0, 0, 1); changed = true; }
+    if (ImGui::Button("Reset rotation"))
+    {
+        body.rotation = XMFLOAT4(0, 0, 0, 1);
+        changed = true;
+    }
     ImGui::SameLine();
     if (ImGui::Button("Delete body"))
     {
@@ -235,6 +352,13 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
         m_SelectedBody = -1;
         changed = true;
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Also removes joints connected to this body.");
-    if (changed) { m_PhysicsDirty = true; m_PhysicsMessage.clear(); }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Also removes joints connected to this body.");
+    }
+    if (changed)
+    {
+        m_PhysicsDirty = true;
+        m_PhysicsMessage.clear();
+    }
 }

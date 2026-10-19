@@ -7,20 +7,32 @@ class PreviewAnimInstance : public PARS::LocomotionAnimInstance
 {
 public:
     using LocomotionAnimInstance::LocomotionAnimInstance;
-    bool IsAutoCycleEnabled() const { return m_AutoCycle; }
-    void SetAutoCycleEnabled(bool enabled) { m_AutoCycle = enabled; m_Elapsed = 0.0f; }
+    bool IsAutoCycleEnabled() const
+    {
+        return m_AutoCycle;
+    }
+    void SetAutoCycleEnabled(bool enabled)
+    {
+        m_AutoCycle = enabled;
+        m_Elapsed = 0.0f;
+    }
     bool SelectAnimation(uint32_t index)
     {
         const bool playing = IsPlaying();
         if (!TransitionToAnimation(index))
+        {
             return false;
+        }
         SetLocomotionEnabled(false);
         m_AutoCycle = false;
         SetPlaying(playing);
         m_Elapsed = 0.0f;
         return true;
     }
-    float GetTimeUntilNextAnimation() const { return GetDisplayDuration() - m_Elapsed; }
+    float GetTimeUntilNextAnimation() const
+    {
+        return GetDisplayDuration() - m_Elapsed;
+    }
 
 protected:
     void NativeUpdateAnimation(float deltaTime) override
@@ -31,7 +43,9 @@ protected:
             return;
         }
         if (!m_AutoCycle || GetAnimationCount() == 0)
+        {
             return;
+        }
         m_Elapsed += deltaTime;
         if (m_Elapsed >= GetDisplayDuration())
         {

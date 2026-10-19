@@ -10,8 +10,12 @@ namespace
         const float* lhs = reinterpret_cast<const float*>(&a);
         const float* rhs = reinterpret_cast<const float*>(&b);
         for (int i = 0; i < 16; ++i)
+        {
             if (!std::isfinite(lhs[i]) || !std::isfinite(rhs[i]) || std::abs(lhs[i] - rhs[i]) > 1e-4f)
+            {
                 return false;
+            }
+        }
         return true;
     }
 
@@ -20,18 +24,26 @@ namespace
     bool CompatibleSkeletons(const Model& mesh, const Model& clip)
     {
         if (mesh.m_NumNodes != clip.m_NumNodes || mesh.m_NumJoints != clip.m_NumJoints)
+        {
             return false;
+        }
         for (uint32_t i = 0; i < mesh.m_NumNodes; ++i)
         {
             const GraphNode& a = mesh.m_SceneGraph[i];
             const GraphNode& b = clip.m_SceneGraph[i];
             if (a.matrixIdx != b.matrixIdx || a.hasChildren != b.hasChildren ||
                 a.hasSibling != b.hasSibling || a.skeletonRoot != b.skeletonRoot || !SameMatrix(a.xform, b.xform))
+            {
                 return false;
+            }
         }
         for (uint32_t i = 0; i < mesh.m_NumJoints; ++i)
+        {
             if (mesh.m_JointIndices[i] != clip.m_JointIndices[i] || !SameMatrix(mesh.m_JointIBMs[i], clip.m_JointIBMs[i]))
+            {
                 return false;
+            }
+        }
         return true;
     }
 }
@@ -54,18 +66,24 @@ namespace PARS
     {
         if (!m_Skeleton || !source || animationIndex >= source->m_NumAnimations ||
             !CompatibleSkeletons(*m_Skeleton, *source))
+        {
             return false;
+        }
         const float duration = source->m_Animations[animationIndex].duration;
         if (!std::isfinite(duration) || duration <= 0.0f)
+        {
             return false;
-        m_Clips.push_back({ name, std::move(source), animationIndex });
+        }
+        m_Clips.push_back({name, std::move(source), animationIndex});
         return true;
     }
 
     bool AnimInstance::PlayAnimation(uint32_t index, bool loop)
     {
         if (index >= m_Clips.size())
+        {
             return false;
+        }
         m_CurrentClip = index;
         m_Loop = loop;
         m_Playing = true;
@@ -83,11 +101,17 @@ namespace PARS
     bool AnimInstance::TransitionToAnimation(uint32_t index, float duration, bool loop)
     {
         if (index >= m_Clips.size() || !std::isfinite(duration))
+        {
             return false;
+        }
         if (index == m_CurrentClip && m_Playing)
+        {
             return true;
+        }
         if (duration <= 0.0f || m_Pose.empty())
+        {
             return PlayAnimation(index, loop);
+        }
         // Snapshot the displayed pose, including an interrupted blend. Starting
         // another transition therefore never snaps back to a previous clip.
         m_BlendSource = m_Pose;
@@ -110,7 +134,9 @@ namespace PARS
     float AnimInstance::GetAnimationDuration(uint32_t index) const
     {
         if (index >= m_Clips.size())
+        {
             return 0.0f;
+        }
         const auto& clip = m_Clips[index];
         return clip.source->m_Animations[clip.animationIndex].duration;
     }
@@ -124,7 +150,9 @@ namespace PARS
     void AnimInstance::UpdateAnimation(float deltaTime)
     {
         if (!std::isfinite(deltaTime) || deltaTime < 0.0f)
+        {
             return;
+        }
         if (m_Playing && !m_Clips.empty())
         {
             NativeUpdateAnimation(deltaTime);
@@ -135,10 +163,14 @@ namespace PARS
             m_Time += deltaTime;
             m_BlendElapsed += deltaTime;
             if (m_BlendElapsed >= m_BlendDuration)
+            {
                 m_BlendSource.clear();
+            }
             const float duration = GetAnimationDuration(m_CurrentClip);
             if (m_Loop)
+            {
                 m_Time = std::fmod(m_Time, duration);
+            }
             else if (m_Time >= duration)
             {
                 m_Time = duration;
@@ -151,7 +183,9 @@ namespace PARS
     void AnimInstance::EvaluatePose()
     {
         if (!m_Skeleton)
+        {
             return;
+        }
         m_Pose.resize(m_Skeleton->m_NumNodes);
         std::memcpy(m_Pose.data(), m_Skeleton->m_SceneGraph.get(), m_Pose.size() * sizeof(GraphNode));
         if (!m_Clips.empty())
@@ -161,6 +195,8 @@ namespace PARS
                 clip.source->m_KeyFrameData.get(), m_Pose.data(), static_cast<uint32_t>(m_Pose.size()), m_Time);
         }
         if (IsBlending())
+        {
             BlendAnimationPoses(m_BlendSource.data(), m_Pose.data(), static_cast<uint32_t>(m_Pose.size()), GetBlendAlpha());
+        }
     }
 }

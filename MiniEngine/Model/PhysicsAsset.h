@@ -6,7 +6,12 @@
 
 namespace PARS
 {
-    enum class PhysicsShapeType { Capsule, Box, Sphere };
+    enum class PhysicsShapeType
+    {
+        Capsule,
+        Box,
+        Sphere
+    };
 
     // One primitive body per bone for the initial editor. Distances are metres,
     // mass is kg. Offset/rotation are relative to the bone's RIGID world frame:
@@ -28,7 +33,12 @@ namespace PARS
 
     Math::Matrix4 PhysicsBoneFrame(const Math::Matrix4& boneWorld);
 
-    enum class PhysicsJointMotion { Locked, Limited, Free };
+    enum class PhysicsJointMotion
+    {
+        Locked,
+        Limited,
+        Free
+    };
 
     // Force-based angular PD drive. Torque limits are Nm per driven axis;
     // stiffness/damping use radians and radians/second. Legacy PAs stay passive.

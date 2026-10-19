@@ -13,21 +13,37 @@
 #include <memory>
 
 class Model;
-namespace PARS { class SkeletalMeshComponent; }
+namespace PARS
+{
+    class SkeletalMeshComponent;
+}
 
 // An editor preview scene. It shares immutable assets with the game, but owns
 // its pose, camera and render targets and has no physics/controller attached.
 class SkeletalMeshViewer
 {
 public:
-    ~SkeletalMeshViewer() { Cleanup(); }
+    ~SkeletalMeshViewer()
+    {
+        Cleanup();
+    }
     bool Initialize(const std::shared_ptr<const Model>* models, const char* const* names, uint32_t count);
     void Cleanup(); // Call after the GPU is idle, before renderer/ImGui shutdown.
     void Update(float deltaTime);
     void RenderUI(GraphicsContext& context);
-    void Open() { m_Open = true; m_FocusRequested = true; }
-    bool WantsInput() const { return m_Open && m_Focused; }
-    const PARS::PhysicsAsset& GetPhysicsAsset() const { return m_PhysicsAsset; }
+    void Open()
+    {
+        m_Open = true;
+        m_FocusRequested = true;
+    }
+    bool WantsInput() const
+    {
+        return m_Open && m_Focused;
+    }
+    const PARS::PhysicsAsset& GetPhysicsAsset() const
+    {
+        return m_PhysicsAsset;
+    }
     bool SetPhysicsAsset(const PARS::PhysicsAsset& asset, std::string& error);
 
 private:
@@ -54,8 +70,14 @@ private:
     void CreatePhysicsBody(PARS::PhysicsShapeType shape);
     void DrawPhysicsBodies();
     void SelectBody(int index);
-    bool EditingBody() const { return m_EditPhysics && !m_EditConstraints && m_SelectedBody >= 0; }
-    bool EditingConstraint() const { return m_EditPhysics && m_EditConstraints && m_SelectedConstraint >= 0; }
+    bool EditingBody() const
+    {
+        return m_EditPhysics && !m_EditConstraints && m_SelectedBody >= 0;
+    }
+    bool EditingConstraint() const
+    {
+        return m_EditPhysics && m_EditConstraints && m_SelectedConstraint >= 0;
+    }
     void DrawConstraintPanel();
     void DrawConstraints();
     static Math::Vector3 GetTwistDisplayReference(const PARS::PhysicsConstraint& joint);

@@ -43,12 +43,24 @@ public:
     PhysicsQueryCapsule* CreateQueryCapsule(const physx::PxVec3& centre,
         float radius, float halfHeight);
     void DestroyQueryCapsule(PhysicsQueryCapsule* capsule);
-    struct CapsuleMoveResult { bool grounded = false, ceiling = false, wall = false; };
+    struct CapsuleMoveResult
+    {
+        bool grounded = false, ceiling = false, wall = false;
+    };
     CapsuleMoveResult MoveQueryCapsule(PhysicsQueryCapsule& capsule, const physx::PxVec3& displacement);
-    uint32_t GetQueryCapsuleCount() const { return static_cast<uint32_t>(m_QueryCapsules.size()); }
+    uint32_t GetQueryCapsuleCount() const
+    {
+        return static_cast<uint32_t>(m_QueryCapsules.size());
+    }
     void GetCapsuleDebugLines(std::vector<physx::PxDebugLine>& lines) const;
-    void SetCapsuleDebugVisible(bool visible) { m_CapsuleDebugVisible = visible; }
-    bool IsCapsuleDebugVisible() const { return m_CapsuleDebugVisible; }
+    void SetCapsuleDebugVisible(bool visible)
+    {
+        m_CapsuleDebugVisible = visible;
+    }
+    bool IsCapsuleDebugVisible() const
+    {
+        return m_CapsuleDebugVisible;
+    }
     void SetPvdSceneQueries(bool enabled);
     uint32_t GetDynamicBodyCount() const;
     uint32_t GetConstraintCount() const;
@@ -60,11 +72,26 @@ public:
     bool ConnectPvd(bool reconnect = false);
     bool IsPvdConnected() const;
     static bool SupportsPvd();
-    bool IsInitialized() const { return m_Scene != nullptr; }
-    uint64_t GetStepCount() const { return m_StepCount; }
-    uint32_t GetLastSubsteps() const { return m_LastSubsteps; }
-    double GetDroppedTime() const { return m_DroppedTime; }
-    uint32_t GetErrorCount() const { return m_ErrorCallback.errors.load(); }
+    bool IsInitialized() const
+    {
+        return m_Scene != nullptr;
+    }
+    uint64_t GetStepCount() const
+    {
+        return m_StepCount;
+    }
+    uint32_t GetLastSubsteps() const
+    {
+        return m_LastSubsteps;
+    }
+    double GetDroppedTime() const
+    {
+        return m_DroppedTime;
+    }
+    uint32_t GetErrorCount() const
+    {
+        return m_ErrorCallback.errors.load();
+    }
 
 private:
     class ErrorCallback : public physx::PxDefaultErrorCallback

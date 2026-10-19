@@ -22,7 +22,9 @@ namespace PARS
         {
             static_assert(std::is_base_of<Actor, T>::value, "T must be an Actor");
             if (m_Clearing)
+            {
                 return nullptr;
+            }
             auto actor = std::make_unique<T>(std::forward<Args>(args)...);
             T* result = actor.get();
             RegisterActor(std::move(actor));
@@ -31,7 +33,8 @@ namespace PARS
 
         // Handles can outlive an Actor. Resolving a destroyed actor returns null.
         Actor* FindActor(ActorHandle handle) const;
-        template<class T> T* FindActor(ActorHandle handle) const
+        template<class T>
+        T* FindActor(ActorHandle handle) const
         {
             return dynamic_cast<T*>(FindActor(handle));
         }
@@ -41,14 +44,29 @@ namespace PARS
 
         void BeginPlay();
         void Tick(float deltaTime);
-        bool HasBegunPlay() const { return m_Playing; }
+        bool HasBegunPlay() const
+        {
+            return m_Playing;
+        }
         bool InitializePhysics(bool connectPvd = true);
         PhysicsWorld* GetPhysicsWorld() const;
         void SetPhysicsPaused(bool paused);
-        bool IsPhysicsPaused() const { return m_PhysicsPaused; }
+        bool IsPhysicsPaused() const
+        {
+            return m_PhysicsPaused;
+        }
         void SetPhysicsTimeScale(float scale);
-        float GetPhysicsTimeScale() const { return m_PhysicsTimeScale; }
-        void RequestPhysicsStep() { if (m_PhysicsPaused) m_StepRequested = true; }
+        float GetPhysicsTimeScale() const
+        {
+            return m_PhysicsTimeScale;
+        }
+        void RequestPhysicsStep()
+        {
+            if (m_PhysicsPaused)
+            {
+                m_StepRequested = true;
+            }
+        }
 
         // New actors join on the next pass; pending destruction is skipped.
         void ForEachActor(const std::function<void(Actor&)>& visitor);

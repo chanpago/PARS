@@ -2,7 +2,11 @@
 #include "PhysicsAsset.h"
 
 class PhysicsWorld;
-namespace physx { class PxRigidDynamic; class PxD6Joint; }
+namespace physx
+{
+    class PxRigidDynamic;
+    class PxD6Joint;
+}
 
 namespace PARS
 {
@@ -19,29 +23,53 @@ namespace PARS
             const std::vector<Math::Matrix4>& boneWorld, Math::Vector3 velocity, std::string& error, bool simulate = true);
         void Destroy();
         void Swap(Ragdoll& other) noexcept;
-        bool IsActive() const { return !m_Bodies.empty(); }
-        bool IsSimulating() const { return m_Simulating; }
+        bool IsActive() const
+        {
+            return !m_Bodies.empty();
+        }
+        bool IsSimulating() const
+        {
+            return m_Simulating;
+        }
         bool SetSimulating(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity = false);
         // Drive switches preserve dynamic poses/velocities, unlike entry from animation.
         void SetDrivesEnabled(bool enabled);
-        bool AreDrivesEnabled() const { return m_DrivesEnabled; }
+        bool AreDrivesEnabled() const
+        {
+            return m_DrivesEnabled;
+        }
         bool ApplyDriveSettings(const PhysicsAsset& asset, std::string& error);
         bool UpdateDriveTargets(const std::vector<Math::Matrix4>& boneWorld, float deltaTime, std::string& error);
         // A world-space force/torque drive supports the DYNAMIC pelvis.
         // Independent of the anatomical angular drives; updates arrive before simulate().
         bool SetRootSupported(bool supported, std::string& error);
-        bool IsRootSupported() const { return m_SupportBody >= 0; }
+        bool IsRootSupported() const
+        {
+            return m_SupportBody >= 0;
+        }
         float GetRootPositionError() const;
         float GetRootRotationError() const;
         size_t GetDrivenJointCount() const;
         float GetMaxDriveError(size_t* worstJoint = nullptr) const;
-        float GetMaxTargetClampAngle() const { return m_MaxTargetClampAngle; }
+        float GetMaxTargetClampAngle() const
+        {
+            return m_MaxTargetClampAngle;
+        }
         // Fixed steps use targets; teleport also refreshes paused/editor poses immediately.
         bool UpdateKinematicPose(const std::vector<Math::Matrix4>& boneWorld, bool teleport, std::string& error);
         size_t GetKinematicBodyCount() const;
-        size_t GetBodyCount() const { return m_Bodies.size(); }
-        size_t GetJointCount() const { return m_Joints.size(); }
-        const std::vector<int>& GetBoneNodes() const { return m_BoneNodes; }
+        size_t GetBodyCount() const
+        {
+            return m_Bodies.size();
+        }
+        size_t GetJointCount() const
+        {
+            return m_Joints.size();
+        }
+        const std::vector<int>& GetBoneNodes() const
+        {
+            return m_BoneNodes;
+        }
         Math::Matrix4 GetBoneWorld(size_t body) const;
         Math::Vector3 GetPosition() const;
         void AddVelocity(Math::Vector3 velocity);
@@ -52,6 +80,7 @@ namespace PARS
         float GetMaxAngularError(size_t* worstJoint = nullptr) const;
         float GetLowestPoint() const;
         bool IsFinite() const;
+
     private:
         PhysicsAsset m_Asset;
         std::vector<int> m_BoneNodes;

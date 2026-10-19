@@ -5,8 +5,14 @@
 #include "PipelineState.h"
 #include <string>
 
-namespace Math { class Camera; }
-namespace PARS { class World; }
+namespace Math
+{
+    class Camera;
+}
+namespace PARS
+{
+    class World;
+}
 class GraphicsContext;
 
 class PhysicsDemo

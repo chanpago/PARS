@@ -9,9 +9,15 @@ namespace PARS
 
     bool Character::SetPhysicsMode(PhysicsAnimationMode mode, std::string& error)
     {
-        if (mode == PhysicsAnimationMode::Animation) return StopRagdoll(error);
+        if (mode == PhysicsAnimationMode::Animation)
+        {
+            return StopRagdoll(error);
+        }
         const bool wasSimulating = IsRagdoll();
-        if (!m_Mesh->SetPhysicsMode(mode, m_Movement->GetVelocity(), error)) return false;
+        if (!m_Mesh->SetPhysicsMode(mode, m_Movement->GetVelocity(), error))
+        {
+            return false;
+        }
         if (!wasSimulating)
         {
             m_MovementWasEnabled = m_Movement->IsTickEnabled();
@@ -23,17 +29,29 @@ namespace PARS
 
     bool Character::CanControlMovement() const
     {
-        if (!IsRagdoll()) return m_Movement->IsTickEnabled() && m_Capsule->IsPhysicsEnabled();
+        if (!IsRagdoll())
+        {
+            return m_Movement->IsTickEnabled() && m_Capsule->IsPhysicsEnabled();
+        }
         return m_Mesh->IsActiveRagdoll() && m_Mesh->GetRagdoll().IsRootSupported() &&
             m_MovementWasEnabled && m_CapsuleWasEnabled;
     }
 
     void Character::SyncRagdollMovement()
     {
-        if (!IsRagdoll()) return;
+        if (!IsRagdoll())
+        {
+            return;
+        }
         const bool enabled = CanControlMovement();
-        if (!enabled) m_Movement->StopMovementImmediately();
-        if (m_Capsule->IsPhysicsEnabled() != enabled) m_Capsule->SetPhysicsEnabled(enabled);
+        if (!enabled)
+        {
+            m_Movement->StopMovementImmediately();
+        }
+        if (m_Capsule->IsPhysicsEnabled() != enabled)
+        {
+            m_Capsule->SetPhysicsEnabled(enabled);
+        }
         m_Movement->SetTickEnabled(enabled && m_Capsule->HasPhysicsCollision());
     }
 
@@ -54,17 +72,26 @@ namespace PARS
 
     bool Character::StopRagdoll(std::string& error)
     {
-        if (!IsRagdoll()) { error.clear(); return true; }
+        if (!IsRagdoll())
+        {
+            error.clear();
+            return true;
+        }
         // Return to animation at the latest movement target (no get-up blend).
         if (!m_Capsule->SetPhysicsEnabled(m_CapsuleWasEnabled))
-        { error = "Could not restore the character capsule."; return false; }
+        {
+            error = "Could not restore the character capsule.";
+            return false;
+        }
         m_Mesh->StopRagdoll();
         m_Movement->StopMovementImmediately();
         m_Movement->SetTickEnabled(m_MovementWasEnabled);
-        error.clear(); return true;
+        error.clear();
+        return true;
     }
 
-    Character::Character(const std::string& name) : Pawn(name)
+    Character::Character(const std::string& name)
+        : Pawn(name)
     {
         m_Capsule = &CreateDefaultSubobject<CapsuleComponent>("CapsuleComponent");
         SetRootComponent(*m_Capsule);

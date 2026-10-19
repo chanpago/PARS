@@ -16,14 +16,23 @@ namespace PARS
     struct ActorHandle
     {
         uint64_t id = 0;
-        bool operator==(ActorHandle other) const { return id == other.id; }
-        bool operator!=(ActorHandle other) const { return !(*this == other); }
+        bool operator==(ActorHandle other) const
+        {
+            return id == other.id;
+        }
+        bool operator!=(ActorHandle other) const
+        {
+            return !(*this == other);
+        }
     };
 
     class Actor
     {
     public:
-        explicit Actor(std::string name = "Actor") : m_Name(std::move(name)) {}
+        explicit Actor(std::string name = "Actor")
+            : m_Name(std::move(name))
+        {
+        }
         virtual ~Actor();
         Actor(const Actor&) = delete;
         Actor& operator=(const Actor&) = delete;
@@ -34,24 +43,48 @@ namespace PARS
         {
             static_assert(std::is_base_of<ActorComponent, T>::value, "T must be a component");
             if (m_BegunPlay || m_EndingPlay || m_PendingDestroy)
+            {
                 throw std::logic_error("Create default subobjects before BeginPlay");
+            }
             for (const auto& component : m_Components)
+            {
                 if (component->GetName() == name)
+                {
                     throw std::invalid_argument("Duplicate component name");
+                }
+            }
             auto component = std::make_unique<T>(*this, name, std::forward<Args>(args)...);
             T& result = *component;
             m_Components.push_back(std::move(component));
             return result;
         }
 
-        const std::string& GetName() const { return m_Name; }
-        World* GetWorld() const { return m_World; }
-        ActorHandle GetHandle() const { return m_Handle; }
+        const std::string& GetName() const
+        {
+            return m_Name;
+        }
+        World* GetWorld() const
+        {
+            return m_World;
+        }
+        ActorHandle GetHandle() const
+        {
+            return m_Handle;
+        }
         bool Destroy();
-        bool IsPendingDestroy() const { return m_PendingDestroy; }
-        const std::vector<std::unique_ptr<ActorComponent>>& GetComponents() const { return m_Components; }
+        bool IsPendingDestroy() const
+        {
+            return m_PendingDestroy;
+        }
+        const std::vector<std::unique_ptr<ActorComponent>>& GetComponents() const
+        {
+            return m_Components;
+        }
         bool OwnsComponent(const ActorComponent& component) const;
-        SceneComponent* GetRootComponent() const { return m_RootComponent; }
+        SceneComponent* GetRootComponent() const
+        {
+            return m_RootComponent;
+        }
         bool SetRootComponent(SceneComponent& component);
 
         Math::AffineTransform GetActorTransform() const;
@@ -64,10 +97,23 @@ namespace PARS
         virtual void Tick(float deltaTime);
         virtual void PreparePhysics(float deltaTime);
         virtual void FixedTick(float deltaTime);
-        enum class TickGroup { PrePhysics, PostPhysics };
-        TickGroup GetTickGroup() const { return m_TickGroup; }
-        void SetTickGroup(TickGroup group) { m_TickGroup = group; }
-        bool HasBegunPlay() const { return m_BegunPlay; }
+        enum class TickGroup
+        {
+            PrePhysics,
+            PostPhysics
+        };
+        TickGroup GetTickGroup() const
+        {
+            return m_TickGroup;
+        }
+        void SetTickGroup(TickGroup group)
+        {
+            m_TickGroup = group;
+        }
+        bool HasBegunPlay() const
+        {
+            return m_BegunPlay;
+        }
 
     private:
         friend class World;

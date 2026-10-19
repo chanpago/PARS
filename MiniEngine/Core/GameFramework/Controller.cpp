@@ -13,9 +13,9 @@ namespace PARS
     {
         if (!GetWorld() || pawn.GetWorld() != GetWorld() || pawn.IsPendingDestroy() || IsPendingDestroy())
         {
-			return false;
+            return false;
         }
-           
+
         if (GetPawn() == &pawn)
         {
             return true;
@@ -47,9 +47,9 @@ namespace PARS
         m_Pawn = {};
     }
 
-    void Controller::EndPlay() 
-    { 
-        UnPossess(); 
-        Actor::EndPlay(); 
+    void Controller::EndPlay()
+    {
+        UnPossess();
+        Actor::EndPlay();
     }
 }

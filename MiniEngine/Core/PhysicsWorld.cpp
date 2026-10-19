@@ -11,7 +11,8 @@ using namespace physx;
 
 namespace
 {
-    template<class T> void Release(T*& object)
+    template<class T>
+    void Release(T*& object)
     {
         if (object)
         {
@@ -27,7 +28,9 @@ namespace
         const PxFilterFlags flags = PxDefaultSimulationFilterShader(attributes0, data0,
             attributes1, data1, pairFlags, constantBlock, constantBlockSize);
         if (!PxFilterObjectIsTrigger(attributes0) && !PxFilterObjectIsTrigger(attributes1))
+        {
             pairFlags |= PxPairFlag::eNOTIFY_CONTACT_POINTS;
+        }
         return flags;
     }
 }
@@ -36,11 +39,16 @@ void PhysicsWorld::ErrorCallback::reportError(PxErrorCode::Enum code, const char
     const char* file, int line)
 {
     if (code != PxErrorCode::eDEBUG_INFO && code != PxErrorCode::eDEBUG_WARNING)
+    {
         ++errors;
+    }
     PxDefaultErrorCallback::reportError(code, message, file, line);
 }
 
-PhysicsWorld::~PhysicsWorld() { Shutdown(); }
+PhysicsWorld::~PhysicsWorld()
+{
+    Shutdown();
+}
 
 bool PhysicsWorld::SupportsPvd()
 {
@@ -55,25 +63,33 @@ bool PhysicsWorld::SupportsPvd()
 bool PhysicsWorld::Initialize(bool connectPvd)
 {
     if (IsInitialized())
+    {
         return true;
+    }
 
     m_ErrorCallback.errors = 0;
     m_Foundation = PxCreateFoundation(PX_PHYSICS_VERSION, m_Allocator, m_ErrorCallback);
     if (!m_Foundation)
+    {
         return false;
+    }
 
     if (SupportsPvd())
     {
         m_Pvd = PxCreatePvd(*m_Foundation);
         m_Transport = PxDefaultPvdSocketTransportCreate("127.0.0.1", 5425, 100);
         if (connectPvd)
+        {
             ConnectPvd(); // A missing debugger must never prevent simulation.
+        }
     }
 
     m_Physics = PxCreatePhysics(PX_PHYSICS_VERSION, *m_Foundation,
         PxTolerancesScale(), true, m_Pvd);
     if (m_Physics)
+    {
         m_ExtensionsInitialized = PxInitExtensions(*m_Physics, m_Pvd);
+    }
     if (!m_Physics || !m_ExtensionsInitialized)
     {
         Shutdown();
@@ -145,12 +161,18 @@ void PhysicsWorld::Shutdown()
 bool PhysicsWorld::ConnectPvd(bool reconnect)
 {
     if (!m_Pvd || !m_Transport)
+    {
         return false;
+    }
     if (!reconnect && IsPvdConnected())
+    {
         return true;
+    }
     m_Pvd->disconnect();
     if (!m_Pvd->connect(*m_Transport, PxPvdInstrumentationFlag::eALL))
+    {
         return false;
+    }
     // Deliver initial scene data even when the demo is waiting for Start drop.
     m_Transport->lock().flush();
     m_Transport->unlock();
@@ -178,12 +200,12 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
     {
         return;
     }
-     
+
     // 콜백함수
-	// 이 부분에서 물리 시뮬레이션 전에 전달 받은 콜백을 호출한다. 콜백은 물리 시뮬레이션 전에 Actor의 pose를 읽어서, 물리 시뮬레이션에 반영할 목표 자세를 갱신하는데 사용된다.
+    // 이 부분에서 물리 시뮬레이션 전에 전달 받은 콜백을 호출한다. 콜백은 물리 시뮬레이션 전에 Actor의 pose를 읽어서, 물리 시뮬레이션에 반영할 목표 자세를 갱신하는데 사용된다.
     // 콜백을 사용한 이유는 다음과같다.
     // world만 actor를 소유하고 불필요한 참조를 만들지 않기 위해서다. physicsworld는 그냥 단순하게 물리만 계산하고 actor의 소유는 world가 담당하게하기 위해서다.
-    // World -> 어떤 액터를 어떻게 갱신할지 결정해서 콜백으로 전달 
+    // World -> 어떤 액터를 어떻게 갱신할지 결정해서 콜백으로 전달
     // PhysicWorld -> 물리 스텝 직전에 콜백을 실행하고 PhysX 계산진행
     // 여기서 줄이는건 PhysicWorld가 World나 Actor의 내부 구조를 알아야 하는 의존성을 줄이기 위해서다. 콜백을 전달해도 액터의 소유권이나 관리책임은 그대로 World가 담당한다.
     if (beforeStep)
@@ -201,15 +223,14 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
         }
     }
 
-	// 이 부분에서 PhsyX를 생성할때 할당 처리한 워커스레드를 이용해서 물리 시뮬레이션을 진행한다. FixedDeltaTime은 1/60초로 고정되어 있다.
+    // 이 부분에서 PhsyX를 생성할때 할당 처리한 워커스레드를 이용해서 물리 시뮬레이션을 진행한다. FixedDeltaTime은 1/60초로 고정되어 있다.
     m_Scene->simulate(static_cast<float>(FixedDeltaTime));
 
-	// PhysX는 시뮬레이션이 끝나면 fetchResults()를 호출해야 한다. fetchResults()가 끝나야 Actor의 pose를 읽을 수 있다. true파라미터는 simulate의 결과를 다 받고 진행하겠다는 뜻.
-    m_Scene->fetchResults(true); 
+    // PhysX는 시뮬레이션이 끝나면 fetchResults()를 호출해야 한다. fetchResults()가 끝나야 Actor의 pose를 읽을 수 있다. true파라미터는 simulate의 결과를 다 받고 진행하겠다는 뜻.
+    m_Scene->fetchResults(true);
     ++m_StepCount;
     m_LastSubsteps = 1;
 }
-
 
 /*
 이번 프레임에 지난 시간을 받아서 물리 시뮬레이션을 몇 번 실행할지 결정한다
@@ -219,8 +240,8 @@ uint32_t PhysicsWorld::Update(double elapsedSeconds, const BeforeStep& beforeSte
 {
     m_LastSubsteps = 0;
     if (!m_Scene || !std::isfinite(elapsedSeconds) || elapsedSeconds <= 0.0)
-    {   
-		return 0;
+    {
+        return 0;
     }
 
     // Keep at most eight steps from this frame. Discard long debugger/window stalls
@@ -232,12 +253,12 @@ uint32_t PhysicsWorld::Update(double elapsedSeconds, const BeforeStep& beforeSte
         elapsedSeconds = maxElapsed;
     }
 
-	// 이 프로젝트에서는 물리를 고정 시간 1/60으로 계산하므로 지난 시간을 누적해서 1/60보다 크면 Step()을 호출한다. Step()은 PhysX의 simulate()과 fetchResults()를 호출한다.
+    // 이 프로젝트에서는 물리를 고정 시간 1/60으로 계산하므로 지난 시간을 누적해서 1/60보다 크면 Step()을 호출한다. Step()은 PhysX의 simulate()과 fetchResults()를 호출한다.
     m_Accumulator += elapsedSeconds;
 
     uint32_t steps = 0;
 
-	// 1/60초가 쌓일 때마다 물리를 한번 진행한다. MaxSubsteps를 넘어가면 더 이상 진행하지 않고, 남은 시간은 다음 프레임으로 넘긴다.
+    // 1/60초가 쌓일 때마다 물리를 한번 진행한다. MaxSubsteps를 넘어가면 더 이상 진행하지 않고, 남은 시간은 다음 프레임으로 넘긴다.
     while (m_Accumulator + 1e-10 >= FixedDeltaTime && steps < MaxSubsteps)
     {
         Step(beforeStep);
@@ -247,7 +268,7 @@ uint32_t PhysicsWorld::Update(double elapsedSeconds, const BeforeStep& beforeSte
 
     if (m_Accumulator < 0.0)
     {
-		m_Accumulator = 0.0;
+        m_Accumulator = 0.0;
     }
 
     m_LastSubsteps = steps;
@@ -258,7 +279,9 @@ PxRigidStatic* PhysicsWorld::CreateStaticBox(const PxTransform& pose,
     const PxVec3& halfExtents, const char* name)
 {
     if (!m_Scene)
+    {
         return nullptr;
+    }
     PxRigidStatic* actor = PxCreateStatic(*m_Physics, pose, PxBoxGeometry(halfExtents), *m_Material);
     if (actor)
     {
@@ -272,7 +295,9 @@ PxRigidDynamic* PhysicsWorld::CreateDynamicBox(const PxTransform& pose,
     const PxVec3& halfExtents, float density, const char* name)
 {
     if (!m_Scene)
+    {
         return nullptr;
+    }
     PxRigidDynamic* actor = PxCreateDynamic(*m_Physics, pose,
         PxBoxGeometry(halfExtents), *m_Material, density);
     if (actor)
@@ -288,9 +313,13 @@ PhysicsQueryCapsule* PhysicsWorld::CreateQueryCapsule(const PxVec3& centre,
 {
     if (!m_Scene || !std::isfinite(radius) || !std::isfinite(halfHeight) ||
         radius <= 0 || halfHeight <= radius || !centre.isFinite())
+    {
         return nullptr;
+    }
     auto capsule = std::make_unique<PhysicsQueryCapsule>();
-    capsule->centre = centre; capsule->radius = radius; capsule->halfHeight = halfHeight;
+    capsule->centre = centre;
+    capsule->radius = radius;
+    capsule->halfHeight = halfHeight;
     auto* result = capsule.get();
     m_QueryCapsules.push_back(std::move(capsule));
     return result;
@@ -299,28 +328,40 @@ PhysicsQueryCapsule* PhysicsWorld::CreateQueryCapsule(const PxVec3& centre,
 void PhysicsWorld::DestroyQueryCapsule(PhysicsQueryCapsule* capsule)
 {
     m_QueryCapsules.erase(std::remove_if(m_QueryCapsules.begin(), m_QueryCapsules.end(),
-        [capsule](const auto& entry) { return entry.get() == capsule; }), m_QueryCapsules.end());
+                              [capsule](const auto& entry) {
+                                  return entry.get() == capsule;
+                              }),
+        m_QueryCapsules.end());
 }
 
 namespace
 {
     constexpr float CapsuleSkin = .02f, SweepEpsilon = .0002f, WalkableNormal = .70710678f;
     PxCapsuleGeometry CapsuleGeometry(const PhysicsQueryCapsule& capsule, float skin = 0)
-    { return PxCapsuleGeometry(capsule.radius + skin, capsule.halfHeight - capsule.radius); }
+    {
+        return PxCapsuleGeometry(capsule.radius + skin, capsule.halfHeight - capsule.radius);
+    }
     PxTransform CapsulePose(const PxVec3& centre)
-    { return PxTransform(centre, PxQuat(PxHalfPi, PxVec3(0, 0, 1))); } // PhysX local X -> PARS +Y.
+    {
+        return PxTransform(centre, PxQuat(PxHalfPi, PxVec3(0, 0, 1)));
+    } // PhysX local X -> PARS +Y.
 
     class CapsuleQueryFilter : public PxQueryFilterCallback
     {
     public:
-        explicit CapsuleQueryFilter(const void* owner) : ignoredOwner(owner) {}
+        explicit CapsuleQueryFilter(const void* owner)
+            : ignoredOwner(owner)
+        {
+        }
         const void* ignoredOwner;
         PxVec3 direction{0};
         PxQueryHitType::Enum preFilter(const PxFilterData&, const PxShape* shape,
             const PxRigidActor* actor, PxHitFlags&) override
         {
             return shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ||
-                (ignoredOwner && actor->userData == ignoredOwner) ? PxQueryHitType::eNONE : PxQueryHitType::eBLOCK;
+                    (ignoredOwner && actor->userData == ignoredOwner)
+                ? PxQueryHitType::eNONE
+                : PxQueryHitType::eBLOCK;
         }
         PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit& hit,
             const PxShape*, const PxRigidActor*) override
@@ -335,25 +376,38 @@ namespace
     class CapsulePenetration : public PxOverlapCallback
     {
     public:
-        CapsulePenetration(const PhysicsQueryCapsule& capsule) : PxOverlapCallback(hits, 32),
-            geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre)) {}
+        CapsulePenetration(const PhysicsQueryCapsule& capsule)
+            : PxOverlapCallback(hits, 32),
+              geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre))
+        {
+        }
         void Consider(const PxGeometry& other, const PxTransform& otherPose)
         {
-            PxVec3 normal; float depth;
+            PxVec3 normal;
+            float depth;
             if (PxGeometryQuery::computePenetration(normal, depth, geometry, pose, other, otherPose) && depth > deepest)
-            { deepest = depth; direction = normal; }
+            {
+                deepest = depth;
+                direction = normal;
+            }
         }
         PxAgain processTouches(const PxOverlapHit* buffer, PxU32 count) override
         {
             for (PxU32 i = 0; i < count; ++i)
+            {
                 Consider(buffer[i].shape->getGeometry(), PxShapeExt::getGlobalPose(*buffer[i].shape, *buffer[i].actor));
+            }
             return true;
         }
-        void finalizeQuery() override { processTouches(touches, nbTouches); }
+        void finalizeQuery() override
+        {
+            processTouches(touches, nbTouches);
+        }
         PxCapsuleGeometry geometry;
         PxTransform pose;
         float deepest = 0;
         PxVec3 direction{0};
+
     private:
         PxOverlapHit hits[32];
     };
@@ -362,7 +416,10 @@ namespace
 PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsule& capsule, const PxVec3& displacement)
 {
     CapsuleMoveResult result;
-    if (!m_Scene || !capsule.centre.isFinite() || !displacement.isFinite()) return result;
+    if (!m_Scene || !capsule.centre.isFinite() || !displacement.isFinite())
+    {
+        return result;
+    }
     CapsuleQueryFilter filter(capsule.owner);
     // Recover spawn/teleport penetration before attempting any sweep.
     for (int iteration = 0; iteration < 8; ++iteration)
@@ -371,14 +428,25 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         m_Scene->overlap(overlaps.geometry, overlaps.pose, overlaps,
             PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::eNO_BLOCK), &filter);
         for (const auto& other : m_QueryCapsules)
-            if (other.get() != &capsule) overlaps.Consider(CapsuleGeometry(*other), CapsulePose(other->centre));
-        if (overlaps.deepest <= 0) break;
+        {
+            if (other.get() != &capsule)
+            {
+                overlaps.Consider(CapsuleGeometry(*other), CapsulePose(other->centre));
+            }
+        }
+        if (overlaps.deepest <= 0)
+        {
+            break;
+        }
         capsule.centre += overlaps.direction * PxMin(overlaps.deepest + SweepEpsilon, 2.0f);
     }
 
     const auto sweep = [&](const PxVec3& origin, const PxVec3& delta, PxGeomSweepHit& hit) {
         const float distance = delta.magnitude();
-        if (distance < 1e-6f) return false;
+        if (distance < 1e-6f)
+        {
+            return false;
+        }
         filter.direction = delta / distance;
         PxSweepBuffer buffer;
         const auto geometry = CapsuleGeometry(capsule, CapsuleSkin);
@@ -387,16 +455,25 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         m_Scene->sweep(geometry, pose, filter.direction, distance, buffer, flags,
             PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::ePOSTFILTER), &filter);
         bool found = buffer.hasBlock;
-        if (found) hit = buffer.block;
+        if (found)
+        {
+            hit = buffer.block;
+        }
         // Other characters also remain query geometry, without registering proxies.
         for (const auto& other : m_QueryCapsules)
         {
-            if (other.get() == &capsule) continue;
+            if (other.get() == &capsule)
+            {
+                continue;
+            }
             PxGeomSweepHit candidate;
             if (PxGeometryQuery::sweep(filter.direction, distance, geometry, pose,
-                CapsuleGeometry(*other), CapsulePose(other->centre), candidate, flags) &&
+                    CapsuleGeometry(*other), CapsulePose(other->centre), candidate, flags) &&
                 candidate.normal.dot(filter.direction) < -1e-5f && (!found || candidate.distance < hit.distance))
-            { hit = candidate; found = true; }
+            {
+                hit = candidate;
+                found = true;
+            }
         }
         return found;
     };
@@ -433,26 +510,41 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         for (int iteration = 0; iteration < 8 && remaining.magnitudeSquared() > 1e-10f; ++iteration)
         {
             PxGeomSweepHit hit;
-            if (!sweep(capsule.centre, remaining, hit)) { capsule.centre += remaining; break; }
+            if (!sweep(capsule.centre, remaining, hit))
+            {
+                capsule.centre += remaining;
+                break;
+            }
             const auto moved = travel(remaining, hit);
-            capsule.centre += moved; remaining -= moved;
+            capsule.centre += moved;
+            remaining -= moved;
             PxVec3 normal = hit.normal;
             if (normal.y >= WalkableNormal)
             {
                 result.grounded = true;
-                if (vertical) break; // Ground support absorbs gravity, without sliding downhill.
+                if (vertical)
+                {
+                    break; // Ground support absorbs gravity, without sliding downhill.
+                }
             }
             else if (normal.y < -.01f)
             {
                 result.ceiling = true;
-                if (vertical) break;
+                if (vertical)
+                {
+                    break;
+                }
             }
             else
             {
                 result.wall = true;
                 // Steep slopes behave as walls instead of turning forward input
                 // into upward velocity. Walkable slopes retain their true normal.
-                if (!vertical) { normal.y = 0; normal.normalize(); }
+                if (!vertical)
+                {
+                    normal.y = 0;
+                    normal.normalize();
+                }
             }
             remaining -= normal * PxMin(0.0f, remaining.dot(normal));
         }
@@ -477,13 +569,18 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
 void PhysicsWorld::GetCapsuleDebugLines(std::vector<PxDebugLine>& lines) const
 {
     lines.clear();
-    if (!m_CapsuleDebugVisible) return;
+    if (!m_CapsuleDebugVisible)
+    {
+        return;
+    }
     constexpr PxU32 color = 0xffe8b84a;
     for (const auto& capsule : m_QueryCapsules)
     {
         const PxVec3 centre = capsule->centre;
         const float radius = capsule->radius, halfCylinder = capsule->halfHeight - radius;
-        const auto line = [&](const PxVec3& a, const PxVec3& b) { lines.emplace_back(centre + a, centre + b, color); };
+        const auto line = [&](const PxVec3& a, const PxVec3& b) {
+            lines.emplace_back(centre + a, centre + b, color);
+        };
         for (int end : {-1, 1})
         {
             const float y = end * halfCylinder;
@@ -493,6 +590,7 @@ void PhysicsWorld::GetCapsuleDebugLines(std::vector<PxDebugLine>& lines) const
                 line(PxVec3(radius * std::cos(a), y, radius * std::sin(a)), PxVec3(radius * std::cos(b), y, radius * std::sin(b)));
             }
             for (int plane = 0; plane < 2; ++plane)
+            {
                 for (int segment = 0; segment < 12; ++segment)
                 {
                     const float a = segment * PxPi / 12, b = (segment + 1) * PxPi / 12;
@@ -500,6 +598,7 @@ void PhysicsWorld::GetCapsuleDebugLines(std::vector<PxDebugLine>& lines) const
                     const PxVec3 q(radius * std::cos(b), y + end * radius * std::sin(b), 0);
                     line(plane ? PxVec3(0, p.y, p.x) : p, plane ? PxVec3(0, q.y, q.x) : q);
                 }
+            }
         }
         for (int side = 0; side < 4; ++side)
         {
@@ -512,16 +611,30 @@ void PhysicsWorld::GetCapsuleDebugLines(std::vector<PxDebugLine>& lines) const
 void PhysicsWorld::SetPvdSceneQueries(bool enabled)
 {
     if (m_Scene)
+    {
         if (auto* client = m_Scene->getScenePvdClient())
+        {
             client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, enabled);
+        }
+    }
 }
 
 PxRigidDynamic* PhysicsWorld::CreateDynamicBody(const PxTransform& pose, const PxGeometry& geometry, float mass, const char* name)
 {
-    if (!m_Scene || !pose.isValid() || !std::isfinite(mass) || mass <= 0) return nullptr;
+    if (!m_Scene || !pose.isValid() || !std::isfinite(mass) || mass <= 0)
+    {
+        return nullptr;
+    }
     auto* body = PxCreateDynamic(*m_Physics, pose, geometry, *m_Material, 1.0f);
-    if (!body) return nullptr;
-    if (!PxRigidBodyExt::setMassAndUpdateInertia(*body, mass)) { body->release(); return nullptr; }
+    if (!body)
+    {
+        return nullptr;
+    }
+    if (!PxRigidBodyExt::setMassAndUpdateInertia(*body, mass))
+    {
+        body->release();
+        return nullptr;
+    }
     body->setName(name);
     body->setSolverIterationCounts(32, 8);
     body->setAngularDamping(.3f);
@@ -535,7 +648,10 @@ PxRigidDynamic* PhysicsWorld::CreateDynamicBody(const PxTransform& pose, const P
 PxD6Joint* PhysicsWorld::CreateJoint(PxRigidActor& parent, const PxTransform& parentFrame,
     PxRigidActor& child, const PxTransform& childFrame)
 {
-    if (!m_Physics || parent.getScene() != m_Scene || child.getScene() != m_Scene) return nullptr;
+    if (!m_Physics || parent.getScene() != m_Scene || child.getScene() != m_Scene)
+    {
+        return nullptr;
+    }
     return PxD6JointCreate(*m_Physics, &parent, parentFrame, &child, childFrame);
 }
 

@@ -10,19 +10,28 @@ namespace PARS
         Matrix4 Local(const GraphNode& node)
         {
             Matrix4 result = node.xform;
-            if (node.staleMatrix) result.Set3x3(Matrix3(node.rotation) * Matrix3::MakeScale(node.scale));
+            if (node.staleMatrix)
+            {
+                result.Set3x3(Matrix3(node.rotation) * Matrix3::MakeScale(node.scale));
+            }
             return result;
         }
         bool SceneTransforms(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& pose,
             const Matrix4& component, std::vector<Matrix4>& scene)
         {
             const size_t count = pose.size();
-            if (!count || skeleton.parents.size() != count || skeleton.names.size() != count || skeleton.meshNodes.size() != count) return false;
+            if (!count || skeleton.parents.size() != count || skeleton.names.size() != count || skeleton.meshNodes.size() != count)
+            {
+                return false;
+            }
             scene.resize(count);
             for (size_t i = 0; i < count; ++i)
             {
                 const int parent = skeleton.parents[i], mesh = skeleton.meshNodes[i];
-                if (parent < -1 || parent >= static_cast<int>(i) || mesh < -1 || mesh >= static_cast<int>(count)) return false;
+                if (parent < -1 || parent >= static_cast<int>(i) || mesh < -1 || mesh >= static_cast<int>(count))
+                {
+                    return false;
+                }
                 scene[i] = pose[i].skeletonRoot ? Local(pose[i]) : (parent < 0 ? component : scene[parent]) * Local(pose[i]);
             }
             return true;
@@ -77,10 +86,19 @@ namespace PARS
         const Matrix4& component, std::vector<Matrix4>& world, std::string& error)
     {
         std::vector<Matrix4> scene;
-        if (!SceneTransforms(skeleton, pose, component, scene)) { error = "Invalid physics skeleton hierarchy."; return false; }
+        if (!SceneTransforms(skeleton, pose, component, scene))
+        {
+            error = "Invalid physics skeleton hierarchy.";
+            return false;
+        }
         world = scene;
         for (size_t i = 0; i < scene.size(); ++i)
-            if (skeleton.meshNodes[i] >= 0) world[i] = scene[skeleton.meshNodes[i]] * scene[i];
+        {
+            if (skeleton.meshNodes[i] >= 0)
+            {
+                world[i] = scene[skeleton.meshNodes[i]] * scene[i];
+            }
+        }
         error.clear();
         return true;
     }
@@ -90,27 +108,63 @@ namespace PARS
     {
         Quaternion q = Normalize(Quaternion(Invert(parentBodyTarget * joint.parentFrame.GetTransform()) *
             (childBodyTarget * joint.childFrame.GetTransform())));
-        if (!clampToLimits) return q;
-        XMFLOAT4 v; XMStoreFloat4(&v, q);
-        if (v.w < 0) { q = -q; XMStoreFloat4(&v, q); }
+        if (!clampToLimits)
+        {
+            return q;
+        }
+        XMFLOAT4 v;
+        XMStoreFloat4(&v, q);
+        if (v.w < 0)
+        {
+            q = -q;
+            XMStoreFloat4(&v, q);
+        }
         const float norm = std::sqrt(v.x * v.x + v.w * v.w);
         const Quaternion twist = norm > 1e-7f ? Quaternion(XMVectorSet(v.x / norm, 0, 0, v.w / norm)) : Quaternion(kIdentity);
-        XMFLOAT4 s; XMStoreFloat4(&s, Normalize(q * ~twist));
-        if (s.w < 0) { s.y = -s.y; s.z = -s.z; s.w = -s.w; }
+        XMFLOAT4 s;
+        XMStoreFloat4(&s, Normalize(q * ~twist));
+        if (s.w < 0)
+        {
+            s.y = -s.y;
+            s.z = -s.z;
+            s.w = -s.w;
+        }
         float x = norm > 1e-7f ? 2 * std::atan2(v.x, v.w) : 0;
         float y = 4 * std::atan2(s.y, 1 + s.w), z = 4 * std::atan2(s.z, 1 + s.w);
-        if (joint.twist == PhysicsJointMotion::Locked) x = 0;
-        else if (joint.twist == PhysicsJointMotion::Limited) x = std::max(joint.twistMin, std::min(joint.twistMax, x));
-        if (joint.swingY == PhysicsJointMotion::Locked) y = 0;
-        else if (joint.swingY == PhysicsJointMotion::Limited) y = std::max(-joint.swingYLimit, std::min(joint.swingYLimit, y));
-        if (joint.swingZ == PhysicsJointMotion::Locked) z = 0;
-        else if (joint.swingZ == PhysicsJointMotion::Limited) z = std::max(-joint.swingZLimit, std::min(joint.swingZLimit, z));
+        if (joint.twist == PhysicsJointMotion::Locked)
+        {
+            x = 0;
+        }
+        else if (joint.twist == PhysicsJointMotion::Limited)
+        {
+            x = std::max(joint.twistMin, std::min(joint.twistMax, x));
+        }
+        if (joint.swingY == PhysicsJointMotion::Locked)
+        {
+            y = 0;
+        }
+        else if (joint.swingY == PhysicsJointMotion::Limited)
+        {
+            y = std::max(-joint.swingYLimit, std::min(joint.swingYLimit, y));
+        }
+        if (joint.swingZ == PhysicsJointMotion::Locked)
+        {
+            z = 0;
+        }
+        else if (joint.swingZ == PhysicsJointMotion::Limited)
+        {
+            z = std::max(-joint.swingZLimit, std::min(joint.swingZLimit, z));
+        }
         if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited)
         {
             // Matches PhysX ConeLimitHelperTanLess's ellipse in swing-angle
             // coordinates; independent clamps alone miss diagonal violations.
             const float r = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) + z * z / (joint.swingZLimit * joint.swingZLimit));
-            if (r > 1) { y /= r; z /= r; }
+            if (r > 1)
+            {
+                y /= r;
+                z /= r;
+            }
         }
         const float ty = std::tan(y * .25f), tz = std::tan(z * .25f), r2 = ty * ty + tz * tz;
         const Quaternion swing(XMVectorSet(0, 2 * ty / (1 + r2), 2 * tz / (1 + r2), (1 - r2) / (1 + r2)));
@@ -122,12 +176,18 @@ namespace PARS
         std::vector<GraphNode>& result)
     {
         std::vector<Matrix4> scene;
-        if (nodes.size() != targets.size() || !SceneTransforms(skeleton, source, component, scene)) return false;
+        if (nodes.size() != targets.size() || !SceneTransforms(skeleton, source, component, scene))
+        {
+            return false;
+        }
         const auto sourceScene = scene;
         std::vector<int> bodyAtNode(source.size(), -1);
         for (size_t i = 0; i < nodes.size(); ++i)
         {
-            if (nodes[i] < 0 || nodes[i] >= static_cast<int>(source.size()) || skeleton.meshNodes[nodes[i]] < 0) return false;
+            if (nodes[i] < 0 || nodes[i] >= static_cast<int>(source.size()) || skeleton.meshNodes[nodes[i]] < 0)
+            {
+                return false;
+            }
             bodyAtNode[nodes[i]] = static_cast<int>(i);
         }
         result = source;
@@ -151,12 +211,19 @@ namespace PARS
         PhysicsAsset& result, std::string& error)
     {
         std::vector<Matrix4> world;
-        if (!EvaluatePhysicsPose(skeleton, reference, Matrix4(kIdentity), world, error)) return false;
+        if (!EvaluatePhysicsPose(skeleton, reference, Matrix4(kIdentity), world, error))
+        {
+            return false;
+        }
         const auto find = [&](const std::string& suffix) {
             for (size_t i = 0; i < skeleton.names.size(); ++i)
             {
-                const auto& name = skeleton.names[i]; const auto colon = name.find_last_of(':');
-                if (name.substr(colon == std::string::npos ? 0 : colon + 1) == suffix && skeleton.meshNodes[i] >= 0) return static_cast<int>(i);
+                const auto& name = skeleton.names[i];
+                const auto colon = name.find_last_of(':');
+                if (name.substr(colon == std::string::npos ? 0 : colon + 1) == suffix && skeleton.meshNodes[i] >= 0)
+                {
+                    return static_cast<int>(i);
+                }
             }
             return -1;
         };
@@ -174,16 +241,37 @@ namespace PARS
         constexpr float neckShare = 1.66f / (4.20f + 1.66f);
         enum MassGroup
         {
-            Pelvis, MiddleTrunk, UpperTrunk, Neck, Head,
-            LeftUpperArm, LeftForearm, LeftHand, RightUpperArm, RightForearm, RightHand,
-            LeftThigh, LeftShank, LeftFoot, RightThigh, RightShank, RightFoot, MassGroupCount
+            Pelvis,
+            MiddleTrunk,
+            UpperTrunk,
+            Neck,
+            Head,
+            LeftUpperArm,
+            LeftForearm,
+            LeftHand,
+            RightUpperArm,
+            RightForearm,
+            RightHand,
+            LeftThigh,
+            LeftShank,
+            LeftFoot,
+            RightThigh,
+            RightShank,
+            RightFoot,
+            MassGroupCount
         };
         constexpr float massFractions[MassGroupCount] = {
             .1117f, .1633f, .1596f, .0694f * neckShare, .0694f * (1.0f - neckShare),
             .0271f, .0162f, .0061f, .0271f, .0162f, .0061f,
-            .1416f, .0433f, .0137f, .1416f, .0433f, .0137f
+            .1416f, .0433f, .0137f, .1416f, .0433f, .0137f};
+        struct Part
+        {
+            const char* bone;
+            const char* end;
+            float radius;
+            MassGroup massGroup;
+            PhysicsShapeType shape;
         };
-        struct Part { const char* bone; const char* end; float radius; MassGroup massGroup; PhysicsShapeType shape; };
         // All articulated Mixamo bones except fingers, toes and terminal end
         // markers. Keep spine/neck/clavicle bodies so joints follow the actual
         // hierarchy instead of attaching the head and upper arms to Spine2.
@@ -208,8 +296,7 @@ namespace PARS
             {"LeftFoot", "LeftToeBase", .045f, LeftFoot, PhysicsShapeType::Capsule},
             {"RightUpLeg", "RightLeg", .075f, RightThigh, PhysicsShapeType::Capsule},
             {"RightLeg", "RightFoot", .055f, RightShank, PhysicsShapeType::Capsule},
-            {"RightFoot", "RightToeBase", .045f, RightFoot, PhysicsShapeType::Capsule}
-        };
+            {"RightFoot", "RightToeBase", .045f, RightFoot, PhysicsShapeType::Capsule}};
         PhysicsAsset candidate;
         std::vector<int> nodes;
         std::vector<double> bodyVolumes;
@@ -217,29 +304,47 @@ namespace PARS
         for (const auto& part : parts)
         {
             const int node = find(part.bone), end = find(part.end);
-            if (node < 0 || end < 0) { error = "Mixamo PA preset cannot find bone: " + std::string(node < 0 ? part.bone : part.end); return false; }
+            if (node < 0 || end < 0)
+            {
+                error = "Mixamo PA preset cannot find bone: " + std::string(node < 0 ? part.bone : part.end);
+                return false;
+            }
             const Vector3 endpoint(Invert(PhysicsBoneFrame(world[node])) * Vector3(world[end].GetW()));
             const float length = Length(endpoint);
-            if (!std::isfinite(length) || length < .005f) { error = "Invalid Mixamo bone length."; return false; }
+            if (!std::isfinite(length) || length < .005f)
+            {
+                error = "Invalid Mixamo bone length.";
+                return false;
+            }
             const Vector3 axis = endpoint / length;
             const float dot = Clamp(float(axis.GetX()), -1.0f, 1.0f);
             Quaternion rotation(kIdentity);
-            if (dot < -.9999f) rotation = Quaternion(Vector3(kYUnitVector), XM_PI);
-            else if (dot < .9999f) rotation = Quaternion(Normalize(Cross(Vector3(kXUnitVector), axis)), std::acos(dot));
+            if (dot < -.9999f)
+            {
+                rotation = Quaternion(Vector3(kYUnitVector), XM_PI);
+            }
+            else if (dot < .9999f)
+            {
+                rotation = Quaternion(Normalize(Cross(Vector3(kXUnitVector), axis)), std::acos(dot));
+            }
             PhysicsBody body;
-            body.bone = skeleton.names[node]; body.shape = part.shape;
-            body.radius = part.radius; body.halfLength = Max(.0f, length * .5f - body.radius);
+            body.bone = skeleton.names[node];
+            body.shape = part.shape;
+            body.radius = part.radius;
+            body.halfLength = Max(.0f, length * .5f - body.radius);
             // Torso boxes cover their own bone segment. A fixed minimum of
             // 7 cm per half-length would overlap the added short spine bodies.
             body.halfExtents = XMFLOAT3(length * .45f, part.radius, part.radius * .7f);
-            XMStoreFloat3(&body.offset, endpoint * .5f); XMStoreFloat4(&body.rotation, rotation);
+            XMStoreFloat3(&body.offset, endpoint * .5f);
+            XMStoreFloat4(&body.rotation, rotation);
             const double radius = body.radius;
             const double volume = body.shape == PhysicsShapeType::Box
                 ? 8.0 * body.halfExtents.x * body.halfExtents.y * body.halfExtents.z
                 : XM_PI * radius * radius * (2.0 * body.halfLength + 4.0 * radius / 3.0);
             bodyVolumes.push_back(volume);
             groupVolumes[part.massGroup] += volume;
-            candidate.bodies.push_back(body); nodes.push_back(node);
+            candidate.bodies.push_back(body);
+            nodes.push_back(node);
         }
         // de Leva has 16 segments; this rig has 20 bodies. Head/neck are split
         // above. Preserve each trunk group mass and split only within that group
@@ -254,23 +359,33 @@ namespace PARS
                 totalMassKg * massFractions[group] * bodyVolumes[i] / groupVolumes[group]);
         }
 
-        const auto position = [&](int node) { return Vector3(world[node].GetW()); };
+        const auto position = [&](int node) {
+            return Vector3(world[node].GetW());
+        };
         const Vector3 left = Normalize(position(find("LeftUpLeg")) - position(find("RightUpLeg")));
         const Vector3 upHint = position(find("Neck")) - position(find("Hips"));
         if (float(LengthSquare(Cross(left, upHint))) < 1e-8f)
-        { error = "Mixamo PA preset needs an upright reference skeleton."; return false; }
+        {
+            error = "Mixamo PA preset needs an upright reference skeleton.";
+            return false;
+        }
         const Vector3 up = Normalize(upHint - left * Dot(left, upHint));
         const Vector3 forward = Normalize(Cross(left, up));
         std::vector<Vector3> longitudinal;
         for (size_t i = 0; i < nodes.size(); ++i)
+        {
             longitudinal.push_back(Normalize(position(find(parts[i].end)) - position(nodes[i])));
+        }
         Vector3 radial[2];
         for (int side = 0; side < 2; ++side)
         {
             const std::string prefix = side == 0 ? "Left" : "Right";
             const int index = find(prefix + "HandIndex1"), pinky = find(prefix + "HandPinky1");
             if (index < 0 || pinky < 0 || float(LengthSquare(position(index) - position(pinky))) < 1e-8f)
-            { error = "Mixamo PA preset needs hand landmarks to calibrate wrist orientation."; return false; }
+            {
+                error = "Mixamo PA preset needs hand landmarks to calibrate wrist orientation.";
+                return false;
+            }
             radial[side] = Normalize(position(index) - position(pinky));
             // The preset is calibrated from the imported T-pose, never a sampled
             // animation frame. Reject degenerate flexion axes instead of making NaNs.
@@ -279,7 +394,10 @@ namespace PARS
                 const int body = candidate.FindBody(skeleton.names[find(prefix + suffix)]);
                 if (std::abs(float(Dot(longitudinal[body], forward))) > .95f ||
                     std::abs(float(Dot(longitudinal[body], radial[side]))) > .95f)
-                { error = "Mixamo PA preset needs an arms-out reference pose."; return false; }
+                {
+                    error = "Mixamo PA preset needs an arms-out reference pose.";
+                    return false;
+                }
             }
         }
 
@@ -315,12 +433,20 @@ namespace PARS
             while (parent >= 0)
             {
                 parentBody = candidate.FindBody(skeleton.names[parent]);
-                if (parentBody >= 0) break;
+                if (parentBody >= 0)
+                {
+                    break;
+                }
                 parent = skeleton.parents[parent];
             }
-            if (parentBody < 0) { error = "Mixamo PA preset has disconnected limbs."; return false; }
+            if (parentBody < 0)
+            {
+                error = "Mixamo PA preset has disconnected limbs.";
+                return false;
+            }
             PhysicsConstraint joint;
-            joint.parentBone = candidate.bodies[parentBody].bone; joint.childBone = candidate.bodies[i].bone;
+            joint.parentBone = candidate.bodies[parentBody].bone;
+            joint.childBone = candidate.bodies[i].bone;
             const Matrix4 parentWorld = PhysicsBoneFrame(world[parent]) * candidate.bodies[parentBody].GetLocalTransform();
             const Matrix4 childWorld = PhysicsBoneFrame(world[nodes[i]]) * candidate.bodies[i].GetLocalTransform();
             const std::string name(parts[i].bone);
@@ -335,7 +461,8 @@ namespace PARS
                 // Three rig joints share the WHOLE trunk budget equally. The
                 // allocation is a rig approximation, not per-vertebra ROM data.
                 cone = {1.516667f, 0, 10.916667f, 8.347644f};
-                twistMax = 52.2f / 3; twistMin = -twistMax;
+                twistMax = 52.2f / 3;
+                twistMin = -twistMax;
             }
             else if (name == "Neck" || name == "Head")
             {
@@ -346,7 +473,8 @@ namespace PARS
                 const bool neck = name == "Neck";
                 cone = neck ? AnatomicalCone{-4.5f, 0, 37.5f, 24.121613f}
                             : AnatomicalCone{-3, 0, 25, 16.078565f};
-                twistMax = 65.5f * (neck ? .6f : .4f); twistMin = -twistMax;
+                twistMax = 65.5f * (neck ? .6f : .4f);
+                twistMin = -twistMax;
             }
             else if (name.find("Shoulder") != std::string::npos)
             {
@@ -359,7 +487,8 @@ namespace PARS
                 // not additional measured anatomical ROM.
                 cone = {4.973932f, -9.956774f * side, 27.052221f, 30.855535f};
                 // Small allowance for swing/twist coupling in the biased frame.
-                twistMin = -3; twistMax = 3;
+                twistMin = -3;
+                twistMax = 3;
             }
             else if (name == "LeftArm" || name == "RightArm")
             {
@@ -380,7 +509,8 @@ namespace PARS
                 parentAxes = HingeAxes(parentX, Cross(parentX, forward));
                 childAxes = HingeAxes(x, Cross(x, forward));
                 cone = {0, 0, 1, 1}; // Valid but unused locked-swing limits.
-                twistMin = -.8f; twistMax = 144.6f;
+                twistMin = -.8f;
+                twistMax = 144.6f;
                 // Keep the imported forearm roll as the hinge reference. This
                 // pure hinge locks side-bending AND independent pronation /
                 // supination; neither is silently transferred to the wrist.
@@ -397,7 +527,8 @@ namespace PARS
                 // Relax the original +/-5-degree coupling allowance to +/-20
                 // for animation roll. This is a rig tuning compromise, not
                 // physiological wrist pronation or a separate forearm roll joint.
-                twistMin = -20; twistMax = 20;
+                twistMin = -20;
+                twistMax = 20;
             }
             else if (name.find("UpLeg") != std::string::npos)
             {
@@ -417,7 +548,8 @@ namespace PARS
                 // Twist supports asymmetric endpoints directly, so no parent
                 // swing bias is needed. Keep valid (unused) locked-swing limits.
                 cone = {0, 0, 1, 1};
-                twistMin = -1; twistMax = 137.7f;
+                twistMin = -1;
+                twistMax = 137.7f;
                 // Pure hinge approximation; side-bending and shank axial
                 // rotation are now swing motions and remain locked.
                 joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
@@ -432,13 +564,17 @@ namespace PARS
                 // envelope: +10 degrees in swing Y and +5 in swing Z, retaining
                 // the frame bias. These are animation tuning margins.
                 cone = {-20.754667f, 7.333241f * side, 44.654347f, 32.971366f};
-                twistMin = -10; twistMax = 10; // +/-4 degrees beyond the original coupling allowance.
+                twistMin = -10;
+                twistMax = 10; // +/-4 degrees beyond the original coupling allowance.
             }
             SetAnatomicalFrames(joint, parentWorld, childWorld, position(nodes[i]),
                 parentAxes, childAxes, cone, twistMin, twistMax);
             candidate.constraints.push_back(joint);
         }
-        if (!candidate.Validate(error)) return false;
+        if (!candidate.Validate(error))
+        {
+            return false;
+        }
         ConfigureDefaultDrives(candidate);
         result = std::move(candidate);
         return true;

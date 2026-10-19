@@ -11,8 +11,12 @@ namespace PARS
         void SetMoveInput(float forward, float right, bool run);
         void SetControlYaw(float radians);
         void SetInputEnabled(bool enabled);
-        bool IsInputEnabled() const { return m_InputEnabled; }
+        bool IsInputEnabled() const
+        {
+            return m_InputEnabled;
+        }
         void Tick(float deltaTime) override;
+
     private:
         float m_Forward = 0, m_Right = 0, m_Yaw = 0;
         bool m_Run = false, m_InputEnabled = true;

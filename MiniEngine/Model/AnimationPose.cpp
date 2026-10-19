@@ -13,8 +13,14 @@ using DirectX::FXMVECTOR;
 bool BuildSceneGraphParents(const GraphNode* nodes, uint32_t count, std::vector<int32_t>& parents)
 {
     parents.clear();
-    if (!count) return true;
-    if (!nodes) return false;
+    if (!count)
+    {
+        return true;
+    }
+    if (!nodes)
+    {
+        return false;
+    }
     std::vector<int32_t> pending;
     int32_t parent = -1;
     for (uint32_t i = 0; i < count; ++i)
@@ -22,14 +28,20 @@ bool BuildSceneGraphParents(const GraphNode* nodes, uint32_t count, std::vector<
         parents.push_back(parent);
         if (nodes[i].hasChildren)
         {
-            if (nodes[i].hasSibling) pending.push_back(parent);
+            if (nodes[i].hasSibling)
+            {
+                pending.push_back(parent);
+            }
             parent = static_cast<int32_t>(i);
         }
         else if (!nodes[i].hasSibling)
         {
             if (pending.empty())
             {
-                if (i + 1 == count) return true;
+                if (i + 1 == count)
+                {
+                    return true;
+                }
                 break;
             }
             parent = pending.back();
@@ -40,10 +52,22 @@ bool BuildSceneGraphParents(const GraphNode* nodes, uint32_t count, std::vector<
     return false;
 }
 
-static inline float ToFloat(const int8_t x) { return Math::Max(x / 127.0f, -1.0f); }
-static inline float ToFloat(const uint8_t x) { return x / 255.0f; }
-static inline float ToFloat(const int16_t x) { return Math::Max(x / 32767.0f, -1.0f); }
-static inline float ToFloat(const uint16_t x) { return x / 65535.0f; }
+static inline float ToFloat(const int8_t x)
+{
+    return Math::Max(x / 127.0f, -1.0f);
+}
+static inline float ToFloat(const uint8_t x)
+{
+    return x / 255.0f;
+}
+static inline float ToFloat(const int16_t x)
+{
+    return Math::Max(x / 32767.0f, -1.0f);
+}
+static inline float ToFloat(const uint16_t x)
+{
+    return x / 65535.0f;
+}
 
 static inline void Lerp3(float* Dest, const float* Key1, const float* Key2, float T)
 {
@@ -52,7 +76,7 @@ static inline void Lerp3(float* Dest, const float* Key1, const float* Key2, floa
     Dest[2] = Math::Lerp(Key1[2], Key2[2], T);
 }
 
-template <typename T>
+template<typename T>
 static inline Quaternion ToQuat(const T* rot)
 {
     return (Quaternion)Vector4(ToFloat(rot[0]), ToFloat(rot[1]), ToFloat(rot[2]), ToFloat(rot[3]));
@@ -67,36 +91,31 @@ static inline void Slerp(float* Dest, const void* Key1, const void* Key2, float 
 {
     switch (Format)
     {
-    case AnimationCurve::kSNorm8:
-    {
+    case AnimationCurve::kSNorm8: {
         const int8_t* key1 = (const int8_t*)Key1;
         const int8_t* key2 = (const int8_t*)Key2;
         XMStoreFloat4((XMFLOAT4*)Dest, (FXMVECTOR)Math::Slerp(ToQuat(key1), ToQuat(key2), T));
         break;
     }
-    case AnimationCurve::kUNorm8:
-    {
+    case AnimationCurve::kUNorm8: {
         const uint8_t* key1 = (const uint8_t*)Key1;
         const uint8_t* key2 = (const uint8_t*)Key2;
         XMStoreFloat4((XMFLOAT4*)Dest, (FXMVECTOR)Math::Slerp(ToQuat(key1), ToQuat(key2), T));
         break;
     }
-    case AnimationCurve::kSNorm16:
-    {
+    case AnimationCurve::kSNorm16: {
         const int16_t* key1 = (const int16_t*)Key1;
         const int16_t* key2 = (const int16_t*)Key2;
         XMStoreFloat4((XMFLOAT4*)Dest, (FXMVECTOR)Math::Slerp(ToQuat(key1), ToQuat(key2), T));
         break;
     }
-    case AnimationCurve::kUNorm16:
-    {
+    case AnimationCurve::kUNorm16: {
         const uint16_t* key1 = (const uint16_t*)Key1;
         const uint16_t* key2 = (const uint16_t*)Key2;
         XMStoreFloat4((XMFLOAT4*)Dest, (FXMVECTOR)Math::Slerp(ToQuat(key1), ToQuat(key2), T));
         break;
     }
-    case AnimationCurve::kFloat:
-    {
+    case AnimationCurve::kFloat: {
         const float* key1 = (const float*)Key1;
         const float* key2 = (const float*)Key2;
         XMStoreFloat4((XMFLOAT4*)Dest, (FXMVECTOR)Math::Slerp(ToQuat(key1), ToQuat(key2), T));
@@ -112,13 +131,17 @@ bool EvaluateAnimationPose(const AnimationSet& animation, const AnimationCurve* 
     const uint8_t* keyFrames, GraphNode* pose, uint32_t nodeCount, float time)
 {
     if (!curves || !keyFrames || !pose || !std::isfinite(time))
+    {
         return false;
+    }
     for (uint32_t i = 0; i < animation.numCurves; ++i)
     {
         const AnimationCurve& curve = curves[animation.firstCurve + i];
         if (curve.targetNode >= nodeCount || curve.numSegments < 1 ||
             curve.keyFrameFormat > AnimationCurve::kFloat || curve.targetPath == AnimationCurve::kWeights)
+        {
             return false;
+        }
         const float progress = Math::Clamp((time - curve.startTime) * curve.rangeScale, 0.0f, curve.numSegments);
         const uint32_t segment = static_cast<uint32_t>(Math::Min(progress, curve.numSegments - 1.0f));
         const float fraction = progress - float(segment);
@@ -134,12 +157,15 @@ bool EvaluateAnimationPose(const AnimationSet& animation, const AnimationCurve* 
         else
         {
             if (curve.keyFrameFormat != AnimationCurve::kFloat)
+            {
                 return false;
-            float* destination = curve.targetPath == AnimationCurve::kTranslation ?
-                reinterpret_cast<float*>(&node.xform) + 12 : reinterpret_cast<float*>(&node.scale);
+            }
+            float* destination = curve.targetPath == AnimationCurve::kTranslation ? reinterpret_cast<float*>(&node.xform) + 12 : reinterpret_cast<float*>(&node.scale);
             Lerp3(destination, reinterpret_cast<const float*>(first), reinterpret_cast<const float*>(second), fraction);
             if (curve.targetPath == AnimationCurve::kScale)
+            {
                 node.staleMatrix = true;
+            }
         }
     }
     return true;
@@ -148,7 +174,9 @@ bool EvaluateAnimationPose(const AnimationSet& animation, const AnimationCurve* 
 void BlendAnimationPoses(const GraphNode* source, GraphNode* target, uint32_t count, float alpha)
 {
     if (!source || !target || !std::isfinite(alpha) || alpha >= 1.0f)
+    {
         return;
+    }
     if (alpha <= 0.0f)
     {
         for (uint32_t i = 0; i < count; ++i)

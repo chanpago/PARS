@@ -9,8 +9,18 @@ namespace PARS
     {
     public:
         using AnimInstance::AnimInstance;
-        bool IsLocomotionEnabled() const { return m_Locomotion; }
-        void SetLocomotionEnabled(bool enabled) { m_Locomotion = enabled; if (enabled) SetPlaying(true); }
+        bool IsLocomotionEnabled() const
+        {
+            return m_Locomotion;
+        }
+        void SetLocomotionEnabled(bool enabled)
+        {
+            m_Locomotion = enabled;
+            if (enabled)
+            {
+                SetPlaying(true);
+            }
+        }
 
     protected:
         void NativeUpdateAnimation(float deltaTime) override;

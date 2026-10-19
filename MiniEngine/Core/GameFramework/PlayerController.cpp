@@ -11,7 +11,12 @@ namespace PARS
         m_Run = run;
     }
     void PlayerController::SetControlYaw(float radians)
-    { if (std::isfinite(radians)) m_Yaw = radians; }
+    {
+        if (std::isfinite(radians))
+        {
+            m_Yaw = radians;
+        }
+    }
 
     void PlayerController::SetInputEnabled(bool enabled)
     {
@@ -19,7 +24,11 @@ namespace PARS
         if (!enabled)
         {
             SetMoveInput(0, 0, false);
-            if (auto pawn = GetPawn()) { pawn->ConsumeMovementInput(); pawn->SetRunRequested(false); }
+            if (auto pawn = GetPawn())
+            {
+                pawn->ConsumeMovementInput();
+                pawn->SetRunRequested(false);
+            }
         }
     }
     void PlayerController::Tick(float deltaTime)

@@ -32,12 +32,25 @@ public:
     void Render(GraphicsContext& context, ColorBuffer& target);
     bool RequestPick(float x, float y);
     bool PollPick(uint32_t& id);
-    void CancelPick() { m_AcceptPick = false; m_PickRequested = false; }
+    void CancelPick()
+    {
+        m_AcceptPick = false;
+        m_PickRequested = false;
+    }
 
 private:
-    struct Vertex { float x, y, z, w; float r, g, b, a; uint32_t id; };
+    struct Vertex
+    {
+        float x, y, z, w;
+        float r, g, b, a;
+        uint32_t id;
+    };
     // Shared unit primitives. Capsule caps move along X independently of radius.
-    struct SurfaceVertex { DirectX::XMFLOAT3 position, normal; float capOffset; };
+    struct SurfaceVertex
+    {
+        DirectX::XMFLOAT3 position, normal;
+        float capOffset;
+    };
     struct BodyDraw
     {
         Math::Matrix4 world;
@@ -45,8 +58,16 @@ private:
         uint32_t id, padding[3]{}; // Matches the vertex shader's b1 layout.
         uint32_t firstVertex, vertexCount;
     };
-    struct LimitLine { Math::Vector3 a, b, color; float width; };
-    struct LimitTriangle { Math::Vector3 a, b, c, color; float opacity; };
+    struct LimitLine
+    {
+        Math::Vector3 a, b, color;
+        float width;
+    };
+    struct LimitTriangle
+    {
+        Math::Vector3 a, b, c, color;
+        float opacity;
+    };
     struct ConstraintGeometry
     {
         PARS::PhysicsConstraint settings;

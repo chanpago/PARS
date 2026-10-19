@@ -10,8 +10,14 @@ namespace PARS
     {
     public:
         using SceneComponent::SceneComponent;
-        void SetVisibility(bool visible) { m_Visible = visible; }
-        bool IsVisible() const { return m_Visible; }
+        void SetVisibility(bool visible)
+        {
+            m_Visible = visible;
+        }
+        bool IsVisible() const
+        {
+            return m_Visible;
+        }
         virtual Math::BoundingSphere GetLocalBounds() const = 0;
 
     private:

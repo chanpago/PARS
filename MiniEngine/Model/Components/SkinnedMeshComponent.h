@@ -9,7 +9,10 @@ namespace PARS
     {
     public:
         using MeshComponent::MeshComponent;
-        const std::shared_ptr<const Model>& GetSkeletalMesh() const { return m_SkeletalMesh; }
+        const std::shared_ptr<const Model>& GetSkeletalMesh() const
+        {
+            return m_SkeletalMesh;
+        }
         virtual bool SetSkeletalMesh(std::shared_ptr<const Model> mesh) = 0;
         Math::BoundingSphere GetLocalBounds() const override
         {

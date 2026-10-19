@@ -1,6 +1,9 @@
 #pragma once
 
-namespace PARS { class World; }
+namespace PARS
+{
+    class World;
+}
 class GraphicsContext;
 
 namespace Renderer

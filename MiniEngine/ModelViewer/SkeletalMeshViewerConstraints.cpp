@@ -13,7 +13,10 @@ namespace
     {
         int value = static_cast<int>(motion);
         ImGui::SetNextItemWidth(105);
-        if (!ImGui::Combo(label, &value, "Locked\0Limited\0Free\0")) return false;
+        if (!ImGui::Combo(label, &value, "Locked\0Limited\0Free\0"))
+        {
+            return false;
+        }
         motion = static_cast<PhysicsJointMotion>(value);
         return true;
     }
@@ -22,7 +25,10 @@ namespace
     {
         float degrees = XMConvertToDegrees(radians);
         ImGui::SetNextItemWidth(105);
-        if (!ImGui::DragFloat(label, &degrees, .5f, low, high, "%.1f deg", ImGuiSliderFlags_AlwaysClamp)) return false;
+        if (!ImGui::DragFloat(label, &degrees, .5f, low, high, "%.1f deg", ImGuiSliderFlags_AlwaysClamp))
+        {
+            return false;
+        }
         radians = XMConvertToRadians(degrees);
         return true;
     }
@@ -41,8 +47,7 @@ namespace
         ImGui::SetNextItemWidth(-1);
         if (ImGui::DragFloat3("##JointRotation", xyz, .5f, -180, 180, "%.1f", ImGuiSliderFlags_AlwaysClamp))
         {
-            XMStoreFloat4(&frame.rotation, Normalize(Quaternion(Vector3(kZUnitVector), XMConvertToRadians(xyz[2])) *
-                Quaternion(Vector3(kYUnitVector), XMConvertToRadians(xyz[1])) * Quaternion(Vector3(kXUnitVector), XMConvertToRadians(xyz[0]))));
+            XMStoreFloat4(&frame.rotation, Normalize(Quaternion(Vector3(kZUnitVector), XMConvertToRadians(xyz[2])) * Quaternion(Vector3(kYUnitVector), XMConvertToRadians(xyz[1])) * Quaternion(Vector3(kXUnitVector), XMConvertToRadians(xyz[0]))));
             changed = true;
         }
         return changed;
@@ -51,13 +56,19 @@ namespace
 
 int SkeletalMeshViewer::FindConstraintParent() const
 {
-    if (m_SelectedBody < 0 || m_SelectedBone < 0) return -1;
+    if (m_SelectedBody < 0 || m_SelectedBone < 0)
+    {
+        return -1;
+    }
     const auto& model = *m_Mesh->GetSkeletalMesh();
     // Skip helper nodes and bones without bodies, rather than requiring every bone.
     for (int node = model.m_NodeParents[m_SelectedBone]; node >= 0; node = model.m_NodeParents[node])
     {
         const int body = m_PhysicsAsset.FindBody(model.m_NodeNames[node]);
-        if (body >= 0) return body;
+        if (body >= 0)
+        {
+            return body;
+        }
     }
     return -1;
 }
@@ -81,8 +92,14 @@ void SkeletalMeshViewer::SelectConstraint(int index)
     m_EditPhysics = true;
     m_EditConstraints = true;
     m_SelectedConstraint = index;
-    if (m_GizmoMode == 2) m_GizmoMode = 0;
-    if (index < 0) return;
+    if (m_GizmoMode == 2)
+    {
+        m_GizmoMode = 0;
+    }
+    if (index < 0)
+    {
+        return;
+    }
     const auto& joint = m_PhysicsAsset.constraints[index];
     m_SelectedBody = m_PhysicsAsset.FindBody(joint.childBone);
     m_SelectedBone = FindBodyNode(m_SelectedBody);
@@ -114,17 +131,28 @@ void SkeletalMeshViewer::MoveOtherConstraintFrame(const Matrix4& previousWorld)
 
 void SkeletalMeshViewer::CreateConstraint()
 {
-    if (m_SelectedBody < 0 || m_ConstraintParent < 0 || m_SelectedBody == m_ConstraintParent) return;
+    if (m_SelectedBody < 0 || m_ConstraintParent < 0 || m_SelectedBody == m_ConstraintParent)
+    {
+        return;
+    }
     CancelInteraction();
     const auto& parent = m_PhysicsAsset.bodies[m_ConstraintParent].bone;
     const auto& child = m_PhysicsAsset.bodies[m_SelectedBody].bone;
     const int existing = m_PhysicsAsset.FindConstraint(parent, child);
-    if (existing >= 0) { SelectConstraint(existing); return; }
+    if (existing >= 0)
+    {
+        SelectConstraint(existing);
+        return;
+    }
     auto& animation = m_Mesh->GetAnimInstance();
     animation.SetPlaying(false);
-    if (m_EditPose.empty()) m_EditPose = animation.GetPose();
+    if (m_EditPose.empty())
+    {
+        m_EditPose = animation.GetPose();
+    }
     PhysicsConstraint joint;
-    joint.parentBone = parent; joint.childBone = child;
+    joint.parentBone = parent;
+    joint.childBone = child;
     ResetConstraintFrames(joint);
     m_PhysicsAsset.constraints.push_back(joint);
     SelectConstraint(static_cast<int>(m_PhysicsAsset.constraints.size()) - 1);
@@ -142,12 +170,20 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     if (ImGui::BeginCombo("##ParentBody", parentName))
     {
         for (int i = 0; i < static_cast<int>(m_PhysicsAsset.bodies.size()); ++i)
+        {
             if (i != m_SelectedBody && ImGui::Selectable(m_PhysicsAsset.bodies[i].bone.c_str(), i == m_ConstraintParent))
-            { CancelInteraction(); m_ConstraintParent = i; }
+            {
+                CancelInteraction();
+                m_ConstraintParent = i;
+            }
+        }
         ImGui::EndCombo();
     }
     ImGui::BeginDisabled(m_ConstraintParent < 0 || m_ConstraintParent == m_SelectedBody);
-    if (ImGui::Button("+ Connect bodies")) CreateConstraint();
+    if (ImGui::Button("+ Connect bodies"))
+    {
+        CreateConstraint();
+    }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
     if (ImGui::BeginListBox("##Joints", ImVec2(-1, ImGui::GetTextLineHeightWithSpacing() * 4)))
@@ -157,13 +193,22 @@ void SkeletalMeshViewer::DrawConstraintPanel()
             const auto& joint = m_PhysicsAsset.constraints[i];
             ImGui::PushID(i);
             const auto label = joint.parentBone + " -> " + joint.childBone;
-            if (ImGui::Selectable(label.c_str(), i == m_SelectedConstraint)) SelectConstraint(i);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", label.c_str());
+            if (ImGui::Selectable(label.c_str(), i == m_SelectedConstraint))
+            {
+                SelectConstraint(i);
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("%s", label.c_str());
+            }
             ImGui::PopID();
         }
         ImGui::EndListBox();
     }
-    if (!EditingConstraint()) return;
+    if (!EditingConstraint())
+    {
+        return;
+    }
     auto& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
     ImGui::TextWrapped("%s -> %s", joint.parentBone.c_str(), joint.childBone.c_str());
     if (ImGui::Button("Delete joint"))
@@ -176,20 +221,42 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         return;
     }
     bool changed = false;
-    if (ImGui::RadioButton("Parent frame", m_ConstraintFrame == 0)) { CancelInteraction(); m_ConstraintFrame = 0; }
+    if (ImGui::RadioButton("Parent frame", m_ConstraintFrame == 0))
+    {
+        CancelInteraction();
+        m_ConstraintFrame = 0;
+    }
     ImGui::SameLine();
-    if (ImGui::RadioButton("Child frame", m_ConstraintFrame == 1)) { CancelInteraction(); m_ConstraintFrame = 1; }
+    if (ImGui::RadioButton("Child frame", m_ConstraintFrame == 1))
+    {
+        CancelInteraction();
+        m_ConstraintFrame = 1;
+    }
     bool moveBoth = m_MoveBothFrames;
-    if (ImGui::Checkbox("Move both frames", &moveBoth)) { CancelInteraction(); m_MoveBothFrames = moveBoth; }
+    if (ImGui::Checkbox("Move both frames", &moveBoth))
+    {
+        CancelInteraction();
+        m_MoveBothFrames = moveBoth;
+    }
     ImGui::BeginDisabled(m_DragAxis >= 0);
     const Matrix4 previousWorld = GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame);
     if (EditFrame(m_ConstraintFrame == 0 ? joint.parentFrame : joint.childFrame))
     {
-        if (m_MoveBothFrames) MoveOtherConstraintFrame(previousWorld);
+        if (m_MoveBothFrames)
+        {
+            MoveOtherConstraintFrame(previousWorld);
+        }
         changed = true;
     }
-    if (ImGui::Button("Align both to child bone")) { ResetConstraintFrames(joint); changed = true; }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Replaces both frames, including any anatomical axis calibration and asymmetric ROM bias.");
+    if (ImGui::Button("Align both to child bone"))
+    {
+        ResetConstraintFrames(joint);
+        changed = true;
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Replaces both frames, including any anatomical axis calibration and asymmetric ROM bias.");
+    }
     ImGui::TextDisabled("Translation locked | X twist, Y/Z swing");
     ImGui::TextWrapped("Swing values are cone half-angles about the parent frame. Its rotation can bias the range; zero need not be the reference pose. Move both frames preserves this bias.");
     changed |= EditMotion("Twist X", joint.twist);
@@ -208,11 +275,19 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     changed |= ImGui::Checkbox("Connected bodies collide", &joint.enableCollision);
     const bool locked = joint.twist == PhysicsJointMotion::Locked || joint.swingY == PhysicsJointMotion::Locked || joint.swingZ == PhysicsJointMotion::Locked;
     // Motion edits must leave a valid PA even while the drive panel is collapsed.
-    if (locked && joint.useSlerpDrive) { joint.useSlerpDrive = false; changed = true; }
+    if (locked && joint.useSlerpDrive)
+    {
+        joint.useSlerpDrive = false;
+        changed = true;
+    }
     if (ImGui::CollapsingHeader("Active Ragdoll drives", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::TextWrapped("Force-based PD. Torque limit is Nm per axis. Apply editor drive settings in Character Animation to update the running character.");
-        if (ImGui::Button("Default PD gains (all joints)")) { ConfigureDefaultDrives(m_PhysicsAsset); changed = true; }
+        if (ImGui::Button("Default PD gains (all joints)"))
+        {
+            ConfigureDefaultDrives(m_PhysicsAsset);
+            changed = true;
+        }
         ImGui::BeginDisabled(locked);
         changed |= ImGui::Checkbox("SLERP (shared angular gains)", &joint.useSlerpDrive);
         ImGui::EndDisabled();
@@ -228,13 +303,19 @@ void SkeletalMeshViewer::DrawConstraintPanel()
             changed |= ImGui::DragFloat("Stiffness", &drive.stiffness, 1, 0, 100000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             changed |= ImGui::DragFloat("Damping", &drive.damping, .1f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             changed |= ImGui::DragFloat("Max torque (Nm)", &drive.maxTorque, .5f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-            ImGui::EndDisabled(); ImGui::EndDisabled(); ImGui::PopID();
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+            ImGui::PopID();
         }
     }
     ImGui::EndDisabled();
     ImGui::TextWrapped("Red cone/arc: allowed swing. Green sector: allowed X twist. Yellow: current child direction / twist (swing removed). Both limits share the joint pivot. Orange: separated anchors.");
     ImGui::TextWrapped("Twist zero follows the body's front, the hand's palm, or the forearm/shin direction for elbow/knee hinges. The sector and needle show X rotation with swing removed.");
-    if (changed) { m_PhysicsDirty = true; m_PhysicsMessage.clear(); }
+    if (changed)
+    {
+        m_PhysicsDirty = true;
+        m_PhysicsMessage.clear();
+    }
 }
 
 Vector3 SkeletalMeshViewer::GetTwistDisplayReference(const PhysicsConstraint& joint)
@@ -248,16 +329,23 @@ Vector3 SkeletalMeshViewer::GetTwistDisplayReference(const PhysicsConstraint& jo
     // The same reference rotates the parent dial and the child twist needle.
     // It stays attached to the joint during animation and frame editing.
     for (const char* name : {"Spine", "Spine1", "Spine2", "Neck", "Head",
-        "LeftShoulder", "RightShoulder", "LeftArm", "RightArm",
-        "LeftHand", "RightHand",
-        "LeftUpLeg", "RightUpLeg", "LeftFoot", "RightFoot"})
-        if (std::strcmp(bone, name) == 0) return Vector3(0, 0, -1);
+             "LeftShoulder", "RightShoulder", "LeftArm", "RightArm",
+             "LeftHand", "RightHand",
+             "LeftUpLeg", "RightUpLeg", "LeftFoot", "RightFoot"})
+    {
+        if (std::strcmp(bone, name) == 0)
+        {
+            return Vector3(0, 0, -1);
+        }
+    }
 
     // Hinge X is the elbow/knee flexion axis and Y follows the forearm/shin.
     // The green twist sector therefore follows the actual bending motion.
     if (std::strcmp(bone, "LeftLeg") == 0 || std::strcmp(bone, "RightLeg") == 0 ||
         std::strcmp(bone, "LeftForeArm") == 0 || std::strcmp(bone, "RightForeArm") == 0)
+    {
         return Vector3(kYUnitVector);
+    }
 
     // Unrecognized rigs retain the joint-local convention; do not guess their anatomy.
     return Vector3(kYUnitVector);
@@ -265,7 +353,10 @@ Vector3 SkeletalMeshViewer::GetTwistDisplayReference(const PhysicsConstraint& jo
 
 void SkeletalMeshViewer::DrawConstraints()
 {
-    if (!m_ShowConstraints && !m_ShowLimits) return;
+    if (!m_ShowConstraints && !m_ShowLimits)
+    {
+        return;
+    }
     for (int i = 0; i < static_cast<int>(m_PhysicsAsset.constraints.size()); ++i)
     {
         const auto& joint = m_PhysicsAsset.constraints[i];
@@ -283,6 +374,8 @@ void SkeletalMeshViewer::DrawConstraints()
             m_Overlay.Point(childPivot, color, id, selected ? 5.0f : 3.0f);
         }
         if (m_ShowLimits)
+        {
             m_Overlay.ConstraintLimits(joint, parent, child, id, selected, GetTwistDisplayReference(joint));
+        }
     }
 }

@@ -11,8 +11,12 @@ namespace PARS
         m_RootComponent = nullptr;
         // Unlink while every sibling is still alive, independent of creation order.
         for (const auto& component : m_Components)
+        {
             if (auto scene = dynamic_cast<SceneComponent*>(component.get()))
+            {
                 scene->DetachFromParent();
+            }
+        }
     }
 
     bool Actor::Destroy()
@@ -23,15 +27,21 @@ namespace PARS
     bool Actor::OwnsComponent(const ActorComponent& component) const
     {
         for (const auto& owned : m_Components)
+        {
             if (owned.get() == &component)
+            {
                 return true;
+            }
+        }
         return false;
     }
 
     bool Actor::SetRootComponent(SceneComponent& component)
     {
         if (!OwnsComponent(component) || component.GetAttachParent())
+        {
             return false;
+        }
         m_RootComponent = &component;
         return true;
     }
@@ -41,7 +51,10 @@ namespace PARS
         return m_RootComponent ? m_RootComponent->GetComponentTransform() : Math::AffineTransform(Math::kIdentity);
     }
 
-    Math::Vector3 Actor::GetActorLocation() const { return GetActorTransform().GetTranslation(); }
+    Math::Vector3 Actor::GetActorLocation() const
+    {
+        return GetActorTransform().GetTranslation();
+    }
 
     bool Actor::SetActorTransform(const Math::AffineTransform& transform)
     {
@@ -58,12 +71,16 @@ namespace PARS
     void Actor::BeginPlay()
     {
         if (m_BegunPlay || m_EndingPlay || m_PendingDestroy)
+        {
             return;
+        }
         m_BegunPlay = true;
         for (const auto& component : m_Components)
         {
             if (!m_BegunPlay || m_PendingDestroy)
+            {
                 break;
+            }
             component->m_BegunPlay = true;
             component->BeginPlay();
         }
@@ -72,13 +89,17 @@ namespace PARS
     void Actor::EndPlay()
     {
         if (!m_BegunPlay)
+        {
             return;
+        }
         m_EndingPlay = true;
         m_BegunPlay = false;
         for (auto it = m_Components.rbegin(); it != m_Components.rend(); ++it)
         {
             if (!(*it)->m_BegunPlay)
+            {
                 continue;
+            }
             (*it)->m_BegunPlay = false;
             (*it)->EndPlay();
         }
@@ -89,9 +110,9 @@ namespace PARS
     {
         if (!m_BegunPlay || m_PendingDestroy || !std::isfinite(deltaTime) || deltaTime < 0.0f)
         {
-			return;
+            return;
         }
-        
+
         for (const auto& component : m_Components)
         {
             if (!m_BegunPlay || m_PendingDestroy)
@@ -102,7 +123,7 @@ namespace PARS
             if (component->IsTickEnabled())
             {
                 component->TickComponent(deltaTime);
-            }          
+            }
         }
     }
 
