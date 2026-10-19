@@ -175,26 +175,53 @@ void PhysicsWorld::ResetClock()
 void PhysicsWorld::Step(const BeforeStep& beforeStep)
 {
     if (!m_Scene)
+    {
         return;
+    }
+     
+    // 콜백함수
+	// 이 부분에서 물리 시뮬레이션 전에 전달 받은 콜백을 호출한다. 콜백은 물리 시뮬레이션 전에 Actor의 pose를 읽어서, 물리 시뮬레이션에 반영할 목표 자세를 갱신하는데 사용된다.
+    // 콜백을 사용한 이유는 다음과같다.
+    // world만 actor를 소유하고 불필요한 참조를 만들지 않기 위해서다. physicsworld는 그냥 단순하게 물리만 계산하고 actor의 소유는 world가 담당하게하기 위해서다.
+    // World -> 어떤 액터를 어떻게 갱신할지 결정해서 콜백으로 전달 
+    // PhysicWorld -> 물리 스텝 직전에 콜백을 실행하고 PhysX 계산진행
+    // 여기서 줄이는건 PhysicWorld가 World나 Actor의 내부 구조를 알아야 하는 의존성을 줄이기 위해서다. 콜백을 전달해도 액터의 소유권이나 관리책임은 그대로 World가 담당한다.
     if (beforeStep)
+    {
         beforeStep(static_cast<float>(FixedDeltaTime));
+    }
+
     if (IsPvdConnected())
     {
         std::vector<PxDebugLine> lines;
         GetCapsuleDebugLines(lines);
-        if (!lines.empty()) m_Scene->getScenePvdClient()->drawLines(lines.data(), static_cast<PxU32>(lines.size()));
+        if (!lines.empty())
+        {
+            m_Scene->getScenePvdClient()->drawLines(lines.data(), static_cast<PxU32>(lines.size()));
+        }
     }
+
+	// 이 부분에서 PhsyX를 생성할때 할당 처리한 워커스레드를 이용해서 물리 시뮬레이션을 진행한다. FixedDeltaTime은 1/60초로 고정되어 있다.
     m_Scene->simulate(static_cast<float>(FixedDeltaTime));
-    m_Scene->fetchResults(true); // Actor poses are safe to read after this completes.
+
+	// PhysX는 시뮬레이션이 끝나면 fetchResults()를 호출해야 한다. fetchResults()가 끝나야 Actor의 pose를 읽을 수 있다. true파라미터는 simulate의 결과를 다 받고 진행하겠다는 뜻.
+    m_Scene->fetchResults(true); 
     ++m_StepCount;
     m_LastSubsteps = 1;
 }
 
+
+/*
+이번 프레임에 지난 시간을 받아서 물리 시뮬레이션을 몇 번 실행할지 결정한다
+
+*/
 uint32_t PhysicsWorld::Update(double elapsedSeconds, const BeforeStep& beforeStep)
 {
     m_LastSubsteps = 0;
     if (!m_Scene || !std::isfinite(elapsedSeconds) || elapsedSeconds <= 0.0)
-        return 0;
+    {   
+		return 0;
+    }
 
     // Keep at most eight steps from this frame. Discard long debugger/window stalls
     // instead of creating a growing backlog; preserve the previous fractional step.
@@ -204,16 +231,25 @@ uint32_t PhysicsWorld::Update(double elapsedSeconds, const BeforeStep& beforeSte
         m_DroppedTime += elapsedSeconds - maxElapsed;
         elapsedSeconds = maxElapsed;
     }
+
+	// 이 프로젝트에서는 물리를 고정 시간 1/60으로 계산하므로 지난 시간을 누적해서 1/60보다 크면 Step()을 호출한다. Step()은 PhysX의 simulate()과 fetchResults()를 호출한다.
     m_Accumulator += elapsedSeconds;
+
     uint32_t steps = 0;
+
+	// 1/60초가 쌓일 때마다 물리를 한번 진행한다. MaxSubsteps를 넘어가면 더 이상 진행하지 않고, 남은 시간은 다음 프레임으로 넘긴다.
     while (m_Accumulator + 1e-10 >= FixedDeltaTime && steps < MaxSubsteps)
     {
         Step(beforeStep);
         m_Accumulator -= FixedDeltaTime;
         ++steps;
     }
+
     if (m_Accumulator < 0.0)
-        m_Accumulator = 0.0;
+    {
+		m_Accumulator = 0.0;
+    }
+
     m_LastSubsteps = steps;
     return steps;
 }

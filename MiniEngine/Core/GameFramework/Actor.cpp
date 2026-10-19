@@ -88,33 +88,61 @@ namespace PARS
     void Actor::Tick(float deltaTime)
     {
         if (!m_BegunPlay || m_PendingDestroy || !std::isfinite(deltaTime) || deltaTime < 0.0f)
-            return;
+        {
+			return;
+        }
+        
         for (const auto& component : m_Components)
         {
             if (!m_BegunPlay || m_PendingDestroy)
+            {
                 break;
+            }
+
             if (component->IsTickEnabled())
+            {
                 component->TickComponent(deltaTime);
+            }          
         }
     }
 
     void Actor::PreparePhysics(float deltaTime)
     {
-        if (!m_BegunPlay || m_PendingDestroy) return;
+        if (!m_BegunPlay || m_PendingDestroy)
+        {
+            return;
+        }
+
         for (const auto& component : m_Components)
         {
-            if (m_PendingDestroy || !m_BegunPlay) break;
-            if (component->IsTickEnabled()) component->PreparePhysics(deltaTime);
+            if (m_PendingDestroy || !m_BegunPlay)
+            {
+                break;
+            }
+            if (component->IsTickEnabled())
+            {
+                component->PreparePhysics(deltaTime);
+            }
         }
     }
 
     void Actor::FixedTick(float deltaTime)
     {
-        if (!m_BegunPlay || m_PendingDestroy) return;
+        if (!m_BegunPlay || m_PendingDestroy)
+        {
+            return;
+        }
+
         for (const auto& component : m_Components)
         {
-            if (m_PendingDestroy || !m_BegunPlay) break;
-            if (component->IsTickEnabled()) component->FixedTickComponent(deltaTime);
+            if (m_PendingDestroy || !m_BegunPlay)
+            {
+                break;
+            }
+            if (component->IsTickEnabled())
+            {
+                component->FixedTickComponent(deltaTime);
+            }
         }
     }
 }

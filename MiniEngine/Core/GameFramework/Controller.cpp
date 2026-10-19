@@ -12,14 +12,27 @@ namespace PARS
     bool Controller::Possess(Pawn& pawn)
     {
         if (!GetWorld() || pawn.GetWorld() != GetWorld() || pawn.IsPendingDestroy() || IsPendingDestroy())
-            return false;
-        if (GetPawn() == &pawn) return true;
+        {
+			return false;
+        }
+           
+        if (GetPawn() == &pawn)
+        {
+            return true;
+        }
+
         UnPossess();
-        if (auto old = pawn.GetController()) old->UnPossess();
+
+        if (auto old = pawn.GetController())
+        {
+            old->UnPossess();
+        }
+
         m_Pawn = pawn.GetHandle();
         pawn.m_Controller = GetHandle();
         pawn.ConsumeMovementInput();
         pawn.SetRunRequested(false);
+
         return true;
     }
 
@@ -34,5 +47,9 @@ namespace PARS
         m_Pawn = {};
     }
 
-    void Controller::EndPlay() { UnPossess(); Actor::EndPlay(); }
+    void Controller::EndPlay() 
+    { 
+        UnPossess(); 
+        Actor::EndPlay(); 
+    }
 }

@@ -25,7 +25,11 @@ namespace PARS
     void PlayerController::Tick(float deltaTime)
     {
         Actor::Tick(deltaTime);
-        if (!HasBegunPlay() || IsPendingDestroy()) return;
+        if (!HasBegunPlay() || IsPendingDestroy())
+        {
+            return;
+        }
+
         if (auto pawn = GetPawn())
         {
             pawn->SetRunRequested(m_InputEnabled && m_Run);

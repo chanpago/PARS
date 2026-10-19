@@ -56,21 +56,47 @@ namespace PARS
 
     void SkeletalMeshComponent::TickComponent(float deltaTime)
     {
-        if (IsRagdoll()) UpdatePhysicsPose();
-        else if (m_Ragdoll.IsActive()) UpdateKinematicPose(true);
-        else m_AnimInstance->UpdateAnimation(deltaTime);
+        if (IsRagdoll())
+        {
+            UpdatePhysicsPose();
+        }
+        else if (m_Ragdoll.IsActive())
+        {
+            UpdateKinematicPose(true);
+        }
+        else
+        {
+            m_AnimInstance->UpdateAnimation(deltaTime);
+        }
     }
 
+    /*
+    * 애니메이션을 진행하고, 래그돌이 따라갈 목표 자세를 갱신한다
+    */
     void SkeletalMeshComponent::FixedTickComponent(float deltaTime)
     {
-        if (!m_Ragdoll.IsActive()) return;
+        if (!m_Ragdoll.IsActive())
+        {
+            return;
+        }
+
         if (m_PendingDriveSettings)
         {
             if (m_Ragdoll.ApplyDriveSettings(*m_PendingDriveSettings, m_PhysicsError))
+            {
                 m_PhysicsAsset = std::move(m_PendingDriveSettings);
-            else m_PendingDriveSettings.reset();
+            }
+            else
+            {
+                m_PendingDriveSettings.reset();
+            }
         }
-        if (m_PhysicsMode == PhysicsAnimationMode::PassiveRagdoll) return;
+
+        if (m_PhysicsMode == PhysicsAnimationMode::PassiveRagdoll)
+        {
+            return;
+        }
+
         // Character movement has already updated the component root. Sample the
         // animation before simulate(), so both PVD and rendering see this pose.
         m_AnimInstance->UpdateAnimation(deltaTime);
@@ -88,7 +114,10 @@ namespace PARS
                 m_PhysicsMode = PhysicsAnimationMode::PassiveRagdoll;
             }
         }
-        else UpdateKinematicPose(false);
+        else
+        {
+            UpdateKinematicPose(false);
+        }
     }
 
     bool SkeletalMeshComponent::UpdateRenderData(GraphicsContext& context, const std::vector<GraphNode>* poseOverride)

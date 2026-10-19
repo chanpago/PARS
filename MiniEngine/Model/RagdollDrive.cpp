@@ -90,7 +90,11 @@ namespace PARS
 
     bool Ragdoll::UpdateDriveTargets(const std::vector<Matrix4>& boneWorld, float deltaTime, std::string& error)
     {
-        if (!IsActive() || !std::isfinite(deltaTime) || deltaTime < 0) { error = "Invalid drive update."; return false; }
+        if (!IsActive() || !std::isfinite(deltaTime) || deltaTime < 0) 
+        { 
+            error = "Invalid drive update."; 
+            return false; 
+        }
 #if defined(_M_X64)
         std::vector<Matrix4> bodies;
         bodies.reserve(m_Bodies.size());
@@ -98,16 +102,30 @@ namespace PARS
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
             const int node = m_BoneNodes[i];
-            if (node < 0 || size_t(node) >= boneWorld.size()) { error = "Drive target has no matching bone."; return false; }
+            if (node < 0 || size_t(node) >= boneWorld.size()) 
+            { 
+                error = "Drive target has no matching bone.";
+                return false; 
+            }
+
             const auto transform = PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform();
             const auto frame = PhysicsJointFrame::FromTransform(transform);
+
             if (!ToPx(Quaternion(DirectX::XMLoadFloat4(&frame.rotation))).isSane())
-            { error = "Invalid drive target rotation."; return false; }
+            { 
+                error = "Invalid drive target rotation.";
+                return false; 
+            }
             if (int(i) == m_SupportBody)
             {
                 supportedPose = PxTransform(PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
                     ToPx(Quaternion(DirectX::XMLoadFloat4(&frame.rotation))));
-                if (!supportedPose.isValid()) { error = "Invalid supported pelvis target."; return false; }
+
+                if (!supportedPose.isValid())
+                { 
+                    error = "Invalid supported pelvis target."; 
+                    return false; 
+                }
             }
             bodies.push_back(transform);
         }
@@ -119,7 +137,11 @@ namespace PARS
             const auto& a = bodies[m_Asset.FindBody(data.parentBone)];
             const auto& b = bodies[m_Asset.FindBody(data.childBone)];
             const auto target = EvaluateJointDriveTarget(data, a, b);
-            if (!ToPx(target).isSane()) { error = "Non-finite joint drive target."; return false; }
+            if (!ToPx(target).isSane())
+            { 
+                error = "Non-finite joint drive target."; 
+                return false; 
+            }
             targets.push_back(target);
             m_MaxTargetClampAngle = PxMax(m_MaxTargetClampAngle, Angle(ToPx(target), ToPx(EvaluateJointDriveTarget(data, a, b, false))));
         }
@@ -134,7 +156,11 @@ namespace PARS
                 const auto previous = m_SupportJoint->getDrivePosition();
                 linear = LimitMagnitude((supportedPose.p - previous.p) / deltaTime, 10.0f);
                 PxQuat delta = supportedPose.q * previous.q.getConjugate();
-                if (delta.w < 0) delta = -delta;
+
+                if (delta.w < 0)
+                {
+                    delta = -delta;
+                }
                 PxReal angle; PxVec3 axis; delta.toRadiansAndUnitAxis(angle, axis);
                 angular = axis * PxMin(angle / deltaTime, 20.0f);
             }

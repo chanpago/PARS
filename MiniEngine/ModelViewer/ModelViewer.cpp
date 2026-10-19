@@ -394,6 +394,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     PARS::PhysicsSkeleton physicsSkeleton;
     PARS::PhysicsAsset defaultPA;
     const std::vector<GraphNode> reference(models[0]->m_SceneGraph.get(), models[0]->m_SceneGraph.get() + models[0]->m_NumNodes);
+
     if (mesh.BuildPhysicsSkeleton(physicsSkeleton, m_RagdollMessage) &&
         PARS::BuildMixamoPhysicsAsset(physicsSkeleton, reference, defaultPA, m_RagdollMessage) &&
         mesh.SetPhysicsAsset(defaultPA, m_RagdollMessage)) m_RagdollMessage = "Mixamo default PA assigned.";
@@ -408,8 +409,11 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     {
         auto player = m_World.SpawnActor<PARS::PlayerController>("PlayerController");
         if (player && player->Possess(*character))
+        {
             m_PlayerController = player->GetHandle();
+        }      
     }
+
     m_World.Tick(0.0f);
     auto& context = GraphicsContext::Begin(L"Initialize Character Pose");
     Renderer::UpdateWorldRenderData(m_World, context);
@@ -417,10 +421,15 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     m_PreviewReady = true;
     ResetPreviewCamera();
     m_MeshViewer = std::make_unique<SkeletalMeshViewer>();
+
     if (!m_MeshViewer->Initialize(models, kPreviewNames, kPreviewCount))
+    {
         m_MeshViewer.reset();
+    }        
     else if (mesh.GetPhysicsAsset())
-        m_MeshViewer->SetPhysicsAsset(*mesh.GetPhysicsAsset(), m_PreviewError);
+    {
+		m_MeshViewer->SetPhysicsAsset(*mesh.GetPhysicsAsset(), m_PreviewError);
+    }
 }
 
 void ModelViewer::SelectPreview(uint32_t index)
@@ -578,12 +587,17 @@ void ModelViewer::Update( float deltaT )
     }
 
     if (GameInput::IsFirstPressed(GameInput::kLShoulder))
+    {
         DebugZoom.Decrement();
+    }
     else if (GameInput::IsFirstPressed(GameInput::kRShoulder))
+    {
         DebugZoom.Increment();
-
+    }
+       
     m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
     UpdateCharacterInput(deltaT);
+
     if ((!GetPlayerController() || m_FreeCamera) && !(m_MeshViewer && m_MeshViewer->WantsInput()))
     {
         m_CameraController->EnableMouseInput(GameInput::IsPressed(GameInput::kMouse1));
@@ -592,15 +606,26 @@ void ModelViewer::Update( float deltaT )
 
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
     m_World.Tick(deltaT);
+
+
 #if defined(_M_X64)
     if (m_PhysicsDemo)
+    {
         m_PhysicsDemo->Update(deltaT);
+    }       
 #endif
     if (GetPlayerController() && !m_FreeCamera)
-        UpdateFollowCamera();
+    {
+		UpdateFollowCamera();
+    }
+
     Renderer::UpdateWorldRenderData(m_World, gfxContext);
     m_ModelInst.Update(gfxContext, deltaT);
-    if (m_MeshViewer) m_MeshViewer->Update(deltaT);
+
+    if (m_MeshViewer)
+    {
+        m_MeshViewer->Update(deltaT);
+    }
 
     gfxContext.Finish();
 

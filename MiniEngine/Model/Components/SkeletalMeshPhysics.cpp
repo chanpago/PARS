@@ -35,11 +35,21 @@ namespace PARS
         const float differences[] = {float(Length(Vector3(component.GetX()) - Vector3(rigid.GetX()))),
             float(Length(Vector3(component.GetY()) - Vector3(rigid.GetY()))),
             float(Length(Vector3(component.GetZ()) - Vector3(rigid.GetZ())))};
+
         for (float difference : differences)
+        {
             if (!std::isfinite(difference) || difference > .001f)
-            { error = "PA bodies require a rigid, unit-scale component transform."; return false; }
+            {
+                error = "PA bodies require a rigid, unit-scale component transform.";
+                return false;
+            }
+        }
         if (!std::isfinite(float(Length(Vector3(component.GetW())))))
-        { error = "Invalid PA component position."; return false; }
+        { 
+            error = "Invalid PA component position."; 
+            return false; 
+        }
+
         return EvaluatePhysicsPose(skeleton, m_AnimInstance->GetPose(), component, worldPose, error);
     }
 
@@ -68,31 +78,57 @@ namespace PARS
 
     bool SkeletalMeshComponent::BuildPhysicsSkeleton(PhysicsSkeleton& skeleton, std::string& error) const
     {
-        if (!m_SkeletalMesh) { error = "Assign a skeletal mesh first."; return false; }
+        if (!m_SkeletalMesh)
+        { 
+            error = "Assign a skeletal mesh first."; 
+            return false; 
+        }
         const auto& model = *m_SkeletalMesh;
-        skeleton.names = model.m_NodeNames; skeleton.parents = model.m_NodeParents;
+        skeleton.names = model.m_NodeNames; 
+        skeleton.parents = model.m_NodeParents;
         skeleton.meshNodes.assign(model.m_NumNodes, -1);
+
         if (skeleton.names.size() != model.m_NumNodes || skeleton.parents.size() != model.m_NumNodes)
-        { error = "Skeletal mesh is missing its named hierarchy."; return false; }
+        {
+            error = "Skeletal mesh is missing its named hierarchy."; 
+            return false; 
+        }
+
         std::vector<int> matrixNode(model.m_NumNodes, -1);
+
         for (uint32_t i = 0; i < model.m_NumNodes; ++i)
-            if (model.m_SceneGraph[i].matrixIdx < model.m_NumNodes) matrixNode[model.m_SceneGraph[i].matrixIdx] = static_cast<int>(i);
+        {
+            if (model.m_SceneGraph[i].matrixIdx < model.m_NumNodes)
+            {
+                matrixNode[model.m_SceneGraph[i].matrixIdx] = static_cast<int>(i);
+            }
+        }
+
         const uint8_t* meshData = model.m_MeshData.get();
         for (uint32_t i = 0; i < model.m_NumMeshes; ++i)
         {
             const Mesh& mesh = *reinterpret_cast<const Mesh*>(meshData);
             if (mesh.numJoints)
             {
-                if (mesh.meshCBV >= matrixNode.size() || matrixNode[mesh.meshCBV] < 0 ||
-                    uint32_t(mesh.startJoint) + mesh.numJoints > model.m_NumJoints)
-                { error = "Invalid skin mesh binding."; return false; }
+                if (mesh.meshCBV >= matrixNode.size() || matrixNode[mesh.meshCBV] < 0 || uint32_t(mesh.startJoint) + mesh.numJoints > model.m_NumJoints)
+                { 
+                    error = "Invalid skin mesh binding."; 
+                    return false; 
+                }
                 for (uint32_t j = mesh.startJoint; j < uint32_t(mesh.startJoint) + mesh.numJoints; ++j)
                 {
                     const auto node = model.m_JointIndices[j];
-                    if (node >= model.m_NumNodes) { error = "Invalid skin joint index."; return false; }
+                    if (node >= model.m_NumNodes)
+                    { 
+                        error = "Invalid skin joint index."; 
+                        return false; 
+                    }
                     auto& owner = skeleton.meshNodes[node];
                     if (owner >= 0 && owner != matrixNode[mesh.meshCBV])
-                    { error = "Ragdoll currently requires each joint to use one skin transform."; return false; }
+                    { 
+                        error = "Ragdoll currently requires each joint to use one skin transform."; 
+                        return false; 
+                    }
                     owner = matrixNode[mesh.meshCBV];
                 }
             }
