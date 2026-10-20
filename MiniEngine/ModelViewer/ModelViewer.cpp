@@ -133,13 +133,19 @@ public:
         }
 #if defined(_M_X64)
         std::wstring comparisonCapture;
-        if (m_Comparison && m_Comparison->GetState() == RagdollComparisonRunner::State::Complete &&
-            CommandLineArgs::GetString(L"comparisoncapture", comparisonCapture))
+        if (m_Comparison && CommandLineArgs::GetString(L"comparisoncapture", comparisonCapture))
         {
             // Read back the rendered buffers; PrintWindow cannot capture a DX12 flip-model window.
-            g_OverlayBuffer.ExportToFile(comparisonCapture + L".ui");
-            g_SceneColorBuffer.ExportToFile(comparisonCapture + L".scene");
-            return true;
+            if (++m_ComparisonCaptureFrames == 10)
+            {
+                g_OverlayBuffer.ExportToFile(comparisonCapture + L".launch.ui");
+            }
+            if (m_Comparison->GetState() == RagdollComparisonRunner::State::Complete)
+            {
+                g_OverlayBuffer.ExportToFile(comparisonCapture + L".ui");
+                g_SceneColorBuffer.ExportToFile(comparisonCapture + L".scene");
+                return true;
+            }
         }
 #endif
         // 미리보기에 포커스가 있으면 Escape를 미리보기에서 처리한다(기즈모 드래그 취소).
@@ -193,6 +199,7 @@ private:
     unique_ptr<RagdollComparisonRunner> m_Comparison;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
+    uint32_t m_ComparisonCaptureFrames = 0;
 #endif
 };
 
@@ -502,8 +509,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         if (!m_RagdollTestDone && CommandLineArgs::GetInteger(L"comparisonpreview", comparisonPreview) &&
             comparisonPreview && mesh.GetPhysicsAsset())
         {
-            m_Comparison->Start(*mesh.GetPhysicsAsset(), RagdollComparisonRunner::Settings{});
-            m_Comparison->Open();
+            m_Comparison->RequestWalkingComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
+                mesh.GetPhysicsAsset());
         }
     }
 #endif
@@ -1016,6 +1023,14 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("Character Animation", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
+#if defined(_M_X64)
+            if (m_Comparison && ImGui::Button("Start Walking comparison"))
+            {
+                auto character = GetPreviewCharacter();
+                m_Comparison->RequestWalkingComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
+                    character ? character->GetMesh().GetPhysicsAsset() : nullptr);
+            }
+#endif
             auto animation = GetPreviewAnimation();
             if (!m_PreviewReady || !animation)
             {
@@ -1109,7 +1124,17 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         ImGui::End();
         if (m_MeshViewer)
         {
+#if defined(_M_X64)
+            m_MeshViewer->RenderUI(context, m_Comparison != nullptr);
+            if (m_MeshViewer->ConsumeComparisonRequest() && m_Comparison)
+            {
+                auto character = GetPreviewCharacter();
+                m_Comparison->RequestWalkingComparison(&m_MeshViewer->GetPhysicsAsset(),
+                    character ? character->GetMesh().GetPhysicsAsset() : nullptr);
+            }
+#else
             m_MeshViewer->RenderUI(context);
+#endif
         }
 #if defined(_M_X64)
         if (m_Comparison)

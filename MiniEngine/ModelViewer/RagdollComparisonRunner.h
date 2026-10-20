@@ -41,6 +41,7 @@ public:
     void SetPaused(bool paused);
     void Stop();
     void DrawUI(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character);
+    void RequestWalkingComparison(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character);
     // UI 변경은 다음 Update의 렌더 명령 기록 전에 처리한다.
     void ProcessRequests();
     bool ConsumeFocusRequest();
@@ -74,7 +75,7 @@ public:
         return m_Message;
     }
     Math::Vector3 GetViewCenter() const;
-    std::string GetDescription() const;
+    std::string GetDescription(bool korean = false) const;
     bool Export(const std::string& path);
 
 private:

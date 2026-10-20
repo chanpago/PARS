@@ -234,6 +234,28 @@ void RagdollComparisonRunner::Stop()
     }
 }
 
+void RagdollComparisonRunner::RequestWalkingComparison(const PhysicsAsset* editor, const PhysicsAsset* character)
+{
+    Open();
+    if (m_State == State::Running || m_State == State::Paused || m_StartRequested)
+    {
+        return;
+    }
+    const bool useEditor = editor && !editor->bodies.empty();
+    const auto* source = useEditor ? editor : character;
+    if (!source || source->bodies.empty())
+    {
+        m_Message = "Assign a physics asset before starting a comparison.";
+        return;
+    }
+    m_UseEditor = useEditor;
+    m_RequestedAsset = *source;
+    m_RequestedSettings = Settings{};
+    m_RequestedSource = useEditor ? "Editor PA (snapshot at start)" : "Character PA (snapshot at start)";
+    m_ResetRequested = false;
+    m_StartRequested = true;
+}
+
 void RagdollComparisonRunner::ProcessRequests()
 {
     if (m_StartRequested || m_ResetRequested)
@@ -264,9 +286,28 @@ Vector3 RagdollComparisonRunner::GetViewCenter() const
         m_Settings.speed * static_cast<float>(m_Steps * PhysicsWorld::FixedDeltaTime));
 }
 
-std::string RagdollComparisonRunner::GetDescription() const
+std::string RagdollComparisonRunner::GetDescription(bool korean) const
 {
     std::ostringstream text;
+    if (korean)
+    {
+        const auto& name = m_Names[m_Settings.clip];
+        const auto clip = name == "Walking" ? u8"걷기 (Walking)" : name == "Idle" ? u8"대기 (Idle)"
+            : name == "Slow Run"                                                  ? u8"달리기 (Slow Run)"
+                                                                                  : name.c_str();
+        const auto source = m_SourceLabel == "Editor PA (snapshot at start)" ? u8"에디터 PA (시작 시 복사)"
+            : m_SourceLabel == "Character PA (snapshot at start)"            ? u8"캐릭터 PA (시작 시 복사)"
+                                                                             : u8"입력된 PA (시작 시 복사)";
+        text << u8"클립: " << clip << u8" | 물리 에셋: " << source
+             << " | " << (m_Settings.suspended ? u8"공중 지지 (+1 m)" : u8"바닥 접촉")
+             << u8" | 지정 경로 +Z 이동: " << m_Settings.speed << " m/s"
+             << u8" | 표본: " << m_Steps << "/" << m_TargetSteps
+             << u8" | 클립 길이: " << (m_Meshes[0] ? m_Meshes[0]->GetAnimInstance().GetAnimationDuration(m_Settings.clip) : 0)
+             << u8"초 | 지연으로 제외된 실시간: " << m_DroppedTime << u8"초"
+             << u8" | 상태: " << (m_State == State::Complete ? u8"완료" : m_State == State::Failed ? u8"실패 / 부분 결과"
+                                                                                                   : u8"부분 결과");
+        return text.str();
+    }
     text << "Clip: " << m_Names[m_Settings.clip] << " | PA: " << m_SourceLabel
          << " | " << (m_Settings.suspended ? "suspended (+1 m)" : "floor contact")
          << " | prescribed +Z travel: " << m_Settings.speed << " m/s"
@@ -280,7 +321,7 @@ std::string RagdollComparisonRunner::GetDescription() const
 
 bool RagdollComparisonRunner::Export(const std::string& path)
 {
-    if (m_Results.ExportHtml(path, GetDescription(), m_Message))
+    if (m_Results.ExportHtml(path, GetDescription(true), m_Message))
     {
         m_Message = "Saved: " + path;
         return true;

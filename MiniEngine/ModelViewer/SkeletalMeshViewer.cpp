@@ -183,7 +183,7 @@ void SkeletalMeshViewer::UpdateCamera(bool hovered)
     }
 }
 
-void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
+void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvailable)
 {
     m_Focused = false;
     if (!m_Open || !m_Mesh)
@@ -218,6 +218,14 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context)
         ImGui::SameLine();
         ImGui::TextDisabled("| %u bones | %zu bodies | %zu constraints", m_Mesh->GetSkeletalMesh()->m_NumJoints,
             m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size());
+        ImGui::BeginDisabled(!comparisonAvailable || m_PhysicsAsset.bodies.empty());
+        if (ImGui::Button("Start Walking comparison"))
+        {
+            m_ComparisonRequested = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Kinematic vs active | 6 seconds | current editor PA | Korean HTML report");
         ImGui::SetNextItemWidth(130);
         if (ImGui::BeginCombo("##Animation", animation.GetAnimationName(animation.GetCurrentAnimationIndex()).c_str()))
         {

@@ -30,7 +30,13 @@ public:
     bool Initialize(const std::shared_ptr<const Model>* models, const char* const* names, uint32_t count);
     void Cleanup(); // GPU가 유휴 상태가 된 후, 렌더러/ImGui를 종료하기 전에 호출한다.
     void Update(float deltaTime);
-    void RenderUI(GraphicsContext& context);
+    void RenderUI(GraphicsContext& context, bool comparisonAvailable = false);
+    bool ConsumeComparisonRequest()
+    {
+        const bool requested = m_ComparisonRequested;
+        m_ComparisonRequested = false;
+        return requested;
+    }
     void Open()
     {
         m_Open = true;
@@ -103,6 +109,7 @@ private:
     float m_Yaw = 0;
     float m_Pitch = 0.12f;
     bool m_Open = true;
+    bool m_ComparisonRequested = false;
     bool m_Focused = false;
     bool m_FocusRequested = true;
     bool m_Flying = false;

@@ -27,6 +27,19 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
     try
     {
         check(report.good(), "Open imported-character comparison validation");
+        runner.RequestWalkingComparison(&asset, nullptr);
+        check(runner.GetState() == RagdollComparisonRunner::State::Empty && runner.GetWorld().GetActorCount() == 0,
+            "Editor button queues creation without changing actors during UI rendering");
+        runner.ProcessRequests();
+        check(runner.GetState() == RagdollComparisonRunner::State::Running && runner.GetWorld().GetActorCount() == 2,
+            "Editor button starts default Walking comparison at the next safe update");
+        runner.SetPaused(true);
+        check(runner.Step(), "Editor-launched comparison can pause and step");
+        runner.RequestWalkingComparison(&asset, nullptr);
+        runner.ProcessRequests();
+        check(runner.GetState() == RagdollComparisonRunner::State::Paused && runner.GetResults().GetFrames().size() == 1,
+            "Repeated launch button keeps an existing recording");
+        runner.Reset();
         std::vector<ComparisonFrame> reference;
         for (int fps : {30, 60, 144})
         {
