@@ -10,6 +10,17 @@
 using namespace Math;
 using namespace PARS;
 
+namespace
+{
+    struct SequenceStage
+    {
+        double endTime, speed;
+    };
+    constexpr SequenceStage Sequence[] = {{2, 0}, {6, 1.6}, {10, 3}};
+    constexpr size_t SequenceCount = sizeof(Sequence) / sizeof(Sequence[0]);
+    constexpr float BlendDuration = .2f;
+}
+
 RagdollComparisonRunner::RagdollComparisonRunner(PhysicsWorld& owner,
     const std::shared_ptr<const Model>* models, const char* const* names, uint32_t count)
     : m_Owner(owner), m_Models(models, models + count)
@@ -45,16 +56,28 @@ void RagdollComparisonRunner::Fail(const std::string& message)
 bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& settings)
 {
     std::string error;
-    if (!asset.Validate(error) || asset.bodies.empty() || settings.clip < 0 ||
-        size_t(settings.clip) >= m_Models.size() || !std::isfinite(settings.duration) ||
-        settings.duration < 1 || settings.duration > 60 || !std::isfinite(settings.speed) ||
-        settings.speed < 0 || settings.speed > 3)
+    auto playback = settings;
+    if (playback.sequence)
+    {
+        if (m_Models.size() < SequenceCount)
+        {
+            m_Message = u8"연속 비교에는 Idle, Walking, Slow Run 클립이 필요합니다.";
+            return false;
+        }
+        playback.clip = 0;
+        playback.duration = static_cast<float>(Sequence[SequenceCount - 1].endTime);
+        playback.speed = 0;
+    }
+    if (!asset.Validate(error) || asset.bodies.empty() || playback.clip < 0 ||
+        size_t(playback.clip) >= m_Models.size() || !std::isfinite(playback.duration) ||
+        playback.duration < 1 || playback.duration > 60 || !std::isfinite(playback.speed) ||
+        playback.speed < 0 || playback.speed > 3)
     {
         m_Message = error.empty() ? u8"비교 설정이 올바르지 않습니다 (시간 1~60초, 속도 0~3 m/s)." : error;
         return false;
     }
     Reset();
-    m_Settings = settings;
+    m_Settings = playback;
     m_SourceLabel = m_RequestedSource.empty() ? "Supplied PA snapshot" : m_RequestedSource;
     // Recreate the scene as well as its actors so reruns start with identical solver state.
     if (!m_World.InitializePhysics(false, &m_Owner))
@@ -95,7 +118,7 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
                 return false;
             }
         }
-        mesh.GetAnimInstance().PlayAnimation(settings.clip);
+        mesh.GetAnimInstance().PlayAnimation(playback.clip);
         if (!mesh.SetPhysicsAsset(asset, error))
         {
             Fail(error);
@@ -126,7 +149,7 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
         Fail(error);
         return false;
     }
-    m_TargetSteps = static_cast<size_t>(std::round(settings.duration / PhysicsWorld::FixedDeltaTime));
+    m_TargetSteps = static_cast<size_t>(std::round(playback.duration / PhysicsWorld::FixedDeltaTime));
     m_State = State::Running;
     if (!Capture(true))
     {
@@ -157,15 +180,20 @@ bool RagdollComparisonRunner::Capture(bool baseline)
             poses[side].push_back(ragdoll.GetBoneWorld(i) * asset.bodies[i].GetLocalTransform());
         }
     }
-    const float time = m_Meshes[0]->GetAnimInstance().GetAnimationTime();
-    if (std::abs(time - m_Meshes[1]->GetAnimInstance().GetAnimationTime()) > 1e-6f ||
+    const auto& reference = m_Meshes[0]->GetAnimInstance();
+    const auto& actual = m_Meshes[1]->GetAnimInstance();
+    const float time = reference.GetAnimationTime();
+    if (std::abs(time - actual.GetAnimationTime()) > 1e-6f ||
+        reference.GetCurrentAnimationIndex() != actual.GetCurrentAnimationIndex() ||
+        std::abs(reference.GetBlendAlpha() - actual.GetBlendAlpha()) > 1e-6f ||
         !m_Meshes[1]->IsActiveRagdoll())
     {
-        Fail(u8"두 애니메이션의 시간이 달라졌거나 액티브 제어가 중단되었습니다.");
+        Fail(u8"두 애니메이션의 클립·시간·블렌딩이 달라졌거나 액티브 제어가 중단되었습니다.");
         return false;
     }
     std::string error;
-    if (!m_Results.Sample(poses[0], poses[1], time, error, baseline))
+    if (!m_Results.Sample(poses[0], poses[1], time, error, baseline,
+            reference.GetAnimationName(reference.GetCurrentAnimationIndex()), reference.GetBlendAlpha()))
     {
         Fail(error);
         return false;
@@ -179,10 +207,18 @@ bool RagdollComparisonRunner::Step()
     {
         return false;
     }
-    const float time = static_cast<float>((m_Steps + 1) * PhysicsWorld::FixedDeltaTime);
+    const int clip = GetTargetClip();
+    const float distance = GetTravelDistance((m_Steps + 1) * PhysicsWorld::FixedDeltaTime);
     for (int side = 0; side < 2; ++side)
     {
-        m_Meshes[side]->GetOwner().SetActorLocation(m_Placements[side] + Vector3(0, 0, m_Settings.speed * time));
+        auto& animation = m_Meshes[side]->GetAnimInstance();
+        if (animation.GetCurrentAnimationIndex() != uint32_t(clip) &&
+            !animation.TransitionToAnimation(clip, BlendDuration))
+        {
+            Fail(u8"다음 동작으로 블렌딩하지 못했습니다.");
+            return false;
+        }
+        m_Meshes[side]->GetOwner().SetActorLocation(m_Placements[side] + Vector3(0, 0, distance));
     }
     m_World.RequestPhysicsStep();
     m_World.Tick(0);
@@ -197,6 +233,42 @@ bool RagdollComparisonRunner::Step()
         m_Message = u8"완료했습니다. 바디/관절을 선택해 시간별 측정값을 확인하거나 HTML로 저장하세요.";
     }
     return true;
+}
+
+int RagdollComparisonRunner::GetTargetClip() const
+{
+    if (!m_Settings.sequence)
+    {
+        return m_Settings.clip;
+    }
+    size_t clip = 0;
+    while (clip + 1 < SequenceCount &&
+        m_Steps >= static_cast<size_t>(std::round(Sequence[clip].endTime / PhysicsWorld::FixedDeltaTime)))
+    {
+        ++clip;
+    }
+    return static_cast<int>(clip);
+}
+
+float RagdollComparisonRunner::GetTravelDistance(double time) const
+{
+    if (!m_Settings.sequence)
+    {
+        return m_Settings.speed * static_cast<float>(time);
+    }
+    // 자세 블렌딩과 같은 시간 동안 경로 속도도 바꾼다. 구간별 속도를 적분해
+    // 전환 시 위치가 뛰지 않으며, 일시정지나 렌더 FPS가 경로에 영향을 주지 않는다.
+    double distance = 0, start = 0, previousSpeed = 0;
+    for (const auto& stage : Sequence)
+    {
+        const double elapsed = std::max(0.0, std::min(time - start, stage.endTime - start));
+        const double blend = std::min(elapsed, double(BlendDuration));
+        distance += previousSpeed * blend + (stage.speed - previousSpeed) * blend * blend / (2 * BlendDuration) +
+            stage.speed * (elapsed - blend);
+        start = stage.endTime;
+        previousSpeed = stage.speed;
+    }
+    return static_cast<float>(distance);
 }
 
 void RagdollComparisonRunner::Advance(float deltaTime)
@@ -234,7 +306,7 @@ void RagdollComparisonRunner::Stop()
     }
 }
 
-void RagdollComparisonRunner::RequestWalkingComparison(const PhysicsAsset* editor, const PhysicsAsset* character)
+void RagdollComparisonRunner::RequestLocomotionComparison(const PhysicsAsset* editor, const PhysicsAsset* character)
 {
     Open();
     if (m_State == State::Running || m_State == State::Paused || m_StartRequested)
@@ -283,7 +355,7 @@ bool RagdollComparisonRunner::ConsumeFocusRequest()
 Vector3 RagdollComparisonRunner::GetViewCenter() const
 {
     return Vector3(0, (m_Settings.suspended ? 1.0f : 0.0f) + 1.0f,
-        m_Settings.speed * static_cast<float>(m_Steps * PhysicsWorld::FixedDeltaTime));
+        GetTravelDistance(m_Steps * PhysicsWorld::FixedDeltaTime));
 }
 
 std::string RagdollComparisonRunner::GetDescription(bool korean) const
@@ -298,22 +370,40 @@ std::string RagdollComparisonRunner::GetDescription(bool korean) const
         const auto source = m_SourceLabel == "Editor PA (snapshot at start)" ? u8"에디터 PA (시작 시 복사)"
             : m_SourceLabel == "Character PA (snapshot at start)"            ? u8"캐릭터 PA (시작 시 복사)"
                                                                              : u8"입력된 PA (시작 시 복사)";
-        text << u8"클립: " << clip << u8" | 물리 에셋: " << source
+        if (m_Settings.sequence)
+        {
+            text << u8"연속 재생: 대기 0–2초 → 걷기 2–6초 → 달리기 (Slow Run) 6–10초"
+                 << u8" | 전환 블렌딩: " << BlendDuration << u8"초 (각 구간 시간에 포함)"
+                 << u8" | +Z 이동 속도: 0 → 1.6 → 3 m/s (블렌딩 중 선형 변경)";
+        }
+        else
+        {
+            text << u8"클립: " << clip << u8" | 지정 경로 +Z 이동: " << m_Settings.speed << " m/s"
+                 << u8" | 클립 길이: " << (m_Meshes[0] ? m_Meshes[0]->GetAnimInstance().GetAnimationDuration(m_Settings.clip) : 0) << u8"초";
+        }
+        text << u8" | 물리 에셋: " << source
              << " | " << (m_Settings.suspended ? u8"공중 지지 (+1 m)" : u8"바닥 접촉")
-             << u8" | 지정 경로 +Z 이동: " << m_Settings.speed << " m/s"
              << u8" | 표본: " << m_Steps << "/" << m_TargetSteps
-             << u8" | 클립 길이: " << (m_Meshes[0] ? m_Meshes[0]->GetAnimInstance().GetAnimationDuration(m_Settings.clip) : 0)
-             << u8"초 | 지연으로 제외된 실시간: " << m_DroppedTime << u8"초"
+             << u8" | 지연으로 제외된 실시간: " << m_DroppedTime << u8"초"
              << u8" | 상태: " << (m_State == State::Complete ? u8"완료" : m_State == State::Failed ? u8"실패 / 부분 결과"
                                                                                                    : u8"부분 결과");
         return text.str();
     }
-    text << "Clip: " << m_Names[m_Settings.clip] << " | PA: " << m_SourceLabel
+    if (m_Settings.sequence)
+    {
+        text << "Sequence: Idle 0-2 s -> Walking 2-6 s -> Slow Run 6-10 s"
+             << " | blend: " << BlendDuration << " s (included in each stage)"
+             << " | +Z speed: 0 -> 1.6 -> 3 m/s (linear during blends)";
+    }
+    else
+    {
+        text << "Clip: " << m_Names[m_Settings.clip] << " | prescribed +Z travel: " << m_Settings.speed << " m/s"
+             << " | clip duration: " << (m_Meshes[0] ? m_Meshes[0]->GetAnimInstance().GetAnimationDuration(m_Settings.clip) : 0) << " s";
+    }
+    text << " | PA: " << m_SourceLabel
          << " | " << (m_Settings.suspended ? "suspended (+1 m)" : "floor contact")
-         << " | prescribed +Z travel: " << m_Settings.speed << " m/s"
          << " | samples: " << m_Steps << "/" << m_TargetSteps
-         << " | clip duration: " << (m_Meshes[0] ? m_Meshes[0]->GetAnimInstance().GetAnimationDuration(m_Settings.clip) : 0)
-         << " s | wall time discarded during stalls: " << m_DroppedTime << " s"
+         << " | wall time discarded during stalls: " << m_DroppedTime << " s"
          << " | state: " << (m_State == State::Complete ? "complete" : m_State == State::Failed ? "failed / partial"
                                                                                                 : "partial");
     return text.str();

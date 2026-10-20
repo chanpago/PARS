@@ -105,6 +105,8 @@ table{font-size:9px;white-space:normal}td,th{padding:4px}button,input,select{dis
 최초 배치 차이만 제거하며, 골반이 기준에서 벗어난 이동은 오차로 남깁니다. 물리 계산이 완료될 때마다 1/60초 간격으로 기록하고 시작 직후의 과도응답도 포함합니다.
 이동량 오차는 <b>두 변위 벡터의 차이 크기</b>이며, 회전 오차는 두 쿼터니언 사이의 최단 회전각입니다.</p>
 <button onclick="window.print()">인쇄 / PDF 저장</button> <button id="csv">전체 측정값 내려받기 (CSV)</button>
+<section><h2>애니메이션 재생 구간</h2><p class="muted">전환 시간은 다음 동작의 측정 구간에 포함됩니다. 시간 그래프의 음영은 블렌딩 구간입니다. 아래 바디·관절 요약은 전체 기록 기준입니다.</p>
+<div class="scroll"><table id="playback"></table></div></section>
 <section><h2>바디별 이동 비교</h2><p class="muted">최대 위치 오차가 큰 순서입니다. 위치는 콜라이더 중심 기준이며, 품질을 하나의 합격·불합격 점수로 환산하지 않습니다. 본 이름은 에셋의 식별자를 그대로 표시합니다.</p>
 <div class="scroll"><table id="bodies"></table></div></section>
 <section><h2>관절 제한과 추종 오차</h2><p class="muted">원본 → 보정 목표: 관절 제한 때문에 목표 자세가 변경된 각도입니다.
@@ -168,7 +170,8 @@ const data = )HTML";
         for (size_t i = 0; i < m_Frames.size(); ++i)
         {
             const auto& frame = m_Frames[i];
-            out << (i ? "," : "") << "{\"t\":" << frame.time << ",\"clip\":" << frame.clipTime << ",\"b\":[";
+            out << (i ? "," : "") << "{\"t\":" << frame.time << ",\"clip\":" << frame.clipTime
+                << ",\"animation\":" << JsonString(frame.clipName) << ",\"blend\":" << frame.blendAlpha << ",\"b\":[";
             for (size_t b = 0; b < frame.bodies.size(); ++b)
             {
                 const auto& body = frame.bodies[b];
@@ -206,6 +209,13 @@ function exposure(values){let count=0,longest=0,run=0,first=-1,last=-1;values.fo
 return {...stats(values.map(v=>v*deg)),percent:100*count/values.length,duration:count*data.step,longest:longest*data.step,first,last}}
 function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 $("description").textContent=data.description;
+const animationName=name=>({"Idle":"대기 (Idle)","Walking":"걷기 (Walking)","Slow Run":"달리기 (Slow Run)"}[name]||name||"이름 미기록");
+const stages=[];
+data.frames.forEach((f,i)=>{let stage=stages[stages.length-1];if(!stage||stage.name!==f.animation){
+stage={name:f.animation,start:i?data.frames[i-1].t:0,end:f.t,count:0,blending:f.blend<1,blendEnd:null};stages.push(stage)}
+stage.end=f.t;stage.count++;if(stage.blending&&stage.blendEnd===null&&f.blend>=1)stage.blendEnd=f.t});
+table("playback",["동작","시작 (초)","종료 (초)","기록 시간 (초)","표본 수","블렌딩 완료 (초)"],
+stages.map(s=>[animationName(s.name),s.start,s.end,s.count*data.step,String(s.count),s.blending?(s.blendEnd===null?"진행 중":s.blendEnd):"-"]));
 const frameSettings=f=>({"위치 (m)":f.p,"회전 쿼터니언 (x, y, z, w)":f.q});
 $("settings").textContent=JSON.stringify({
 "물리 시간 간격 (초)":data.step,
@@ -228,10 +238,12 @@ const x=v=>60+(v-xmin)/(xmax-xmin)*(w-90),y=v=>h-35-(v-ymin)/(ymax-ymin)*(h-65);
 ctx.clearRect(0,0,w,h);ctx.font="14px system-ui";ctx.fillStyle="#52647b";ctx.fillText(fmt(ymax),3,23);ctx.fillText(fmt(ymin),3,h-32);ctx.fillText(fmt(xmin),60,h-9);ctx.fillText(fmt(xmax),w-80,h-9);ctx.fillText(xlabel,w/2,h-9);
 ctx.strokeStyle="#c4ceda";ctx.beginPath();ctx.moveTo(60,20);ctx.lineTo(60,h-35);ctx.lineTo(w-30,h-35);ctx.stroke();
 bounds.forEach(v=>{ctx.setLineDash([6,5]);ctx.beginPath();ctx.moveTo(60,y(v));ctx.lineTo(w-30,y(v));ctx.stroke();ctx.setLineDash([])});
+if(xlabel==="시간 (초)")stages.filter(s=>s.blending).forEach(s=>{ctx.fillStyle="rgba(115,134,157,.15)";ctx.fillRect(x(s.start),20,x(s.blendEnd===null?s.end:s.blendEnd)-x(s.start),h-55);
+ctx.fillStyle="#52647b";ctx.fillText(animationName(s.name),x(s.start)+4,35)});
 series.forEach(s=>{ctx.strokeStyle=s.color;ctx.lineWidth=2;ctx.beginPath();s.points.forEach((p,i)=>{if(i)ctx.lineTo(x(p[0]),y(p[1]));else ctx.moveTo(x(p[0]),y(p[1]))});ctx.stroke()});
 if(selected!==null){ctx.strokeStyle="#263b52";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x(selected),20);ctx.lineTo(x(selected),h-35);ctx.stroke()}}
 function refresh(){const bi=+$("body").value,ji=+$("joint").value,fi=+$("frame").value,f=data.frames[fi],b=f.b[bi],a=+$("axis").value;
-$("time").textContent=`표본 ${fi+1} | 실험 시간 ${fmt(f.t)}초 | 클립 시간 ${fmt(f.clip)}초`;
+$("time").textContent=`표본 ${fi+1} | 실험 시간 ${fmt(f.t)}초 | ${animationName(f.animation)} | 클립 시간 ${fmt(f.clip)}초 | ${f.blend<1?"전환 블렌딩":"목표 동작"} ${(f.blend*100).toFixed(1)}%`;
 $("position").textContent=`${data.bodies[bi].name} | 기준 위치 XYZ (m): ${b.r.map(fmt).join(", ")} | 실제 위치 XYZ (m): ${b.a.map(fmt).join(", ")} | 위치 차이 (cm): ${b.d.map(v=>fmt(v*100)).join(", ")} | 이동량 차이 (cm/스텝): ${b.v.map(v=>fmt(v*100)).join(", ")}`;
 chart("bodyPlot",[{color:"#1674c5",points:data.frames.map(f=>[f.t,f.b[bi].p*100])},{color:"#bd590a",points:data.frames.map(f=>[f.t,f.b[bi].m*100])}],f.t);
 chart("trajectory",[{color:"#1674c5",points:data.frames.map(f=>[f.b[bi].r[2],f.b[bi].r[1]])},{color:"#bd590a",points:data.frames.map(f=>[f.b[bi].a[2],f.b[bi].a[1]])}],null,"Z (m)");
@@ -247,9 +259,9 @@ const e=exposure(data.frames.map(f=>f.j[ji].r.e[a])),actual=exposure(data.frames
 $("range").textContent=axes.slice(0,3).map((name,a)=>{const v=data.frames.map(f=>f.j[ji].r.a[a]*deg);return `${name} 원본 범위: ${fmt(Math.min(...v))} ~ ${fmt(Math.max(...v))}°`}).join(" | ");
 const singular=data.frames.filter(f=>f.j[ji].r.singular).length;$("singular").textContent=singular?`주의: ${singular}개 표본은 스윙이 180°에 가까워 트위스트 분해가 불명확합니다. 조인트 기준 좌표계를 확인하세요.`:"";}
 ["body","joint","frame","axis"].forEach(id=>$(id).addEventListener("input",refresh));
-$("csv").onclick=()=>{const rows=[["종류","본 이름","실험 시간 (초)","클립 시간 (초)","기준 X (m)","기준 Y (m)","기준 Z (m)","실제 X (m)","실제 Y (m)","실제 Z (m)","위치 차이 X (m)","위치 차이 Y (m)","위치 차이 Z (m)","이동량 차이 X (m/스텝)","이동량 차이 Y (m/스텝)","이동량 차이 Z (m/스텝)","위치 오차 (m)","이동량 오차 (m/스텝)","회전 오차 (rad)","목표 보정각 (rad)","추종 오차 (rad)","전체 오차 (rad)","원본 트위스트 (rad)","원본 스윙 Y (rad)","원본 스윙 Z (rad)","보정 트위스트 (rad)","보정 스윙 Y (rad)","보정 스윙 Z (rad)","실제 트위스트 (rad)","실제 스윙 Y (rad)","실제 스윙 Z (rad)","원본 트위스트 초과 (rad)","원본 스윙 Y 초과 (rad)","원본 스윙 Z 초과 (rad)","원본 원뿔 초과 (rad)"]];
-data.frames.forEach(f=>{f.b.forEach((b,i)=>rows.push(["바디",data.bodies[i].name,f.t,f.clip,...b.r,...b.a,...b.d,...b.v,b.p,b.m,b.q,...Array(16).fill("")]));
-f.j.forEach((j,i)=>rows.push(["관절",data.joints[i].name,f.t,f.clip,...Array(15).fill(""),j.c,j.k,j.e,...j.r.a,...j.b.a,...j.a.a,...j.r.e]))});
+$("csv").onclick=()=>{const rows=[["종류","본 이름","실험 시간 (초)","클립 시간 (초)","애니메이션","블렌딩 비율","기준 X (m)","기준 Y (m)","기준 Z (m)","실제 X (m)","실제 Y (m)","실제 Z (m)","위치 차이 X (m)","위치 차이 Y (m)","위치 차이 Z (m)","이동량 차이 X (m/스텝)","이동량 차이 Y (m/스텝)","이동량 차이 Z (m/스텝)","위치 오차 (m)","이동량 오차 (m/스텝)","회전 오차 (rad)","목표 보정각 (rad)","추종 오차 (rad)","전체 오차 (rad)","원본 트위스트 (rad)","원본 스윙 Y (rad)","원본 스윙 Z (rad)","보정 트위스트 (rad)","보정 스윙 Y (rad)","보정 스윙 Z (rad)","실제 트위스트 (rad)","실제 스윙 Y (rad)","실제 스윙 Z (rad)","원본 트위스트 초과 (rad)","원본 스윙 Y 초과 (rad)","원본 스윙 Z 초과 (rad)","원본 원뿔 초과 (rad)"]];
+data.frames.forEach(f=>{f.b.forEach((b,i)=>rows.push(["바디",data.bodies[i].name,f.t,f.clip,animationName(f.animation),f.blend,...b.r,...b.a,...b.d,...b.v,b.p,b.m,b.q,...Array(16).fill("")]));
+f.j.forEach((j,i)=>rows.push(["관절",data.joints[i].name,f.t,f.clip,animationName(f.animation),f.blend,...Array(15).fill(""),j.c,j.k,j.e,...j.r.a,...j.b.a,...j.a.a,...j.r.e]))});
 const quote=v=>'"'+String(v).replace(/"/g,'""')+'"';download("래그돌-비교.csv","\ufeff"+rows.map(r=>r.map(quote).join(",")).join("\r\n"),"text/csv;charset=utf-8")};
 refresh();
 </script></html>)HTML";

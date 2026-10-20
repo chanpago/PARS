@@ -50,6 +50,8 @@ namespace PARS
     struct ComparisonFrame
     {
         float time = 0, clipTime = 0;
+        std::string clipName;
+        float blendAlpha = 1;
         std::vector<ComparisonBodySample> bodies;
         std::vector<ComparisonJointSample> joints;
     };
@@ -75,7 +77,8 @@ namespace PARS
         bool Initialize(const PhysicsAsset& asset, const Math::Matrix4& referencePlacement,
             const Math::Matrix4& actualPlacement, float step, std::string& error);
         bool Sample(const std::vector<Math::Matrix4>& reference, const std::vector<Math::Matrix4>& actual,
-            float clipTime, std::string& error, bool baseline = false);
+            float clipTime, std::string& error, bool baseline = false,
+            const std::string& clipName = {}, float blendAlpha = 1);
         const PhysicsAsset& GetAsset() const
         {
             return m_Asset;

@@ -154,9 +154,10 @@ namespace PARS
     }
 
     bool RagdollComparison::Sample(const std::vector<Matrix4>& reference, const std::vector<Matrix4>& actual,
-        float clipTime, std::string& error, bool baseline)
+        float clipTime, std::string& error, bool baseline, const std::string& clipName, float blendAlpha)
     {
         if (m_Bodies.empty() || reference.size() != m_Bodies.size() || actual.size() != m_Bodies.size() || !std::isfinite(clipTime) ||
+            !std::isfinite(blendAlpha) || blendAlpha < 0 || blendAlpha > 1 ||
             (!baseline && m_PreviousReference.empty()) || (baseline && !m_Frames.empty()) ||
             !std::all_of(reference.begin(), reference.end(), Finite) || !std::all_of(actual.begin(), actual.end(), Finite))
         {
@@ -167,6 +168,8 @@ namespace PARS
         ComparisonFrame frame;
         frame.time = static_cast<float>(m_Frames.size() + 1) * m_Step;
         frame.clipTime = clipTime;
+        frame.clipName = clipName;
+        frame.blendAlpha = blendAlpha;
         frame.bodies.resize(m_Bodies.size());
         frame.joints.resize(m_Joints.size());
         for (size_t i = 0; i < m_Bodies.size(); ++i)

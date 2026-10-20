@@ -27,25 +27,44 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
     try
     {
         check(report.good(), "Open imported-character comparison validation");
-        runner.RequestWalkingComparison(&asset, nullptr);
+        runner.RequestLocomotionComparison(&asset, nullptr);
         check(runner.GetState() == RagdollComparisonRunner::State::Empty && runner.GetWorld().GetActorCount() == 0,
             "Editor button queues creation without changing actors during UI rendering");
         runner.ProcessRequests();
         check(runner.GetState() == RagdollComparisonRunner::State::Running && runner.GetWorld().GetActorCount() == 2,
-            "Editor button starts default Walking comparison at the next safe update");
+            "Editor button starts the Idle/Walking/Slow Run sequence at the next safe update");
         runner.SetPaused(true);
         check(runner.Step(), "Editor-launched comparison can pause and step");
-        runner.RequestWalkingComparison(&asset, nullptr);
+        runner.RequestLocomotionComparison(&asset, nullptr);
         runner.ProcessRequests();
         check(runner.GetState() == RagdollComparisonRunner::State::Paused && runner.GetResults().GetFrames().size() == 1,
             "Repeated launch button keeps an existing recording");
+        for (int i = 1; i < 120; ++i)
+        {
+            if (!runner.Step())
+            {
+                check(false, "Step through the initial Idle stage");
+            }
+        }
+        check(runner.GetResults().GetFrames().back().clipName == "Idle" &&
+                std::abs(float(runner.GetViewCenter().GetZ())) < 1e-6f,
+            "Idle lasts two seconds without prescribed forward travel");
+        check(runner.Step() && runner.GetResults().GetFrames().back().clipName == "Walking" &&
+                std::abs(runner.GetResults().GetFrames().back().blendAlpha - 1.0f / 12) < 1e-5f,
+            "The first Walking sample uses the existing 0.2-second pose blend");
+        const auto pausedBlend = runner.GetResults().GetFrames().back().blendAlpha;
+        runner.Advance(1);
+        check(runner.GetResults().GetFrames().size() == 121 &&
+                runner.GetResults().GetFrames().back().blendAlpha == pausedBlend,
+            "Pausing during a transition preserves the recording and blend clock");
+        check(runner.Step() && runner.GetResults().GetFrames().back().blendAlpha > pausedBlend,
+            "Single stepping advances the transition by one physics step");
         runner.Reset();
         std::vector<ComparisonFrame> reference;
         for (int fps : {30, 60, 144})
         {
             RagdollComparisonRunner::Settings settings;
-            settings.duration = 2;
-            check(runner.Start(asset, settings), "Start independent Walking dummies");
+            check(runner.Start(asset, settings), "Start independent locomotion-sequence dummies");
             check(runner.GetWorld().GetActorCount() == 2 &&
                     runner.GetWorld().GetPhysicsWorld()->GetDynamicBodyCount() == 2 * asset.bodies.size(),
                 "Two non-player actors with complete rigid body sets");
@@ -66,13 +85,30 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
             check(runner.GetResults().GetFrames().empty(), "Pause produces no samples");
             check(runner.Step() && runner.GetResults().GetFrames().size() == 1, "Single step captures once after physics");
             check(runner.Start(asset, settings), "Restart resets clocks and measurements");
-            for (int frame = 0; frame < fps * 2; ++frame)
+            for (int frame = 0; frame < fps * 10; ++frame)
             {
                 runner.Advance(1.0f / fps);
             }
             const auto& results = runner.GetResults();
-            check(runner.GetState() == RagdollComparisonRunner::State::Complete && results.GetFrames().size() == 120,
-                "Exactly 120 synchronized samples at 30/60/144 render FPS");
+            check(runner.GetState() == RagdollComparisonRunner::State::Complete && results.GetFrames().size() == 600,
+                "Exactly 600 synchronized samples at 30/60/144 render FPS");
+            bool correctStages = true;
+            for (size_t i = 0; i < results.GetFrames().size(); ++i)
+            {
+                const auto& sample = results.GetFrames()[i];
+                const auto* name = i < 120 ? "Idle" : i < 360 ? "Walking"
+                                                              : "Slow Run";
+                const size_t start = i < 120 ? 0 : i < 360 ? 120
+                                                           : 360;
+                const float alpha = i < 120 ? 1 : std::min(1.0f, float(i - start + 1) / 12);
+                correctStages &= sample.clipName == name && std::abs(sample.blendAlpha - alpha) < 1e-5f;
+            }
+            check(correctStages, "Record Idle for 120 steps, Walking for 240, Slow Run for 240, including both complete blends");
+            check(std::abs(results.GetFrames()[120].clipTime - results.GetStep()) < 1e-6f &&
+                    std::abs(results.GetFrames()[360].clipTime - results.GetStep()) < 1e-6f,
+                "Each new animation begins at its first physics sample");
+            check(std::abs(float(runner.GetViewCenter().GetZ()) - 18.1f) < 1e-4f,
+                "Camera follows the integrated 0/1.6/3 m/s path with continuous speed ramps");
             float maxClamp = 0;
             for (const auto& joint : results.GetJoints())
             {
@@ -88,11 +124,13 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
             else
             {
                 float maxPositionDelta = 0, maxAngleDelta = 0, maxClockDelta = 0;
+                bool samePlayback = true;
                 for (size_t frame = 0; frame < reference.size(); ++frame)
                 {
                     const auto& before = reference[frame];
                     const auto& after = results.GetFrames()[frame];
                     maxClockDelta = std::max(maxClockDelta, std::abs(before.clipTime - after.clipTime));
+                    samePlayback &= before.clipName == after.clipName && std::abs(before.blendAlpha - after.blendAlpha) < 1e-6f;
                     for (size_t body = 0; body < before.bodies.size(); ++body)
                     {
                         maxPositionDelta = std::max(maxPositionDelta, std::abs(before.bodies[body].positionError - after.bodies[body].positionError));
@@ -106,8 +144,8 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
                 }
                 report << "repeat_max_position_delta_m=" << maxPositionDelta << " repeat_max_angle_delta_rad=" << maxAngleDelta
                        << " repeat_max_clip_delta_s=" << maxClockDelta << std::endl;
-                check(maxPositionDelta < 1e-4f && maxAngleDelta < 1e-4f && maxClockDelta < 1e-6f,
-                    "Every frame's movement, position, limit and tracking measurements are independent of render FPS");
+                check(samePlayback && maxPositionDelta < 1e-4f && maxAngleDelta < 1e-4f && maxClockDelta < 1e-6f,
+                    "Every frame's playback, blends, movement, limits and tracking are independent of render FPS");
             }
         }
         check(owner.GetDynamicBodyCount() == ownerBodies && owner.GetConstraintCount() == ownerJoints &&
@@ -116,13 +154,14 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
         auto& context = GraphicsContext::Begin(L"Validate comparison dummy rendering");
         Renderer::UpdateWorldRenderData(runner.GetWorld(), context);
         context.Finish(true);
-        check(runner.Export("../../.tools/comparison-imported.html"), "Export actual imported Walking results");
+        check(runner.Export("../../.tools/comparison-imported.html"), "Export actual imported locomotion-sequence results");
         const char* clipReports[] = {"../../.tools/comparison-pa-idle.html",
             "../../.tools/comparison-pa-walking.html", "../../.tools/comparison-pa-slowrun.html"};
         const float clipSpeeds[] = {0, 1.6f, 3.0f};
         for (int clip = 0; clip < 3; ++clip)
         {
             RagdollComparisonRunner::Settings settings;
+            settings.sequence = false;
             settings.clip = clip;
             settings.speed = clipSpeeds[clip];
             check(runner.Start(asset, settings), "Start six-second locomotion PA validation");
@@ -184,6 +223,7 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
         std::string assetError;
         check(asset.Save("../../.tools/comparison-pa.physics.json", assetError), "Save the validated physics asset");
         RagdollComparisonRunner::Settings ground;
+        ground.sequence = false;
         ground.duration = 1;
         ground.suspended = false;
         check(runner.Start(asset, ground), "Start floor-contact comparison");

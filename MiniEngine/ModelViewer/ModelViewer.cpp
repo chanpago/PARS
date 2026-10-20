@@ -510,7 +510,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         if (!m_RagdollTestDone && CommandLineArgs::GetInteger(L"comparisonpreview", comparisonPreview) &&
             comparisonPreview && mesh.GetPhysicsAsset())
         {
-            m_Comparison->RequestWalkingComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
+            m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
                 mesh.GetPhysicsAsset());
         }
     }
@@ -1025,10 +1025,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         if (ImGui::Begin(u8"캐릭터 애니메이션", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
 #if defined(_M_X64)
-            if (m_Comparison && ImGui::Button(u8"걷기 비교 시작"))
+            if (m_Comparison && ImGui::Button(u8"연속 동작 비교 시작"))
             {
                 auto character = GetPreviewCharacter();
-                m_Comparison->RequestWalkingComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
+                m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
                     character ? character->GetMesh().GetPhysicsAsset() : nullptr);
             }
 #endif
@@ -1130,7 +1130,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
             if (m_MeshViewer->ConsumeComparisonRequest() && m_Comparison)
             {
                 auto character = GetPreviewCharacter();
-                m_Comparison->RequestWalkingComparison(&m_MeshViewer->GetPhysicsAsset(),
+                m_Comparison->RequestLocomotionComparison(&m_MeshViewer->GetPhysicsAsset(),
                     character ? character->GetMesh().GetPhysicsAsset() : nullptr);
             }
 #else

@@ -79,29 +79,38 @@ void RagdollComparisonRunner::DrawUI(const PhysicsAsset* editor, const PhysicsAs
         return;
     }
     ImGui::TextUnformatted(u8"키네마틱 기준 | 액티브 래그돌");
-    ImGui::TextWrapped(u8"플레이어와 분리된 더미 장면입니다. 같은 애니메이션을 반복하며 지정된 +Z 경로로 이동합니다. "
+    ImGui::TextWrapped(u8"플레이어와 분리된 더미 장면입니다. 두 더미가 같은 애니메이션과 블렌딩으로 지정된 +Z 경로를 따릅니다. "
                        u8"최초 배치 차이만 제거하며 원본 애니메이션을 절대 기준으로 사용합니다.");
     const bool busy = m_State == State::Running || m_State == State::Paused;
     ImGui::BeginDisabled(busy);
     ImGui::Checkbox(u8"에디터 PA 사용 (저장하지 않은 편집 포함)", &m_UseEditor);
-    ImGui::SetNextItemWidth(160);
-    if (ImGui::BeginCombo(u8"애니메이션", ViewerLabels::Animation(m_Names[m_RequestedSettings.clip])))
+    ImGui::Checkbox(u8"연속 재생: 대기 2초 → 걷기 4초 → 달리기 4초", &m_RequestedSettings.sequence);
+    if (m_RequestedSettings.sequence)
     {
-        for (int i = 0; i < static_cast<int>(m_Names.size()); ++i)
-        {
-            if (ImGui::Selectable(ViewerLabels::Animation(m_Names[i]), m_RequestedSettings.clip == i))
-            {
-                m_RequestedSettings.clip = i;
-            }
-        }
-        ImGui::EndCombo();
+        ImGui::TextWrapped(u8"총 10초 | 전환마다 0.2초 블렌딩 (구간 시간에 포함) | 달리기: Slow Run");
+        ImGui::TextDisabled(u8"+Z 이동 속도: 0 → 1.6 → 3 m/s, 전환 중 0.2초 동안 서서히 변경");
     }
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(100);
-    ImGui::DragFloat(u8"측정 시간 (초)", &m_RequestedSettings.duration, .5f, 1, 60, "%.1f", ImGuiSliderFlags_AlwaysClamp);
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(100);
-    ImGui::DragFloat(u8"이동 속도 (m/s)", &m_RequestedSettings.speed, .1f, 0, 3, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    else
+    {
+        ImGui::SetNextItemWidth(160);
+        if (ImGui::BeginCombo(u8"애니메이션", ViewerLabels::Animation(m_Names[m_RequestedSettings.clip])))
+        {
+            for (int i = 0; i < static_cast<int>(m_Names.size()); ++i)
+            {
+                if (ImGui::Selectable(ViewerLabels::Animation(m_Names[i]), m_RequestedSettings.clip == i))
+                {
+                    m_RequestedSettings.clip = i;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(100);
+        ImGui::DragFloat(u8"측정 시간 (초)", &m_RequestedSettings.duration, .5f, 1, 60, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(100);
+        ImGui::DragFloat(u8"이동 속도 (m/s)", &m_RequestedSettings.speed, .1f, 0, 3, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    }
     ImGui::Checkbox(u8"공중 지지 (+1 m): 바닥 접촉 없이 추종 성능 측정", &m_RequestedSettings.suspended);
     ImGui::EndDisabled();
     const auto* source = m_UseEditor ? editor : character;
@@ -206,6 +215,8 @@ void RagdollComparisonRunner::DrawSelectedSample()
     }
     const auto& frame = frames[m_SelectedFrame];
     ImGui::Text(u8"표본 %d | 실험 시간 %.4f초 | 애니메이션 시간 %.4f초 (반복)", m_SelectedFrame + 1, frame.time, frame.clipTime);
+    ImGui::Text(u8"동작: %s | %s %.0f%%", ViewerLabels::Animation(frame.clipName),
+        frame.blendAlpha < 1 ? u8"전환 블렌딩" : u8"목표 동작", frame.blendAlpha * 100);
     ImGui::TextDisabled(u8"슬라이더로 기록된 수치를 확인합니다. 장면의 자세는 현재 시뮬레이션 상태를 유지합니다.");
 }
 

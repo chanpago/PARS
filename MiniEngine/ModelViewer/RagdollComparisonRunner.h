@@ -26,9 +26,11 @@ public:
     };
     struct Settings
     {
+        // 연속 재생을 끈 경우에만 단일 클립, 시간, 속도를 사용한다.
         int clip = 1;
         float duration = 6, speed = 1.6f;
         bool suspended = true;
+        bool sequence = true;
     };
 
     RagdollComparisonRunner(PhysicsWorld& owner, const std::shared_ptr<const Model>* models,
@@ -41,7 +43,7 @@ public:
     void SetPaused(bool paused);
     void Stop();
     void DrawUI(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character);
-    void RequestWalkingComparison(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character);
+    void RequestLocomotionComparison(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character);
     // UI 변경은 다음 Update의 렌더 명령 기록 전에 처리한다.
     void ProcessRequests();
     bool ConsumeFocusRequest();
@@ -80,6 +82,8 @@ public:
 
 private:
     bool Capture(bool baseline);
+    int GetTargetClip() const;
+    float GetTravelDistance(double time) const;
     void Fail(const std::string& message);
     void DrawBodyResults();
     void DrawJointResults();
