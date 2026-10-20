@@ -167,9 +167,14 @@ void RunAnatomicalLimitTests()
             else { low = -54.6f; high = 12.7f; }
             const bool hinge = std::string(suffix) == "Leg" || std::string(suffix) == "ForeArm";
             if (hinge)
+            {
                 Check(joint->twist == PhysicsJointMotion::Limited &&
-                    joint->swingY == PhysicsJointMotion::Locked && joint->swingZ == PhysicsJointMotion::Locked,
-                    "Elbows and knees use single-twist hinges with both swing axes locked");
+                        joint->swingY == PhysicsJointMotion::Limited && joint->swingZ == PhysicsJointMotion::Limited,
+                    "Elbow/knee flexion and auxiliary rotations remain bounded");
+                Check(joint->drives[0].enabled &&
+                        joint->drives[1].enabled && joint->drives[2].enabled,
+                    "Auxiliary rotations are actively driven instead of left passive");
+            }
             const Matrix3 neutral(x, y, Cross(x, y));
             const auto sample = [&](float bend, float lateral, float twist) {
                 const Matrix3 rotation(Quaternion(Vector3(kYUnitVector), XMConvertToRadians(bend)) *
@@ -204,8 +209,11 @@ void RunAnatomicalLimitTests()
                 for (float bend : {0.0f, 45.0f, 90.0f, 130.0f})
                 {
                     Check(sample(bend, 0, 0) < .001f, "Twist hinges allow anatomical flexion throughout their range");
-                    Check(sample(bend, 10, 0) > .1f && sample(bend, 0, 15) > .15f,
-                        "Pure elbow/knee hinges reject side-bending and longitudinal rotation throughout flexion");
+                    Check(sample(bend, 4, 8) < .001f && sample(bend, -4, -8) < .001f,
+                        "Bounded auxiliary rotation remains reachable throughout flexion on both sides");
+                    Check(sample(bend, 60, 0) > .1f && sample(bend, 0, 60) > .1f &&
+                            sample(bend, -60, 0) > .1f && sample(bend, 0, -60) > .1f,
+                        "Elbows and knees still reject excessive side-bending and longitudinal rotation");
                 }
             }
             if (std::string(suffix) == "UpLeg")

@@ -117,6 +117,68 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
         Renderer::UpdateWorldRenderData(runner.GetWorld(), context);
         context.Finish(true);
         check(runner.Export("../../.tools/comparison-imported.html"), "Export actual imported Walking results");
+        const char* clipReports[] = {"../../.tools/comparison-pa-idle.html",
+            "../../.tools/comparison-pa-walking.html", "../../.tools/comparison-pa-slowrun.html"};
+        const float clipSpeeds[] = {0, 1.6f, 3.0f};
+        for (int clip = 0; clip < 3; ++clip)
+        {
+            RagdollComparisonRunner::Settings settings;
+            settings.clip = clip;
+            settings.speed = clipSpeeds[clip];
+            check(runner.Start(asset, settings), "Start six-second locomotion PA validation");
+            for (int i = 0; i < 360; ++i)
+            {
+                if (!runner.Step())
+                {
+                    check(false, "Capture locomotion PA sample");
+                }
+            }
+            const auto& results = runner.GetResults();
+            check(runner.GetState() == RagdollComparisonRunner::State::Complete &&
+                    results.GetFrames().size() == 360,
+                "Record the complete locomotion clip comparison");
+            check(runner.Export(clipReports[clip]), "Export six-second locomotion PA results");
+            for (size_t i = 0; i < asset.constraints.size(); ++i)
+            {
+                const auto& bone = asset.constraints[i].childBone;
+                const auto separator = bone.find_last_of(':');
+                const auto name = separator == std::string::npos ? bone : bone.substr(separator + 1);
+                const auto& joint = results.GetJoints()[i];
+                report << "clip=" << clip << " joint=" << bone
+                       << " clamp_mean_deg=" << DirectX::XMConvertToDegrees(joint.clamp.Mean())
+                       << " clamp_max_deg=" << DirectX::XMConvertToDegrees(joint.clamp.maximum)
+                       << " tracking_mean_deg=" << DirectX::XMConvertToDegrees(joint.tracking.Mean())
+                       << " tracking_max_deg=" << DirectX::XMConvertToDegrees(joint.tracking.maximum) << std::endl;
+                if (name == "LeftForeArm" || name == "RightForeArm" || name == "LeftLeg" || name == "RightLeg")
+                {
+                    check(joint.clamp.maximum < .001f,
+                        "Elbow/knee locomotion targets remain inside the bounded PA envelope");
+                    check(joint.tracking.Mean() < DirectX::XMConvertToRadians(5) &&
+                            joint.tracking.maximum < DirectX::XMConvertToRadians(15),
+                        "Elbow/knee drives track the admitted auxiliary rotations");
+                    for (const auto& violation : joint.actualViolations)
+                    {
+                        check(violation.excess.maximum < DirectX::XMConvertToRadians(5),
+                            "Physical elbow/knee motion stays close to the constraint envelope");
+                    }
+                }
+            }
+            if (clip == 1)
+            {
+                for (size_t i = 0; i < asset.bodies.size(); ++i)
+                {
+                    if (asset.bodies[i].bone.find("Hand") != std::string::npos)
+                    {
+                        report << "walking_hand=" << asset.bodies[i].bone
+                               << " position_mean_m=" << results.GetBodies()[i].position.Mean() << std::endl;
+                        check(results.GetBodies()[i].position.Mean() < .06f,
+                            "Walking hand position error improves beyond the locked-elbow baseline");
+                    }
+                }
+            }
+        }
+        std::string assetError;
+        check(asset.Save("../../.tools/comparison-pa.physics.json", assetError), "Save the validated physics asset");
         RagdollComparisonRunner::Settings ground;
         ground.duration = 1;
         ground.suspended = false;

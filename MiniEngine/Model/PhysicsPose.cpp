@@ -503,18 +503,19 @@ namespace PARS
             }
             else if (name.find("ForeArm") != std::string::npos)
             {
-                // 무릎과 같은 단일 트위스트 힌지를 사용한다. 좌우 X축을 대칭으로 잡아
+                // 굽힘에는 트위스트 X축을 사용한다. 좌우 X축을 대칭으로 잡아
                 // 양쪽 모두 양의 트위스트에서 아래팔이 앞으로 굽혀지게 한다. Y축은 각 아래팔을 따라
                 // 초록색 각도 표시가 실제 팔꿈치 굽힘을 나타내도록 한다.
                 parentAxes = HingeAxes(parentX, Cross(parentX, forward));
                 childAxes = HingeAxes(x, Cross(x, forward));
-                cone = {0, 0, 1, 1}; // 잠긴 스윙축의 제한값은 유효하지만 실제로 사용하지 않는다.
+                // 걷기 보고서의 아래팔 목표는 Y 최대 23.4도, Z 최대 16.2도의
+                // 보조 회전을 포함한다. 두 축을 잠그면 굽힘이 정상이어도 목표가 약 20도 잘린다.
+                // 길이 방향 회전은 굽힘과 결합되어 두 스윙 성분에 나뉘므로 둘 다 Limited로 둔다.
+                // 대각선 타원 한도에도 여유를 둔 리그 튜닝값이며, 해부학적 ROM 측정값은 아니다.
+                cone = {0, 0, 30, 22};
                 twistMin = -.8f;
                 twistMax = 144.6f;
-                // 가져온 아래팔의 축 회전 방향을 힌지 기준으로 유지한다. 이 순수 힌지는
-                // 측면 굽힘과 독립적인 회내/회외를 모두 잠그며,
-                // 이 운동들을 손목으로 암묵적으로 넘기지 않는다.
-                joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
+                joint.swingY = joint.swingZ = PhysicsJointMotion::Limited;
             }
             else if (name.find("Hand") != std::string::npos)
             {
@@ -540,19 +541,18 @@ namespace PARS
             }
             else if (name.find("Leg") != std::string::npos)
             {
-                // D6의 단일 트위스트 힌지를 사용한다. X축은 무릎을 가로지르고 Y축은 다리를 따른다.
+                // D6의 트위스트 X축으로 굽힌다. X축은 무릎을 가로지르고 Y축은 다리를 따른다.
                 // 양쪽 모두 양의 X 회전에서 정강이가 뒤로 굽혀진다.
                 // 이 조인트 축들은 캡슐의 X축과 별개다.
                 parentAxes = HingeAxes(parentX, left);
                 childAxes = HingeAxes(x, left);
-                // 트위스트는 비대칭 끝점을 직접 지원하므로 부모의 스윙 편향이 필요 없다.
-                // 잠긴 스윙축의 제한값은 유효한 값으로 유지하되 실제로 사용하지 않는다.
-                cone = {0, 0, 1, 1};
+                // 걷기 목표의 보조 회전은 Y 최대 20.5도, Z 최대 9.8도다.
+                // 단일 축 최대값만 맞추면 결합된 타원 한도에서 다시 잘리므로 여유를 둔다.
+                // 이는 이 리그의 애니메이션을 위한 근사이며, 실제 무릎의 독립적인 측굴 ROM이 아니다.
+                cone = {0, 0, 26, 16};
                 twistMin = -1;
                 twistMax = 137.7f;
-                // 순수 힌지 근사다. 측면 굽힘과 정강이의 축 회전은
-                // 이 좌표계에서 스윙 운동에 해당하며 잠긴 상태를 유지한다.
-                joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
+                joint.swingY = joint.swingZ = PhysicsJointMotion::Limited;
             }
             else // 발은 발목에서 발가락으로 향하는 캡슐 X축 대신 가상의 아래쪽 축을 사용한다.
             {
@@ -576,6 +576,21 @@ namespace PARS
             return false;
         }
         ConfigureDefaultDrives(candidate);
+        for (auto& joint : candidate.constraints)
+        {
+            const auto group = parts[candidate.FindBody(joint.childBone)].massGroup;
+            if (group == LeftShank || group == RightShank)
+            {
+                // 무릎은 보조 회전을 포함한 SLERP 드라이브로 바뀐다.
+                // 빠른 다리 신전에서 목표를 지나쳐 펴지지 않도록 응답과 제동 토크를 보강한다.
+                for (auto& drive : joint.drives)
+                {
+                    drive.stiffness *= 2;
+                    drive.damping *= 2;
+                    drive.maxTorque *= 2;
+                }
+            }
+        }
         result = std::move(candidate);
         return true;
     }
