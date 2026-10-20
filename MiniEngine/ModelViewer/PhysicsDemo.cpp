@@ -303,7 +303,7 @@ void PhysicsDemo::ConnectPvd()
     if (window && IsPvdUnresponsive(window))
     {
         m_PvdUnresponsive = true;
-        m_PvdMessage = "The existing PVD window is not responding. Restart it to restore the connection.";
+        m_PvdMessage = u8"실행 중인 PVD가 응답하지 않습니다. 다시 시작하여 연결을 복구하세요.";
         return;
     }
     ShowPvdWindow(window);
@@ -318,7 +318,7 @@ void PhysicsDemo::ConnectPvd()
         const std::wstring executable = FindPvdExecutable();
         if (executable.empty())
         {
-            m_PvdMessage = "PVD3.exe was not found in .tools/pvd/app. Open your installed PVD, then retry.";
+            m_PvdMessage = u8".tools/pvd/app에 PVD3.exe가 없습니다. 설치된 PVD를 연 뒤 다시 시도하세요.";
             return;
         }
         const std::wstring workingDirectory = executable.substr(0, executable.find_last_of(L"\\/"));
@@ -330,17 +330,17 @@ void PhysicsDemo::ConnectPvd()
         if (!CreateProcessW(executable.c_str(), nullptr, nullptr, nullptr, FALSE, 0, nullptr,
                 workingDirectory.c_str(), &startup, &process))
         {
-            m_PvdMessage = "Could not start PVD (Windows error " + std::to_string(GetLastError()) + ").";
+            m_PvdMessage = u8"PVD를 실행하지 못했습니다 (Windows 오류 " + std::to_string(GetLastError()) + ").";
             return;
         }
         m_PvdProcessId = process.dwProcessId;
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
-        m_PvdMessage = "Starting PVD and waiting for its connection port...";
+        m_PvdMessage = u8"PVD 실행 후 연결 포트가 열리기를 기다리는 중...";
     }
     else
     {
-        m_PvdMessage = "PVD is running. Waiting for 127.0.0.1:5425...";
+        m_PvdMessage = u8"PVD 실행 중. 127.0.0.1:5425 연결 대기 중...";
     }
 
     const uint64_t now = GetTickCount64();
@@ -381,7 +381,7 @@ void PhysicsDemo::RestartPvd()
     }
     else
     {
-        m_PvdMessage = "Could not restart the bundled PVD. Close the unresponsive debugger and retry Connect.";
+        m_PvdMessage = u8"포함된 PVD를 다시 시작하지 못했습니다. 응답하지 않는 디버거를 닫고 다시 연결하세요.";
     }
 }
 
@@ -397,8 +397,8 @@ void PhysicsDemo::UpdatePvdConnection()
         m_PvdConnecting = false;
         const HWND window = FindPvdWindow(m_PvdProcessId);
         m_PvdUnresponsive = window && IsPvdUnresponsive(window);
-        m_PvdMessage = m_PvdUnresponsive ? "PVD is not responding. Restart the debugger and retry." : "PVD did not accept the connection on 127.0.0.1:5425. Enable incoming connections "
-                                                                                                      "using PVD's rightmost toolbar button, then retry.";
+        m_PvdMessage = m_PvdUnresponsive ? u8"PVD가 응답하지 않습니다. 디버거를 다시 시작한 뒤 재시도하세요." : u8"PVD가 127.0.0.1:5425 연결을 받지 않았습니다. "
+                                                                                                                u8"PVD 도구 모음 맨 오른쪽 버튼에서 외부 연결을 허용한 뒤 다시 시도하세요.";
         return;
     }
     // PVD가 OpenGL을 시작할 때 창 메시지 처리를 일시적으로 멈출 수 있다.
@@ -503,39 +503,39 @@ void PhysicsDemo::RenderUI()
     ImGui::SetNextWindowPos(ImVec2(20, 70), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(410, 610), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(390, 520), ImVec2(FLT_MAX, FLT_MAX));
-    if (ImGui::Begin("PARS - Physics", &visible))
+    if (ImGui::Begin(u8"PARS - 물리", &visible))
     {
         const bool ready = m_DropReady;
         bool paused = m_GameWorld.IsPhysicsPaused();
         bool slowMotion = m_GameWorld.GetPhysicsTimeScale() < 1.0f;
-        ImGui::TextUnformatted(paused ? "WORLD PAUSED" : ready ? "BOX READY - character active"
-                                                               : "SIMULATING");
-        if (ImGui::Button(ready ? "Start drop###Drop" : "Drop again###Drop", ImVec2(-1, 32)))
+        ImGui::TextUnformatted(paused ? u8"월드 일시정지" : ready ? u8"상자 준비 완료 - 캐릭터 동작 중"
+                                                                  : u8"시뮬레이션 중");
+        if (ImGui::Button(ready ? u8"낙하 시작###Drop" : u8"다시 낙하###Drop", ImVec2(-1, 32)))
         {
             StartDrop();
         }
-        if (ImGui::Button("Reset box"))
+        if (ImGui::Button(u8"상자 초기화"))
         {
             ResetBox();
         }
         ImGui::SameLine();
         ImGui::BeginDisabled(!m_Box);
-        if (ImGui::Button("Kick up + spin"))
+        if (ImGui::Button(u8"위로 밀기 + 회전"))
         {
             KickBox();
         }
         ImGui::EndDisabled();
-        if (ImGui::Checkbox("Slow motion (0.25x)", &slowMotion))
+        if (ImGui::Checkbox(u8"느리게 (0.25배)", &slowMotion))
         {
             m_GameWorld.SetPhysicsTimeScale(slowMotion ? 0.25f : 1.0f);
         }
-        if (ImGui::Checkbox("Pause world", &paused))
+        if (ImGui::Checkbox(u8"월드 일시정지", &paused))
         {
             m_GameWorld.SetPhysicsPaused(paused);
         }
         ImGui::SameLine();
         ImGui::BeginDisabled(!paused);
-        if (ImGui::Button("Step 1/60 s"))
+        if (ImGui::Button(u8"1/60초 진행"))
         {
             m_GameWorld.RequestPhysicsStep();
         }
@@ -543,55 +543,55 @@ void PhysicsDemo::RenderUI()
         ImGui::Separator();
         if (m_Box)
         {
-            ImGui::Text("Box centre height: %.3f m", m_Box->getGlobalPose().p.y);
-            ImGui::Text("Vertical speed: %.3f m/s", m_Box->getLinearVelocity().y);
-            ImGui::Text("Body: %s", m_Box->isSleeping() ? "Sleeping" : "Awake");
+            ImGui::Text(u8"상자 중심 높이: %.3f m", m_Box->getGlobalPose().p.y);
+            ImGui::Text(u8"수직 속도: %.3f m/s", m_Box->getLinearVelocity().y);
+            ImGui::Text(u8"바디 상태: %s", m_Box->isSleeping() ? u8"휴면" : u8"활성");
             ImGui::PlotLines("##Height", m_HeightHistory, m_HistoryCount,
                 m_HistoryCount == HistoryCapacity ? m_HistoryOffset : 0,
-                "Height history (m)", 0.0f, FLT_MAX, ImVec2(-1, 64));
+                u8"높이 변화 (m)", 0.0f, FLT_MAX, ImVec2(-1, 64));
         }
         else
         {
-            ImGui::TextUnformatted("Box creation failed. Try Reset box.");
+            ImGui::TextUnformatted(u8"상자를 생성하지 못했습니다. '상자 초기화'를 눌러주세요.");
         }
-        ImGui::Text("%.1f FPS | Physics: 60 Hz | Speed: %.2fx", ImGui::GetIO().Framerate,
+        ImGui::Text(u8"%.1f FPS | 물리: 60 Hz | 속도: %.2f배", ImGui::GetIO().Framerate,
             m_GameWorld.GetPhysicsTimeScale());
-        ImGui::Text("Steps: %llu | This frame: %u", static_cast<unsigned long long>(m_World.GetStepCount()),
+        ImGui::Text(u8"물리 스텝: %llu | 현재 프레임: %u", static_cast<unsigned long long>(m_World.GetStepCount()),
             m_World.GetLastSubsteps());
-        ImGui::Text("Dropped stall time: %.2f s", m_World.GetDroppedTime());
+        ImGui::Text(u8"지연으로 제외된 시간: %.2f초", m_World.GetDroppedTime());
         ImGui::Separator();
         bool showCapsule = m_World.IsCapsuleDebugVisible();
-        if (ImGui::Checkbox("Movement capsule outline", &showCapsule))
+        if (ImGui::Checkbox(u8"이동 캡슐 윤곽선", &showCapsule))
         {
             m_World.SetCapsuleDebugVisible(showCapsule);
         }
         if (!PhysicsWorld::SupportsPvd())
         {
-            ImGui::TextWrapped("PVD recording requires a Debug or Profile build.");
+            ImGui::TextWrapped(u8"PVD 기록은 Debug 또는 Profile 빌드에서 사용할 수 있습니다.");
         }
         else
         {
             const bool connected = m_World.IsPvdConnected();
-            if (ImGui::Checkbox("Show scene queries in PVD", &m_PvdSceneQueries))
+            if (ImGui::Checkbox(u8"PVD에 장면 쿼리 표시", &m_PvdSceneQueries))
             {
                 m_World.SetPvdSceneQueries(m_PvdSceneQueries);
             }
             ImGui::TextColored(connected ? ImVec4(0.4f, 0.95f, 0.65f, 1) : ImVec4(1, 0.75f, 0.3f, 1),
-                "PVD: %s", connected ? "Connected" : "Disconnected");
+                "PVD: %s", connected ? u8"연결됨" : u8"연결 안 됨");
             ImGui::BeginDisabled(m_PvdConnecting);
-            if (ImGui::Button(m_PvdConnecting ? "Connecting..." : connected ? "Reconnect PVD"
-                                                                            : "Launch / connect PVD"))
+            if (ImGui::Button(m_PvdConnecting ? u8"연결 중..." : connected ? u8"PVD 다시 연결"
+                                                                           : u8"PVD 실행 / 연결"))
             {
                 ConnectPvd();
             }
             ImGui::EndDisabled();
-            if (m_PvdUnresponsive && ImGui::Button("Restart unresponsive PVD"))
+            if (m_PvdUnresponsive && ImGui::Button(u8"응답 없는 PVD 다시 시작"))
             {
                 RestartPvd();
             }
             if (connected)
             {
-                ImGui::TextWrapped("World updates record the character and rigid bodies in PVD.");
+                ImGui::TextWrapped(u8"월드를 갱신할 때 캐릭터와 리지드바디를 PVD에 기록합니다.");
             }
             else if (!m_PvdMessage.empty())
             {
@@ -599,11 +599,11 @@ void PhysicsDemo::RenderUI()
             }
             else
             {
-                ImGui::TextWrapped("Connect opens the local PVD application automatically.");
+                ImGui::TextWrapped(u8"연결 버튼을 누르면 로컬 PVD 프로그램을 자동으로 실행합니다.");
             }
         }
-        ImGui::Text("PhysX errors: %u", m_World.GetErrorCount());
-        ImGui::TextWrapped("Tab: character / free camera. F1: panels. Units: metres.");
+        ImGui::Text(u8"PhysX 오류: %u개", m_World.GetErrorCount());
+        ImGui::TextWrapped(u8"Tab: 캐릭터 / 자유 카메라 전환. F1: 패널 표시. 단위: m.");
     }
     ImGui::End();
 }

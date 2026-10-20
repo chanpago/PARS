@@ -56,19 +56,22 @@ msbuild MiniEngine\ModelViewer\ModelViewer.slnx -restore -p:RestorePackagesConfi
 See [the MiniEngine guide](MiniEngine/readme.md) for controls, model loading, and
 additional build configurations.
 
-On x64, ModelViewer starts with a **PARS - Physics** test scene, paused with a
-one-metre box four metres above the floor. Click **Start drop** to watch it fall;
-**Drop again** immediately replays the experiment, and **Reset & pause** restores
-the starting pose. **Kick up + spin** applies a PhysX impulse and torque so you
-can observe flight, rotation and collision from the current pose. Use **Slow
-motion (0.25x)**, **Pause**, and **Step 1/60 s** to inspect the motion. Height,
+x64 ModelViewer의 ImGui 화면은 한글로 표시되며 Windows의 맑은 고딕 또는 굴림을 사용합니다.
+본 이름, 파일 경로 등 에셋 식별자는 원래 이름을 유지합니다.
+
+On x64, ModelViewer starts with a **PARS - 물리** test scene, with a
+one-metre box ready four metres above the floor. Click **낙하 시작** to watch it fall;
+**다시 낙하** immediately replays the experiment, and **상자 초기화** restores
+the starting pose. **위로 밀기 + 회전** applies a PhysX impulse and torque so you
+can observe flight, rotation and collision from the current pose. Use **느리게
+(0.25배)**, **월드 일시정지**, and **1/60초 진행** to inspect the motion. Height,
 vertical speed and a height history plot make the result visible after it settles.
 Physics runs at 60 Hz independently of rendering, with at most eight catch-up
 steps per frame after a stall. **F1** hides/reopens the panel.
-Click **Start Walking comparison** at the top of **Skeletal Mesh Viewer** (or
-**Character Animation**) to run synchronized kinematic and active Walking dummies.
-Use **Window → Ragdoll Comparison** to adjust settings, inspect per-body motion
-errors and twist/swing limits, and export a standalone Korean HTML report.
+**스켈레탈 메시 뷰어** 또는 **캐릭터 애니메이션** 창의 **걷기 비교 시작**을 누르면
+키네마틱 기준 더미와 액티브 래그돌 더미가 함께 걷습니다.
+**창 → 래그돌 비교**에서 설정을 바꾸고 바디별 이동 오차와 트위스트/스윙 제한을 확인할 수 있습니다.
+**HTML 저장**으로 한글 보고서를 내보내며, 보고서에서 CSV 다운로드와 인쇄/PDF 저장이 가능합니다.
 Use WASD to move and Q/E to move down/up; hold the right mouse button outside the
 UI to look around. Movement does not require a mouse button.
 

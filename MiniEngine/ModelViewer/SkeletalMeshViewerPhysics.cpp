@@ -11,7 +11,7 @@ bool SkeletalMeshViewer::SetPhysicsAsset(const PhysicsAsset& asset, std::string&
 {
     if (!m_Mesh)
     {
-        error = "Preview mesh is unavailable.";
+        error = u8"미리보기 메시를 사용할 수 없습니다.";
         return false;
     }
     std::vector<std::string> joints;
@@ -174,45 +174,45 @@ void SkeletalMeshViewer::DrawPhysicsBodies()
 
 void SkeletalMeshViewer::DrawPhysicsPanel()
 {
-    ImGui::Text("PA | %zu bodies / %zu joints%s", m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size(), m_PhysicsDirty ? " *" : "");
+    ImGui::Text(u8"PA | 바디 %zu개 / 관절 %zu개%s", m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size(), m_PhysicsDirty ? " *" : "");
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##PhysicsAssetPath", m_PhysicsPath, sizeof(m_PhysicsPath));
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip("PhysicsAsset JSON path (relative to the working directory or absolute)");
+        ImGui::SetTooltip(u8"물리 에셋 JSON 파일 경로입니다. 작업 폴더 기준 상대 경로나 절대 경로를 입력하세요.");
     }
-    if (ImGui::Button("Save PA"))
+    if (ImGui::Button(u8"PA 저장"))
     {
         CancelInteraction();
         if (m_PhysicsAsset.Save(m_PhysicsPath, m_PhysicsMessage))
         {
             m_PhysicsDirty = false;
-            m_PhysicsMessage = "Saved.";
+            m_PhysicsMessage = u8"저장했습니다.";
         }
     }
     ImGui::SameLine();
     bool load = false;
-    if (ImGui::Button("Load PA"))
+    if (ImGui::Button(u8"PA 불러오기"))
     {
         if (m_PhysicsDirty)
         {
-            ImGui::OpenPopup("Load and replace edits?");
+            ImGui::OpenPopup(u8"편집 내용을 바꿀까요?");
         }
         else
         {
             load = true;
         }
     }
-    if (ImGui::BeginPopupModal("Load and replace edits?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    if (ImGui::BeginPopupModal(u8"편집 내용을 바꿀까요?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
-        ImGui::TextUnformatted("Replace the unsaved PA edits with this file?");
-        if (ImGui::Button("Load"))
+        ImGui::TextUnformatted(u8"저장하지 않은 PA 편집 내용을 이 파일로 바꿀까요?");
+        if (ImGui::Button(u8"불러오기"))
         {
             load = true;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel"))
+        if (ImGui::Button(u8"취소"))
         {
             ImGui::CloseCurrentPopup();
         }
@@ -237,37 +237,37 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
             {
                 m_PhysicsAsset = std::move(candidate);
                 m_PhysicsDirty = false;
-                m_PhysicsMessage = "Loaded.";
+                m_PhysicsMessage = u8"불러왔습니다.";
                 SelectBone(m_SelectedBone);
                 m_ShowBodies = true;
                 m_ShowConstraints = true;
             }
         }
     }
-    if (ImGui::Button("Assign to preview mesh"))
+    if (ImGui::Button(u8"미리보기 메시에 적용"))
     {
         CancelInteraction();
         if (m_Mesh->SetPhysicsAsset(m_PhysicsAsset, m_PhysicsMessage))
         {
-            m_PhysicsMessage = "Assigned current PA to preview mesh. Simulation is not enabled.";
+            m_PhysicsMessage = u8"현재 PA를 미리보기 메시에 적용했습니다. 물리 시뮬레이션은 시작하지 않습니다.";
         }
     }
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip("Copies the current PA settings to this SkeletalMeshComponent. Reassign after further edits.");
+        ImGui::SetTooltip(u8"현재 PA 설정을 미리보기 메시에 복사합니다. 이후 편집한 내용을 반영하려면 다시 적용하세요.");
     }
     if (!m_PhysicsMessage.empty())
     {
         ImGui::TextWrapped("%s", m_PhysicsMessage.c_str());
     }
     ImGui::Separator();
-    if (ImGui::RadioButton("Bodies##PA", !m_EditConstraints))
+    if (ImGui::RadioButton(u8"바디##PA", !m_EditConstraints))
     {
         CancelInteraction();
         m_EditConstraints = false;
     }
     ImGui::SameLine();
-    if (ImGui::RadioButton("Joints##PA", m_EditConstraints))
+    if (ImGui::RadioButton(u8"관절##PA", m_EditConstraints))
     {
         CancelInteraction();
         m_EditConstraints = true;
@@ -284,20 +284,20 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     }
     if (m_SelectedBone < 0)
     {
-        ImGui::TextWrapped("Select a bone in the hierarchy to add a body.");
+        ImGui::TextWrapped(u8"바디를 추가하려면 트리에서 본을 선택하세요.");
     }
     ImGui::BeginDisabled(m_SelectedBone < 0 || m_SelectedBody >= 0);
-    if (ImGui::Button("+ Capsule"))
+    if (ImGui::Button(u8"+ 캡슐"))
     {
         CreatePhysicsBody(PhysicsShapeType::Capsule);
     }
     ImGui::SameLine();
-    if (ImGui::Button("+ Box"))
+    if (ImGui::Button(u8"+ 상자"))
     {
         CreatePhysicsBody(PhysicsShapeType::Box);
     }
     ImGui::SameLine();
-    if (ImGui::Button("+ Sphere"))
+    if (ImGui::Button(u8"+ 구"))
     {
         CreatePhysicsBody(PhysicsShapeType::Sphere);
     }
@@ -310,40 +310,40 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     bool changed = false;
     ImGui::SetNextItemWidth(100);
     int shape = static_cast<int>(body.shape);
-    if (ImGui::Combo("Shape", &shape, "Capsule\0Box\0Sphere\0"))
+    if (ImGui::Combo(u8"형상", &shape, u8"캡슐\0상자\0구\0"))
     {
         body.shape = static_cast<PhysicsShapeType>(shape);
         changed = true;
     }
-    ImGui::TextUnformatted("Bone offset (m)");
+    ImGui::TextUnformatted(u8"본 기준 위치 (m)");
     ImGui::SetNextItemWidth(-1);
     changed |= ImGui::DragFloat3("##BodyOffset", &body.offset.x, .002f, -100, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
     if (body.shape == PhysicsShapeType::Box)
     {
-        ImGui::TextUnformatted("Half extents X / Y / Z (m)");
+        ImGui::TextUnformatted(u8"상자 반크기 X / Y / Z (m)");
         ImGui::SetNextItemWidth(-1);
         changed |= ImGui::DragFloat3("##HalfExtents", &body.halfExtents.x, .001f, .001f, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
     }
     else
     {
         ImGui::SetNextItemWidth(110);
-        changed |= ImGui::DragFloat("Radius (m)", &body.radius, .001f, .001f, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        changed |= ImGui::DragFloat(u8"반지름 (m)", &body.radius, .001f, .001f, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
         if (body.shape == PhysicsShapeType::Capsule)
         {
             ImGui::SetNextItemWidth(110);
-            changed |= ImGui::DragFloat("Half cylinder (m)", &body.halfLength, .001f, 0, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-            ImGui::TextDisabled("X axis | Full length: %.3f m", 2 * (body.halfLength + body.radius));
+            changed |= ImGui::DragFloat(u8"원통 반길이 (m)", &body.halfLength, .001f, 0, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::TextDisabled(u8"X축 | 전체 길이: %.3f m", 2 * (body.halfLength + body.radius));
         }
     }
     ImGui::SetNextItemWidth(110);
-    changed |= ImGui::DragFloat("Mass (kg)", &body.mass, .1f, .001f, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-    if (ImGui::Button("Reset rotation"))
+    changed |= ImGui::DragFloat(u8"질량 (kg)", &body.mass, .1f, .001f, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::Button(u8"회전 초기화"))
     {
         body.rotation = XMFLOAT4(0, 0, 0, 1);
         changed = true;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Delete body"))
+    if (ImGui::Button(u8"바디 삭제"))
     {
         CancelInteraction();
         m_PhysicsAsset.RemoveBody(m_SelectedBody);
@@ -354,7 +354,7 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     }
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip("Also removes joints connected to this body.");
+        ImGui::SetTooltip(u8"이 바디에 연결된 관절도 함께 삭제합니다.");
     }
     if (changed)
     {

@@ -13,7 +13,7 @@ namespace
     {
         int value = static_cast<int>(motion);
         ImGui::SetNextItemWidth(105);
-        if (!ImGui::Combo(label, &value, "Locked\0Limited\0Free\0"))
+        if (!ImGui::Combo(label, &value, u8"잠금\0제한\0자유\0"))
         {
             return false;
         }
@@ -25,7 +25,7 @@ namespace
     {
         float degrees = XMConvertToDegrees(radians);
         ImGui::SetNextItemWidth(105);
-        if (!ImGui::DragFloat(label, &degrees, .5f, low, high, "%.1f deg", ImGuiSliderFlags_AlwaysClamp))
+        if (!ImGui::DragFloat(label, &degrees, .5f, low, high, u8"%.1f도", ImGuiSliderFlags_AlwaysClamp))
         {
             return false;
         }
@@ -35,7 +35,7 @@ namespace
 
     bool EditFrame(PhysicsJointFrame& frame)
     {
-        ImGui::TextUnformatted("Body-local offset (m)");
+        ImGui::TextUnformatted(u8"바디 기준 위치 (m)");
         ImGui::SetNextItemWidth(-1);
         bool changed = ImGui::DragFloat3("##JointOffset", &frame.offset.x, .002f, -100, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
         const auto& q = frame.rotation;
@@ -43,7 +43,7 @@ namespace
             XMConvertToDegrees(std::atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x * q.x + q.y * q.y))),
             XMConvertToDegrees(std::asin(Clamp(2 * (q.w * q.y - q.z * q.x), -1.0f, 1.0f))),
             XMConvertToDegrees(std::atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)))};
-        ImGui::TextUnformatted("Frame rotation X / Y / Z (deg)");
+        ImGui::TextUnformatted(u8"기준 좌표계 회전 X / Y / Z (도)");
         ImGui::SetNextItemWidth(-1);
         if (ImGui::DragFloat3("##JointRotation", xyz, .5f, -180, 180, "%.1f", ImGuiSliderFlags_AlwaysClamp))
         {
@@ -163,9 +163,9 @@ void SkeletalMeshViewer::CreateConstraint()
 
 void SkeletalMeshViewer::DrawConstraintPanel()
 {
-    ImGui::TextWrapped("Select a child bone with a body, then choose the parent body.");
+    ImGui::TextWrapped(u8"바디가 있는 자식 본을 선택한 뒤 부모 바디를 선택하세요.");
     ImGui::BeginDisabled(m_SelectedBody < 0);
-    const char* parentName = m_ConstraintParent >= 0 ? m_PhysicsAsset.bodies[m_ConstraintParent].bone.c_str() : "Choose parent body";
+    const char* parentName = m_ConstraintParent >= 0 ? m_PhysicsAsset.bodies[m_ConstraintParent].bone.c_str() : u8"부모 바디 선택";
     ImGui::SetNextItemWidth(-1);
     if (ImGui::BeginCombo("##ParentBody", parentName))
     {
@@ -180,7 +180,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         ImGui::EndCombo();
     }
     ImGui::BeginDisabled(m_ConstraintParent < 0 || m_ConstraintParent == m_SelectedBody);
-    if (ImGui::Button("+ Connect bodies"))
+    if (ImGui::Button(u8"+ 바디 연결"))
     {
         CreateConstraint();
     }
@@ -211,7 +211,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     }
     auto& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
     ImGui::TextWrapped("%s -> %s", joint.parentBone.c_str(), joint.childBone.c_str());
-    if (ImGui::Button("Delete joint"))
+    if (ImGui::Button(u8"관절 삭제"))
     {
         CancelInteraction();
         m_PhysicsAsset.constraints.erase(m_PhysicsAsset.constraints.begin() + m_SelectedConstraint);
@@ -221,19 +221,19 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         return;
     }
     bool changed = false;
-    if (ImGui::RadioButton("Parent frame", m_ConstraintFrame == 0))
+    if (ImGui::RadioButton(u8"부모 좌표계", m_ConstraintFrame == 0))
     {
         CancelInteraction();
         m_ConstraintFrame = 0;
     }
     ImGui::SameLine();
-    if (ImGui::RadioButton("Child frame", m_ConstraintFrame == 1))
+    if (ImGui::RadioButton(u8"자식 좌표계", m_ConstraintFrame == 1))
     {
         CancelInteraction();
         m_ConstraintFrame = 1;
     }
     bool moveBoth = m_MoveBothFrames;
-    if (ImGui::Checkbox("Move both frames", &moveBoth))
+    if (ImGui::Checkbox(u8"두 좌표계 함께 이동", &moveBoth))
     {
         CancelInteraction();
         m_MoveBothFrames = moveBoth;
@@ -248,31 +248,31 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         }
         changed = true;
     }
-    if (ImGui::Button("Align both to child bone"))
+    if (ImGui::Button(u8"두 좌표계를 자식 본에 정렬"))
     {
         ResetConstraintFrames(joint);
         changed = true;
     }
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip("Replaces both frames, including any anatomical axis calibration and asymmetric ROM bias.");
+        ImGui::SetTooltip(u8"해부학적 축 보정과 비대칭 가동 범위 보정을 포함하여 두 기준 좌표계를 다시 설정합니다.");
     }
-    ImGui::TextDisabled("Translation locked | X twist, Y/Z swing");
-    ImGui::TextWrapped("Swing values are cone half-angles about the parent frame. Its rotation can bias the range; zero need not be the reference pose. Move both frames preserves this bias.");
-    changed |= EditMotion("Twist X", joint.twist);
+    ImGui::TextDisabled(u8"위치 잠금 | X 트위스트, Y/Z 스윙");
+    ImGui::TextWrapped(u8"스윙 값은 부모 좌표계 기준 원뿔의 반각입니다. 좌표계 회전에 따라 허용 범위가 치우칠 수 있어 0도가 기준 자세와 같지 않을 수 있습니다. 두 좌표계를 함께 이동하면 이 보정을 유지합니다.");
+    changed |= EditMotion(u8"트위스트 X", joint.twist);
     ImGui::BeginDisabled(joint.twist != PhysicsJointMotion::Limited);
-    changed |= EditAngle("Minimum", joint.twistMin, -179.9f, XMConvertToDegrees(joint.twistMax) - .1f);
-    changed |= EditAngle("Maximum", joint.twistMax, XMConvertToDegrees(joint.twistMin) + .1f, 179.9f);
+    changed |= EditAngle(u8"최소각", joint.twistMin, -179.9f, XMConvertToDegrees(joint.twistMax) - .1f);
+    changed |= EditAngle(u8"최대각", joint.twistMax, XMConvertToDegrees(joint.twistMin) + .1f, 179.9f);
     ImGui::EndDisabled();
-    changed |= EditMotion("Swing Y", joint.swingY);
+    changed |= EditMotion(u8"스윙 Y", joint.swingY);
     ImGui::BeginDisabled(joint.swingY != PhysicsJointMotion::Limited);
-    changed |= EditAngle("Y limit", joint.swingYLimit, .1f, 179.9f);
+    changed |= EditAngle(u8"Y 제한각", joint.swingYLimit, .1f, 179.9f);
     ImGui::EndDisabled();
-    changed |= EditMotion("Swing Z", joint.swingZ);
+    changed |= EditMotion(u8"스윙 Z", joint.swingZ);
     ImGui::BeginDisabled(joint.swingZ != PhysicsJointMotion::Limited);
-    changed |= EditAngle("Z limit", joint.swingZLimit, .1f, 179.9f);
+    changed |= EditAngle(u8"Z 제한각", joint.swingZLimit, .1f, 179.9f);
     ImGui::EndDisabled();
-    changed |= ImGui::Checkbox("Connected bodies collide", &joint.enableCollision);
+    changed |= ImGui::Checkbox(u8"연결된 바디끼리 충돌", &joint.enableCollision);
     const bool locked = joint.twist == PhysicsJointMotion::Locked || joint.swingY == PhysicsJointMotion::Locked || joint.swingZ == PhysicsJointMotion::Locked;
     // 드라이브 패널이 접혀 있어도 운동 설정 편집 후 PA는 유효해야 한다.
     if (locked && joint.useSlerpDrive)
@@ -280,37 +280,37 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         joint.useSlerpDrive = false;
         changed = true;
     }
-    if (ImGui::CollapsingHeader("Active Ragdoll drives", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(u8"액티브 래그돌 드라이브", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::TextWrapped("Force-based PD. Torque limit is Nm per axis. Apply editor drive settings in Character Animation to update the running character.");
-        if (ImGui::Button("Default PD gains (all joints)"))
+        ImGui::TextWrapped(u8"힘 기반 PD 제어입니다. 최대 토크 단위는 축별 Nm입니다. 실행 중인 캐릭터에 반영하려면 캐릭터 애니메이션 창에서 '에디터 드라이브 적용'을 누르세요.");
+        if (ImGui::Button(u8"전체 관절 PD 기본값"))
         {
             ConfigureDefaultDrives(m_PhysicsAsset);
             changed = true;
         }
         ImGui::BeginDisabled(locked);
-        changed |= ImGui::Checkbox("SLERP (shared angular gains)", &joint.useSlerpDrive);
+        changed |= ImGui::Checkbox(u8"SLERP (회전 게인 공유)", &joint.useSlerpDrive);
         ImGui::EndDisabled();
-        const char* names[] = {"Twist X drive", "Swing Y drive", "Swing Z drive"};
+        const char* names[] = {u8"트위스트 X 드라이브", u8"스윙 Y 드라이브", u8"스윙 Z 드라이브"};
         const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
         for (int axis = 0; axis < (joint.useSlerpDrive ? 1 : 3); ++axis)
         {
             ImGui::PushID(axis);
             auto& drive = joint.drives[axis];
             ImGui::BeginDisabled(motions[axis] == PhysicsJointMotion::Locked);
-            changed |= ImGui::Checkbox(joint.useSlerpDrive ? "Angular drive" : names[axis], &drive.enabled);
+            changed |= ImGui::Checkbox(joint.useSlerpDrive ? u8"회전 드라이브" : names[axis], &drive.enabled);
             ImGui::BeginDisabled(!drive.enabled);
-            changed |= ImGui::DragFloat("Stiffness", &drive.stiffness, 1, 0, 100000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-            changed |= ImGui::DragFloat("Damping", &drive.damping, .1f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-            changed |= ImGui::DragFloat("Max torque (Nm)", &drive.maxTorque, .5f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::DragFloat(u8"강성 Kp", &drive.stiffness, 1, 0, 100000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::DragFloat(u8"감쇠 Kd", &drive.damping, .1f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::DragFloat(u8"최대 토크 (Nm)", &drive.maxTorque, .5f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             ImGui::EndDisabled();
             ImGui::EndDisabled();
             ImGui::PopID();
         }
     }
     ImGui::EndDisabled();
-    ImGui::TextWrapped("Red cone/arc: allowed swing. Green sector: allowed X twist. Yellow: current child direction / twist (swing removed). Both limits share the joint pivot. Orange: separated anchors.");
-    ImGui::TextWrapped("Twist zero follows the body's front, the hand's palm, or the forearm/shin direction for elbow/knee hinges. The sector and needle show X rotation with swing removed.");
+    ImGui::TextWrapped(u8"빨간 원뿔/호: 스윙 허용 범위. 초록 부채꼴: X 트위스트 허용 범위. 노랑: 현재 자식 방향 / 스윙을 제거한 트위스트. 두 제한은 관절 중심을 공유합니다. 주황: 떨어진 연결점.");
+    ImGui::TextWrapped(u8"트위스트 0도는 몸의 정면, 손바닥 또는 팔꿈치/무릎 힌지의 아래팔/정강이 방향을 기준으로 합니다. 부채꼴과 바늘은 스윙을 제거한 X축 회전을 표시합니다.");
     if (changed)
     {
         m_PhysicsDirty = true;

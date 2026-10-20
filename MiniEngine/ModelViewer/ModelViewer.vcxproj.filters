@@ -277,5 +277,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PreviewAnimInstance.h" />
+    <ClInclude Include="ViewerLabels.h" />
   </ItemGroup>
 </Project>

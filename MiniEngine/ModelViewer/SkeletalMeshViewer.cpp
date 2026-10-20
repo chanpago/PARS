@@ -5,6 +5,7 @@
 #include "BufferManager.h"
 #include "GraphicsCommon.h"
 #include "ImGuiOverlay.h"
+#include "ViewerLabels.h"
 #include "imgui.h"
 #include "CompiledShaders/MeshPreviewVS.h"
 #include "CompiledShaders/MeshPreviewPS.h"
@@ -201,7 +202,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         ImGui::SetNextWindowFocus();
         m_FocusRequested = false;
     }
-    if (ImGui::Begin("Skeletal Mesh Viewer", &m_Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+    if (ImGui::Begin(u8"스켈레탈 메시 뷰어", &m_Open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
     {
         m_Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().AppFocusLost;
         if (!m_Focused)
@@ -214,24 +215,24 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
             HandlePick(pickedId);
         }
         auto& animation = m_Mesh->GetAnimInstance();
-        ImGui::TextUnformatted("Mixamo character");
+        ImGui::TextUnformatted(u8"Mixamo 캐릭터");
         ImGui::SameLine();
-        ImGui::TextDisabled("| %u bones | %zu bodies | %zu constraints", m_Mesh->GetSkeletalMesh()->m_NumJoints,
+        ImGui::TextDisabled(u8"| 본 %u개 | 바디 %zu개 | 관절 %zu개", m_Mesh->GetSkeletalMesh()->m_NumJoints,
             m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size());
         ImGui::BeginDisabled(!comparisonAvailable || m_PhysicsAsset.bodies.empty());
-        if (ImGui::Button("Start Walking comparison"))
+        if (ImGui::Button(u8"걷기 비교 시작"))
         {
             m_ComparisonRequested = true;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::TextDisabled("Kinematic vs active | 6 seconds | current editor PA | Korean HTML report");
+        ImGui::TextDisabled(u8"키네마틱 / 액티브 비교 | 6초 | 현재 에디터 PA | 한글 보고서");
         ImGui::SetNextItemWidth(130);
-        if (ImGui::BeginCombo("##Animation", animation.GetAnimationName(animation.GetCurrentAnimationIndex()).c_str()))
+        if (ImGui::BeginCombo("##Animation", ViewerLabels::Animation(animation.GetAnimationName(animation.GetCurrentAnimationIndex()))))
         {
             for (uint32_t i = 0; i < animation.GetAnimationCount(); ++i)
             {
-                if (ImGui::Selectable(animation.GetAnimationName(i).c_str(), i == animation.GetCurrentAnimationIndex()))
+                if (ImGui::Selectable(ViewerLabels::Animation(animation.GetAnimationName(i)), i == animation.GetCurrentAnimationIndex()))
                 {
                     CancelInteraction();
                     m_EditPose.clear();
@@ -242,7 +243,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         }
         ImGui::SameLine();
         bool playing = animation.IsPlaying();
-        if (ImGui::Checkbox("Play", &playing))
+        if (ImGui::Checkbox(u8"재생", &playing))
         {
             CancelInteraction();
             if (playing)
@@ -252,7 +253,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
             animation.SetPlaying(playing);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Reference pose"))
+        if (ImGui::Button(u8"기준 자세"))
         {
             CancelInteraction();
             animation.SetPlaying(false);
@@ -260,47 +261,47 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
             m_EditPose.assign(model.m_SceneGraph.get(), model.m_SceneGraph.get() + model.m_NumNodes);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Animation pose"))
+        if (ImGui::Button(u8"애니메이션 자세"))
         {
             CancelInteraction();
             m_EditPose.clear();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Frame mesh"))
+        if (ImGui::Button(u8"메시에 화면 맞춤"))
         {
             CancelInteraction();
             ResetCamera();
         }
-        if (ImGui::Checkbox("Bones", &m_ShowBones))
+        if (ImGui::Checkbox(u8"본", &m_ShowBones))
         {
             CancelInteraction();
         }
         ImGui::SameLine();
-        if (ImGui::Checkbox("Bodies", &m_ShowBodies))
+        if (ImGui::Checkbox(u8"바디", &m_ShowBodies))
         {
             CancelInteraction();
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(110);
-        ImGui::SliderFloat("Opacity", &m_BodyOpacity, .05f, .75f, "%.2f");
+        ImGui::SliderFloat(u8"불투명도", &m_BodyOpacity, .05f, .75f, "%.2f");
         ImGui::SameLine();
-        if (ImGui::Checkbox("Constraints", &m_ShowConstraints))
+        if (ImGui::Checkbox(u8"관절", &m_ShowConstraints))
         {
             CancelInteraction();
         }
         ImGui::SameLine();
-        if (ImGui::Checkbox("Limits", &m_ShowLimits))
+        if (ImGui::Checkbox(u8"제한 범위", &m_ShowLimits))
         {
             CancelInteraction();
         }
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Red cone: allowed swing. Green sector: allowed rotation angle. Yellow: current direction / twist. Click a limit to select its constraint.");
+            ImGui::SetTooltip(u8"빨간 원뿔: 스윙 허용 범위. 초록 부채꼴: 회전 허용 범위. 노랑: 현재 방향 / 트위스트. 제한 표시를 클릭하면 해당 관절을 선택합니다.");
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(120);
         int mode = m_GizmoMode;
-        if (ImGui::Combo("Local gizmo", &mode, m_EditPhysics && m_EditConstraints ? "Move (W)\0Rotate (E)\0" : "Move (W)\0Rotate (E)\0Scale (R)\0"))
+        if (ImGui::Combo(u8"로컬 기즈모", &mode, m_EditPhysics && m_EditConstraints ? u8"이동 (W)\0회전 (E)\0" : u8"이동 (W)\0회전 (E)\0크기 (R)\0"))
         {
             CancelInteraction();
             m_GizmoMode = mode;
@@ -309,7 +310,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Viewport: RMB + WASD move, Q/E down/up, Shift fast\nWheel: dolly | F: frame mesh | Esc: cancel\nGraph: click a node to select, wheel to zoom, MMB drag to pan");
+            ImGui::SetTooltip(u8"뷰포트: 우클릭 + WASD 이동, Q/E 아래/위, Shift 빠르게\n휠: 앞뒤 이동 | F: 메시 맞춤 | Esc: 취소\n그래프: 노드 클릭 선택, 휠 확대/축소, 가운데 버튼 드래그 이동");
         }
         // 같은 프레임에 마우스 오른쪽 버튼과 W/E가 들어올 수 있으므로 모드와 버튼을 함께 검사한다.
         if (m_Focused && !ImGui::GetIO().WantTextInput && m_DragAxis < 0 && !m_Flying &&
@@ -343,17 +344,17 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         if (ImGui::BeginTable("EditorLayout", 3, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV,
                 ImVec2(0, available.y)))
         {
-            ImGui::TableSetupColumn("Navigation", ImGuiTableColumnFlags_WidthFixed, 360);
-            ImGui::TableSetupColumn("Viewport", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Details", ImGuiTableColumnFlags_WidthFixed, 320);
+            ImGui::TableSetupColumn(u8"탐색", ImGuiTableColumnFlags_WidthFixed, 360);
+            ImGui::TableSetupColumn(u8"뷰포트", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn(u8"세부 설정", ImGuiTableColumnFlags_WidthFixed, 320);
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            ImGui::BeginChild("Navigation", ImVec2(0, available.y - 4), false, ImGuiWindowFlags_NoScrollbar);
+            ImGui::BeginChild(u8"탐색", ImVec2(0, available.y - 4), false, ImGuiWindowFlags_NoScrollbar);
             DrawNavigation();
             ImGui::EndChild();
             // 현재 프레임에 편집 결과가 표시되도록 세부 설정 패널을 뷰포트보다 먼저 그린다.
             ImGui::TableSetColumnIndex(2);
-            ImGui::BeginChild("Details", ImVec2(0, available.y - 4), true);
+            ImGui::BeginChild(u8"세부 설정", ImVec2(0, available.y - 4), true);
             DrawDetails();
             ImGui::EndChild();
             ImGui::TableSetColumnIndex(1);

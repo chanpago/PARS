@@ -115,14 +115,14 @@ void SkeletalMeshViewer::DrawBoneTree(int32_t node)
     const auto separator = fullName.find_last_of(':');
     const char* label = fullName.c_str() + (separator == std::string::npos ? 0 : separator + 1);
     const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<intptr_t>(node + 1)), flags,
-        "%s%s%s", label, m_IsJoint[node] ? "" : " (root)", body >= 0 ? " [Body]" : "");
+        "%s%s%s", label, m_IsJoint[node] ? "" : u8" (루트)", body >= 0 ? u8" [바디]" : "");
     if (!m_IsJoint[node])
     {
         ImGui::PopStyleColor();
     }
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip("%s\nNode %d", fullName.c_str(), node);
+        ImGui::SetTooltip(u8"%s\n노드 %d", fullName.c_str(), node);
     }
     if (m_IsJoint[node] && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
     {
@@ -145,7 +145,7 @@ void SkeletalMeshViewer::DrawBoneTree(int32_t node)
         {
             const auto& joint = m_PhysicsAsset.constraints[index];
             const auto colon = joint.parentBone.find_last_of(':');
-            const std::string title = "[Joint] from " + joint.parentBone.substr(colon == std::string::npos ? 0 : colon + 1);
+            const std::string title = u8"[관절] 부모: " + joint.parentBone.substr(colon == std::string::npos ? 0 : colon + 1);
             ImGui::PushID(index + 0x600000);
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(.85f, .8f, .45f, 1));
             const bool selected = EditingConstraint() && m_SelectedConstraint == index;

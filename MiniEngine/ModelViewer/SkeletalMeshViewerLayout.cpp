@@ -88,9 +88,9 @@ void SkeletalMeshViewer::DrawNavigation()
 {
     const float height = ImGui::GetContentRegionAvail().y;
     ImGui::BeginChild("SkeletonTree", ImVec2(0, Max(80.0f, height * m_HierarchyFraction)), true);
-    ImGui::TextUnformatted("Skeleton Tree");
+    ImGui::TextUnformatted(u8"스켈레톤 트리");
     ImGui::SameLine();
-    if (ImGui::Checkbox("Bodies only", &m_PhysicsTreeOnly))
+    if (ImGui::Checkbox(u8"바디만", &m_PhysicsTreeOnly))
     {
         m_RevealSelection = true;
     }
@@ -122,11 +122,11 @@ void SkeletalMeshViewer::DrawNavigation()
 
 void SkeletalMeshViewer::DrawDetails()
 {
-    ImGui::TextUnformatted("Details");
+    ImGui::TextUnformatted(u8"세부 설정");
     ImGui::Separator();
     int target = m_EditPhysics ? 1 : 0;
     ImGui::SetNextItemWidth(-1);
-    if (ImGui::Combo("##EditTarget", &target, "Bone pose\0Physics asset\0"))
+    if (ImGui::Combo("##EditTarget", &target, u8"본 자세\0물리 에셋\0"))
     {
         CancelInteraction();
         m_EditPhysics = target == 1;
@@ -154,14 +154,14 @@ void SkeletalMeshViewer::DrawDetails()
     {
         const auto& pose = m_EditPose.empty() ? m_Mesh->GetAnimInstance().GetPose() : m_EditPose;
         const auto& node = pose[m_SelectedBone];
-        ImGui::TextUnformatted("Local position / scale");
+        ImGui::TextUnformatted(u8"로컬 위치 / 크기");
         ImGui::Text("%.2f  %.2f  %.2f", float(node.xform.GetW().GetX()), float(node.xform.GetW().GetY()), float(node.xform.GetW().GetZ()));
         ImGui::Text("%.2f  %.2f  %.2f", node.scale.x, node.scale.y, node.scale.z);
-        ImGui::TextWrapped("Use the viewport gizmo to edit the bone pose. Play restores animation.");
+        ImGui::TextWrapped(u8"뷰포트 기즈모로 본 자세를 편집합니다. 재생하면 애니메이션 자세로 돌아갑니다.");
     }
     else
     {
-        ImGui::TextWrapped("Select a bone, body or constraint in the tree, graph or viewport.");
+        ImGui::TextWrapped(u8"트리, 그래프 또는 뷰포트에서 본, 바디, 관절을 선택하세요.");
     }
 }
 
@@ -204,16 +204,16 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         const int parent = m_PhysicsAsset.FindBody(joint.parentBone), child = m_PhysicsAsset.FindBody(joint.childBone);
         if (parent >= 0 && child >= 0)
         {
-            nodes = {{false, parent, 0, 0, bodyWidth, "Parent"},
-                {true, selectedJoint, middle, 0, jointWidth, "Constraint"},
-                {false, child, right, 0, bodyWidth, "Child"}};
+            nodes = {{false, parent, 0, 0, bodyWidth, u8"부모"},
+                {true, selectedJoint, middle, 0, jointWidth, u8"관절"},
+                {false, child, right, 0, bodyWidth, u8"자식"}};
             links = {{0, 1}, {1, 2}};
         }
     }
     else if (body >= 0 && body < static_cast<int>(m_PhysicsAsset.bodies.size()))
     {
         const auto& name = m_PhysicsAsset.bodies[body].bone;
-        nodes.push_back({false, body, 0, 0, bodyWidth, "Body"});
+        nodes.push_back({false, body, 0, 0, bodyWidth, u8"바디"});
         int row = 0;
         for (int i = 0; i < static_cast<int>(m_PhysicsAsset.constraints.size()); ++i)
         {
@@ -229,8 +229,8 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
                 continue;
             }
             const int jointNode = static_cast<int>(nodes.size());
-            nodes.push_back({true, i, middle, row * step, jointWidth, "Constraint"});
-            nodes.push_back({false, other, right, row * step, bodyWidth, outgoing ? "Child" : "Parent"});
+            nodes.push_back({true, i, middle, row * step, jointWidth, u8"관절"});
+            nodes.push_back({false, other, right, row * step, bodyWidth, outgoing ? u8"자식" : u8"부모"});
             links.push_back({0, jointNode});
             links.push_back({jointNode, jointNode + 1});
             ++row;
@@ -238,18 +238,18 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         nodes[0].y = Max(0.0f, (row - 1) * step * .5f);
     }
 
-    ImGui::TextUnformatted("Graph");
+    ImGui::TextUnformatted(u8"연결 그래프");
     ImGui::SameLine();
-    if (ImGui::SmallButton("Fit"))
+    if (ImGui::SmallButton(u8"화면 맞춤"))
     {
         m_GraphZoom = 1;
         m_GraphPanX = m_GraphPanY = 0;
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("%zu constraints", links.size() / 2);
+    ImGui::TextDisabled(u8"관절 %zu개", links.size() / 2);
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip("Each connection is Body - Constraint - Body.\nWheel: zoom | MMB drag: pan | Click a node: select");
+        ImGui::SetTooltip(u8"바디 - 관절 - 바디 순서로 연결됩니다.\n휠: 확대/축소 | 가운데 버튼 드래그: 이동 | 노드 클릭: 선택");
     }
     ImGui::BeginChild("GraphCanvas", ImVec2(0, 0), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     const ImVec2 origin = ImGui::GetCursorScreenPos(), size = ImGui::GetContentRegionAvail();
@@ -271,7 +271,7 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
     }
     if (nodes.empty())
     {
-        ImGui::TextWrapped(body < 0 && m_SelectedBone >= 0 ? "This bone has no physics body." : "Select a body or constraint to see its connections.");
+        ImGui::TextWrapped(body < 0 && m_SelectedBone >= 0 ? u8"이 본에는 물리 바디가 없습니다." : u8"바디나 관절을 선택하면 연결 관계가 표시됩니다.");
         draw->PopClipRect();
         ImGui::EndChild();
         return;
@@ -346,15 +346,15 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         {
             const auto& joint = m_PhysicsAsset.constraints[node.index];
             name = ShortBoneName(joint.childBone);
-            detail = "from " + ShortBoneName(joint.parentBone);
+            detail = u8"부모: " + ShortBoneName(joint.parentBone);
             tooltip = joint.parentBone + " -> " + joint.childBone;
         }
         else
         {
             const auto& entry = m_PhysicsAsset.bodies[node.index];
             name = ShortBoneName(entry.bone);
-            detail = entry.shape == PARS::PhysicsShapeType::Capsule ? "Capsule" : entry.shape == PARS::PhysicsShapeType::Box ? "Box"
-                                                                                                                             : "Sphere";
+            detail = entry.shape == PARS::PhysicsShapeType::Capsule ? u8"캡슐" : entry.shape == PARS::PhysicsShapeType::Box ? u8"상자"
+                                                                                                                            : u8"구";
             tooltip = entry.bone;
         }
         const ImVec4 clip(a.x + 5 * scale, a.y, b.x - 5 * scale, b.y);
@@ -367,7 +367,7 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         text(41, detail.c_str(), IM_COL32(205, 214, 194, 255));
         if (hovered)
         {
-            ImGui::SetTooltip("%s\nClick to select", tooltip.c_str());
+            ImGui::SetTooltip(u8"%s\n클릭하여 선택", tooltip.c_str());
         }
     }
     draw->PopClipRect();

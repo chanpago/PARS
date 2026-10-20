@@ -36,6 +36,7 @@
 #include "GameFramework/World.h"
 #include "WorldRenderer.h"
 #include "PreviewAnimInstance.h"
+#include "ViewerLabels.h"
 #include "SkeletalMeshViewer.h"
 #include "GameFramework/PlayerController.h"
 #include "ShadowCamera.h"
@@ -400,7 +401,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     const std::wstring root = FindPreviewAssetRoot();
     if (root.empty())
     {
-        m_PreviewError = "Cannot find Idle, Walking and SlowRun in Assets/Characters/Mixamo/Converted.";
+        m_PreviewError = u8"Assets/Characters/Mixamo/Converted에서 대기, 걷기, 달리기 애니메이션을 찾을 수 없습니다.";
         return;
     }
 
@@ -411,7 +412,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         model = Renderer::LoadModel(root + kPreviewFiles[i], forceRebuild);
         if (!model || model->m_NumAnimations == 0 || model->m_Animations[0].duration <= 0.0f)
         {
-            m_PreviewError = std::string("Could not load animation: ") + kPreviewNames[i];
+            m_PreviewError = std::string(u8"애니메이션을 불러오지 못했습니다: ") + kPreviewNames[i];
             return;
         }
     }
@@ -430,7 +431,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         {
             if (!mesh.SetSkeletalMesh(model))
             {
-                m_PreviewError = "The character model has no usable skeleton.";
+                m_PreviewError = u8"캐릭터 모델에 사용할 수 있는 스켈레톤이 없습니다.";
                 character->Destroy();
                 return;
             }
@@ -438,7 +439,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
         if (!mesh.GetAnimInstance().AddAnimation(kPreviewNames[i], model))
         {
-            m_PreviewError = std::string("Animation skeleton does not match the character: ") + kPreviewNames[i];
+            m_PreviewError = std::string(u8"애니메이션과 캐릭터의 스켈레톤이 다릅니다: ") + kPreviewNames[i];
             character->Destroy();
             return;
         }
@@ -461,7 +462,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         PARS::BuildMixamoPhysicsAsset(physicsSkeleton, reference, defaultPA, m_RagdollMessage) &&
         mesh.SetPhysicsAsset(defaultPA, m_RagdollMessage))
     {
-        m_RagdollMessage = "Mixamo default PA assigned.";
+        m_RagdollMessage = u8"Mixamo 기본 PA를 적용했습니다.";
     }
     mesh.GetAnimInstance().PlayAnimation(0);
     auto animation = GetPreviewAnimation();
@@ -810,7 +811,7 @@ void ModelViewer::Update(float deltaT)
 
 void ModelViewer::DrawRagdollPanel(PARS::Character& character)
 {
-    if (!ImGui::CollapsingHeader("Ragdoll / PhysicsAsset", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!ImGui::CollapsingHeader(u8"래그돌 / 물리 에셋", ImGuiTreeNodeFlags_DefaultOpen))
     {
         return;
     }
@@ -818,19 +819,19 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     const auto* asset = mesh.GetPhysicsAsset();
     if (asset)
     {
-        ImGui::Text("Assigned PA: %zu bodies / %zu joints", asset->bodies.size(), asset->constraints.size());
+        ImGui::Text(u8"적용된 PA: 바디 %zu개 / 관절 %zu개", asset->bodies.size(), asset->constraints.size());
     }
     else
     {
-        ImGui::TextUnformatted("No PhysicsAsset assigned");
+        ImGui::TextUnformatted(u8"물리 에셋이 적용되지 않았습니다.");
     }
     const auto& runtime = mesh.GetRagdoll();
-    ImGui::Text("PhysX: %zu bodies / %zu joints", runtime.GetBodyCount(), runtime.GetJointCount());
+    ImGui::Text(u8"PhysX: 바디 %zu개 / 관절 %zu개", runtime.GetBodyCount(), runtime.GetJointCount());
     if (runtime.IsActive())
     {
-        ImGui::Text("Mode: %s", mesh.IsActiveRagdoll() ? "Active Ragdoll" : character.IsRagdoll() ? "Passive Ragdoll"
-                                                                                                  : "Animation");
-        ImGui::Text("Kinematic bodies: %zu", runtime.GetKinematicBodyCount());
+        ImGui::Text(u8"모드: %s", mesh.IsActiveRagdoll() ? u8"액티브 래그돌" : character.IsRagdoll() ? u8"패시브 래그돌"
+                                                                                                     : u8"애니메이션");
+        ImGui::Text(u8"키네마틱 바디: %zu개", runtime.GetKinematicBodyCount());
     }
     if (!mesh.GetPhysicsError().empty())
     {
@@ -839,42 +840,42 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     ImGui::BeginDisabled(character.IsRagdoll());
     ImGui::SetNextItemWidth(290);
     ImGui::InputText("##CharacterPAPath", m_CharacterPAPath, sizeof(m_CharacterPAPath));
-    if (ImGui::Button("Load character PA"))
+    if (ImGui::Button(u8"캐릭터 PA 불러오기"))
     {
         PARS::PhysicsAsset candidate;
         if (candidate.Load(m_CharacterPAPath, m_RagdollMessage) && mesh.SetPhysicsAsset(candidate, m_RagdollMessage))
         {
-            m_RagdollMessage = "PA loaded and assigned to the play character.";
+            m_RagdollMessage = u8"PA를 불러와 플레이 캐릭터에 적용했습니다.";
         }
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(!m_MeshViewer || m_MeshViewer->GetPhysicsAsset().bodies.empty());
-    if (ImGui::Button("Use editor PA") && mesh.SetPhysicsAsset(m_MeshViewer->GetPhysicsAsset(), m_RagdollMessage))
+    if (ImGui::Button(u8"에디터 PA 적용") && mesh.SetPhysicsAsset(m_MeshViewer->GetPhysicsAsset(), m_RagdollMessage))
     {
-        m_RagdollMessage = "Current editor PA assigned to the play character.";
+        m_RagdollMessage = u8"현재 에디터 PA를 플레이 캐릭터에 적용했습니다.";
     }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
     ImGui::BeginDisabled(!asset || mesh.HasPendingDriveSettings());
-    if (ImGui::Button("Save character PA"))
+    if (ImGui::Button(u8"캐릭터 PA 저장"))
     {
         if (mesh.GetPhysicsAsset()->Save(m_CharacterPAPath, m_RagdollMessage))
         {
-            m_RagdollMessage = "Character PA saved.";
+            m_RagdollMessage = u8"캐릭터 PA를 저장했습니다.";
         }
     }
     ImGui::EndDisabled();
     asset = mesh.GetPhysicsAsset();
     ImGui::BeginDisabled(!asset || asset->bodies.empty() || !m_World.GetPhysicsWorld());
     ImGui::BeginDisabled(mesh.GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll);
-    if (ImGui::Button("Passive Ragdoll") && character.StartRagdoll(m_RagdollMessage))
+    if (ImGui::Button(u8"패시브 래그돌") && character.StartRagdoll(m_RagdollMessage))
     {
-        m_RagdollMessage = "Passive ragdoll: angular drives off, pelvis released.";
+        m_RagdollMessage = u8"패시브 래그돌: 회전 드라이브를 끄고 골반 지지를 해제했습니다.";
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(mesh.IsActiveRagdoll() || mesh.HasPendingDriveSettings());
-    if (ImGui::Button("Active Ragdoll"))
+    if (ImGui::Button(u8"액티브 래그돌"))
     {
         const bool entering = !character.IsRagdoll();
         if (character.SetPhysicsMode(PARS::PhysicsAnimationMode::ActiveRagdoll, m_RagdollMessage))
@@ -885,7 +886,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
             }
             if (!entering || mesh.GetRagdoll().SetRootSupported(m_ActiveSupport, m_RagdollMessage))
             {
-                m_RagdollMessage = "Active ragdoll: animation targets drive the physical joints.";
+                m_RagdollMessage = u8"액티브 래그돌: 애니메이션 목표에 맞춰 물리 관절을 구동합니다.";
             }
         }
     }
@@ -893,7 +894,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     ImGui::EndDisabled();
     bool supported = character.IsRagdoll() ? runtime.IsRootSupported() : m_ActiveSupport;
     ImGui::BeginDisabled(mesh.GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll);
-    if (ImGui::Checkbox("Pelvis force / torque support", &supported))
+    if (ImGui::Checkbox(u8"골반 힘 / 토크 지지", &supported))
     {
         if (!character.IsRagdoll() || mesh.GetRagdoll().SetRootSupported(supported, m_RagdollMessage))
         {
@@ -903,53 +904,53 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     {
-        ImGui::SetTooltip("Dynamic pelvis: limited forces follow animation position, limited torques follow rotation. Contacts and impacts can displace it. Passive disables this support.");
+        ImGui::SetTooltip(u8"동적 골반은 제한된 힘과 토크로 애니메이션의 위치와 회전을 따라갑니다. 접촉과 충격으로 목표에서 벗어날 수 있습니다. 패시브 모드에서는 지지를 해제합니다.");
     }
     if (mesh.IsActiveRagdoll())
     {
         bool drives = runtime.AreDrivesEnabled();
-        if (ImGui::Checkbox("Angular drives", &drives))
+        if (ImGui::Checkbox(u8"회전 드라이브", &drives))
         {
             mesh.GetRagdoll().SetDrivesEnabled(drives);
         }
-        ImGui::Text("Driven joints: %zu", runtime.GetDrivenJointCount());
-        ImGui::Text("Max target error: %.1f deg", XMConvertToDegrees(runtime.GetMaxDriveError()));
-        ImGui::Text("Target limit correction: %.1f deg", XMConvertToDegrees(runtime.GetMaxTargetClampAngle()));
+        ImGui::Text(u8"구동 관절: %zu개", runtime.GetDrivenJointCount());
+        ImGui::Text(u8"최대 목표 오차: %.1f도", XMConvertToDegrees(runtime.GetMaxDriveError()));
+        ImGui::Text(u8"제한에 따른 목표 보정: %.1f도", XMConvertToDegrees(runtime.GetMaxTargetClampAngle()));
         if (runtime.IsRootSupported())
         {
-            ImGui::Text("Pelvis target error: %.1f cm / %.1f deg", runtime.GetRootPositionError() * 100.0f,
+            ImGui::Text(u8"골반 목표 오차: %.1f cm / %.1f도", runtime.GetRootPositionError() * 100.0f,
                 XMConvertToDegrees(runtime.GetRootRotationError()));
         }
-        ImGui::TextUnformatted(character.CanControlMovement() ? "WASD: move | Shift: run" : "Movement requires pelvis support.");
+        ImGui::TextUnformatted(character.CanControlMovement() ? u8"WASD: 이동 | Shift: 달리기" : u8"이동하려면 골반 지지가 필요합니다.");
     }
     ImGui::BeginDisabled(!asset);
-    if (ImGui::Button("Use default PD gains"))
+    if (ImGui::Button(u8"PD 기본값 적용"))
     {
         auto candidate = *asset;
         PARS::ConfigureDefaultDrives(candidate);
         if (mesh.QueueDriveSettings(candidate, m_RagdollMessage))
         {
-            m_RagdollMessage = "Default gains queued for the next physics step.";
+            m_RagdollMessage = u8"다음 물리 스텝에 PD 기본값을 적용합니다.";
         }
     }
     ImGui::BeginDisabled(!m_MeshViewer || m_MeshViewer->GetPhysicsAsset().bodies.empty());
-    if (ImGui::Button("Apply editor drive settings") && mesh.QueueDriveSettings(m_MeshViewer->GetPhysicsAsset(), m_RagdollMessage))
+    if (ImGui::Button(u8"에디터 드라이브 적용") && mesh.QueueDriveSettings(m_MeshViewer->GetPhysicsAsset(), m_RagdollMessage))
     {
-        m_RagdollMessage = "Drive settings queued. Frames, shapes and limits use the assigned character PA.";
+        m_RagdollMessage = u8"다음 물리 스텝에 드라이브 설정을 적용합니다. 좌표계, 형상, 제한값은 캐릭터에 적용된 PA를 사용합니다.";
     }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
     if (mesh.HasPendingDriveSettings())
     {
-        ImGui::TextUnformatted("Drive settings pending next physics step.");
+        ImGui::TextUnformatted(u8"다음 물리 스텝에 드라이브 설정을 적용합니다.");
     }
     if (character.IsRagdoll())
     {
-        if (ImGui::Button("Stop / return to animation") && character.StopRagdoll(m_RagdollMessage))
+        if (ImGui::Button(u8"종료 / 애니메이션 복귀") && character.StopRagdoll(m_RagdollMessage))
         {
-            m_RagdollMessage = "Returned to animation and character control at the current movement target.";
+            m_RagdollMessage = u8"현재 이동 목표 위치에서 애니메이션과 캐릭터 조작으로 돌아왔습니다.";
         }
-        if (ImGui::Button("Restart ragdoll"))
+        if (ImGui::Button(u8"래그돌 다시 시작"))
         {
             const auto mode = mesh.GetPhysicsMode();
             const bool support = runtime.IsRootSupported();
@@ -961,21 +962,21 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
         }
         if (character.IsRagdoll())
         {
-            if (ImGui::Button("Push ragdoll"))
+            if (ImGui::Button(u8"래그돌 밀기"))
             {
                 mesh.GetRagdoll().AddVelocity(Vector3(1.5f, 2, 0));
             }
-            ImGui::Text("Joint separation: %.4f m", mesh.GetRagdoll().GetMaxAnchorError());
+            ImGui::Text(u8"관절 연결점 간격: %.4f m", mesh.GetRagdoll().GetMaxAnchorError());
         }
     }
     bool paused = m_World.IsPhysicsPaused();
-    if (ImGui::Checkbox("Pause world##Ragdoll", &paused))
+    if (ImGui::Checkbox(u8"월드 일시정지##Ragdoll", &paused))
     {
         m_World.SetPhysicsPaused(paused);
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(!paused);
-    if (ImGui::Button("Step 1/60##Ragdoll"))
+    if (ImGui::Button(u8"1/60초 진행##Ragdoll"))
     {
         m_World.RequestPhysicsStep();
     }
@@ -1002,14 +1003,14 @@ void ModelViewer::RenderUI(GraphicsContext& context)
     {
         if (ImGui::BeginMainMenuBar())
         {
-            if (ImGui::BeginMenu("Window"))
+            if (ImGui::BeginMenu(u8"창"))
             {
-                if (ImGui::MenuItem("Skeletal Mesh Viewer", nullptr, false, m_MeshViewer != nullptr))
+                if (ImGui::MenuItem(u8"스켈레탈 메시 뷰어", nullptr, false, m_MeshViewer != nullptr))
                 {
                     m_MeshViewer->Open();
                 }
 #if defined(_M_X64)
-                if (ImGui::MenuItem("Ragdoll Comparison", nullptr, false, m_Comparison != nullptr))
+                if (ImGui::MenuItem(u8"래그돌 비교", nullptr, false, m_Comparison != nullptr))
                 {
                     m_Comparison->Open();
                 }
@@ -1021,10 +1022,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 24.0f, 70.0f),
             ImGuiCond_FirstUseEver, ImVec2(1.0f, 0.0f));
         ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Character Animation", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        if (ImGui::Begin(u8"캐릭터 애니메이션", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
 #if defined(_M_X64)
-            if (m_Comparison && ImGui::Button("Start Walking comparison"))
+            if (m_Comparison && ImGui::Button(u8"걷기 비교 시작"))
             {
                 auto character = GetPreviewCharacter();
                 m_Comparison->RequestWalkingComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
@@ -1034,17 +1035,17 @@ void ModelViewer::RenderUI(GraphicsContext& context)
             auto animation = GetPreviewAnimation();
             if (!m_PreviewReady || !animation)
             {
-                ImGui::TextWrapped("%s", m_PreviewError.empty() ? "Preview character is no longer in the world." : m_PreviewError.c_str());
+                ImGui::TextWrapped("%s", m_PreviewError.empty() ? u8"월드에 미리보기 캐릭터가 없습니다." : m_PreviewError.c_str());
             }
             else
             {
-                ImGui::Text("Now playing: %s", animation->GetAnimationName(animation->GetCurrentAnimationIndex()).c_str());
+                ImGui::Text(u8"재생 중: %s", ViewerLabels::Animation(animation->GetAnimationName(animation->GetCurrentAnimationIndex())));
                 if (auto character = GetPreviewCharacter())
                 {
                     const auto& movement = character->GetCharacterMovement();
-                    ImGui::Text("Speed: %.2f m/s | %s", movement.GetGroundSpeed(),
-                        movement.IsMovingOnGround() ? "Grounded" : "Airborne");
-                    ImGui::Text("Blend: %.0f%%", animation->GetBlendAlpha() * 100.0f);
+                    ImGui::Text(u8"속도: %.2f m/s | %s", movement.GetGroundSpeed(),
+                        movement.IsMovingOnGround() ? u8"지면 접촉" : u8"공중");
+                    ImGui::Text(u8"블렌딩: %.0f%%", animation->GetBlendAlpha() * 100.0f);
                 }
                 if (auto character = GetPreviewCharacter())
                 {
@@ -1055,12 +1056,12 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 if (GetPlayerController())
                 {
                     bool automatic = animation->IsLocomotionEnabled();
-                    if (ImGui::Checkbox("Animation follows movement", &automatic))
+                    if (ImGui::Checkbox(u8"이동에 맞춰 애니메이션 재생", &automatic))
                     {
                         animation->SetLocomotionEnabled(automatic);
                     }
                     bool freeCamera = m_FreeCamera;
-                    if (ImGui::Checkbox("Free camera (Tab)", &freeCamera))
+                    if (ImGui::Checkbox(u8"자유 카메라 (Tab)", &freeCamera))
                     {
                         SetFreeCamera(freeCamera);
                     }
@@ -1068,19 +1069,19 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 if (!animation->IsLocomotionEnabled())
                 {
                     bool playing = animation->IsPlaying();
-                    if (ImGui::Checkbox("Play", &playing))
+                    if (ImGui::Checkbox(u8"재생", &playing))
                     {
                         animation->SetPlaying(playing);
                     }
                     ImGui::SameLine();
                     bool autoCycle = animation->IsAutoCycleEnabled();
-                    if (ImGui::Checkbox("Auto cycle", &autoCycle))
+                    if (ImGui::Checkbox(u8"자동 전환", &autoCycle))
                     {
                         animation->SetAutoCycleEnabled(autoCycle);
                     }
                     if (autoCycle)
                     {
-                        ImGui::Text("Next animation in %.1f s", animation->GetTimeUntilNextAnimation());
+                        ImGui::Text(u8"%.1f초 후 다음 애니메이션", animation->GetTimeUntilNextAnimation());
                     }
                 }
                 for (uint32_t i = 0; i < kPreviewCount; ++i)
@@ -1089,12 +1090,12 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     {
                         ImGui::SameLine();
                     }
-                    if (ImGui::Button(kPreviewNames[i]))
+                    if (ImGui::Button(ViewerLabels::Animation(kPreviewNames[i])))
                     {
                         SelectPreview(i);
                     }
                 }
-                if (ImGui::Button("Reset camera"))
+                if (ImGui::Button(u8"카메라 초기화"))
                 {
                     ResetPreviewCamera();
                 }
@@ -1102,7 +1103,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
 #if defined(_M_X64)
                 if (m_PhysicsDemo)
                 {
-                    if (ImGui::Button("Reset character"))
+                    if (ImGui::Button(u8"캐릭터 초기화"))
                     {
                         if (auto character = GetPreviewCharacter())
                         {
@@ -1113,12 +1114,12 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                             }
                         }
                     }
-                    ImGui::TextWrapped(m_FreeCamera ? "Free camera: WASD + Q/E. Tab: control character." : "Character: WASD move, Shift run. Tab: free camera.");
-                    ImGui::TextWrapped("Hold right mouse to look. Animation buttons enable manual preview.");
+                    ImGui::TextWrapped(m_FreeCamera ? u8"자유 카메라: WASD + Q/E 이동. Tab: 캐릭터 조작." : u8"캐릭터: WASD 이동, Shift 달리기. Tab: 자유 카메라.");
+                    ImGui::TextWrapped(u8"마우스 오른쪽 버튼을 누르면 시점을 움직입니다. 애니메이션 버튼으로 수동 미리보기를 시작합니다.");
                 }
                 else
 #endif
-                    ImGui::TextWrapped("Hold right mouse and drag to orbit. Hold right mouse and scroll to zoom.");
+                    ImGui::TextWrapped(u8"우클릭 드래그로 시점을 회전하고 우클릭 상태에서 휠로 확대/축소합니다.");
             }
         }
         ImGui::End();
@@ -1150,7 +1151,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
     static bool showDemo = false;
     static float testValue = 0.5f;
     static int clicks = 0;
-    static char text[64] = "Hello PARS!";
+    static char text[64] = u8"PARS에 오신 것을 환영합니다!";
 
     if (ImGui::IsKeyPressed(ImGuiKey_F1, false))
     {
@@ -1161,23 +1162,23 @@ void ModelViewer::RenderUI(GraphicsContext& context)
     {
         ImGui::SetNextWindowPos(ImVec2(30.0f, 80.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(420.0f, 330.0f), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("PARS - ImGui Test", &showWindow))
+        if (ImGui::Begin(u8"PARS - ImGui 테스트", &showWindow))
         {
-            ImGui::TextColored(ImVec4(0.4f, 0.95f, 0.65f, 1.0f), "Win32 + DirectX 12 connected");
+            ImGui::TextColored(ImVec4(0.4f, 0.95f, 0.65f, 1.0f), u8"Win32 + DirectX 12 연결됨");
             ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
             ImGui::Separator();
-            ImGui::SliderFloat("Test value", &testValue, 0.0f, 1.0f);
-            if (ImGui::Button("Click me"))
+            ImGui::SliderFloat(u8"테스트 값", &testValue, 0.0f, 1.0f);
+            if (ImGui::Button(u8"클릭"))
             {
                 ++clicks;
             }
             ImGui::SameLine();
-            ImGui::Text("Clicked %d times", clicks);
-            ImGui::InputText("Text", text, IM_ARRAYSIZE(text));
-            ImGui::Checkbox("Show ImGui demo", &showDemo);
+            ImGui::Text(u8"%d번 클릭했습니다.", clicks);
+            ImGui::InputText(u8"텍스트", text, IM_ARRAYSIZE(text));
+            ImGui::Checkbox(u8"ImGui 예제 창 보기", &showDemo);
             ImGui::Separator();
-            ImGui::TextWrapped("Drag the title bar to move this window. F1 toggles this panel.");
-            ImGui::TextWrapped("Use WASD to move and Q/E to move down/up. Hold right mouse outside the UI to look around.");
+            ImGui::TextWrapped(u8"제목 표시줄을 드래그하면 창이 이동합니다. F1로 패널을 숨기거나 표시합니다.");
+            ImGui::TextWrapped(u8"WASD로 이동하고 Q/E로 아래/위로 움직입니다. UI 바깥에서 우클릭한 채로 시점을 움직입니다.");
         }
         ImGui::End();
     }

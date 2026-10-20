@@ -50,7 +50,7 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
         settings.duration < 1 || settings.duration > 60 || !std::isfinite(settings.speed) ||
         settings.speed < 0 || settings.speed > 3)
     {
-        m_Message = error.empty() ? "Invalid comparison settings (1-60 s, 0-3 m/s)." : error;
+        m_Message = error.empty() ? u8"비교 설정이 올바르지 않습니다 (시간 1~60초, 속도 0~3 m/s)." : error;
         return false;
     }
     Reset();
@@ -59,13 +59,13 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
     // Recreate the scene as well as its actors so reruns start with identical solver state.
     if (!m_World.InitializePhysics(false, &m_Owner))
     {
-        Fail("Could not create the isolated comparison physics scene.");
+        Fail(u8"독립된 비교용 물리 장면을 생성하지 못했습니다.");
         return false;
     }
     if (!m_World.GetPhysicsWorld()->CreateStaticBox(physx::PxTransform(physx::PxVec3(0, -.5f, 0)),
             physx::PxVec3(250, .5f, 250), "Comparison floor"))
     {
-        Fail("Could not create the comparison floor.");
+        Fail(u8"비교용 바닥을 생성하지 못했습니다.");
         return false;
     }
     auto& physics = *m_World.GetPhysicsWorld();
@@ -84,14 +84,14 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
         m_Meshes[side] = &mesh;
         if (!mesh.SetSkeletalMesh(m_Models[0]))
         {
-            Fail("The comparison skeleton is unavailable.");
+            Fail(u8"비교할 스켈레톤을 사용할 수 없습니다.");
             return false;
         }
         for (size_t clip = 0; clip < m_Models.size(); ++clip)
         {
             if (!mesh.GetAnimInstance().AddAnimation(m_Names[clip], m_Models[clip]))
             {
-                Fail("The comparison clip does not match the skeleton.");
+                Fail(u8"비교할 애니메이션과 스켈레톤이 다릅니다.");
                 return false;
             }
         }
@@ -108,7 +108,7 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
     {
         if (!mesh->GetRagdoll().IsActive() || !mesh->GetPhysicsError().empty())
         {
-            Fail("Could not initialize dummy bodies: " + mesh->GetPhysicsError());
+            Fail(u8"더미 바디를 초기화하지 못했습니다: " + mesh->GetPhysicsError());
             return false;
         }
     }
@@ -136,7 +136,7 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
     m_FocusRequested = true;
     m_FollowLatest = true;
     m_SelectedFrame = m_SelectedBody = m_SelectedJoint = 0;
-    m_Message = "Recording every 1/60 s. Startup transients are included.";
+    m_Message = u8"1/60초마다 기록 중입니다. 시작 직후의 과도응답도 포함합니다.";
     return true;
 }
 
@@ -149,7 +149,7 @@ bool RagdollComparisonRunner::Capture(bool baseline)
         auto& ragdoll = m_Meshes[side]->GetRagdoll();
         if (!ragdoll.IsFinite() || !m_Meshes[side]->GetPhysicsError().empty())
         {
-            Fail("Non-finite or invalid physics state: " + m_Meshes[side]->GetPhysicsError());
+            Fail(u8"물리 상태가 올바르지 않거나 유효하지 않은 수치가 있습니다: " + m_Meshes[side]->GetPhysicsError());
             return false;
         }
         for (size_t i = 0; i < asset.bodies.size(); ++i)
@@ -161,7 +161,7 @@ bool RagdollComparisonRunner::Capture(bool baseline)
     if (std::abs(time - m_Meshes[1]->GetAnimInstance().GetAnimationTime()) > 1e-6f ||
         !m_Meshes[1]->IsActiveRagdoll())
     {
-        Fail("Animation clocks diverged or the active controller stopped.");
+        Fail(u8"두 애니메이션의 시간이 달라졌거나 액티브 제어가 중단되었습니다.");
         return false;
     }
     std::string error;
@@ -194,7 +194,7 @@ bool RagdollComparisonRunner::Step()
     if (m_Steps >= m_TargetSteps)
     {
         m_State = State::Complete;
-        m_Message = "Complete. Select a body/joint to inspect the recorded timeline, or export HTML.";
+        m_Message = u8"완료했습니다. 바디/관절을 선택해 시간별 측정값을 확인하거나 HTML로 저장하세요.";
     }
     return true;
 }
@@ -229,7 +229,7 @@ void RagdollComparisonRunner::Stop()
     if (m_State == State::Running || m_State == State::Paused)
     {
         m_State = State::Stopped;
-        m_Message = "Stopped. The partial recording is preserved.";
+        m_Message = u8"중단했습니다. 지금까지의 기록은 유지됩니다.";
         m_Accumulator = 0;
     }
 }
@@ -245,7 +245,7 @@ void RagdollComparisonRunner::RequestWalkingComparison(const PhysicsAsset* edito
     const auto* source = useEditor ? editor : character;
     if (!source || source->bodies.empty())
     {
-        m_Message = "Assign a physics asset before starting a comparison.";
+        m_Message = u8"비교를 시작하기 전에 물리 에셋을 적용하세요.";
         return;
     }
     m_UseEditor = useEditor;
@@ -323,7 +323,7 @@ bool RagdollComparisonRunner::Export(const std::string& path)
 {
     if (m_Results.ExportHtml(path, GetDescription(true), m_Message))
     {
-        m_Message = "Saved: " + path;
+        m_Message = u8"저장 완료: " + path;
         return true;
     }
     return false;
