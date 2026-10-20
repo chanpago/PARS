@@ -28,7 +28,7 @@ namespace PARS
     // 관절 제한에는 성인 가동 범위 참고값, 해부학적 기준점 축, 방향별 범위를 표현하는
     // 편향 원뿔을 사용한다. 척추/목/어깨이음의 배분과 결합 운동은
     // 리그에 맞춘 근사이며, 출처 설명은 PhysicsPose.cpp를 참고한다.
-    // 팔꿈치/무릎은 굽힘 축과 함께 비교 보고서로 조정한 제한된 보조 스윙을 허용한다.
+    // 대기/걷기/달리기 비교 보고서의 결합 회전을 수용하도록 제한값에 리그용 여유를 둔다.
     // 애니메이션 샘플이 아니라 가져온 팔을 벌린 기준 포즈가 필요하다.
     bool BuildMixamoPhysicsAsset(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& reference,
         PhysicsAsset& result, std::string& error);

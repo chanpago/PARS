@@ -149,18 +149,22 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
                        << " clamp_max_deg=" << DirectX::XMConvertToDegrees(joint.clamp.maximum)
                        << " tracking_mean_deg=" << DirectX::XMConvertToDegrees(joint.tracking.Mean())
                        << " tracking_max_deg=" << DirectX::XMConvertToDegrees(joint.tracking.maximum) << std::endl;
+                check(joint.clamp.maximum < 1e-4f && joint.singularFrames == 0,
+                    "Every locomotion joint target fits the finite PA limits without clamping or singularities");
+                for (const auto& violation : joint.violations)
+                {
+                    check(violation.frames == 0, "No raw twist, swing or coupled-cone limit violations");
+                }
+                for (const auto& violation : joint.actualViolations)
+                {
+                    check(violation.frames == 0,
+                        "The current physical tracking trajectory also stays inside the finite PA limits");
+                }
                 if (name == "LeftForeArm" || name == "RightForeArm" || name == "LeftLeg" || name == "RightLeg")
                 {
-                    check(joint.clamp.maximum < .001f,
-                        "Elbow/knee locomotion targets remain inside the bounded PA envelope");
                     check(joint.tracking.Mean() < DirectX::XMConvertToRadians(5) &&
                             joint.tracking.maximum < DirectX::XMConvertToRadians(15),
                         "Elbow/knee drives track the admitted auxiliary rotations");
-                    for (const auto& violation : joint.actualViolations)
-                    {
-                        check(violation.excess.maximum < DirectX::XMConvertToRadians(5),
-                            "Physical elbow/knee motion stays close to the constraint envelope");
-                    }
                 }
             }
             if (clip == 1)

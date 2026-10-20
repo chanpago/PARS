@@ -75,6 +75,12 @@ void RunAnatomicalLimitTests()
     PhysicsAsset asset;
     std::string error;
     Check(BuildMixamoPhysicsAsset(rig.skeleton, rig.pose, asset, error), "Generate anatomical T-pose preset");
+    for (const auto& joint : asset.constraints)
+    {
+        Check(joint.twist == PhysicsJointMotion::Limited &&
+                joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited,
+            "Animation tuning retains finite constraints on every angular axis");
+    }
     std::vector<Matrix4> world;
     Check(EvaluatePhysicsPose(rig.skeleton, rig.pose, Matrix4(kIdentity), world, error), "Evaluate ROM fixture");
 
@@ -198,10 +204,11 @@ void RunAnatomicalLimitTests()
             };
             for (float angle : {low, 0.0f, high})
                 Check(sample(angle, 0, 0) < .001f, "Neutral and published sagittal endpoints lie inside the real D6 limit");
-            // The ankle now has an explicit animation margin around its ROM
-            // envelope. Probe beyond that margin; the published endpoints above
-            // must still be reachable with the same calibrated frames.
-            const float outsideMargin = std::string(suffix) == "Foot" ? 15.0f : 3.0f;
+            // Animation margins widen hip/ankle flexion without changing the
+            // calibrated axes. Probe beyond those margins while keeping the
+            // original reference endpoints above reachable.
+            const float outsideMargin = std::string(suffix) == "Foot" ? 55.0f :
+                std::string(suffix) == "UpLeg" ? 15.0f : 3.0f;
             Check(sample(low - outsideMargin, 0, 0) > .01f && sample(high + outsideMargin, 0, 0) > .01f,
                 "D6 rejects excessive flexion/extension beyond the reference envelope and tuning margin");
             if (hinge)
@@ -220,8 +227,17 @@ void RunAnatomicalLimitTests()
             {
                 const float abduction = -32.1f * side, adduction = 13.7f * side;
                 Check(sample(0, abduction, 0) < .001f && sample(0, adduction, 0) < .001f &&
-                    sample(0, abduction - 3 * side, 0) > .01f && sample(0, adduction + 3 * side, 0) > .01f,
-                    "Mirrored hips preserve distinct abduction/adduction despite the flexion-biased cone");
+                    sample(0, abduction - 10 * side, 0) > .01f && sample(0, adduction + 10 * side, 0) > .01f,
+                    "Mirrored hips include the reference ROM but reject excessive lateral motion beyond the animation margin");
+            }
+            if (std::string(suffix) == "Hand" || std::string(suffix) == "Foot")
+            {
+                const bool hand = std::string(suffix) == "Hand";
+                const float admitted = hand ? 42.0f : 22.0f, outside = hand ? 50.0f : 30.0f;
+                Check(sample(0, 0, admitted) < .001f && sample(0, 0, -admitted) < .001f,
+                    "Wrist/ankle axial rotations from the imported clips fit the calibrated frames");
+                Check(sample(0, 0, outside) > .01f && sample(0, 0, -outside) > .01f,
+                    "Wrist/ankle twist remains bounded beyond the animation margin");
             }
         }
     }
