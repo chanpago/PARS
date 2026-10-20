@@ -65,6 +65,9 @@ motion (0.25x)**, **Pause**, and **Step 1/60 s** to inspect the motion. Height,
 vertical speed and a height history plot make the result visible after it settles.
 Physics runs at 60 Hz independently of rendering, with at most eight catch-up
 steps per frame after a stall. **F1** hides/reopens the panel.
+Use **Window → Ragdoll Comparison** to run synchronized kinematic and active
+Walking dummies, inspect per-body motion errors and twist/swing limit exposure,
+and export a standalone HTML report.
 Use WASD to move and Q/E to move down/up; hold the right mouse button outside the
 UI to look around. Movement does not require a mouse button.
 

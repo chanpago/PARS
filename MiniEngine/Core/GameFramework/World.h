@@ -48,7 +48,7 @@ namespace PARS
         {
             return m_Playing;
         }
-        bool InitializePhysics(bool connectPvd = true);
+        bool InitializePhysics(bool connectPvd = true, PhysicsWorld* sceneOwner = nullptr);
         PhysicsWorld* GetPhysicsWorld() const;
         void SetPhysicsPaused(bool paused);
         bool IsPhysicsPaused() const

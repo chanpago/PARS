@@ -75,6 +75,8 @@ namespace PARS
         void AddVelocity(Math::Vector3 velocity);
         // PxActor::userData로 소유자를 식별해 이동 쿼리에서 자기 자신을 제외한다.
         void SetQueryOwner(void* owner);
+        // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
+        void SetCollisionEnabled(bool enabled);
         // 통합 테스트와 PVD 패널에서도 사용하는 진단 정보다.
         float GetMaxAnchorError() const;
         float GetMaxAngularError(size_t* worstJoint = nullptr) const;

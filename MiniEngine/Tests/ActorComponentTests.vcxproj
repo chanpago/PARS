@@ -47,6 +47,9 @@
     <ClCompile Include="..\Model\RagdollDrive.cpp" />
     <ClCompile Include="RagdollTests.cpp" />
     <ClCompile Include="ActiveRagdollTests.cpp" />
+    <ClCompile Include="RagdollComparisonTests.cpp" />
+    <ClCompile Include="..\Model\RagdollComparison.cpp" />
+    <ClCompile Include="..\Model\RagdollComparisonReport.cpp" />
     <ClCompile Include="AnatomicalLimitTests.cpp" />
     <ClCompile Include="WorldTests.cpp" />
     <ClCompile Include="..\Core\GameFramework\CapsuleComponent.cpp" />

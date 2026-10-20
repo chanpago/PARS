@@ -9,6 +9,23 @@ using namespace Math;
 
 namespace PARS
 {
+    void Ragdoll::SetCollisionEnabled(bool enabled)
+    {
+#if defined(_M_X64)
+        for (auto* body : m_Bodies)
+        {
+            std::vector<physx::PxShape*> shapes(body->getNbShapes());
+            body->getShapes(shapes.data(), static_cast<physx::PxU32>(shapes.size()));
+            for (auto* shape : shapes)
+            {
+                shape->setFlag(physx::PxShapeFlag::eSIMULATION_SHAPE, enabled);
+            }
+        }
+#else
+        (void)enabled;
+#endif
+    }
+
 #if defined(_M_X64)
     namespace
     {

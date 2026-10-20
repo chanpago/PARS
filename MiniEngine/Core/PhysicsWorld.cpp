@@ -115,6 +115,24 @@ bool PhysicsWorld::Initialize(bool connectPvd)
         return false;
     }
 
+    return CreateScene();
+}
+
+bool PhysicsWorld::InitializeScene(PhysicsWorld& owner)
+{
+    if (this == &owner || !owner.IsInitialized() || IsInitialized())
+    {
+        return false;
+    }
+    m_ServiceOwner = &owner;
+    m_Physics = owner.m_Physics;
+    m_Dispatcher = owner.m_Dispatcher;
+    m_Material = owner.m_Material;
+    return CreateScene();
+}
+
+bool PhysicsWorld::CreateScene()
+{
     PxSceneDesc desc(m_Physics->getTolerancesScale());
     // TGS는 접촉 상황에서 인체형 래그돌의 질량/관성 비율과 좁은 관절 제한을 더 정확히 처리한다.
     // 외부 고정 스텝은 계속 1/60이다. 여기서는 프레임률에 따른 시계가 아니라
@@ -144,6 +162,15 @@ void PhysicsWorld::Shutdown()
 {
     m_QueryCapsules.clear();
     Release(m_Scene); // Actor와 각 Actor가 독점 소유하는 형상도 함께 해제한다.
+    if (m_ServiceOwner)
+    {
+        m_Physics = nullptr;
+        m_Dispatcher = nullptr;
+        m_Material = nullptr;
+        m_ServiceOwner = nullptr;
+        ResetClock();
+        return;
+    }
     Release(m_Material);
     Release(m_Dispatcher);
     if (m_ExtensionsInitialized)

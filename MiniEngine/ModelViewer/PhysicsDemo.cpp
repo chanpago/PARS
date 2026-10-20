@@ -416,7 +416,7 @@ void PhysicsDemo::UpdatePvdConnection()
 }
 
 void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
-    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
+    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor, bool comparisonScene)
 {
     context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
     context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
@@ -433,17 +433,21 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
     // fetchResults() 이후 PhysX의 실제 위치와 회전을 모두 복사한다.
     alignas(16) Vertex vertices[36 * 7];
     Vertex* output = vertices;
-    if (m_Floor)
+    if (comparisonScene)
+    {
+        AppendBox(output, PxTransform(PxVec3(0, -.5f, 0)), PxVec3(250, .5f, 250), PxVec3(.24f, .34f, .42f));
+    }
+    else if (m_Floor)
     {
         AppendBox(output, m_Floor->getGlobalPose(), FloorHalfExtents, PxVec3(0.24f, 0.34f, 0.42f));
     }
-    if (m_Box)
+    if (m_Box && !comparisonScene)
     {
         AppendBox(output, m_Box->getGlobalPose(), BoxHalfExtents, PxVec3(1.0f, 0.38f, 0.06f));
     }
     for (size_t i = 0; i < _countof(m_Walls); ++i)
     {
-        if (m_Walls[i])
+        if (m_Walls[i] && !comparisonScene)
         {
             AppendBox(output, m_Walls[i]->getGlobalPose(), WallExtents[i], PxVec3(.35f, .47f, .5f));
         }

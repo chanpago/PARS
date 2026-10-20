@@ -30,6 +30,8 @@ public:
     PhysicsWorld& operator=(const PhysicsWorld&) = delete;
 
     bool Initialize(bool connectPvd = true);
+    // SDK와 워커만 공유한다. 씬/시계/접촉은 독립적이며 owner보다 먼저 종료해야 한다.
+    bool InitializeScene(PhysicsWorld& owner);
     void Shutdown();
     using BeforeStep = std::function<void(float)>;
     uint32_t Update(double elapsedSeconds, const BeforeStep& beforeStep = {});
@@ -90,10 +92,12 @@ public:
     }
     uint32_t GetErrorCount() const
     {
-        return m_ErrorCallback.errors.load();
+        return m_ServiceOwner ? m_ServiceOwner->GetErrorCount() : m_ErrorCallback.errors.load();
     }
 
 private:
+    bool CreateScene();
+    PhysicsWorld* m_ServiceOwner = nullptr;
     class ErrorCallback : public physx::PxDefaultErrorCallback
     {
     public:

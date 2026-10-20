@@ -231,6 +231,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PhysicsDemo.h" />
+    <ClInclude Include="RagdollComparisonRunner.h" />
+    <ClCompile Include="RagdollComparisonRunner.cpp" />
+    <ClCompile Include="RagdollComparisonUI.cpp" />
+    <ClCompile Include="RagdollComparisonValidation.cpp" />
     <ClCompile Include="PhysicsDemo.cpp" />
     <ClCompile Include="RagdollValidation.cpp" />
     <ClCompile Include="ActiveRagdollValidation.cpp" />

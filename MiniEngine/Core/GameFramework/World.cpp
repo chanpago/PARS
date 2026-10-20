@@ -35,16 +35,17 @@ namespace PARS
         Clear();
     }
 
-    bool World::InitializePhysics(bool connectPvd)
+    bool World::InitializePhysics(bool connectPvd, PhysicsWorld* sceneOwner)
     {
 #if defined(_M_X64)
         if (!m_Physics)
         {
             m_Physics = std::make_unique<PhysicsWorld>();
         }
-        return m_Physics->Initialize(connectPvd);
+        return sceneOwner ? m_Physics->InitializeScene(*sceneOwner) : m_Physics->Initialize(connectPvd);
 #else
         (void)connectPvd;
+        (void)sceneOwner;
         return false;
 #endif
     }

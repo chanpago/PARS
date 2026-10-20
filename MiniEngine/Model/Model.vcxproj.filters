@@ -147,6 +147,9 @@
     <ClInclude Include="PhysicsPose.h" />
     <ClCompile Include="Ragdoll.cpp" />
     <ClCompile Include="RagdollDrive.cpp" />
+    <ClCompile Include="RagdollComparison.cpp" />
+    <ClCompile Include="RagdollComparisonReport.cpp" />
+    <ClInclude Include="RagdollComparison.h" />
     <ClInclude Include="Ragdoll.h" />
     <ClCompile Include="Components\SkeletalMeshPhysics.cpp">
       <Filter>Components</Filter>

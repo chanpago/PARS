@@ -1,0 +1,289 @@
+﻿#include "RagdollComparisonRunner.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "PhysicsWorld.h"
+#include "GraphicsCore.h"
+#include "CommandListManager.h"
+#include <algorithm>
+#include <cmath>
+#include <sstream>
+
+using namespace Math;
+using namespace PARS;
+
+RagdollComparisonRunner::RagdollComparisonRunner(PhysicsWorld& owner,
+    const std::shared_ptr<const Model>* models, const char* const* names, uint32_t count)
+    : m_Owner(owner), m_Models(models, models + count)
+{
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        m_Names.push_back(names[i]);
+    }
+}
+
+void RagdollComparisonRunner::Reset()
+{
+    m_Meshes[0] = m_Meshes[1] = nullptr;
+    m_World.Clear();
+    if (auto* physics = m_World.GetPhysicsWorld())
+    {
+        physics->Shutdown();
+    }
+    m_Results = {};
+    m_State = State::Empty;
+    m_Steps = m_TargetSteps = 0;
+    m_Accumulator = m_DroppedTime = 0;
+    m_ShowScene = false;
+    m_Message.clear();
+}
+
+void RagdollComparisonRunner::Fail(const std::string& message)
+{
+    m_State = State::Failed;
+    m_Message = message;
+}
+
+bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& settings)
+{
+    std::string error;
+    if (!asset.Validate(error) || asset.bodies.empty() || settings.clip < 0 ||
+        size_t(settings.clip) >= m_Models.size() || !std::isfinite(settings.duration) ||
+        settings.duration < 1 || settings.duration > 60 || !std::isfinite(settings.speed) ||
+        settings.speed < 0 || settings.speed > 3)
+    {
+        m_Message = error.empty() ? "Invalid comparison settings (1-60 s, 0-3 m/s)." : error;
+        return false;
+    }
+    Reset();
+    m_Settings = settings;
+    m_SourceLabel = m_RequestedSource.empty() ? "Supplied PA snapshot" : m_RequestedSource;
+    // Recreate the scene as well as its actors so reruns start with identical solver state.
+    if (!m_World.InitializePhysics(false, &m_Owner))
+    {
+        Fail("Could not create the isolated comparison physics scene.");
+        return false;
+    }
+    if (!m_World.GetPhysicsWorld()->CreateStaticBox(physx::PxTransform(physx::PxVec3(0, -.5f, 0)),
+            physx::PxVec3(250, .5f, 250), "Comparison floor"))
+    {
+        Fail("Could not create the comparison floor.");
+        return false;
+    }
+    auto& physics = *m_World.GetPhysicsWorld();
+    physics.ResetClock();
+    m_World.SetPhysicsPaused(true);
+    // 서로의 배치만 제거한다. 진행 경로와 골반의 추종 오차는 기록에 남긴다.
+    const float height = settings.suspended ? 1.0f : 0.0f;
+    m_Placements[0] = Vector3(-1.5f, height, 0);
+    m_Placements[1] = Vector3(1.5f, height, 0);
+    for (int side = 0; side < 2; ++side)
+    {
+        auto* actor = m_World.SpawnActor<Actor>(side == 0 ? "Kinematic reference" : "Active ragdoll");
+        auto& mesh = actor->CreateDefaultSubobject<SkeletalMeshComponent>("Comparison mesh");
+        actor->SetRootComponent(mesh);
+        actor->SetActorLocation(m_Placements[side]);
+        m_Meshes[side] = &mesh;
+        if (!mesh.SetSkeletalMesh(m_Models[0]))
+        {
+            Fail("The comparison skeleton is unavailable.");
+            return false;
+        }
+        for (size_t clip = 0; clip < m_Models.size(); ++clip)
+        {
+            if (!mesh.GetAnimInstance().AddAnimation(m_Names[clip], m_Models[clip]))
+            {
+                Fail("The comparison clip does not match the skeleton.");
+                return false;
+            }
+        }
+        mesh.GetAnimInstance().PlayAnimation(settings.clip);
+        if (!mesh.SetPhysicsAsset(asset, error))
+        {
+            Fail(error);
+            return false;
+        }
+    }
+    m_World.BeginPlay();
+    m_World.Tick(0);
+    for (auto* mesh : m_Meshes)
+    {
+        if (!mesh->GetRagdoll().IsActive() || !mesh->GetPhysicsError().empty())
+        {
+            Fail("Could not initialize dummy bodies: " + mesh->GetPhysicsError());
+            return false;
+        }
+    }
+    // 기준 더미는 물리 접촉으로 실험 대상에 영향을 주지 않는다.
+    m_Meshes[0]->GetRagdoll().SetCollisionEnabled(false);
+    if (!m_Meshes[1]->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, Vector3(kZero), error) ||
+        !m_Meshes[1]->GetRagdoll().SetRootSupported(true, error))
+    {
+        Fail(error);
+        return false;
+    }
+    if (!m_Results.Initialize(asset, Matrix4(Matrix3(kIdentity), m_Placements[0]),
+            Matrix4(Matrix3(kIdentity), m_Placements[1]), static_cast<float>(PhysicsWorld::FixedDeltaTime), error))
+    {
+        Fail(error);
+        return false;
+    }
+    m_TargetSteps = static_cast<size_t>(std::round(settings.duration / PhysicsWorld::FixedDeltaTime));
+    m_State = State::Running;
+    if (!Capture(true))
+    {
+        return false;
+    }
+    m_ShowScene = true;
+    m_FocusRequested = true;
+    m_FollowLatest = true;
+    m_SelectedFrame = m_SelectedBody = m_SelectedJoint = 0;
+    m_Message = "Recording every 1/60 s. Startup transients are included.";
+    return true;
+}
+
+bool RagdollComparisonRunner::Capture(bool baseline)
+{
+    std::vector<Matrix4> poses[2];
+    const auto& asset = m_Results.GetAsset();
+    for (int side = 0; side < 2; ++side)
+    {
+        auto& ragdoll = m_Meshes[side]->GetRagdoll();
+        if (!ragdoll.IsFinite() || !m_Meshes[side]->GetPhysicsError().empty())
+        {
+            Fail("Non-finite or invalid physics state: " + m_Meshes[side]->GetPhysicsError());
+            return false;
+        }
+        for (size_t i = 0; i < asset.bodies.size(); ++i)
+        {
+            poses[side].push_back(ragdoll.GetBoneWorld(i) * asset.bodies[i].GetLocalTransform());
+        }
+    }
+    const float time = m_Meshes[0]->GetAnimInstance().GetAnimationTime();
+    if (std::abs(time - m_Meshes[1]->GetAnimInstance().GetAnimationTime()) > 1e-6f ||
+        !m_Meshes[1]->IsActiveRagdoll())
+    {
+        Fail("Animation clocks diverged or the active controller stopped.");
+        return false;
+    }
+    std::string error;
+    if (!m_Results.Sample(poses[0], poses[1], time, error, baseline))
+    {
+        Fail(error);
+        return false;
+    }
+    return true;
+}
+
+bool RagdollComparisonRunner::Step()
+{
+    if (m_State != State::Running && m_State != State::Paused)
+    {
+        return false;
+    }
+    const float time = static_cast<float>((m_Steps + 1) * PhysicsWorld::FixedDeltaTime);
+    for (int side = 0; side < 2; ++side)
+    {
+        m_Meshes[side]->GetOwner().SetActorLocation(m_Placements[side] + Vector3(0, 0, m_Settings.speed * time));
+    }
+    m_World.RequestPhysicsStep();
+    m_World.Tick(0);
+    if (!Capture(false))
+    {
+        return false;
+    }
+    ++m_Steps;
+    if (m_Steps >= m_TargetSteps)
+    {
+        m_State = State::Complete;
+        m_Message = "Complete. Select a body/joint to inspect the recorded timeline, or export HTML.";
+    }
+    return true;
+}
+
+void RagdollComparisonRunner::Advance(float deltaTime)
+{
+    if (m_State != State::Running || !std::isfinite(deltaTime) || deltaTime < 0)
+    {
+        return;
+    }
+    const double budget = PhysicsWorld::FixedDeltaTime * PhysicsWorld::MaxSubsteps;
+    m_DroppedTime += std::max(0.0, m_Accumulator + deltaTime - budget);
+    m_Accumulator = std::min(budget, m_Accumulator + deltaTime);
+    while (m_Accumulator + 1e-9 >= PhysicsWorld::FixedDeltaTime && m_State == State::Running)
+    {
+        m_Accumulator -= PhysicsWorld::FixedDeltaTime;
+        Step();
+    }
+}
+
+void RagdollComparisonRunner::SetPaused(bool paused)
+{
+    if (m_State == State::Running || m_State == State::Paused)
+    {
+        m_State = paused ? State::Paused : State::Running;
+        m_Accumulator = 0;
+    }
+}
+
+void RagdollComparisonRunner::Stop()
+{
+    if (m_State == State::Running || m_State == State::Paused)
+    {
+        m_State = State::Stopped;
+        m_Message = "Stopped. The partial recording is preserved.";
+        m_Accumulator = 0;
+    }
+}
+
+void RagdollComparisonRunner::ProcessRequests()
+{
+    if (m_StartRequested || m_ResetRequested)
+    {
+        Graphics::g_CommandManager.IdleGPU();
+        if (m_ResetRequested)
+        {
+            Reset();
+        }
+        else
+        {
+            Start(m_RequestedAsset, m_RequestedSettings);
+        }
+        m_StartRequested = m_ResetRequested = false;
+    }
+}
+
+bool RagdollComparisonRunner::ConsumeFocusRequest()
+{
+    const bool requested = m_FocusRequested;
+    m_FocusRequested = false;
+    return requested;
+}
+
+Vector3 RagdollComparisonRunner::GetViewCenter() const
+{
+    return Vector3(0, (m_Settings.suspended ? 1.0f : 0.0f) + 1.0f,
+        m_Settings.speed * static_cast<float>(m_Steps * PhysicsWorld::FixedDeltaTime));
+}
+
+std::string RagdollComparisonRunner::GetDescription() const
+{
+    std::ostringstream text;
+    text << "Clip: " << m_Names[m_Settings.clip] << " | PA: " << m_SourceLabel
+         << " | " << (m_Settings.suspended ? "suspended (+1 m)" : "floor contact")
+         << " | prescribed +Z travel: " << m_Settings.speed << " m/s"
+         << " | samples: " << m_Steps << "/" << m_TargetSteps
+         << " | clip duration: " << (m_Meshes[0] ? m_Meshes[0]->GetAnimInstance().GetAnimationDuration(m_Settings.clip) : 0)
+         << " s | wall time discarded during stalls: " << m_DroppedTime << " s"
+         << " | state: " << (m_State == State::Complete ? "complete" : m_State == State::Failed ? "failed / partial"
+                                                                                                : "partial");
+    return text.str();
+}
+
+bool RagdollComparisonRunner::Export(const std::string& path)
+{
+    if (m_Results.ExportHtml(path, GetDescription(), m_Message))
+    {
+        m_Message = "Saved: " + path;
+        return true;
+    }
+    return false;
+}

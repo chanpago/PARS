@@ -43,7 +43,10 @@
 #include "imgui.h"
 #if defined(_M_X64)
 #include "PhysicsDemo.h"
+#include "RagdollComparisonRunner.h"
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
+bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const PARS::PhysicsAsset& asset,
+    PhysicsWorld& owner, const std::wstring& reportPath);
 #endif
 
 #define LEGACY_RENDERER
@@ -128,6 +131,17 @@ public:
         {
             return true;
         }
+#if defined(_M_X64)
+        std::wstring comparisonCapture;
+        if (m_Comparison && m_Comparison->GetState() == RagdollComparisonRunner::State::Complete &&
+            CommandLineArgs::GetString(L"comparisoncapture", comparisonCapture))
+        {
+            // Read back the rendered buffers; PrintWindow cannot capture a DX12 flip-model window.
+            g_OverlayBuffer.ExportToFile(comparisonCapture + L".ui");
+            g_SceneColorBuffer.ExportToFile(comparisonCapture + L".scene");
+            return true;
+        }
+#endif
         // 미리보기에 포커스가 있으면 Escape를 미리보기에서 처리한다(기즈모 드래그 취소).
         return !(m_MeshViewer && m_MeshViewer->WantsInput()) && GameCore::IGameApp::IsDone();
     }
@@ -176,6 +190,9 @@ private:
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
     unique_ptr<PhysicsDemo> m_PhysicsDemo;
+    unique_ptr<RagdollComparisonRunner> m_Comparison;
+    bool m_WasComparing = false;
+    bool m_PreComparisonFreeCamera = false;
 #endif
 };
 
@@ -471,6 +488,25 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     {
         m_MeshViewer->SetPhysicsAsset(*mesh.GetPhysicsAsset(), m_PreviewError);
     }
+#if defined(_M_X64)
+    if (m_World.GetPhysicsWorld())
+    {
+        m_Comparison = std::make_unique<RagdollComparisonRunner>(*m_World.GetPhysicsWorld(), models, kPreviewNames, kPreviewCount);
+        std::wstring report;
+        if (CommandLineArgs::GetString(L"comparisontest", report) && mesh.GetPhysicsAsset())
+        {
+            RunRagdollComparisonValidation(*m_Comparison, *mesh.GetPhysicsAsset(), *m_World.GetPhysicsWorld(), report);
+            m_RagdollTestDone = true;
+        }
+        uint32_t comparisonPreview = 0;
+        if (!m_RagdollTestDone && CommandLineArgs::GetInteger(L"comparisonpreview", comparisonPreview) &&
+            comparisonPreview && mesh.GetPhysicsAsset())
+        {
+            m_Comparison->Start(*mesh.GetPhysicsAsset(), RagdollComparisonRunner::Settings{});
+            m_Comparison->Open();
+        }
+    }
+#endif
 }
 
 void ModelViewer::SelectPreview(uint32_t index)
@@ -489,6 +525,13 @@ PreviewAnimInstance* ModelViewer::GetPreviewAnimation() const
 
 void ModelViewer::RenderModels(Renderer::MeshSorter& sorter)
 {
+#if defined(_M_X64)
+    if (m_Comparison && m_Comparison->IsShowingScene())
+    {
+        Renderer::AddWorldMeshes(m_Comparison->GetWorld(), sorter);
+        return;
+    }
+#endif
     Renderer::AddWorldMeshes(m_World, sorter);
     m_ModelInst.Render(sorter);
 }
@@ -555,6 +598,13 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
     {
         return;
     }
+#if defined(_M_X64)
+    if (m_Comparison && m_Comparison->IsShowingScene())
+    {
+        player->SetInputEnabled(false);
+        return;
+    }
+#endif
     if (m_MeshViewer && m_MeshViewer->WantsInput())
     {
         player->SetInputEnabled(false);
@@ -604,6 +654,9 @@ void ModelViewer::Cleanup(void)
     // GameCore는 Cleanup 전에 GPU 작업 완료를 기다린다. 컴포넌트가 렌더러와 물리 서비스를
     // 아직 사용할 수 있는 동안 Actor의 수명을 종료한다.
     m_MeshViewer.reset();
+#if defined(_M_X64)
+    m_Comparison.reset();
+#endif
     m_PreviewCharacter = {};
     m_PlayerController = {};
     m_World.Clear();
@@ -636,6 +689,34 @@ namespace Graphics
 void ModelViewer::Update(float deltaT)
 {
     ScopedTimer _prof(L"Update State");
+#if defined(_M_X64)
+    if (m_Comparison)
+    {
+        m_Comparison->ProcessRequests();
+        m_Comparison->Advance(deltaT);
+        if (!m_WasComparing && m_Comparison->IsShowingScene())
+        {
+            m_PreComparisonFreeCamera = m_FreeCamera;
+        }
+        if (m_Comparison->ConsumeFocusRequest() && m_Comparison->IsShowingScene())
+        {
+            const auto target = m_Comparison->GetViewCenter();
+            m_Camera.SetEyeAtUp(target + Vector3(5, 3, 7), target, Vector3(kYUnitVector));
+            SetFreeCamera(true);
+            m_Camera.Update();
+            if (m_MeshViewer)
+            {
+                m_MeshViewer->Close();
+            }
+        }
+        if (m_WasComparing && !m_Comparison->IsShowingScene())
+        {
+            SetFreeCamera(m_PreComparisonFreeCamera);
+            ResetPreviewCamera();
+        }
+        m_WasComparing = m_Comparison->IsShowingScene();
+    }
+#endif
 
     if (m_World.HasPendingDestroy())
     {
@@ -676,6 +757,18 @@ void ModelViewer::Update(float deltaT)
     {
         UpdateFollowCamera();
     }
+#if defined(_M_X64)
+    if (m_Comparison)
+    {
+        if (m_Comparison->ShouldFollowCamera())
+        {
+            const auto target = m_Comparison->GetViewCenter();
+            m_Camera.SetEyeAtUp(target + Vector3(5, 3, 7), target, Vector3(kYUnitVector));
+            m_Camera.Update();
+        }
+        Renderer::UpdateWorldRenderData(m_Comparison->GetWorld(), gfxContext);
+    }
+#endif
 
     Renderer::UpdateWorldRenderData(m_World, gfxContext);
     m_ModelInst.Update(gfxContext, deltaT);
@@ -908,6 +1001,12 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 {
                     m_MeshViewer->Open();
                 }
+#if defined(_M_X64)
+                if (ImGui::MenuItem("Ragdoll Comparison", nullptr, false, m_Comparison != nullptr))
+                {
+                    m_Comparison->Open();
+                }
+#endif
                 ImGui::EndMenu();
             }
             ImGui::EndMainMenuBar();
@@ -1012,6 +1111,14 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         {
             m_MeshViewer->RenderUI(context);
         }
+#if defined(_M_X64)
+        if (m_Comparison)
+        {
+            auto character = GetPreviewCharacter();
+            m_Comparison->DrawUI(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
+                character ? character->GetMesh().GetPhysicsAsset() : nullptr);
+        }
+#endif
         return;
     }
     static bool showWindow = true;
@@ -1064,12 +1171,16 @@ void ModelViewer::RenderScene(void)
     const D3D12_RECT& scissor = m_MainScissor;
 
     bool physicsScene = false;
-    const bool hasModels = Renderer::HasWorldMeshes(m_World) || !m_ModelInst.IsNull();
+    bool hasModels = Renderer::HasWorldMeshes(m_World) || !m_ModelInst.IsNull();
 #if defined(_M_X64)
+    if (m_Comparison && m_Comparison->IsShowingScene())
+    {
+        hasModels = Renderer::HasWorldMeshes(m_Comparison->GetWorld());
+    }
     if (m_PhysicsDemo)
     {
         physicsScene = true;
-        m_PhysicsDemo->Render(gfxContext, m_Camera, viewport, scissor);
+        m_PhysicsDemo->Render(gfxContext, m_Camera, viewport, scissor, m_Comparison && m_Comparison->IsShowingScene());
         if (!hasModels)
         {
             m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
@@ -1106,8 +1217,14 @@ void ModelViewer::RenderScene(void)
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3(costheta * cosphi, sinphi, sintheta * cosphi));
-        m_SunShadowCamera.UpdateMatrix(-SunDirection,
-            physicsScene ? Vector3(0, 2, 0) : Vector3(0, -500.0f, 0),
+        Vector3 shadowCenter = physicsScene ? Vector3(0, 2, 0) : Vector3(0, -500.0f, 0);
+#if defined(_M_X64)
+        if (m_Comparison && m_Comparison->IsShowingScene())
+        {
+            shadowCenter = m_Comparison->GetViewCenter();
+        }
+#endif
+        m_SunShadowCamera.UpdateMatrix(-SunDirection, shadowCenter,
             physicsScene ? Vector3(16, 10, 16) : Vector3(5000, 3000, 3000),
             (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
 
@@ -1188,7 +1305,7 @@ void ModelViewer::RenderScene(void)
     }
 
 #if defined(_M_X64)
-    if (m_PhysicsDemo)
+    if (m_PhysicsDemo && !(m_Comparison && m_Comparison->IsShowingScene()))
     {
         m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
     }

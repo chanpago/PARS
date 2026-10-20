@@ -87,9 +87,19 @@
     <ClCompile Include="ActiveRagdollValidation.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="RagdollComparisonRunner.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="RagdollComparisonUI.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="RagdollComparisonValidation.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PhysicsDemo.h" />
+    <ClInclude Include="RagdollComparisonRunner.h" />
     <ClInclude Include="SkeletalMeshViewer.h" />
     <ClInclude Include="SkeletonOverlay.h" />
     <FxCompile Include="Shaders\SkeletonOverlayVS.hlsl">

@@ -23,7 +23,7 @@ public:
     void Cleanup();
     void Update(float deltaTime);
     void Render(GraphicsContext& context, const Math::Camera& camera,
-        const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
+        const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor, bool comparisonScene = false);
     void RenderUI();
     void RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);

@@ -157,6 +157,7 @@ void RunPhysicsAssetTests();
 void RunRagdollTests();
 void RunAnatomicalLimitTests();
 void RunActiveRagdollTests();
+void RunRagdollComparisonTests();
 
 int main()
 {
@@ -169,5 +170,6 @@ int main()
     RunRagdollTests();
     RunAnatomicalLimitTests();
     RunActiveRagdollTests();
+    RunRagdollComparisonTests();
     return 0;
 }

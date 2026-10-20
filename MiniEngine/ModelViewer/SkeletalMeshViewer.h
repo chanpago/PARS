@@ -36,6 +36,11 @@ public:
         m_Open = true;
         m_FocusRequested = true;
     }
+    void Close()
+    {
+        m_Open = false;
+        m_Focused = false;
+    }
     bool WantsInput() const
     {
         return m_Open && m_Focused;
