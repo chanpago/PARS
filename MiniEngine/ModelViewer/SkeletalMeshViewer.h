@@ -36,7 +36,7 @@ public:
     bool Initialize(const std::shared_ptr<const Model>* models, const char* const* names, uint32_t count);
     void Cleanup(); // GPU가 유휴 상태가 된 후, 렌더러/ImGui를 종료하기 전에 호출한다.
     void Update(float deltaTime);
-    void RenderUI(GraphicsContext& context, bool comparisonAvailable = false);
+    void RenderUI(GraphicsContext& context, bool comparisonAvailable = false, bool physicsSaveAvailable = false);
     ComparisonRequest ConsumeComparisonRequest()
     {
         const auto requested = m_ComparisonRequested;
@@ -62,6 +62,9 @@ public:
         return m_PhysicsAsset;
     }
     bool SetPhysicsAsset(const PARS::PhysicsAsset& asset, std::string& error);
+    void SetDefaultPhysicsAssetPath(const std::string& path);
+    bool ConsumePhysicsSaveRequest();
+    void CompletePhysicsSave(bool saved, const std::string& message);
 
 private:
     void ResetCamera();
@@ -159,6 +162,8 @@ private:
     bool m_EditPhysics = true, m_ShowBodies = true, m_PhysicsDirty = false, m_DragWasDirty = false;
     int m_SelectedBody = -1;
     float m_BodyOpacity = .28f;
-    char m_PhysicsPath[260] = "Mixamo.physics.json";
+    std::string m_PhysicsPath = "Mixamo.physics.json";
+    std::string m_DefaultPhysicsPath;
+    bool m_PhysicsSaveAvailable = false, m_PhysicsSaveRequested = false;
     std::string m_PhysicsMessage;
 };

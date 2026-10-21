@@ -104,6 +104,9 @@ void SkeletalMeshViewer::Cleanup()
     m_ConstraintParent = -1;
     m_PhysicsAsset = {};
     m_PhysicsDirty = false;
+    m_DefaultPhysicsPath.clear();
+    m_PhysicsSaveAvailable = false;
+    m_PhysicsSaveRequested = false;
     m_Color.Destroy();
     m_Display.Destroy();
     m_Depth.Destroy();
@@ -184,8 +187,9 @@ void SkeletalMeshViewer::UpdateCamera(bool hovered)
     }
 }
 
-void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvailable)
+void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvailable, bool physicsSaveAvailable)
 {
+    m_PhysicsSaveAvailable = physicsSaveAvailable;
     m_Focused = false;
     if (!m_Open || !m_Mesh)
     {

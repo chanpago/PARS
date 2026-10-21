@@ -1,11 +1,34 @@
 ﻿#include "SkeletalMeshViewer.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "imgui.h"
+#include "imgui_stdlib.h"
 #include <algorithm>
 #include <cmath>
 
 using namespace Math;
 using namespace PARS;
+
+void SkeletalMeshViewer::SetDefaultPhysicsAssetPath(const std::string& path)
+{
+    m_DefaultPhysicsPath = path;
+    m_PhysicsPath = path;
+}
+
+bool SkeletalMeshViewer::ConsumePhysicsSaveRequest()
+{
+    const bool requested = m_PhysicsSaveRequested;
+    m_PhysicsSaveRequested = false;
+    return requested;
+}
+
+void SkeletalMeshViewer::CompletePhysicsSave(bool saved, const std::string& message)
+{
+    if (saved)
+    {
+        m_PhysicsDirty = false;
+    }
+    m_PhysicsMessage = message;
+}
 
 bool SkeletalMeshViewer::SetPhysicsAsset(const PhysicsAsset& asset, std::string& error)
 {
@@ -175,19 +198,32 @@ void SkeletalMeshViewer::DrawPhysicsBodies()
 void SkeletalMeshViewer::DrawPhysicsPanel()
 {
     ImGui::Text(u8"PA | 바디 %zu개 / 관절 %zu개%s", m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size(), m_PhysicsDirty ? " *" : "");
+    ImGui::BeginDisabled(!m_PhysicsSaveAvailable || m_DefaultPhysicsPath.empty());
+    if (ImGui::Button(u8"저장 후 기본 PA로 적용"))
+    {
+        CancelInteraction();
+        m_PhysicsSaveRequested = true;
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    {
+        ImGui::SetTooltip(u8"현재 캐릭터에 적용하고 다음 실행 때 자동으로 불러옵니다.\n래그돌 실행 중에는 먼저 애니메이션으로 복귀하세요.\n저장 위치: %s",
+            m_DefaultPhysicsPath.c_str());
+    }
+    ImGui::TextWrapped(u8"다시 실행해도 유지하려면 위 버튼으로 저장하세요.");
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputText("##PhysicsAssetPath", m_PhysicsPath, sizeof(m_PhysicsPath));
+    ImGui::InputText("##PhysicsAssetPath", &m_PhysicsPath);
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip(u8"물리 에셋 JSON 파일 경로입니다. 작업 폴더 기준 상대 경로나 절대 경로를 입력하세요.");
+        ImGui::SetTooltip(u8"아래 파일 저장/불러오기에 사용할 JSON 경로입니다. 기본 PA 적용 버튼은 캐릭터 에셋 폴더에 저장합니다.");
     }
-    if (ImGui::Button(u8"PA 저장"))
+    if (ImGui::Button(u8"PA 파일 저장"))
     {
         CancelInteraction();
         if (m_PhysicsAsset.Save(m_PhysicsPath, m_PhysicsMessage))
         {
             m_PhysicsDirty = false;
-            m_PhysicsMessage = u8"저장했습니다.";
+            m_PhysicsMessage = u8"파일을 저장했습니다. 현재 캐릭터에도 반영하려면 기본 PA 적용 버튼을 누르세요.";
         }
     }
     ImGui::SameLine();

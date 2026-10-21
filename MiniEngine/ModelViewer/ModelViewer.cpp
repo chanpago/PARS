@@ -43,6 +43,7 @@
 #include "ShadowCamera.h"
 #include "Display.h"
 #include "imgui.h"
+#include "imgui_stdlib.h"
 #include <fstream>
 #if defined(_M_X64)
 #include "PhysicsDemo.h"
@@ -88,11 +89,11 @@ namespace
             }
             while (!directory.empty())
             {
-                const std::wstring root = directory + L"/Assets/Characters/Mixamo/Converted/";
+                const std::wstring root = directory + L"/Assets/Characters/Mixamo/";
                 bool found = true;
                 for (const wchar_t* file : kPreviewFiles)
                 {
-                    const DWORD attributes = GetFileAttributesW((root + file).c_str());
+                    const DWORD attributes = GetFileAttributesW((root + L"Converted/" + file).c_str());
                     found &= attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
                 }
                 if (found)
@@ -188,6 +189,7 @@ private:
     PreviewAnimInstance* GetPreviewAnimation() const;
     void RenderModels(Renderer::MeshSorter& sorter);
     void DrawRagdollPanel(PARS::Character& character);
+    void SaveDefaultPhysicsAsset();
 
     Camera m_Camera;
     unique_ptr<CameraController> m_CameraController;
@@ -208,7 +210,8 @@ private:
     std::string m_PreviewError;
     std::string m_RagdollMessage;
     bool m_ActiveSupport = true;
-    char m_CharacterPAPath[260] = "Mixamo.physics.json";
+    std::string m_CharacterPAPath = "Mixamo.physics.json";
+    std::string m_DefaultPAPath;
     bool m_RagdollTestDone = false;
     unique_ptr<SkeletalMeshViewer> m_MeshViewer;
     ShadowCamera m_SunShadowCamera;
@@ -427,7 +430,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
         auto& model = models[i];
-        model = Renderer::LoadModel(root + kPreviewFiles[i], forceRebuild);
+        model = Renderer::LoadModel(root + L"Converted/" + kPreviewFiles[i], forceRebuild);
         if (!model || model->m_NumAnimations == 0 || model->m_Animations[0].duration <= 0.0f)
         {
             m_PreviewError = std::string(u8"애니메이션을 불러오지 못했습니다: ") + kPreviewNames[i];
@@ -472,15 +475,46 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         character->SetActorTransform(AffineTransform(Matrix3::MakeScale(scale), Vector3(0, halfHeight * scale, 0)));
     }
     m_PreviewCharacter = character->GetHandle();
-    PARS::PhysicsSkeleton physicsSkeleton;
-    PARS::PhysicsAsset defaultPA;
-    const std::vector<GraphNode> reference(models[0]->m_SceneGraph.get(), models[0]->m_SceneGraph.get() + models[0]->m_NumNodes);
-
-    if (mesh.BuildPhysicsSkeleton(physicsSkeleton, m_RagdollMessage) &&
-        PARS::BuildMixamoPhysicsAsset(physicsSkeleton, reference, defaultPA, m_RagdollMessage) &&
-        mesh.SetPhysicsAsset(defaultPA, m_RagdollMessage))
+    // 실행 작업 폴더와 관계없이 캐릭터 에셋 옆의 PA를 저장/복원한다.
+    const std::wstring defaultPAPath = root + L"Mixamo.physics.json";
+    const int pathLength = static_cast<int>(defaultPAPath.size());
+    const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, defaultPAPath.data(), pathLength, nullptr, 0, nullptr, nullptr);
+    m_DefaultPAPath.resize(utf8Length);
+    if (utf8Length > 0)
     {
-        m_RagdollMessage = u8"Mixamo 기본 PA를 적용했습니다.";
+        WideCharToMultiByte(CP_UTF8, 0, defaultPAPath.data(), pathLength, &m_DefaultPAPath[0], utf8Length, nullptr, nullptr);
+    }
+    m_CharacterPAPath = m_DefaultPAPath;
+    bool loadedPA = false;
+    std::string loadError;
+    if (GetFileAttributesW(defaultPAPath.c_str()) != INVALID_FILE_ATTRIBUTES)
+    {
+        PARS::PhysicsAsset savedPA;
+        loadedPA = savedPA.Load(m_DefaultPAPath, loadError) && mesh.SetPhysicsAsset(savedPA, loadError);
+    }
+    else if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND)
+    {
+        loadError = u8"기본 PA 파일에 접근할 수 없습니다.";
+    }
+    if (loadedPA)
+    {
+        m_RagdollMessage = u8"저장된 기본 PA를 자동 적용했습니다: " + m_DefaultPAPath;
+    }
+    else
+    {
+        PARS::PhysicsSkeleton physicsSkeleton;
+        PARS::PhysicsAsset defaultPA;
+        const std::vector<GraphNode> reference(models[0]->m_SceneGraph.get(), models[0]->m_SceneGraph.get() + models[0]->m_NumNodes);
+        if (mesh.BuildPhysicsSkeleton(physicsSkeleton, m_RagdollMessage) &&
+            PARS::BuildMixamoPhysicsAsset(physicsSkeleton, reference, defaultPA, m_RagdollMessage) &&
+            mesh.SetPhysicsAsset(defaultPA, m_RagdollMessage))
+        {
+            m_RagdollMessage = u8"코드에서 생성한 Mixamo 기본 PA를 적용했습니다.";
+        }
+        if (!loadError.empty())
+        {
+            m_RagdollMessage = u8"저장된 PA를 불러오지 못했습니다: " + loadError + "\n" + m_RagdollMessage;
+        }
     }
     mesh.GetAnimInstance().PlayAnimation(0);
     auto animation = GetPreviewAnimation();
@@ -518,6 +552,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     else if (mesh.GetPhysicsAsset())
     {
         m_MeshViewer->SetPhysicsAsset(*mesh.GetPhysicsAsset(), m_PreviewError);
+        m_MeshViewer->SetDefaultPhysicsAssetPath(m_DefaultPAPath);
+        m_MeshViewer->CompletePhysicsSave(loadedPA, m_RagdollMessage);
     }
 #if defined(_M_X64)
     if (m_World.GetPhysicsWorld())
@@ -848,6 +884,33 @@ void ModelViewer::Update(float deltaT)
     m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
 }
 
+void ModelViewer::SaveDefaultPhysicsAsset()
+{
+    auto* character = GetPreviewCharacter();
+    if (!character || !m_MeshViewer || m_DefaultPAPath.empty())
+    {
+        return;
+    }
+    const auto& asset = m_MeshViewer->GetPhysicsAsset();
+    bool saved = false;
+    std::string error;
+    // 기존 캐릭터에서 실제 물리 상태를 생성할 수 있는지 확인한 뒤 파일을 교체한다.
+    if (!character->GetMesh().SetPhysicsAsset(asset, error))
+    {
+        m_RagdollMessage = u8"PA 적용에 실패했습니다. 기본 파일은 유지됩니다: " + error;
+    }
+    else if (!asset.Save(m_DefaultPAPath, error))
+    {
+        m_RagdollMessage = u8"현재 캐릭터에는 적용했지만 저장하지 못했습니다. 다시 저장하세요: " + error;
+    }
+    else
+    {
+        saved = true;
+        m_RagdollMessage = u8"현재 캐릭터에 적용하고 기본 PA로 저장했습니다. 다음 실행 때 자동 적용됩니다.";
+    }
+    m_MeshViewer->CompletePhysicsSave(saved, m_RagdollMessage);
+}
+
 void ModelViewer::DrawRagdollPanel(PARS::Character& character)
 {
     if (!ImGui::CollapsingHeader(u8"래그돌 / 물리 에셋", ImGuiTreeNodeFlags_DefaultOpen))
@@ -878,7 +941,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     }
     ImGui::BeginDisabled(character.IsRagdoll());
     ImGui::SetNextItemWidth(290);
-    ImGui::InputText("##CharacterPAPath", m_CharacterPAPath, sizeof(m_CharacterPAPath));
+    ImGui::InputText("##CharacterPAPath", &m_CharacterPAPath);
     if (ImGui::Button(u8"캐릭터 PA 불러오기"))
     {
         PARS::PhysicsAsset candidate;
@@ -1199,19 +1262,24 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         ImGui::End();
         if (m_MeshViewer)
         {
+            const auto* character = GetPreviewCharacter();
+            const bool physicsSaveAvailable = character && !character->IsRagdoll();
 #if defined(_M_X64)
-            m_MeshViewer->RenderUI(context, m_Comparison != nullptr);
+            m_MeshViewer->RenderUI(context, m_Comparison != nullptr, physicsSaveAvailable);
             const auto comparison = m_MeshViewer->ConsumeComparisonRequest();
             if (comparison != SkeletalMeshViewer::ComparisonRequest::None && m_Comparison)
             {
-                auto character = GetPreviewCharacter();
                 m_Comparison->RequestLocomotionComparison(&m_MeshViewer->GetPhysicsAsset(),
                     character ? character->GetMesh().GetPhysicsAsset() : nullptr,
                     comparison == SkeletalMeshViewer::ComparisonRequest::B ? RagdollComparisonRunner::Simulation::B : RagdollComparisonRunner::Simulation::A);
             }
 #else
-            m_MeshViewer->RenderUI(context);
+            m_MeshViewer->RenderUI(context, false, physicsSaveAvailable);
 #endif
+            if (m_MeshViewer->ConsumePhysicsSaveRequest())
+            {
+                SaveDefaultPhysicsAsset();
+            }
         }
 #if defined(_M_X64)
         if (m_Comparison)
