@@ -439,9 +439,14 @@ void RagdollComparisonRunner::DrawJointResults()
     for (int axis = 0; axis < 3; ++axis)
     {
         const auto& drive = config.drives[config.useSlerpDrive ? 0 : axis];
-        ImGui::Text(u8"%s: 원본 범위 [%.2f, %.2f]도 | 드라이브 %s | Kp %.1f Kd %.1f 최대 %.1f Nm",
+        ImGui::Text(u8"%s: 원본 범위 [%.2f, %.2f]도 | 드라이브 %s | %s Kp %.1f Kd %.1f 최대 %.1f Nm",
             Axes[axis], result.minimumAngles[axis] * Degrees, result.maximumAngles[axis] * Degrees,
-            drive.enabled ? u8"켜짐" : u8"꺼짐", drive.stiffness, drive.damping, drive.maxTorque);
+            drive.enabled ? u8"켜짐" : u8"꺼짐", drive.useAcceleration ? u8"가속도" : u8"토크",
+            drive.GetStiffness(), drive.GetDamping(), drive.maxTorque);
+        if (drive.useAcceleration)
+        {
+            ImGui::Text(u8"고유각진동수 %.2f rad/s | 감쇠비 %.2f", drive.naturalFrequency, drive.dampingRatio);
+        }
     }
     if (result.singularFrames)
     {

@@ -1,4 +1,4 @@
-#include "../Model/Ragdoll.h"
+﻿#include "../Model/Ragdoll.h"
 #include "../Model/PhysicsPose.h"
 #include "../Core/PhysicsWorld.h"
 #include <cstdio>
@@ -16,6 +16,111 @@ namespace
     float Difference(Quaternion a, Quaternion b)
     { return 2 * std::acos((std::min)(1.0f, std::abs(XMVectorGetX(XMVector4Dot(a, b))))); }
     Matrix4 Pose(Vector3 position, Quaternion rotation = Quaternion(kIdentity)) { return Matrix4(OrthogonalTransform(rotation, position)); }
+
+    std::vector<float> SampleAccelerationResponse(float massScale, float radius, bool slerp, float maxTorque)
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize acceleration drive world");
+        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "floor");
+        Check(floor != nullptr, "Create acceleration test scene");
+        PhysicsAsset asset;
+        PhysicsBody parent;
+        parent.bone = "parent";
+        parent.shape = PhysicsShapeType::Sphere;
+        parent.radius = radius;
+        parent.mass = massScale;
+        PhysicsBody child = parent;
+        child.bone = "child";
+        child.mass *= 2.0f;
+        asset.bodies = {parent, child};
+        PhysicsConstraint joint;
+        joint.parentBone = parent.bone;
+        joint.childBone = child.bone;
+        joint.twist = PhysicsJointMotion::Free;
+        joint.swingY = joint.swingZ = slerp ? PhysicsJointMotion::Free : PhysicsJointMotion::Locked;
+        asset.constraints.push_back(joint);
+        ConfigureDefaultDrives(asset);
+        for (auto& drive : asset.constraints[0].drives)
+        {
+            drive.maxTorque = maxTorque;
+        }
+        const std::vector<std::string> names{parent.bone, child.bone};
+        const std::vector<Matrix4> initial{Pose(Vector3(0, 3, 0)), Pose(Vector3(0, 3, 0))};
+        Ragdoll ragdoll;
+        std::string error;
+        Check(ragdoll.Create(world, asset, names, initial, Vector3(kZero), error), "Create acceleration drive pair");
+        PxActor* actors[2]{};
+        Check(floor->getScene()->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors, 2) == 2, "Find acceleration test bodies");
+        PxRigidDynamic* childBody = nullptr;
+        for (auto* actor : actors)
+        {
+            auto* body = actor->is<PxRigidDynamic>();
+            body->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+            body->setAngularDamping(0);
+            body->setLinearDamping(0);
+            if (std::strcmp(body->getName(), "child") == 0)
+            {
+                childBody = body;
+            }
+        }
+        Check(childBody != nullptr, "Find child inertia for torque bound");
+        // 질량과 형상만 바꾸고 외력, 바디 감쇠, 관절 오프셋의 영향을 분리해 응답을 비교한다.
+        auto target = initial;
+        target[1] = Pose(Vector3(0, 3, 0), Quaternion(Vector3(kXUnitVector), .5f));
+        Check(ragdoll.UpdateDriveTargets(target, 0, error), "Set acceleration target without a velocity spike");
+        ragdoll.SetDrivesEnabled(true);
+        std::vector<float> errors;
+        for (int step = 0; step < 60; ++step)
+        {
+            Check(ragdoll.UpdateDriveTargets(target, 1.0f / 60, error), "Update acceleration target");
+            world.Step();
+            Check(ragdoll.IsFinite(), "Acceleration drive remains finite");
+            errors.push_back(ragdoll.GetMaxDriveError());
+            if (step == 0)
+            {
+                const float velocityBound = maxTorque / childBody->getMassSpaceInertiaTensor().x / 60.0f;
+                Check(std::abs(childBody->getAngularVelocity().x) <= velocityBound * 1.02f + 1e-5f,
+                    "Acceleration mode keeps its torque limit in Nm");
+            }
+        }
+        auto changed = asset;
+        changed.constraints[0].drives[0].naturalFrequency = 8.0f;
+        changed.constraints[0].drives[0].dampingRatio = .7f;
+        const auto before = childBody->getGlobalPose();
+        const auto velocity = childBody->getAngularVelocity();
+        Check(ragdoll.ApplyDriveSettings(changed, error) &&
+            (childBody->getGlobalPose().p - before.p).magnitude() < 1e-7f &&
+            std::abs(childBody->getGlobalPose().q.dot(before.q)) > .999999f &&
+            (childBody->getAngularVelocity() - velocity).magnitude() < 1e-7f,
+            "Live frequency and ratio edits preserve the physical state");
+        ragdoll.Destroy();
+        Check(world.GetConstraintCount() == 0 && world.GetDynamicBodyCount() == 0 && world.GetErrorCount() == 0,
+            "Acceleration drive releases all bodies and constraints without errors");
+        return errors;
+    }
+
+    void TestAccelerationDrives()
+    {
+        for (bool slerp : {false, true})
+        {
+            const auto reference = SampleAccelerationResponse(1.0f, .1f, slerp, 10000);
+            const auto heavy = SampleAccelerationResponse(8.0f, .1f, slerp, 10000);
+            const auto larger = SampleAccelerationResponse(1.0f, .4f, slerp, 10000);
+            float difference = 0;
+            for (size_t i = 0; i < reference.size(); ++i)
+            {
+                difference = (std::max)(difference, std::abs(reference[i] - heavy[i]));
+                difference = (std::max)(difference, std::abs(reference[i] - larger[i]));
+            }
+            std::printf("acceleration %s response difference=%.6f final error=%.6f\n",
+                slerp ? "SLERP" : "twist", difference, reference.back());
+            Check(difference < .003f && reference.back() < .005f,
+                "Same frequency and ratio produce matching response for different masses and shape inertias");
+            const auto limited = SampleAccelerationResponse(1.0f, .4f, slerp, .001f);
+            Check(limited.back() > .4f, "Torque capacity still limits an acceleration drive");
+        }
+        std::puts("PASS: acceleration drives normalize inertia, preserve torque caps and support live response edits");
+    }
 
     void TestDynamicPelvis()
     {
@@ -264,4 +369,5 @@ void RunActiveRagdollTests()
     std::puts("PASS: active target frames, limit projection, PD hinge tracking, torque limits, impulse recovery and mode preservation");
     world.Shutdown();
     TestDynamicPelvis();
+    TestAccelerationDrives();
 }

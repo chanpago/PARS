@@ -89,7 +89,8 @@ void RunPhysicsAssetTests()
     Check(loaded.constraints.size() == 1, "Round trip preserves joint count");
     const auto& savedJoint = loaded.constraints[0];
     Check(savedJoint.drives[0].enabled && savedJoint.drives[0].stiffness == 135 && savedJoint.drives[0].damping == 12 &&
-        savedJoint.drives[0].maxTorque == 28 && !savedJoint.drives[1].enabled, "Drive settings and disabled axes survive PA v3 round trip");
+        savedJoint.drives[0].maxTorque == 28 && !savedJoint.drives[0].useAcceleration && !savedJoint.drives[1].enabled,
+        "Legacy force settings and disabled axes survive PA v4 round trip");
     Check(savedJoint.parentBone == joint.parentBone && savedJoint.childBone == joint.childBone &&
         SameFrame(savedJoint.parentFrame.GetTransform(), joint.parentFrame.GetTransform()) &&
         SameFrame(savedJoint.childFrame.GetTransform(), joint.childFrame.GetTransform()) &&
@@ -110,7 +111,40 @@ void RunPhysicsAssetTests()
     slerp.constraints[0].useSlerpDrive = true;
     PhysicsAsset slerpLoaded;
     Check(slerp.Save(path, error) && slerpLoaded.Load(path, error) && slerpLoaded.constraints[0].useSlerpDrive,
-        "SLERP drive mode survives PA v3 round trip");
+        "SLERP drive mode survives PA v4 round trip");
+    auto acceleration = original;
+    ConfigureDefaultDrives(acceleration);
+    acceleration.constraints[0].drives[0].naturalFrequency = 24.0f;
+    acceleration.constraints[0].drives[0].dampingRatio = .75f;
+    PhysicsAsset accelerationLoaded;
+    Check(acceleration.Save(path, error) && accelerationLoaded.Load(path, error), "Round trip acceleration drives");
+    const auto& accelerationDrive = accelerationLoaded.constraints[0].drives[0];
+    Check(accelerationDrive.useAcceleration && accelerationDrive.naturalFrequency == 24.0f &&
+        accelerationDrive.dampingRatio == .75f && accelerationDrive.GetStiffness() == 576.0f &&
+        accelerationDrive.GetDamping() == 36.0f && !accelerationLoaded.constraints[0].drives[1].enabled,
+        "Acceleration drive preserves frequency, ratio and locked axes without interpreting torque gains");
+    auto heavier = original;
+    for (auto& body : heavier.bodies)
+    {
+        body.mass *= 3.0f;
+    }
+    ConfigureDefaultDrives(heavier);
+    ConfigureDefaultDrives(acceleration);
+    Check(heavier.constraints[0].drives[0].GetStiffness() == acceleration.constraints[0].drives[0].GetStiffness() &&
+        heavier.constraints[0].drives[0].GetDamping() == acceleration.constraints[0].drives[0].GetDamping() &&
+        heavier.constraints[0].drives[0].maxTorque > acceleration.constraints[0].drives[0].maxTorque,
+        "Mass changes torque capacity but not the requested acceleration response");
+    for (float frequency : {-1.0f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::max()})
+    {
+        auto badResponse = acceleration;
+        badResponse.constraints[0].drives[0].naturalFrequency = frequency;
+        Check(!badResponse.Validate(error), "Reject negative, non-finite or overflowing acceleration frequency");
+    }
+    auto badResponse = acceleration;
+    badResponse.constraints[0].drives[0].dampingRatio = -1.0f;
+    Check(!badResponse.Validate(error), "Reject negative damping ratio");
+    badResponse.constraints[0].drives[0].dampingRatio = std::numeric_limits<float>::infinity();
+    Check(!badResponse.Validate(error), "Reject non-finite damping ratio");
     Check(original.Save(path, error), "Restore fixture for legacy format tests");
     invalid = loaded;
     invalid.constraints[0].childBone = "missing";
@@ -151,6 +185,29 @@ void RunPhysicsAssetTests()
     corruptJoint = saved; corruptJoint["angleUnits"] = "degrees";
     writeJson(corruptJoint);
     Check(!loaded.Load(path, error) && loaded.constraints.size() == 1, "Reject ambiguous angular units");
+    corruptJoint = saved;
+    corruptJoint["constraints"][0]["drives"][0]["type"] = "unknown";
+    writeJson(corruptJoint);
+    Check(!loaded.Load(path, error) && !loaded.constraints[0].drives[0].useAcceleration,
+        "Reject unknown drive type without changing the live asset");
+    corruptJoint = saved;
+    corruptJoint["constraints"][0]["drives"][0]["type"] = "acceleration";
+    writeJson(corruptJoint);
+    Check(!loaded.Load(path, error), "Acceleration files must supply frequency and ratio instead of legacy gains");
+    auto legacyForce = saved;
+    legacyForce["version"] = 3;
+    legacyForce["driveUnits"] = "Nm-radians-seconds";
+    for (auto& entry : legacyForce["constraints"])
+    {
+        for (auto& drive : entry["drives"])
+        {
+            drive.erase("type");
+        }
+    }
+    writeJson(legacyForce);
+    Check(loaded.Load(path, error) && !loaded.constraints[0].drives[0].useAcceleration &&
+        loaded.constraints[0].drives[0].GetStiffness() == 135.0f && loaded.constraints[0].drives[0].GetDamping() == 12.0f,
+        "Legacy v3 torque gains remain force drives rather than becoming acceleration gains");
     auto legacy = saved; legacy["version"] = 2; legacy.erase("driveUnits");
     for (auto& entry : legacy["constraints"]) entry.erase("drives");
     writeJson(legacy);
@@ -160,7 +217,7 @@ void RunPhysicsAssetTests()
     Check(loaded.Load(path, error) && loaded.bodies.size() == 3 && loaded.constraints.empty(),
         "Legacy version 1 body-only file loads and clears previous joints");
     writeJson(saved);
-    Check(loaded.Load(path, error), "Restore version 2 asset");
+    Check(loaded.Load(path, error), "Restore version 4 asset");
     original.bodies[0].radius = -1;
     Check(!original.Save(path, error), "Reject negative radius before overwriting saved asset");
     Check(loaded.Load(path, error) && loaded.bodies[0].radius == .12f, "Failed save preserves previous file");
@@ -176,5 +233,5 @@ void RunPhysicsAssetTests()
     { std::ofstream corrupt(path); corrupt << "{broken json"; }
     Check(!loaded.Load(path, error) && loaded.bodies.size() == 3, "Malformed asset preserves editor state");
     DeleteFileA(path);
-    std::puts("PASS: PhysicsAsset body/joint transforms, angular limits, v1/v2/v3 round trip, skeleton compatibility and transactional validation");
+    std::puts("PASS: PhysicsAsset transforms, limits, v1/v2/v3 compatibility, v4 acceleration response and transactional validation");
 }

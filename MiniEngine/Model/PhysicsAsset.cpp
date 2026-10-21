@@ -89,6 +89,16 @@ namespace
 
 namespace PARS
 {
+    float PhysicsAngularDrive::GetStiffness() const
+    {
+        return useAcceleration ? naturalFrequency * naturalFrequency : stiffness;
+    }
+
+    float PhysicsAngularDrive::GetDamping() const
+    {
+        return useAcceleration ? 2.0f * dampingRatio * naturalFrequency : damping;
+    }
+
     Matrix4 PhysicsBody::GetLocalTransform() const
     {
         return Matrix4(OrthogonalTransform(Quaternion(DirectX::XMLoadFloat4(&rotation)), Vector3(offset)));
@@ -260,8 +270,14 @@ namespace PARS
             }
             for (const auto& drive : joint.drives)
             {
-                if (!std::isfinite(drive.stiffness) || !std::isfinite(drive.damping) || !std::isfinite(drive.maxTorque) ||
-                    drive.stiffness < 0 || drive.damping < 0 || drive.maxTorque < 0)
+                if (drive.useAcceleration &&
+                    (!std::isfinite(drive.naturalFrequency) || !std::isfinite(drive.dampingRatio) ||
+                        drive.naturalFrequency < 0 || drive.dampingRatio < 0))
+                {
+                    error = "Drive frequency and damping ratio must be finite and nonnegative.";
+                }
+                if (!std::isfinite(drive.GetStiffness()) || !std::isfinite(drive.GetDamping()) || !std::isfinite(drive.maxTorque) ||
+                    drive.GetStiffness() < 0 || drive.GetDamping() < 0 || drive.maxTorque < 0)
                 {
                     error = "Drive gains and torque limits must be finite and nonnegative.";
                 }
@@ -298,8 +314,8 @@ namespace PARS
             const auto destination = WidePath(path);
             temporary = destination + L".tmp";
             json root;
-            root["version"] = 3;
-            root["driveUnits"] = "Nm-radians-seconds";
+            root["version"] = 4;
+            root["driveUnits"] = "mode-dependent-radians-seconds-Nm";
             root["units"] = "metres";
             root["angleUnits"] = "radians";
             root["bodies"] = json::array();
@@ -337,8 +353,19 @@ namespace PARS
                 entry["drives"] = json::array();
                 for (const auto& drive : joint.drives)
                 {
-                    entry["drives"].push_back({{"enabled", drive.enabled}, {"stiffness", drive.stiffness},
-                        {"damping", drive.damping}, {"maxTorque", drive.maxTorque}});
+                    json settings = {{"enabled", drive.enabled}, {"maxTorque", drive.maxTorque},
+                        {"type", drive.useAcceleration ? "acceleration" : "force"}};
+                    if (drive.useAcceleration)
+                    {
+                        settings["naturalFrequency"] = drive.naturalFrequency;
+                        settings["dampingRatio"] = drive.dampingRatio;
+                    }
+                    else
+                    {
+                        settings["stiffness"] = drive.stiffness;
+                        settings["damping"] = drive.damping;
+                    }
+                    entry["drives"].push_back(settings);
                 }
                 root["constraints"].push_back(entry);
             }
@@ -374,11 +401,15 @@ namespace PARS
             json root;
             input >> root;
             const int version = root.at("version").get<int>();
-            if ((version < 1 || version > 3) || root.at("units").get<std::string>() != "metres")
+            if ((version < 1 || version > 4) || root.at("units").get<std::string>() != "metres")
             {
                 throw std::runtime_error("Unsupported PhysicsAsset version or units.");
             }
             if (version == 3 && root.at("driveUnits").get<std::string>() != "Nm-radians-seconds")
+            {
+                throw std::runtime_error("Unsupported angular drive units.");
+            }
+            if (version == 4 && root.at("driveUnits").get<std::string>() != "mode-dependent-radians-seconds-Nm")
             {
                 throw std::runtime_error("Unsupported angular drive units.");
             }
@@ -444,7 +475,7 @@ namespace PARS
                     joint.swingYLimit = entry.at("swingYLimit").get<float>();
                     joint.swingZLimit = entry.at("swingZLimit").get<float>();
                     joint.enableCollision = entry.at("enableCollision").get<bool>();
-                    if (version == 3)
+                    if (version >= 3)
                     {
                         const auto mode = entry.at("driveMode").get<std::string>();
                         if (mode != "slerp" && mode != "swingTwist")
@@ -462,9 +493,26 @@ namespace PARS
                             auto& drive = joint.drives[axis];
                             const auto& value = drives.at(axis);
                             drive.enabled = value.at("enabled").get<bool>();
-                            drive.stiffness = value.at("stiffness").get<float>();
-                            drive.damping = value.at("damping").get<float>();
                             drive.maxTorque = value.at("maxTorque").get<float>();
+                            if (version == 4)
+                            {
+                                const auto type = value.at("type").get<std::string>();
+                                if (type != "acceleration" && type != "force")
+                                {
+                                    throw std::runtime_error("Unknown angular drive type.");
+                                }
+                                drive.useAcceleration = type == "acceleration";
+                            }
+                            if (drive.useAcceleration)
+                            {
+                                drive.naturalFrequency = value.at("naturalFrequency").get<float>();
+                                drive.dampingRatio = value.at("dampingRatio").get<float>();
+                            }
+                            else
+                            {
+                                drive.stiffness = value.at("stiffness").get<float>();
+                                drive.damping = value.at("damping").get<float>();
+                            }
                         }
                     }
                     candidate.constraints.push_back(joint);
@@ -489,8 +537,8 @@ namespace PARS
     {
         for (auto& joint : asset.constraints)
         {
-            // 몸통에 가까운 관절은 하위 부위의 무게도 지탱한다. 하위 부위 질량에 비례해 초기 게인을
-            // 설정하므로 손을 몸통과 같은 세기로 구동하지 않는다.
+            // 하위 부위 질량은 최대 토크의 초기 추정에만 사용한다.
+            // 반응 속도와 감쇠비는 질량과 분리하고, 각 바디의 관성 반영은 가속도 드라이브에 맡긴다.
             std::set<std::string> descendants{joint.childBone};
             for (size_t pass = 0; pass < asset.bodies.size(); ++pass)
             {
@@ -510,13 +558,16 @@ namespace PARS
                     mass += body.mass;
                 }
             }
-            const float stiffness = (std::max)(1600.0f, (std::min)(96000.0f, mass * 1600.0f));
+            const float maxTorque = (std::max)(32.0f, (std::min)(1400.0f, mass * 32.0f));
             const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
             joint.useSlerpDrive = joint.twist != PhysicsJointMotion::Locked && joint.swingY != PhysicsJointMotion::Locked && joint.swingZ != PhysicsJointMotion::Locked;
             for (int axis = 0; axis < 3; ++axis)
             {
-                joint.drives[axis] = {motions[axis] != PhysicsJointMotion::Locked, stiffness,
-                    stiffness * .005f, (std::max)(32.0f, (std::min)(1400.0f, mass * 32.0f))};
+                auto& drive = joint.drives[axis];
+                drive = PhysicsAngularDrive{};
+                drive.enabled = motions[axis] != PhysicsJointMotion::Locked;
+                drive.useAcceleration = true;
+                drive.maxTorque = maxTorque;
             }
         }
     }
@@ -527,7 +578,7 @@ namespace PARS
         for (int axis = 0; axis < (joint.useSlerpDrive ? 1 : 3); ++axis)
         {
             const auto& drive = joint.drives[axis];
-            if (motions[axis] != PhysicsJointMotion::Locked && drive.enabled && drive.maxTorque > 0 && (drive.stiffness > 0 || drive.damping > 0))
+            if (motions[axis] != PhysicsJointMotion::Locked && drive.enabled && drive.maxTorque > 0 && (drive.GetStiffness() > 0 || drive.GetDamping() > 0))
             {
                 return true;
             }

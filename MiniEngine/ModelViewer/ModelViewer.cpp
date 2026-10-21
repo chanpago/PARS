@@ -963,13 +963,13 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
         ImGui::TextUnformatted(character.CanControlMovement() ? u8"WASD: 이동 | Shift: 달리기" : u8"이동하려면 골반 지지가 필요합니다.");
     }
     ImGui::BeginDisabled(!asset);
-    if (ImGui::Button(u8"PD 기본값 적용"))
+    if (ImGui::Button(u8"가속도 PD 기본값 적용"))
     {
         auto candidate = *asset;
         PARS::ConfigureDefaultDrives(candidate);
         if (mesh.QueueDriveSettings(candidate, m_RagdollMessage))
         {
-            m_RagdollMessage = u8"다음 물리 스텝에 PD 기본값을 적용합니다.";
+            m_RagdollMessage = u8"다음 물리 스텝에 가속도 PD 기본값을 적용합니다.";
         }
     }
     ImGui::BeginDisabled(!m_MeshViewer || m_MeshViewer->GetPhysicsAsset().bodies.empty());

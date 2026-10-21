@@ -164,7 +164,13 @@ const data = )HTML";
             {
                 const auto& drive = joint.drives[axis];
                 out << (axis ? "," : "") << "{\"enabled\":" << (drive.enabled ? "true" : "false")
-                    << ",\"kp\":" << drive.stiffness << ",\"kd\":" << drive.damping << ",\"maxNm\":" << drive.maxTorque << '}';
+                    << ",\"acceleration\":" << (drive.useAcceleration ? "true" : "false")
+                    << ",\"kp\":" << drive.GetStiffness() << ",\"kd\":" << drive.GetDamping() << ",\"maxNm\":" << drive.maxTorque;
+                if (drive.useAcceleration)
+                {
+                    out << ",\"omegaN\":" << drive.naturalFrequency << ",\"zeta\":" << drive.dampingRatio;
+                }
+                out << '}';
             }
             out << "]}";
         }
@@ -222,7 +228,7 @@ const frameSettings=f=>({"위치 (m)":f.p,"회전 쿼터니언 (x, y, z, w)":f.q
 $("settings").textContent=JSON.stringify({
 "물리 시간 간격 (초)":data.step,
 "바디":data.bodies.map(b=>({"본":b.name,"질량 (kg)":b.massKg,"형상":["캡슐","상자","구"][b.shape],"반지름 (m)":b.radius,"원통 반길이 (m)":b.halfLength,"상자 반크기 (m)":b.halfExtents,"바디 기준 좌표계":frameSettings(b.frame)})),
-"관절":data.joints.map(j=>({"부모 본":j.parent,"자식 본":j.name,"축별 운동":j.motion.map((m,a)=>`${axes[a]}: ${["잠금","제한","자유"][m]}`),"설정 최소각 (rad)":j.min,"설정 최대각 (rad)":j.max,"SLERP 드라이브":j.slerp?"사용":"사용 안 함","연결된 바디 간 충돌":j.collision?"사용":"사용 안 함","부모 기준 좌표계":frameSettings(j.parentFrame),"자식 기준 좌표계":frameSettings(j.childFrame),"드라이브":j.drives.map((d,a)=>({"축":axes[a],"설정상 활성":d.enabled?"켜짐":"꺼짐","강성 Kp":d.kp,"감쇠 Kd":d.kd,"최대 토크 (Nm)":d.maxNm}))}))
+"관절":data.joints.map(j=>({"부모 본":j.parent,"자식 본":j.name,"축별 운동":j.motion.map((m,a)=>`${axes[a]}: ${["잠금","제한","자유"][m]}`),"설정 최소각 (rad)":j.min,"설정 최대각 (rad)":j.max,"SLERP 드라이브":j.slerp?"사용":"사용 안 함","연결된 바디 간 충돌":j.collision?"사용":"사용 안 함","부모 기준 좌표계":frameSettings(j.parentFrame),"자식 기준 좌표계":frameSettings(j.childFrame),"드라이브":j.drives.map((d,a)=>({"축":axes[a],"설정상 활성":d.enabled?"켜짐":"꺼짐","구동 방식":d.acceleration?"가속도":"토크",...(d.acceleration?{"고유각진동수 (rad/s)":d.omegaN,"감쇠비":d.zeta}:{}),"강성 계수":d.kp,"감쇠 계수":d.kd,"최대 토크 (Nm)":d.maxNm}))}))
 },null,2);
 data.bodies.forEach((b,i)=>$("body").add(new Option(b.name,i)));
 data.joints.forEach((j,i)=>$("joint").add(new Option(j.parent+" → "+j.name,i)));

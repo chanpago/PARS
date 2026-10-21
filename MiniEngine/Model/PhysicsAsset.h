@@ -40,12 +40,19 @@ namespace PARS
         Free
     };
 
-    // 힘 기반 각도 PD 드라이브다. 토크 제한은 구동 축마다 Nm 단위로 지정한다.
-    // 강성/감쇠 계산에는 라디안과 라디안/초를 사용한다. 이전 형식의 PA는 패시브 상태를 유지한다.
+    // 가속도 드라이브는 고유각진동수(rad/s)와 감쇠비로 반응을 정하고 관성 반영은 PhysX에 맡긴다.
+    // 이전 PA의 토크 게인은 힘 모드에서만 사용한다. 최대 토크는 두 모드 모두 Nm 단위다.
     struct PhysicsAngularDrive
     {
         bool enabled = false;
         float stiffness = 0, damping = 0, maxTorque = 0;
+        bool useAcceleration = false;
+        // 사용자가 조절하는 시작값이다. 단위는 Hz가 아닌 rad/s다.
+        float naturalFrequency = 16.0f;
+        float dampingRatio = 1.0f;
+
+        float GetStiffness() const;
+        float GetDamping() const;
     };
 
     struct PhysicsJointFrame

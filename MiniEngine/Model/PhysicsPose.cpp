@@ -584,12 +584,9 @@ namespace PARS
             const auto group = parts[candidate.FindBody(joint.childBone)].massGroup;
             if (group == LeftShank || group == RightShank)
             {
-                // 무릎은 보조 회전을 포함한 SLERP 드라이브로 바뀐다.
-                // 빠른 다리 신전에서 목표를 지나쳐 펴지지 않도록 응답과 제동 토크를 보강한다.
+                // 무릎의 기존 토크 여유는 유지하되, 반응 속도와 감쇠비는 다른 관절과 같은 기본값을 쓴다.
                 for (auto& drive : joint.drives)
                 {
-                    drive.stiffness *= 2;
-                    drive.damping *= 2;
                     drive.maxTorque *= 2;
                 }
             }

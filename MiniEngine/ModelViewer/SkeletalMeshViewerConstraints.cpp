@@ -282,8 +282,8 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     }
     if (ImGui::CollapsingHeader(u8"액티브 래그돌 드라이브", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::TextWrapped(u8"힘 기반 PD 제어입니다. 최대 토크 단위는 축별 Nm입니다. 실행 중인 캐릭터에 반영하려면 캐릭터 애니메이션 창에서 '에디터 드라이브 적용'을 누르세요.");
-        if (ImGui::Button(u8"전체 관절 PD 기본값"))
+        ImGui::TextWrapped(u8"가속도 드라이브는 반응 속도와 감쇠비를 기준으로 제어하며, PhysX가 바디의 관성을 반영합니다. 최대 토크는 Nm 단위입니다. 실행 중인 캐릭터에는 '에디터 드라이브 적용'으로 반영하세요.");
+        if (ImGui::Button(u8"전체 관절 가속도 PD 기본값"))
         {
             ConfigureDefaultDrives(m_PhysicsAsset);
             changed = true;
@@ -300,8 +300,29 @@ void SkeletalMeshViewer::DrawConstraintPanel()
             ImGui::BeginDisabled(motions[axis] == PhysicsJointMotion::Locked);
             changed |= ImGui::Checkbox(joint.useSlerpDrive ? u8"회전 드라이브" : names[axis], &drive.enabled);
             ImGui::BeginDisabled(!drive.enabled);
-            changed |= ImGui::DragFloat(u8"강성 Kp", &drive.stiffness, 1, 0, 100000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-            changed |= ImGui::DragFloat(u8"감쇠 Kd", &drive.damping, .1f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            if (!drive.useAcceleration)
+            {
+                ImGui::TextUnformatted(u8"기존 토크 기준 드라이브");
+                if (ImGui::Button(u8"가속도 기본값으로 전환"))
+                {
+                    const PhysicsAngularDrive defaults;
+                    drive.useAcceleration = true;
+                    drive.naturalFrequency = defaults.naturalFrequency;
+                    drive.dampingRatio = defaults.dampingRatio;
+                    changed = true;
+                }
+            }
+            if (drive.useAcceleration)
+            {
+                changed |= ImGui::DragFloat(u8"고유각진동수 (rad/s)", &drive.naturalFrequency, .1f, 0, 200, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                changed |= ImGui::DragFloat(u8"감쇠비", &drive.dampingRatio, .01f, 0, 10, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::TextDisabled(u8"가속도 계수: Kp %.2f, Kd %.2f", drive.GetStiffness(), drive.GetDamping());
+            }
+            else
+            {
+                changed |= ImGui::DragFloat(u8"강성 Kp", &drive.stiffness, 1, 0, 100000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                changed |= ImGui::DragFloat(u8"감쇠 Kd", &drive.damping, .1f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            }
             changed |= ImGui::DragFloat(u8"최대 토크 (Nm)", &drive.maxTorque, .5f, 0, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             ImGui::EndDisabled();
             ImGui::EndDisabled();

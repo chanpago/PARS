@@ -31,7 +31,7 @@ namespace PARS
         bool Enabled(const PhysicsAngularDrive& drive, PhysicsJointMotion motion)
         {
             return drive.enabled && motion != PhysicsJointMotion::Locked && drive.maxTorque > 0 &&
-                (drive.stiffness > 0 || drive.damping > 0);
+                (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
         }
     }
 #endif
@@ -49,10 +49,15 @@ namespace PARS
             for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
             {
                 const auto& drive = data.drives[axis];
-                // 축별 Nm 제한을 사용하는 힘 기반 PD 제어다. 실제 계산은 PhysX가 수행하므로
-                // 별도의 수동 토크 제어기를 중복 적용하지 않는다.
+                // 가속도 모드의 게인은 omegaN^2, 2*zeta*omegaN이다. 관성과 토크 제한은 PhysX가 반영한다.
+                // 이전 PA의 힘 모드는 기존 게인의 의미를 유지한다.
                 const bool on = m_DrivesEnabled && Enabled(drive, motions[axis]);
-                m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], on ? PxD6JointDrive(drive.stiffness, drive.damping, drive.maxTorque, false) : PxD6JointDrive());
+                PxD6JointDrive motor;
+                if (on)
+                {
+                    motor = PxD6JointDrive(drive.GetStiffness(), drive.GetDamping(), drive.maxTorque, drive.useAcceleration);
+                }
+                m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], motor);
             }
         }
         for (auto* body : m_Bodies)
