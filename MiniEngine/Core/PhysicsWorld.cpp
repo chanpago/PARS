@@ -373,10 +373,10 @@ namespace
         return PxTransform(centre, PxQuat(PxHalfPi, PxVec3(0, 0, 1)));
     } // PhysX의 로컬 X축을 PARS의 +Y축에 맞춘다.
 
-    class CapsuleQueryFilter : public PxQueryFilterCallback
+    class OwnerQueryFilter : public PxQueryFilterCallback
     {
     public:
-        explicit CapsuleQueryFilter(const void* owner)
+        explicit OwnerQueryFilter(const void* owner)
             : ignoredOwner(owner)
         {
         }
@@ -440,6 +440,44 @@ namespace
     };
 }
 
+float PhysicsWorld::SweepSphereDistance(const PxVec3& origin, const PxVec3& displacement,
+    float radius, const void* ignoredOwner) const
+{
+    const float distance = displacement.magnitude();
+    if (!origin.isFinite() || !displacement.isFinite() || !std::isfinite(distance) ||
+        !std::isfinite(radius) || radius <= 0 || distance < 1e-6f)
+    {
+        return 0;
+    }
+    if (!m_Scene)
+    {
+        return distance;
+    }
+    const PxSphereGeometry geometry(radius);
+    const PxTransform pose(origin);
+    const PxVec3 direction = displacement / distance;
+    OwnerQueryFilter filter(ignoredOwner);
+    PxSweepBuffer hit;
+    m_Scene->sweep(geometry, pose, direction, distance, hit, PxHitFlag::eDEFAULT,
+        PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER), &filter);
+    float allowed = hit.hasBlock ? PxMax(0.0f, hit.block.distance) : distance;
+    // 이동용 캡슐은 씬에 PxActor를 만들지 않으므로 별도로 검사한다.
+    for (const auto& capsule : m_QueryCapsules)
+    {
+        if (ignoredOwner && capsule->owner == ignoredOwner)
+        {
+            continue;
+        }
+        PxGeomSweepHit candidate;
+        if (PxGeometryQuery::sweep(direction, distance, geometry, pose,
+                CapsuleGeometry(*capsule), CapsulePose(capsule->centre), candidate, PxHitFlag::eDEFAULT))
+        {
+            allowed = PxMin(allowed, PxMax(0.0f, candidate.distance));
+        }
+    }
+    return PxMin(allowed, distance);
+}
+
 PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsule& capsule, const PxVec3& displacement)
 {
     CapsuleMoveResult result;
@@ -447,7 +485,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
     {
         return result;
     }
-    CapsuleQueryFilter filter(capsule.owner);
+    OwnerQueryFilter filter(capsule.owner);
     // 스윕을 시도하기 전에 생성/순간이동으로 발생한 파고듦을 해결한다.
     for (int iteration = 0; iteration < 8; ++iteration)
     {

@@ -501,6 +501,8 @@
     <ClInclude Include="GameFramework\PrimitiveComponent.h" />
     <ClCompile Include="GameFramework\SceneComponent.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClInclude Include="GameFramework\SceneComponent.h" />
+    <ClCompile Include="GameFramework\SpringArmComponent.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="GameFramework\SpringArmComponent.h" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="GameFramework\World.h" />

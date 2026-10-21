@@ -39,6 +39,7 @@
 #include "ViewerLabels.h"
 #include "SkeletalMeshViewer.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/SpringArmComponent.h"
 #include "ShadowCamera.h"
 #include "Display.h"
 #include "imgui.h"
@@ -154,9 +155,12 @@ public:
                     const auto* player = GetPlayerController();
                     const bool controlsRestored = player && player->IsInputEnabled() && !m_FreeCamera &&
                         !(m_MeshViewer && m_MeshViewer->WantsInput());
+                    const bool springArmApplied = m_SpringArm && &m_SpringArm->GetOwner() == GetPreviewCharacter() &&
+                        float(Length(m_Camera.GetPosition() - m_SpringArm->GetCameraLocation())) < 1e-4f;
                     std::ofstream report(comparisonCapture + L".txt");
-                    report << (controlsRestored ? "PASS" : "FAIL") << ": returned to the player scene with movement input and follow camera\n"
-                           << "samples=" << m_Comparison->GetResults().GetFrames().size() << '\n';
+                    report << (controlsRestored && springArmApplied ? "PASS" : "FAIL") << ": returned to the player scene with movement input and spring arm camera\n"
+                           << "samples=" << m_Comparison->GetResults().GetFrames().size() << '\n'
+                           << "spring_arm_m=" << (m_SpringArm ? m_SpringArm->GetCurrentArmLength() : -1) << '\n';
                 }
                 return true;
             }
@@ -171,7 +175,7 @@ private:
     void SelectPreview(uint32_t index);
     void ResetPreviewCamera();
     void UpdateCharacterInput(float deltaTime);
-    void UpdateFollowCamera();
+    void UpdateFollowCamera(float deltaTime = 0);
     void SetFreeCamera(bool freeCamera);
     PARS::PlayerController* GetPlayerController() const
     {
@@ -195,6 +199,7 @@ private:
     PARS::World m_World;
     PARS::ActorHandle m_PreviewCharacter; // 참조만 보관하며, Actor의 소유자는 World다.
     PARS::ActorHandle m_PlayerController;
+    PARS::SpringArmComponent* m_SpringArm = nullptr; // 캐릭터 Actor가 소유한다.
     bool m_FreeCamera = false;
     float m_ControlYaw = XM_PI;
     float m_ControlPitch = 0.28f;
@@ -486,6 +491,11 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     animation->SetLocomotionEnabled(characterControl);
     if (characterControl)
     {
+        m_SpringArm = &character->CreateDefaultSubobject<PARS::SpringArmComponent>("SpringArmComponent");
+        m_SpringArm->AttachToComponent(character->GetCapsuleComponent());
+        m_SpringArm->SetRelativeLocation(Vector3(0, .55f, 0));
+        // 래그돌의 최종 위치와 렌더 프레임 시간을 사용하도록 World::Tick 뒤에 갱신한다.
+        m_SpringArm->SetTickEnabled(false);
         auto player = m_World.SpawnActor<PARS::PlayerController>("PlayerController");
         if (player && player->Possess(*character))
         {
@@ -559,6 +569,10 @@ void ModelViewer::RenderModels(Renderer::MeshSorter& sorter)
 
 void ModelViewer::ResetPreviewCamera()
 {
+    if (m_SpringArm)
+    {
+        m_SpringArm->ResetLagState();
+    }
     m_Camera.SetZRange(0.1f, 1000.0f);
 #if defined(_M_X64)
     if (m_PhysicsDemo)
@@ -608,6 +622,10 @@ void ModelViewer::SetFreeCamera(bool freeCamera)
         const auto forward = m_Camera.GetForwardVec();
         m_ControlYaw = std::atan2(float(forward.GetX()), float(forward.GetZ()));
         m_ControlPitch = Clamp(std::asin(Clamp(-float(forward.GetY()), -1.0f, 1.0f)), -0.1f, 1.1f);
+        if (m_SpringArm)
+        {
+            m_SpringArm->ResetLagState();
+        }
     }
 }
 
@@ -656,17 +674,19 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
         IsPressed(kKey_lshift) || IsPressed(kKey_rshift) || IsPressed(kLThumbClick));
 }
 
-void ModelViewer::UpdateFollowCamera()
+void ModelViewer::UpdateFollowCamera(float deltaTime)
 {
     auto character = GetPreviewCharacter();
-    if (!character)
+    if (!character || !m_SpringArm)
     {
         return;
     }
     const Vector3 target = character->IsRagdoll() ? character->GetMesh().GetRagdoll().GetPosition() + Vector3(0, .25f, 0) : character->GetActorLocation() + Vector3(0, 0.55f, 0);
-    const Vector3 forward(std::sin(m_ControlYaw) * std::cos(m_ControlPitch), -std::sin(m_ControlPitch),
-        std::cos(m_ControlYaw) * std::cos(m_ControlPitch));
-    m_Camera.SetEyeAtUp(target - forward * 4.5f, target, Vector3(kYUnitVector));
+    m_SpringArm->SetWorldTransform(AffineTransform(Matrix3(kIdentity), target));
+    m_SpringArm->SetControlRotation(m_ControlYaw, m_ControlPitch);
+    m_SpringArm->UpdateArm(deltaTime);
+    m_Camera.SetPosition(m_SpringArm->GetCameraLocation());
+    m_Camera.SetLookDirection(m_SpringArm->GetViewDirection(), Vector3(kYUnitVector));
     m_Camera.Update();
 }
 
@@ -680,6 +700,7 @@ void ModelViewer::Cleanup(void)
 #endif
     m_PreviewCharacter = {};
     m_PlayerController = {};
+    m_SpringArm = nullptr;
     m_World.Clear();
 #if defined(_M_X64)
     if (m_PhysicsDemo)
@@ -781,7 +802,7 @@ void ModelViewer::Update(float deltaT)
 #endif
     if (GetPlayerController() && !m_FreeCamera)
     {
-        UpdateFollowCamera();
+        UpdateFollowCamera(deltaT);
     }
 #if defined(_M_X64)
     if (m_Comparison)
@@ -1132,6 +1153,23 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     ResetPreviewCamera();
                 }
                 ImGui::EndDisabled();
+                if (m_SpringArm && ImGui::CollapsingHeader(u8"스프링암 카메라"))
+                {
+                    auto settings = m_SpringArm->GetSettings();
+                    ImGui::SetNextItemWidth(110);
+                    bool changed = ImGui::DragFloat(u8"기본 거리 (m)", &settings.targetArmLength, .1f, .5f, 8, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                    ImGui::SetNextItemWidth(110);
+                    changed |= ImGui::DragFloat(u8"따라오기 속도", &settings.cameraLagSpeed, .5f, 0, 30, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                    ImGui::SetNextItemWidth(110);
+                    changed |= ImGui::DragFloat(u8"거리 복원 속도", &settings.armReturnSpeed, .5f, 0, 30, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                    if (changed)
+                    {
+                        m_SpringArm->SetSettings(settings);
+                    }
+                    ImGui::TextWrapped(u8"속도 0: 즉시 반영. 충돌 시에는 즉시 거리를 줄입니다.");
+                    ImGui::Text(u8"현재 거리: %.2f m | 장애물: %s", m_SpringArm->GetCurrentArmLength(),
+                        m_SpringArm->IsCollisionFixApplied() ? u8"감지" : u8"없음");
+                }
 #if defined(_M_X64)
                 if (m_PhysicsDemo)
                 {
@@ -1143,6 +1181,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                             {
                                 character->SetActorLocation(Vector3(2, 0.95f, 0));
                                 character->GetCharacterMovement().StopMovementImmediately();
+                                if (m_SpringArm)
+                                {
+                                    m_SpringArm->ResetLagState();
+                                }
                             }
                         }
                     }

@@ -822,6 +822,12 @@
     <ClInclude Include="GameFramework\SceneComponent.h">
       <Filter>GameFramework</Filter>
     </ClInclude>
+    <ClCompile Include="GameFramework\SpringArmComponent.cpp">
+      <Filter>GameFramework</Filter>
+    </ClCompile>
+    <ClInclude Include="GameFramework\SpringArmComponent.h">
+      <Filter>GameFramework</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="GameFramework\World.h">

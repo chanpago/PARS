@@ -50,6 +50,9 @@ public:
         bool grounded = false, ceiling = false, wall = false;
     };
     CapsuleMoveResult MoveQueryCapsule(PhysicsQueryCapsule& capsule, const physx::PxVec3& displacement);
+    // 구형 프로브가 장애물에 닿기 전까지 이동할 수 있는 거리(m). 자기 Actor와 트리거는 제외한다.
+    float SweepSphereDistance(const physx::PxVec3& origin, const physx::PxVec3& displacement,
+        float radius, const void* ignoredOwner = nullptr) const;
     uint32_t GetQueryCapsuleCount() const
     {
         return static_cast<uint32_t>(m_QueryCapsules.size());

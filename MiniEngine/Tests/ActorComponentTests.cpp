@@ -158,6 +158,7 @@ void RunRagdollTests();
 void RunAnatomicalLimitTests();
 void RunActiveRagdollTests();
 void RunRagdollComparisonTests();
+void RunSpringArmTests();
 
 int main()
 {
@@ -166,6 +167,7 @@ int main()
     TestPoseSampling();
     RunWorldTests();
     RunCharacterMovementTests();
+    RunSpringArmTests();
     RunPhysicsAssetTests();
     RunRagdollTests();
     RunAnatomicalLimitTests();

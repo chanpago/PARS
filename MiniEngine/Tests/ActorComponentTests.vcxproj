@@ -59,6 +59,8 @@
     <ClCompile Include="..\Core\GameFramework\CharacterMovementComponent.cpp" />
     <ClCompile Include="..\Core\PhysicsWorld.cpp" />
     <ClCompile Include="CharacterMovementTests.cpp" />
+    <ClCompile Include="SpringArmTests.cpp" />
+    <ClCompile Include="..\Core\GameFramework\SpringArmComponent.cpp" />
     <ClCompile Include="..\Core\GameFramework\World.cpp" />
     <ClCompile Include="..\Core\GameFramework\Actor.cpp" />
     <ClCompile Include="..\Core\GameFramework\SceneComponent.cpp" />
