@@ -454,7 +454,8 @@ namespace PARS
             for (int axis = 0; axis < 3; ++axis)
             {
                 const auto& drive = data.drives[data.useSlerpDrive ? 0 : axis];
-                const bool enabled = m_DrivesEnabled && drive.enabled && motions[axis] != PhysicsJointMotion::Locked;
+                const bool enabled = m_DrivesEnabled && drive.enabled && drive.maxTorque > 0 &&
+                    motions[axis] != PhysicsJointMotion::Locked;
                 const unsigned dof = m_ArticulationDofOffsets[i] + axis;
                 float feedForward = 0;
                 if (enabled && compensate)
@@ -466,11 +467,13 @@ namespace PARS
                     {
                         feedForward += cache.massMatrix[(6 + dof) * count + column] * targetAcceleration[column];
                     }
-                    feedForward = PxClamp(feedForward, -drive.maxTorque, drive.maxTorque);
+                    // 토크 상한의 영향을 비교하기 위해 보상토크 제한을 임시로 해제한다.
+                    // feedForward = PxClamp(feedForward, -drive.maxTorque, drive.maxTorque);
                 }
                 cache.jointForce[dof] = feedForward;
-                // 보상과 PD가 같은 토크 예산을 나눠 쓴다. 모터 상한을 우회하는 외부 토크는 추가하지 않는다.
-                const float remainingTorque = enabled ? PxMax(0.0f, drive.maxTorque - PxAbs(feedForward)) : 0;
+                // 상한 해제 실험: 보상 사용량을 차감하지 않고 PD에 사실상 무제한 토크를 허용한다.
+                // const float remainingTorque = enabled ? PxMax(0.0f, drive.maxTorque - PxAbs(feedForward)) : 0;
+                const float remainingTorque = enabled ? PX_MAX_F32 : 0;
                 // 최신 Articulation에는 구형 internalCompliance가 없다. 다른 모터의 지지 상태를 반영한
                 // 관성으로 Kp=I*omegaN^2, Kd=2*zeta*I*omegaN을 만들고 암시적 토크 드라이브에 전달한다.
                 const float inertia = enabled && drive.useAcceleration ? inertias[6 + dof] : 1.0f;
