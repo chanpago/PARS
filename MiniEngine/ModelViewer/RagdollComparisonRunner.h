@@ -120,7 +120,7 @@ private:
     bool m_PlayerControlRequested = false;
     bool m_StartRequested = false, m_ResetRequested = false, m_UseEditor = true;
     bool m_FollowLatest = true;
-    bool m_FollowCamera = true;
+    bool m_FollowCamera = false;
     int m_SelectedBody = 0, m_SelectedJoint = 0, m_SelectedFrame = 0;
     char m_ReportPath[512] = "ragdoll-comparison-a.html";
 };
