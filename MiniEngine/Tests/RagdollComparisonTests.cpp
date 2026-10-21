@@ -93,6 +93,13 @@ void RunRagdollComparisonTests()
     const auto cone = AnalyzeComparisonJoint(joint, diagonal);
     CheckComparison(cone.excess[1] == 0 && cone.excess[2] == 0 && cone.excess[3] > .06f,
         "Coupled swing cone detects diagonal violations within both individual limits");
+    const auto native = AnalyzeComparisonJoint(joint, diagonal, true);
+    CheckComparison(native.excess == std::array<float, 4>{} &&
+        ComparisonRotationError(diagonal, ClampArticulationDriveTarget(joint, diagonal)) < 1e-5f,
+        "Articulation diagnostics use independent rotation-vector bounds instead of the D6 cone");
+    const auto nativeClamped = ClampArticulationDriveTarget(joint, Quaternion(Vector3(kYUnitVector), .8f));
+    CheckComparison(Near(AnalyzeComparisonJoint(joint, nativeClamped, true).angles[1], .5f),
+        "Articulation target and diagnostic limit coordinates agree");
     const auto negative = AnalyzeComparisonJoint(joint, -diagonal);
     CheckComparison(Near(cone.excess[3], negative.excess[3]) && ComparisonRotationError(diagonal, -diagonal) < 1e-6f,
         "Quaternion sign does not change diagnostics");

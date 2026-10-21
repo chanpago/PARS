@@ -103,6 +103,42 @@ namespace PARS
         return true;
     }
 
+    Vector3 JointRotationVector(Quaternion rotation)
+    {
+        XMFLOAT4 q;
+        XMStoreFloat4(&q, Normalize(rotation));
+        if (q.w < 0)
+        {
+            q = XMFLOAT4(-q.x, -q.y, -q.z, -q.w);
+        }
+        const float length = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z);
+        return length > 1e-8f ? Vector3(q.x, q.y, q.z) * (2 * std::atan2(length, q.w) / length) : Vector3(kZero);
+    }
+
+    Quaternion ClampArticulationDriveTarget(const PhysicsConstraint& joint, Quaternion rotation)
+    {
+        XMFLOAT3 position;
+        XMStoreFloat3(&position, JointRotationVector(rotation));
+        float values[] = {position.x, position.y, position.z};
+        const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
+        const float lower[] = {joint.twistMin, -joint.swingYLimit, -joint.swingZLimit};
+        const float upper[] = {joint.twistMax, joint.swingYLimit, joint.swingZLimit};
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            if (motions[axis] == PhysicsJointMotion::Locked)
+            {
+                values[axis] = 0;
+            }
+            else if (motions[axis] == PhysicsJointMotion::Limited)
+            {
+                values[axis] = Clamp(values[axis], lower[axis], upper[axis]);
+            }
+        }
+        const Vector3 vector(values[0], values[1], values[2]);
+        const float angle = Length(vector);
+        return angle > 1e-8f ? Quaternion(vector / angle, angle) : Quaternion(kIdentity);
+    }
+
     Quaternion EvaluateJointDriveTarget(const PhysicsConstraint& joint, const Matrix4& parentBodyTarget,
         const Matrix4& childBodyTarget, bool clampToLimits)
     {
@@ -582,6 +618,15 @@ namespace PARS
         for (auto& joint : candidate.constraints)
         {
             const auto group = parts[candidate.FindBody(joint.childBone)].massGroup;
+            if (group == LeftHand || group == RightHand || group == LeftFoot || group == RightFoot)
+            {
+                // 레퍼런스 erLimb.cpp의 손목/발목 dampingMult=3을 프리셋 값으로 드러낸다.
+                // 주파수는 16을 유지하며, 에디터에서 보이는 감쇠비만 1 -> 3으로 설정한다.
+                for (auto& drive : joint.drives)
+                {
+                    drive.dampingRatio = 3.0f;
+                }
+            }
             if (group == LeftShank || group == RightShank)
             {
                 // 무릎의 기존 토크 여유는 유지하되, 반응 속도와 감쇠비는 다른 관절과 같은 기본값을 쓴다.

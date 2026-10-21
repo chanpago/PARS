@@ -40,7 +40,8 @@ namespace PARS
         Free
     };
 
-    // 가속도 드라이브는 고유각진동수(rad/s)와 감쇠비로 반응을 정하고 관성 반영은 PhysX에 맡긴다.
+    // 주파수 모드는 고유각진동수(rad/s)와 감쇠비로 반응을 정한다.
+    // 런타임에서 PhysX Articulation의 질량 행렬로 관성을 구해 토크 게인으로 변환한다.
     // 이전 PA의 토크 게인은 힘 모드에서만 사용한다. 최대 토크는 두 모드 모두 Nm 단위다.
     struct PhysicsAngularDrive
     {
@@ -63,7 +64,8 @@ namespace PARS
         static PhysicsJointFrame FromTransform(const Math::Matrix4& rigidTransform);
     };
 
-    // D6 조인트 데이터다. 평행이동은 잠그고, X축은 트위스트, Y/Z축은 스윙으로 사용한다.
+    // 평행이동을 잠그고 X/Y/Z 회전을 제어하는 관절 데이터다.
+    // 기존 D6는 트위스트/스윙 원뿔, Articulation은 회전 벡터의 축별 제한을 사용한다.
     // 좌표계는 바디 기준이다(본의 강체 좌표계 * 콜라이더 오프셋).
     // 각도는 라디안, 위치는 미터 단위다. 축이나 좌표계의 좌우 방향은 변환하지 않는다.
     struct PhysicsConstraint
@@ -88,6 +90,7 @@ namespace PARS
     {
         std::vector<PhysicsBody> bodies;
         std::vector<PhysicsConstraint> constraints;
+        bool UsesArticulation() const;
         int FindBody(const std::string& bone) const;
         int FindConstraint(const std::string& boneA, const std::string& boneB) const;
         // 바디를 제거하면 연결된 조인트도 모두 제거한다.

@@ -111,7 +111,8 @@ table{font-size:9px;white-space:normal}td,th{padding:4px}button,input,select{dis
 <div class="scroll"><table id="bodies"></table></div></section>
 <section><h2>관절 제한과 추종 오차</h2><p class="muted">원본 → 보정 목표: 관절 제한 때문에 목표 자세가 변경된 각도입니다.
 보정 목표 → 실제: 제한 안의 목표와 물리 결과 사이의 추종 오차입니다. 제한값, 조인트 기준 좌표계, 원본 애니메이션과 제어 강도를 함께 확인하세요.
-스윙 Y/Z는 오일러 각도가 아닌 PhysX D6의 quarter-angle 좌표로 계산합니다. 두 축을 함께 제한하는 스윙 원뿔도 검사합니다.</p>
+Articulation은 회전 벡터의 축별 성분을, 기존 D6는 트위스트/quarter-angle 스윙 좌표를 사용합니다.
+D6에서만 두 스윙 축을 함께 제한하는 원뿔을 검사합니다. 정규화 게인은 Kp/I, Kd/I이며 실제 토크 게인은 자세에 따라 달라집니다.</p>
 <div class="scroll"><table id="joints"></table></div></section>
 <section><h2>시간별 측정값</h2>
 <p><label>바디 <select id="body"></select></label> <label>관절 <select id="joint"></select></label></p>
@@ -136,7 +137,8 @@ table{font-size:9px;white-space:normal}td,th{padding:4px}button,input,select{dis
 </main><script>
 "use strict";
 const data = )HTML";
-        out << "{\"description\":" << JsonString(description) << ",\"step\":" << m_Step << ",\"bodies\":[";
+        out << "{\"description\":" << JsonString(description) << ",\"articulation\":" << (m_Articulation ? "true" : "false")
+            << ",\"step\":" << m_Step << ",\"bodies\":[";
         for (size_t i = 0; i < m_Asset.bodies.size(); ++i)
         {
             const auto& body = m_Asset.bodies[i];
@@ -208,7 +210,8 @@ const data = )HTML";
             out << "]}";
         }
         out << u8R"HTML(]};
-const $=id=>document.getElementById(id), deg=180/Math.PI, fmt=v=>Number(v).toFixed(3), axes=["트위스트 X","스윙 Y","스윙 Z","스윙 원뿔"];
+const $=id=>document.getElementById(id), deg=180/Math.PI, fmt=v=>Number(v).toFixed(3), axes=data.articulation?["회전 벡터 X","회전 벡터 Y","회전 벡터 Z","원뿔 (해당 없음)"]:["트위스트 X","스윙 Y","스윙 Z","스윙 원뿔"];
+Array.from($("axis").options).forEach((option,i)=>option.textContent=axes[i]);
 function table(id,headers,rows){const t=$(id);t.replaceChildren();const head=t.createTHead().insertRow();headers.forEach(s=>{const c=document.createElement("th");c.textContent=s;head.append(c)});
 const body=t.createTBody();rows.forEach(row=>{const tr=body.insertRow();row.forEach(s=>{const c=tr.insertCell();c.textContent=typeof s==="number"?fmt(s):s})})}
 function stats(values){let sum=0,sq=0,peak=-1,at=0;values.forEach((v,i)=>{sum+=v;sq+=v*v;if(v>peak){peak=v;at=data.frames[i].t}});
@@ -226,9 +229,9 @@ table("playback",["동작","시작 (초)","종료 (초)","기록 시간 (초)","
 stages.map(s=>[animationName(s.name),s.start,s.end,s.count*data.step,String(s.count),s.blending?(s.blendEnd===null?"진행 중":s.blendEnd):"-"]));
 const frameSettings=f=>({"위치 (m)":f.p,"회전 쿼터니언 (x, y, z, w)":f.q});
 $("settings").textContent=JSON.stringify({
-"물리 시간 간격 (초)":data.step,
+"물리 시간 간격 (초)":data.step,"관절 방식":data.articulation?"Articulation 회전 벡터":"D6 트위스트/스윙",
 "바디":data.bodies.map(b=>({"본":b.name,"질량 (kg)":b.massKg,"형상":["캡슐","상자","구"][b.shape],"반지름 (m)":b.radius,"원통 반길이 (m)":b.halfLength,"상자 반크기 (m)":b.halfExtents,"바디 기준 좌표계":frameSettings(b.frame)})),
-"관절":data.joints.map(j=>({"부모 본":j.parent,"자식 본":j.name,"축별 운동":j.motion.map((m,a)=>`${axes[a]}: ${["잠금","제한","자유"][m]}`),"설정 최소각 (rad)":j.min,"설정 최대각 (rad)":j.max,"SLERP 드라이브":j.slerp?"사용":"사용 안 함","연결된 바디 간 충돌":j.collision?"사용":"사용 안 함","부모 기준 좌표계":frameSettings(j.parentFrame),"자식 기준 좌표계":frameSettings(j.childFrame),"드라이브":j.drives.map((d,a)=>({"축":axes[a],"설정상 활성":d.enabled?"켜짐":"꺼짐","구동 방식":d.acceleration?"가속도":"토크",...(d.acceleration?{"고유각진동수 (rad/s)":d.omegaN,"감쇠비":d.zeta}:{}),"강성 계수":d.kp,"감쇠 계수":d.kd,"최대 토크 (Nm)":d.maxNm}))}))
+"관절":data.joints.map(j=>({"부모 본":j.parent,"자식 본":j.name,"축별 운동":j.motion.map((m,a)=>`${axes[a]}: ${["잠금","제한","자유"][m]}`),"설정 최소각 (rad)":j.min,"설정 최대각 (rad)":j.max,"회전 설정 공유":j.slerp?"사용":"사용 안 함","연결된 바디 간 충돌":j.collision?"사용":"사용 안 함","부모 기준 좌표계":frameSettings(j.parentFrame),"자식 기준 좌표계":frameSettings(j.childFrame),"드라이브":j.drives.map((d,a)=>({"축":axes[a],"설정상 활성":d.enabled?"켜짐":"꺼짐","구동 방식":d.acceleration?"관성 정규화":"토크",...(d.acceleration?{"고유각진동수 (rad/s)":d.omegaN,"감쇠비":d.zeta}:{}),[d.acceleration?"Kp/I":"Kp"]:d.kp,[d.acceleration?"Kd/I":"Kd"]:d.kd,"최대 토크 (Nm)":d.maxNm}))}))
 },null,2);
 data.bodies.forEach((b,i)=>$("body").add(new Option(b.name,i)));
 data.joints.forEach((j,i)=>$("joint").add(new Option(j.parent+" → "+j.name,i)));

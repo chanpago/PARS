@@ -221,6 +221,53 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             "Active: all-dynamic pelvis support remains bounded during animated floor contact");
     }
 
+    // 사용자에게 보였던 제자리 회전을 실제 Mixamo Idle 포즈와 바닥 접촉 상태에서 재현한다.
+    prepare(0, false);
+    character.GetCharacterMovement().SetTickEnabled(false);
+    const auto turnBase = character.GetActorTransform();
+    float armTurnError = 0;
+    for (int step = 0; step < 360; ++step)
+    {
+        const float phase = Clamp((step / 60.0f - 1.0f) / 3.0f, 0.0f, 1.0f);
+        const float wave = std::sin(phase * XM_PI);
+        auto transform = turnBase;
+        transform.SetBasis(Matrix3::MakeYRotation(XM_PI * wave * wave) * turnBase.GetBasis());
+        character.SetActorTransform(transform);
+        world.Tick(1.0f / 60);
+        std::vector<Matrix4> target;
+        check(EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), target, error),
+            "Active turn: sample imported animation target");
+        for (const auto& joint : originalAsset.constraints)
+        {
+            const auto& name = joint.childBone;
+            if (name.find("Arm") == std::string::npos && name.find("Hand") == std::string::npos && name.find("Shoulder") == std::string::npos)
+            {
+                continue;
+            }
+            const int parent = originalAsset.FindBody(joint.parentBone), child = originalAsset.FindBody(joint.childBone);
+            const auto parentLocal = originalAsset.bodies[parent].GetLocalTransform();
+            const auto childLocal = originalAsset.bodies[child].GetLocalTransform();
+            auto desired = EvaluateJointDriveTarget(joint,
+                PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[parent]]) * parentLocal,
+                PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[child]]) * childLocal, false);
+            desired = ClampArticulationDriveTarget(joint, desired);
+            const auto actual = EvaluateJointDriveTarget(joint, ragdoll.GetBoneWorld(parent) * parentLocal,
+                ragdoll.GetBoneWorld(child) * childLocal, false);
+            const float dot = std::abs(XMVectorGetX(XMVector4Dot(desired, actual)));
+            if (step > 60)
+            {
+                armTurnError = Max(armTurnError, 2 * std::acos(Clamp(dot, 0.0f, 1.0f)));
+            }
+        }
+        if (!ragdoll.IsFinite())
+        {
+            check(false, "Active turn: finite articulated character");
+        }
+    }
+    character.SetActorTransform(turnBase);
+    report << "active_idle_turn_arm_error_rad=" << armTurnError << std::endl;
+    check(armTurnError < .35f, "Active turn: Idle arms follow a start/reverse/stop yaw on the floor at frequency 16");
+
     std::vector<Matrix4> reference;
     float referenceTime = 0;
     for (int fps : {30, 60, 144})

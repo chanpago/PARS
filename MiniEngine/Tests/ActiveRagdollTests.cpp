@@ -17,7 +17,7 @@ namespace
     { return 2 * std::acos((std::min)(1.0f, std::abs(XMVectorGetX(XMVector4Dot(a, b))))); }
     Matrix4 Pose(Vector3 position, Quaternion rotation = Quaternion(kIdentity)) { return Matrix4(OrthogonalTransform(rotation, position)); }
 
-    std::vector<float> SampleAccelerationResponse(float massScale, float radius, bool slerp, float maxTorque)
+    std::vector<float> SampleAccelerationResponse(float massScale, float radius, bool slerp, float maxTorque, bool rotatedFrames = false)
     {
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize acceleration drive world");
@@ -38,6 +38,11 @@ namespace
         joint.childBone = child.bone;
         joint.twist = PhysicsJointMotion::Free;
         joint.swingY = joint.swingZ = slerp ? PhysicsJointMotion::Free : PhysicsJointMotion::Locked;
+        if (rotatedFrames)
+        {
+            XMStoreFloat4(&joint.parentFrame.rotation, Quaternion(Vector3(kYUnitVector), .7f));
+            joint.childFrame.rotation = joint.parentFrame.rotation;
+        }
         asset.constraints.push_back(joint);
         ConfigureDefaultDrives(asset);
         for (auto& drive : asset.constraints[0].drives)
@@ -49,12 +54,14 @@ namespace
         Ragdoll ragdoll;
         std::string error;
         Check(ragdoll.Create(world, asset, names, initial, Vector3(kZero), error), "Create acceleration drive pair");
-        PxActor* actors[2]{};
-        Check(floor->getScene()->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors, 2) == 2, "Find acceleration test bodies");
-        PxRigidDynamic* childBody = nullptr;
-        for (auto* actor : actors)
+        PxArticulationReducedCoordinate* articulation = nullptr;
+        Check(ragdoll.UsesArticulation() && floor->getScene()->getArticulations(&articulation, 1) == 1,
+            "Acceleration PA uses an articulation");
+        PxArticulationLink* links[2]{};
+        Check(articulation->getLinks(links, 2) == 2, "Find acceleration test links");
+        PxRigidBody* childBody = nullptr;
+        for (auto* body : links)
         {
-            auto* body = actor->is<PxRigidDynamic>();
             body->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
             body->setAngularDamping(0);
             body->setLinearDamping(0);
@@ -93,6 +100,20 @@ namespace
             std::abs(childBody->getGlobalPose().q.dot(before.q)) > .999999f &&
             (childBody->getAngularVelocity() - velocity).magnitude() < 1e-7f,
             "Live frequency and ratio edits preserve the physical state");
+        const auto beforeBackendSwitch = ragdoll.GetBoneWorld(1);
+        auto forceAsset = changed;
+        for (auto& drive : forceAsset.constraints[0].drives)
+        {
+            drive.useAcceleration = false;
+            drive.stiffness = 100;
+            drive.damping = 10;
+        }
+        Check(ragdoll.ApplyDriveSettings(forceAsset, error) && !ragdoll.UsesArticulation() &&
+            Difference(Quaternion(beforeBackendSwitch), Quaternion(ragdoll.GetBoneWorld(1))) < .001f,
+            "Live switch to legacy D6 preserves pose");
+        Check(ragdoll.ApplyDriveSettings(changed, error) && ragdoll.UsesArticulation() &&
+            world.GetDynamicBodyCount() == 2 && world.GetConstraintCount() == 1,
+            "Live switch back to articulation does not duplicate objects");
         ragdoll.Destroy();
         Check(world.GetConstraintCount() == 0 && world.GetDynamicBodyCount() == 0 && world.GetErrorCount() == 0,
             "Acceleration drive releases all bodies and constraints without errors");
@@ -119,7 +140,143 @@ namespace
             const auto limited = SampleAccelerationResponse(1.0f, .4f, slerp, .001f);
             Check(limited.back() > .4f, "Torque capacity still limits an acceleration drive");
         }
+        const auto rotated = SampleAccelerationResponse(1.0f, .1f, true, 10000, true);
+        std::printf("rotated articulation frame error=%.6f\n", rotated.back());
+        Check(rotated.back() < .005f, "Articulation drive target respects rotated parent/child joint frames");
         std::puts("PASS: acceleration drives normalize inertia, preserve torque caps and support live response edits");
+    }
+
+    void TestArticulatedArm()
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize articulated arm world");
+        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -5, 0)), PxVec3(10, .1f, 10), "floor");
+        PhysicsBody torso;
+        torso.bone = "torso";
+        torso.shape = PhysicsShapeType::Sphere;
+        torso.radius = .12f;
+        torso.mass = 25;
+        PhysicsBody upper;
+        upper.bone = "upper";
+        upper.shape = PhysicsShapeType::Capsule;
+        upper.radius = .045f;
+        upper.halfLength = .21f;
+        upper.mass = 2;
+        XMStoreFloat4(&upper.rotation, Quaternion(Vector3(kZUnitVector), XM_PIDIV2));
+        auto lower = upper;
+        lower.bone = "lower";
+        lower.halfLength = .16f;
+        lower.mass = 1.3f;
+        auto hand = torso;
+        hand.bone = "hand";
+        hand.radius = .055f;
+        hand.mass = .5f;
+        // PA 배열과 내부 링크 순서를 다르게 만들어 캐시의 DOF 매핑도 함께 검증한다.
+        PhysicsAsset asset;
+        asset.bodies = {hand, torso, lower, upper};
+        const std::vector<std::string> names{"torso", "upper", "lower", "hand"};
+        const std::vector<Matrix4> initial{Pose(Vector3(0, 3, 0)), Pose(Vector3(.3f, 2.75f, 0)),
+            Pose(Vector3(.3f, 2.3f, 0)), Pose(Vector3(.3f, 2.05f, 0))};
+        const auto addJoint = [&](const char* parent, const char* child, Vector3 anchor) {
+            PhysicsConstraint joint;
+            joint.parentBone = parent;
+            joint.childBone = child;
+            const auto parentNode = std::find(names.begin(), names.end(), parent) - names.begin();
+            const auto childNode = std::find(names.begin(), names.end(), child) - names.begin();
+            joint.SetWorldFrame(initial[parentNode] * asset.bodies[asset.FindBody(parent)].GetLocalTransform(),
+                initial[childNode] * asset.bodies[asset.FindBody(child)].GetLocalTransform(), Pose(anchor));
+            joint.twist = joint.swingY = joint.swingZ = PhysicsJointMotion::Free;
+            asset.constraints.push_back(joint);
+        };
+        addJoint("lower", "hand", Vector3(.3f, 2.1f, 0));
+        addJoint("torso", "upper", Vector3(.3f, 3, 0));
+        addJoint("upper", "lower", Vector3(.3f, 2.5f, 0));
+        ConfigureDefaultDrives(asset);
+        Ragdoll ragdoll;
+        std::string error;
+        Check(ragdoll.Create(world, asset, names, initial, Vector3(kZero), error, false), "Create animated arm PA");
+        int owner = 0;
+        ragdoll.SetQueryOwner(&owner);
+        Check(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.UsesArticulation(),
+            "Animation enters connected-body simulation");
+        Check(ragdoll.SetRootSupported(true, error), "Support dynamic torso");
+        ragdoll.SetDrivesEnabled(true);
+        const auto target = [&](float yaw, float raise) {
+            auto result = initial;
+            const Matrix4 turn = initial[0] * Pose(Vector3(kZero), Quaternion(Vector3(kYUnitVector), yaw)) * Invert(initial[0]);
+            const Matrix4 shoulder = Pose(Vector3(.3f, 3, 0));
+            const Matrix4 lift = shoulder * Pose(Vector3(kZero), Quaternion(Vector3(kZUnitVector), raise)) * Invert(shoulder);
+            result[0] = turn * initial[0];
+            for (size_t i = 1; i < result.size(); ++i)
+            {
+                result[i] = turn * lift * initial[i];
+            }
+            return result;
+        };
+        // 팔 전체를 수평으로 들어 손까지의 지렛팔과 중력 하중을 실제로 만든다.
+        const auto horizontal = target(0, XM_PIDIV2);
+        Check(ragdoll.UpdateDriveTargets(horizontal, 0, error), "Set horizontal arm target");
+        for (int step = 0; step < 240; ++step)
+        {
+            Check(ragdoll.UpdateDriveTargets(horizontal, 1.0f / 60, error), "Update horizontal arm target");
+            world.Step();
+        }
+        const float holdError = ragdoll.GetMaxDriveError();
+        std::printf("articulated arm omega=16 horizontal error=%f\n", holdError);
+        Check(holdError < .04f && ragdoll.GetMaxAnchorError() < .0001f,
+            "Whole arm holds against gravity at frequency 16 with connected anchors");
+        for (int step = 0; step < 180; ++step)
+        {
+            Check(ragdoll.UpdateDriveTargets(initial, 1.0f / 60, error), "Return to hanging idle arm");
+            world.Step();
+        }
+        float turnError = 0;
+        for (int step = 0; step < 360; ++step)
+        {
+            const float time = step / 60.0f;
+            // 정지, 좌우 회전, 정지 구간을 같은 제어기로 처리한다.
+            const float phase = PxClamp((time - 1.0f) / 3.0f, 0.0f, 1.0f);
+            const float yaw = XM_PI * std::sin(phase * XM_PI) * std::sin(phase * XM_PI);
+            Check(ragdoll.UpdateDriveTargets(target(yaw, 0), 1.0f / 60, error), "Update idle turn target");
+            world.Step();
+            Check(ragdoll.IsFinite(), "Turning articulated arm stays finite");
+            turnError = (std::max)(turnError, ragdoll.GetMaxDriveError());
+        }
+        std::printf("articulated arm omega=16 turn error=%f rest error=%f\n", turnError, ragdoll.GetMaxDriveError());
+        Check(turnError < .25f && ragdoll.GetMaxDriveError() < .04f,
+            "Idle arm follows torso yaw and settles without increasing natural frequency");
+        PxArticulationReducedCoordinate* articulation = nullptr;
+        Check(floor->getScene()->getArticulations(&articulation, 1) == 1, "One articulation owns the arm");
+        PxArticulationLink* links[4]{};
+        articulation->getLinks(links, 4);
+        for (const auto* link : links)
+        {
+            Check(link->userData == &owner, "Actor owner survives animation-to-articulation transition");
+        }
+        auto* cache = articulation->createCache();
+        ragdoll.SetDrivesEnabled(false);
+        articulation->copyInternalStateToCache(*cache, PxArticulationCacheFlag::eFORCE);
+        for (unsigned i = 0; i < articulation->getDofs(); ++i)
+        {
+            Check(cache->jointForce[i] == 0, "Passive transition clears persistent compensation torques");
+        }
+        cache->release();
+        Check(ragdoll.SetRootSupported(false, error), "Release the torso support");
+        const auto before = ragdoll.GetBoneWorld(1);
+        for (int step = 0; step < 30; ++step)
+        {
+            world.Step();
+        }
+        Check(float(ragdoll.GetBoneWorld(1).GetW().GetY()) < float(before.GetW().GetY()) - .5f,
+            "Unsupported passive articulation falls under gravity");
+        Check(ragdoll.SetSimulating(false, Vector3(kZero), error) && ragdoll.GetKinematicBodyCount() == 4,
+            "Articulation returns to editable animation bodies");
+        Check(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.UsesArticulation(),
+            "Articulation can be recreated after returning to animation");
+        ragdoll.Destroy();
+        Check(world.GetErrorCount() == 0 && world.GetDynamicBodyCount() == 0 && world.GetConstraintCount() == 0,
+            "Articulated arm lifecycle leaves no actors, joints or SDK errors");
+        std::puts("PASS: articulated arm gravity, idle turning, ownership and passive/animation lifecycle");
     }
 
     void TestDynamicPelvis()
@@ -370,4 +527,5 @@ void RunActiveRagdollTests()
     world.Shutdown();
     TestDynamicPelvis();
     TestAccelerationDrives();
+    TestArticulatedArm();
 }

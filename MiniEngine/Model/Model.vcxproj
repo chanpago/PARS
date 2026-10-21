@@ -198,6 +198,7 @@
     <ClInclude Include="PhysicsPose.h" />
     <ClCompile Include="Ragdoll.cpp" />
     <ClCompile Include="RagdollDrive.cpp" />
+    <ClCompile Include="RagdollArticulation.cpp" />
     <ClCompile Include="RagdollComparison.cpp" />
     <ClCompile Include="RagdollComparisonReport.cpp" />
     <ClInclude Include="RagdollComparison.h" />

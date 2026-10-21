@@ -258,7 +258,10 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         ImGui::SetTooltip(u8"해부학적 축 보정과 비대칭 가동 범위 보정을 포함하여 두 기준 좌표계를 다시 설정합니다.");
     }
     ImGui::TextDisabled(u8"위치 잠금 | X 트위스트, Y/Z 스윙");
-    ImGui::TextWrapped(u8"스윙 값은 부모 좌표계 기준 원뿔의 반각입니다. 좌표계 회전에 따라 허용 범위가 치우칠 수 있어 0도가 기준 자세와 같지 않을 수 있습니다. 두 좌표계를 함께 이동하면 이 보정을 유지합니다.");
+    const bool articulation = m_PhysicsAsset.UsesArticulation();
+    ImGui::TextWrapped(articulation ?
+        u8"Articulation은 회전 벡터의 X/Y/Z 성분을 각각 제한합니다. 표시된 부채꼴은 각 축 단독 범위입니다. 잠금은 매우 좁은 내부 제한으로 풉니다. 기존 D6 원뿔과 결합 회전의 경계가 다릅니다." :
+        u8"스윙 값은 부모 좌표계 기준 원뿔의 반각입니다. 좌표계 회전에 따라 허용 범위가 치우칠 수 있어 0도가 기준 자세와 같지 않을 수 있습니다. 두 좌표계를 함께 이동하면 이 보정을 유지합니다.");
     changed |= EditMotion(u8"트위스트 X", joint.twist);
     ImGui::BeginDisabled(joint.twist != PhysicsJointMotion::Limited);
     changed |= EditAngle(u8"최소각", joint.twistMin, -179.9f, XMConvertToDegrees(joint.twistMax) - .1f);
@@ -272,7 +275,13 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     ImGui::BeginDisabled(joint.swingZ != PhysicsJointMotion::Limited);
     changed |= EditAngle(u8"Z 제한각", joint.swingZLimit, .1f, 179.9f);
     ImGui::EndDisabled();
+    ImGui::BeginDisabled(articulation);
     changed |= ImGui::Checkbox(u8"연결된 바디끼리 충돌", &joint.enableCollision);
+    ImGui::EndDisabled();
+    if (articulation)
+    {
+        ImGui::TextDisabled(u8"Articulation의 직접 연결된 부모/자식은 충돌하지 않습니다.");
+    }
     const bool locked = joint.twist == PhysicsJointMotion::Locked || joint.swingY == PhysicsJointMotion::Locked || joint.swingZ == PhysicsJointMotion::Locked;
     // 드라이브 패널이 접혀 있어도 운동 설정 편집 후 PA는 유효해야 한다.
     if (locked && joint.useSlerpDrive)
@@ -282,14 +291,14 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     }
     if (ImGui::CollapsingHeader(u8"액티브 래그돌 드라이브", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::TextWrapped(u8"가속도 드라이브는 반응 속도와 감쇠비를 기준으로 제어하며, PhysX가 바디의 관성을 반영합니다. 최대 토크는 Nm 단위입니다. 실행 중인 캐릭터에는 '에디터 드라이브 적용'으로 반영하세요.");
-        if (ImGui::Button(u8"전체 관절 가속도 PD 기본값"))
+        ImGui::TextWrapped(u8"관성 기반 드라이브는 연결된 몸의 질량 행렬에서 축별 관성을 구해 토크 게인을 계산합니다. 골반 지지 중에는 중력과 운동 하중을 보상하며, PD와 보상이 최대 토크를 함께 사용합니다. 실행 중인 캐릭터에는 '에디터 드라이브 적용'으로 반영하세요.");
+        if (ImGui::Button(u8"전체 관절 주파수 PD 기본값"))
         {
             ConfigureDefaultDrives(m_PhysicsAsset);
             changed = true;
         }
         ImGui::BeginDisabled(locked);
-        changed |= ImGui::Checkbox(u8"SLERP (회전 게인 공유)", &joint.useSlerpDrive);
+        changed |= ImGui::Checkbox(articulation ? u8"세 축의 주파수·감쇠비·토크 설정 공유" : u8"SLERP (회전 게인 공유)", &joint.useSlerpDrive);
         ImGui::EndDisabled();
         const char* names[] = {u8"트위스트 X 드라이브", u8"스윙 Y 드라이브", u8"스윙 Z 드라이브"};
         const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
@@ -303,7 +312,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
             if (!drive.useAcceleration)
             {
                 ImGui::TextUnformatted(u8"기존 토크 기준 드라이브");
-                if (ImGui::Button(u8"가속도 기본값으로 전환"))
+                if (ImGui::Button(u8"관성 기반 기본값으로 전환"))
                 {
                     const PhysicsAngularDrive defaults;
                     drive.useAcceleration = true;
@@ -316,7 +325,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
             {
                 changed |= ImGui::DragFloat(u8"고유각진동수 (rad/s)", &drive.naturalFrequency, .1f, 0, 200, "%.2f", ImGuiSliderFlags_AlwaysClamp);
                 changed |= ImGui::DragFloat(u8"감쇠비", &drive.dampingRatio, .01f, 0, 10, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-                ImGui::TextDisabled(u8"가속도 계수: Kp %.2f, Kd %.2f", drive.GetStiffness(), drive.GetDamping());
+                ImGui::TextDisabled(u8"정규화 계수: Kp/I %.2f, Kd/I %.2f", drive.GetStiffness(), drive.GetDamping());
             }
             else
             {
@@ -396,7 +405,7 @@ void SkeletalMeshViewer::DrawConstraints()
         }
         if (m_ShowLimits)
         {
-            m_Overlay.ConstraintLimits(joint, parent, child, id, selected, GetTwistDisplayReference(joint));
+            m_Overlay.ConstraintLimits(joint, parent, child, id, selected, GetTwistDisplayReference(joint), m_PhysicsAsset.UsesArticulation());
         }
     }
 }

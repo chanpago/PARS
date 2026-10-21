@@ -1,4 +1,4 @@
-// Opt-in integration check: ModelViewer.exe -ragdolltest <report path>
+﻿// Opt-in integration check: ModelViewer.exe -ragdolltest <report path>
 // Runs with the actual imported model, component lifecycle, PhysX and DX12 pose upload.
 #include "GameFramework/World.h"
 #include "GameFramework/Character.h"
@@ -9,11 +9,15 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
 
 using namespace Math;
 void RunActiveRagdollValidation(PARS::World& world, PARS::Character& character, std::ostream& report);
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath)
 {
+    // SDK 단언으로 종료되어도 원인을 리다이렉트한 테스트 로그에 남긴다.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
     std::ofstream report(reportPath);
     const auto check = [&](bool condition, const char* message) {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -152,7 +156,7 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
             check(!character.GetCapsuleComponent().HasPhysicsCollision() && !character.GetCharacterMovement().IsTickEnabled() &&
                 physics->GetQueryCapsuleCount() + 1 == initialCapsuleCount, "Ragdoll disables movement and removes capsule collision");
             auto& ragdoll = mesh.GetRagdoll();
-            check(ragdoll.GetBodyCount() == bodyCount && ragdoll.GetJointCount() == jointCount, "Instantiate actual PA rigid bodies and D6 joints");
+            check(ragdoll.GetBodyCount() == bodyCount && ragdoll.GetJointCount() == jointCount, "Instantiate actual PA articulation links and joints");
             check(ragdoll.GetKinematicBodyCount() == 0 && physics->GetDynamicBodyCount() == animatedBodies &&
                 physics->GetConstraintCount() == animatedJoints, "Ragdoll switches registered bodies to dynamic without duplicating the PA");
             std::vector<Matrix4> after;

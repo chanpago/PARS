@@ -89,6 +89,21 @@ namespace
 
 namespace PARS
 {
+    bool PhysicsAsset::UsesArticulation() const
+    {
+        for (const auto& joint : constraints)
+        {
+            for (const auto& drive : joint.drives)
+            {
+                if (drive.useAcceleration)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     float PhysicsAngularDrive::GetStiffness() const
     {
         return useAcceleration ? naturalFrequency * naturalFrequency : stiffness;

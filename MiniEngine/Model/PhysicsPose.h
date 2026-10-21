@@ -21,6 +21,9 @@ namespace PARS
     // PA 오프셋을 적용한 뒤, 부모 조인트 좌표계에서 표현한 자식 조인트의 목표 회전이다.
     Math::Quaternion EvaluateJointDriveTarget(const PhysicsConstraint& joint,
         const Math::Matrix4& parentBodyTarget, const Math::Matrix4& childBodyTarget, bool clampToLimits = true);
+    // 최단 회전의 축 * 각도(rad). Articulation 런타임과 비교 보고서가 같은 좌표를 사용한다.
+    Math::Vector3 JointRotationVector(Math::Quaternion rotation);
+    Math::Quaternion ClampArticulationDriveTarget(const PhysicsConstraint& joint, Math::Quaternion rotation);
     // 주요 본 전체를 포함한 프리셋이다(바디 20개 / 제약 19개). 손가락, 발가락,
     // 말단 표시 노드는 제외한다. 질량은 73kg 성인 남성 기준값(de Leva 1996)을 사용한다.
     // 몸통 그룹은 프리셋 콜라이더 부피에 비례해 나누고, 머리/목은

@@ -85,9 +85,19 @@ namespace PARS
         return 2 * std::atan2(std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z), std::abs(delta.w));
     }
 
-    ComparisonJointRotation AnalyzeComparisonJoint(const PhysicsConstraint& joint, Quaternion rotation)
+    ComparisonJointRotation AnalyzeComparisonJoint(const PhysicsConstraint& joint, Quaternion rotation, bool articulation)
     {
         ComparisonJointRotation result;
+        if (articulation)
+        {
+            DirectX::XMFLOAT3 vector;
+            XMStoreFloat3(&vector, JointRotationVector(rotation));
+            result.angles = {vector.x, vector.y, vector.z};
+            result.excess[0] = AxisExcess(vector.x, joint.twist, joint.twistMin, joint.twistMax);
+            result.excess[1] = AxisExcess(vector.y, joint.swingY, -joint.swingYLimit, joint.swingYLimit);
+            result.excess[2] = AxisExcess(vector.z, joint.swingZ, -joint.swingZLimit, joint.swingZLimit);
+            return result;
+        }
         Quaternion q = Normalize(rotation);
         DirectX::XMFLOAT4 v;
         XMStoreFloat4(&v, q);
@@ -140,6 +150,7 @@ namespace PARS
         }
         *this = RagdollComparison();
         m_Asset = asset;
+        m_Articulation = asset.UsesArticulation();
         m_ReferenceInverse = Invert(PhysicsBoneFrame(referencePlacement));
         m_ActualInverse = Invert(PhysicsBoneFrame(actualPlacement));
         m_Step = step;
@@ -207,13 +218,14 @@ namespace PARS
             const auto& joint = m_Asset.constraints[i];
             const int parent = m_JointBodies[i][0], child = m_JointBodies[i][1];
             const Quaternion raw = EvaluateJointDriveTarget(joint, reference[parent], reference[child], false);
-            const Quaternion bounded = EvaluateJointDriveTarget(joint, reference[parent], reference[child]);
+            const Quaternion bounded = m_Articulation ? ClampArticulationDriveTarget(joint, raw) :
+                EvaluateJointDriveTarget(joint, reference[parent], reference[child]);
             const Quaternion physical = EvaluateJointDriveTarget(joint, actual[parent], actual[child], false);
             auto& sample = frame.joints[i];
             auto& result = m_Joints[i];
-            sample.raw = AnalyzeComparisonJoint(joint, raw);
-            sample.bounded = AnalyzeComparisonJoint(joint, bounded);
-            sample.actual = AnalyzeComparisonJoint(joint, physical);
+            sample.raw = AnalyzeComparisonJoint(joint, raw, m_Articulation);
+            sample.bounded = AnalyzeComparisonJoint(joint, bounded, m_Articulation);
+            sample.actual = AnalyzeComparisonJoint(joint, physical, m_Articulation);
             sample.clampError = ComparisonRotationError(raw, bounded);
             sample.trackingError = ComparisonRotationError(bounded, physical);
             sample.totalError = ComparisonRotationError(raw, physical);

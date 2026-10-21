@@ -134,10 +134,9 @@ bool PhysicsWorld::InitializeScene(PhysicsWorld& owner)
 bool PhysicsWorld::CreateScene()
 {
     PxSceneDesc desc(m_Physics->getTolerancesScale());
-    // TGS는 접촉 상황에서 인체형 래그돌의 질량/관성 비율과 좁은 관절 제한을 더 정확히 처리한다.
-    // 외부 고정 스텝은 계속 1/60이다. 여기서는 프레임률에 따른 시계가 아니라
-    // PhysX의 제약 솔버를 선택한다.
     desc.solverType = PxSolverType::eTGS;
+    // 중력/관절 보상력을 각 TGS 반복에 나눠 적용해 드라이브의 정상 상태 속도 편향을 줄인다.
+    desc.flags |= PxSceneFlag::eENABLE_EXTERNAL_FORCES_EVERY_ITERATION_TGS;
     desc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
     desc.cpuDispatcher = m_Dispatcher;
     desc.filterShader = ContactFilter;
@@ -710,6 +709,43 @@ PxRigidDynamic* PhysicsWorld::CreateDynamicBody(const PxTransform& pose, const P
     return body;
 }
 
+PxArticulationReducedCoordinate* PhysicsWorld::CreateArticulation()
+{
+    return m_Scene ? m_Physics->createArticulationReducedCoordinate() : nullptr;
+}
+
+PxArticulationLink* PhysicsWorld::CreateArticulationLink(PxArticulationReducedCoordinate& articulation,
+    PxArticulationLink* parent, const PxTransform& pose, const PxGeometry& geometry, float mass, const char* name)
+{
+    auto* link = articulation.createLink(parent, pose);
+    if (!link)
+    {
+        return nullptr;
+    }
+    if (!PxRigidActorExt::createExclusiveShape(*link, geometry, *m_Material) ||
+        !PxRigidBodyExt::setMassAndUpdateInertia(*link, mass))
+    {
+        link->release();
+        return nullptr;
+    }
+    link->setName(name);
+    link->setLinearDamping(.05f);
+    link->setAngularDamping(.3f);
+    link->setMaxAngularVelocity(20);
+    link->setMaxDepenetrationVelocity(3);
+    return link;
+}
+
+bool PhysicsWorld::AddArticulation(PxArticulationReducedCoordinate& articulation)
+{
+    if (!m_Scene || articulation.getScene())
+    {
+        return false;
+    }
+    m_Scene->addArticulation(articulation);
+    return articulation.getScene() == m_Scene;
+}
+
 PxD6Joint* PhysicsWorld::CreateJoint(PxRigidActor& parent, const PxTransform& parentFrame,
     PxRigidActor& child, const PxTransform& childFrame)
 {
@@ -722,7 +758,18 @@ PxD6Joint* PhysicsWorld::CreateJoint(PxRigidActor& parent, const PxTransform& pa
 
 uint32_t PhysicsWorld::GetDynamicBodyCount() const
 {
-    return m_Scene ? m_Scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC) : 0;
+    if (!m_Scene)
+    {
+        return 0;
+    }
+    uint32_t count = m_Scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
+    std::vector<PxArticulationReducedCoordinate*> articulations(m_Scene->getNbArticulations());
+    m_Scene->getArticulations(articulations.data(), static_cast<PxU32>(articulations.size()));
+    for (const auto* articulation : articulations)
+    {
+        count += articulation->getNbLinks();
+    }
+    return count;
 }
 
 uint32_t PhysicsWorld::GetConstraintCount() const

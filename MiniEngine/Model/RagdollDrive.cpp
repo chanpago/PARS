@@ -49,9 +49,8 @@ namespace PARS
             for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
             {
                 const auto& drive = data.drives[axis];
-                // 가속도 모드의 게인은 omegaN^2, 2*zeta*omegaN이다. 관성과 토크 제한은 PhysX가 반영한다.
-                // 이전 PA의 힘 모드는 기존 게인의 의미를 유지한다.
-                const bool on = m_DrivesEnabled && Enabled(drive, motions[axis]);
+                // 기존 PA의 힘 모드는 D6에서 유지한다. Articulation 모터는 아래에서 별도로 갱신한다.
+                const bool on = !m_Articulation && m_DrivesEnabled && Enabled(drive, motions[axis]);
                 PxD6JointDrive motor;
                 if (on)
                 {
@@ -60,16 +59,20 @@ namespace PARS
                 m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], motor);
             }
         }
-        for (auto* body : m_Bodies)
+        if (m_Articulation)
         {
-            // 액티브 모터는 애니메이션 추종과 Debug 계산 비용의 균형을 위해 위치 32회 / 속도 8회의
-            // 솔버 반복을 사용한다. 패시브 모드는 16/4를 사용한다.
-            body->setSolverIterationCounts(m_DrivesEnabled ? 32 : 16, m_DrivesEnabled ? 8 : 4);
-            if (!(body->getRigidBodyFlags() & PxRigidBodyFlag::eKINEMATIC))
+            m_Articulation->setArticulationFlag(PxArticulationFlag::eDISABLE_SELF_COLLISION, m_DrivesEnabled);
+            m_Articulation->setSolverIterationCounts(32, 8);
+            UpdateArticulationDrives();
+        }
+        else
+        {
+            for (auto* body : m_Bodies)
             {
-                body->wakeUp();
+                body->is<PxRigidDynamic>()->setSolverIterationCounts(m_DrivesEnabled ? 32 : 16, m_DrivesEnabled ? 8 : 4);
             }
         }
+        WakeBodies();
 #endif
         if (!m_DrivesEnabled)
         {
@@ -112,12 +115,28 @@ namespace PARS
         {
             return false;
         }
+        const auto previous = m_Asset;
         for (size_t i = 0; i < candidate.constraints.size(); ++i)
         {
             m_Asset.constraints[i].useSlerpDrive = candidate.constraints[i].useSlerpDrive;
             for (int axis = 0; axis < 3; ++axis)
             {
                 m_Asset.constraints[i].drives[axis] = candidate.constraints[i].drives[axis];
+            }
+        }
+        if (IsSimulating() && m_Asset.UsesArticulation() != UsesArticulation())
+        {
+            if (!RebuildSimulation(true, Vector3(kZero), error, false))
+            {
+                for (size_t i = 0; i < previous.constraints.size(); ++i)
+                {
+                    m_Asset.constraints[i].useSlerpDrive = previous.constraints[i].useSlerpDrive;
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        m_Asset.constraints[i].drives[axis] = previous.constraints[i].drives[axis];
+                    }
+                }
+                return false;
             }
         }
         SetDrivesEnabled(m_DrivesEnabled);
@@ -173,7 +192,11 @@ namespace PARS
         {
             const auto& a = bodies[m_Asset.FindBody(data.parentBone)];
             const auto& b = bodies[m_Asset.FindBody(data.childBone)];
-            const auto target = EvaluateJointDriveTarget(data, a, b);
+            auto target = EvaluateJointDriveTarget(data, a, b, !m_Articulation);
+            if (m_Articulation)
+            {
+                target = ClampArticulationDriveTarget(data, target);
+            }
             if (!ToPx(target).isSane())
             {
                 error = "Non-finite joint drive target.";
@@ -238,9 +261,17 @@ namespace PARS
                 angular = axis * PxMin(angle / deltaTime, 20.0f);
                 // 이 SDK의 SWING_TWIST 제약 행은 부모 속도에서 자식 속도를 뺀 값을 사용한다.
                 // SLERP는 자식 속도에서 부모 속도를 뺀 값을 사용한다(ExtD6JointSolverPrep 참고).
-                if (!data.useSlerpDrive)
+                if (!m_Articulation && !data.useSlerpDrive)
                 {
                     angular = -angular;
+                }
+            }
+            if (m_Articulation)
+            {
+                SetArticulationTarget(i, targets[i], Vector3(angular.x, angular.y, angular.z));
+                if (changed)
+                {
+                    m_Articulation->wakeUp();
                 }
             }
             m_Joints[i]->setDrivePosition(PxTransform(PxVec3(0), q), changed);
@@ -248,6 +279,7 @@ namespace PARS
         }
         m_DriveTargets = std::move(targets);
         m_HasDriveTargets = true;
+        UpdateArticulationDrives(deltaTime);
         error.clear();
         return true;
 #else
@@ -301,9 +333,10 @@ namespace PARS
             // 드라이브를 제거해도 모든 바디의 포즈와 속도는 유지한다.
             m_SupportJoint->release();
             m_SupportJoint = nullptr;
-            m_Bodies[m_SupportBody]->wakeUp();
+            WakeBodies();
             m_SupportBody = -1;
             m_HasSupportTarget = false;
+            UpdateArticulationDrives();
             error.clear();
             return true;
         }
@@ -343,7 +376,8 @@ namespace PARS
         m_SupportJoint = drive;
         m_SupportBody = root;
         m_HasSupportTarget = false;
-        body->wakeUp();
+        WakeBodies();
+        UpdateArticulationDrives();
         error.clear();
         return true;
 #else

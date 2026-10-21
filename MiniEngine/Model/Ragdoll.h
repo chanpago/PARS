@@ -4,8 +4,11 @@
 class PhysicsWorld;
 namespace physx
 {
-    class PxRigidDynamic;
+    class PxRigidBody;
     class PxD6Joint;
+    class PxArticulationReducedCoordinate;
+    class PxArticulationJointReducedCoordinate;
+    class PxArticulationCache;
 }
 
 namespace PARS
@@ -30,6 +33,10 @@ namespace PARS
         bool IsSimulating() const
         {
             return m_Simulating;
+        }
+        bool UsesArticulation() const
+        {
+            return m_Articulation != nullptr;
         }
         bool SetSimulating(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity = false);
         // 애니메이션에서 새로 진입할 때와 달리, 드라이브 전환 시에는 동적 포즈와 속도를 유지한다.
@@ -84,10 +91,26 @@ namespace PARS
         bool IsFinite() const;
 
     private:
+        bool CreateArticulation(PhysicsWorld& world, const std::vector<Math::Matrix4>& boneWorld, std::string& error);
+        bool RebuildSimulation(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity);
+        void SetArticulationVelocities(const std::vector<Math::Vector3>& linear, const std::vector<Math::Vector3>& angular);
+        void UpdateArticulationDrives(float deltaTime = 0);
+        void SetArticulationTarget(size_t joint, Math::Quaternion rotation, Math::Vector3 angularVelocity);
+        void WakeBodies();
         PhysicsAsset m_Asset;
+        PhysicsWorld* m_World = nullptr;
+        std::vector<std::string> m_BoneNames;
+        void* m_QueryOwner = nullptr;
+        bool m_CollisionEnabled = true;
         std::vector<int> m_BoneNodes;
-        std::vector<physx::PxRigidDynamic*> m_Bodies;
+        std::vector<physx::PxRigidBody*> m_Bodies;
         std::vector<physx::PxD6Joint*> m_Joints;
+        physx::PxArticulationReducedCoordinate* m_Articulation = nullptr;
+        physx::PxArticulationCache* m_ArticulationCache = nullptr;
+        std::vector<physx::PxArticulationJointReducedCoordinate*> m_ArticulationJoints;
+        std::vector<unsigned> m_ArticulationDofOffsets;
+        std::vector<float> m_PreviousArticulationTargetVelocity;
+        int m_ArticulationRoot = -1;
         bool m_Simulating = false;
         bool m_DrivesEnabled = false, m_HasDriveTargets = false;
         int m_SupportBody = -1;

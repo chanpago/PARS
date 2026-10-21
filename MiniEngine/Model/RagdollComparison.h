@@ -25,14 +25,14 @@ namespace PARS
 
     struct ComparisonJointRotation
     {
-        // PhysX D6 좌표: twist X, swing Y/Z의 quarter-angle 좌표를 라디안으로 저장한다.
+        // D6는 twist/quarter-angle swing, Articulation은 회전 벡터다. 단위는 rad다.
         std::array<float, 3> angles{};
         // X/Y/Z 단독 초과량과 두 Limited swing 축의 타원 방사 방향 초과량이다.
         std::array<float, 4> excess{};
         bool singular = false;
     };
 
-    ComparisonJointRotation AnalyzeComparisonJoint(const PhysicsConstraint& joint, Math::Quaternion rotation);
+    ComparisonJointRotation AnalyzeComparisonJoint(const PhysicsConstraint& joint, Math::Quaternion rotation, bool articulation = false);
     float ComparisonRotationError(Math::Quaternion a, Math::Quaternion b);
 
     struct ComparisonBodySample
@@ -103,6 +103,7 @@ namespace PARS
 
     private:
         PhysicsAsset m_Asset;
+        bool m_Articulation = false;
         Math::Matrix4 m_ReferenceInverse{Math::kIdentity}, m_ActualInverse{Math::kIdentity};
         float m_Step = 1.0f / 60;
         std::vector<std::array<int, 2>> m_JointBodies;

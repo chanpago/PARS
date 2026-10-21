@@ -368,7 +368,8 @@ void RagdollComparisonRunner::DrawJointResults()
     const auto& result = results[m_SelectedJoint];
     const auto& sample = frames[m_SelectedFrame].joints[m_SelectedJoint];
     ImGui::Text(u8"%s → %s | %s | 원본 → 실제: %.3f도",
-        config.parentBone.c_str(), config.childBone.c_str(), config.useSlerpDrive ? "SLERP" : u8"스윙 / 트위스트", sample.totalError * Degrees);
+        config.parentBone.c_str(), config.childBone.c_str(), m_Results.GetAsset().UsesArticulation() ? u8"Articulation 회전 벡터" :
+            config.useSlerpDrive ? "SLERP" : u8"스윙 / 트위스트", sample.totalError * Degrees);
     if (ImGui::Button(u8"최대 목표 보정 보기"))
     {
         m_SelectedFrame = static_cast<int>(std::round(result.clamp.maximumTime / m_Results.GetStep())) - 1;
@@ -441,7 +442,7 @@ void RagdollComparisonRunner::DrawJointResults()
         const auto& drive = config.drives[config.useSlerpDrive ? 0 : axis];
         ImGui::Text(u8"%s: 원본 범위 [%.2f, %.2f]도 | 드라이브 %s | %s Kp %.1f Kd %.1f 최대 %.1f Nm",
             Axes[axis], result.minimumAngles[axis] * Degrees, result.maximumAngles[axis] * Degrees,
-            drive.enabled ? u8"켜짐" : u8"꺼짐", drive.useAcceleration ? u8"가속도" : u8"토크",
+            drive.enabled ? u8"켜짐" : u8"꺼짐", drive.useAcceleration ? u8"관성 정규화" : u8"토크",
             drive.GetStiffness(), drive.GetDamping(), drive.maxTorque);
         if (drive.useAcceleration)
         {

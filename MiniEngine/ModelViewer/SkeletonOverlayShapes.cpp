@@ -1,5 +1,6 @@
 ﻿#include "SkeletonOverlay.h"
 #include "GraphicsCommon.h"
+#include "PhysicsPose.h"
 #include "CompiledShaders/PhysicsAssetVS.h"
 #include "CompiledShaders/PhysicsAssetPS.h"
 #include <cmath>
@@ -16,16 +17,17 @@ namespace
 }
 
 void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, const Matrix4& parent,
-    const Matrix4& child, uint32_t id, bool selected, Vector3 twistReference)
+    const Matrix4& child, uint32_t id, bool selected, Vector3 twistReference, bool articulation)
 {
     auto& geometry = m_ConstraintGeometry[id];
     const auto& previous = geometry.settings;
-    if (!geometry.valid || geometry.selected != selected || previous.twist != joint.twist ||
+    if (!geometry.valid || geometry.articulation != articulation || geometry.selected != selected || previous.twist != joint.twist ||
         previous.swingY != joint.swingY || previous.swingZ != joint.swingZ ||
         previous.twistMin != joint.twistMin || previous.twistMax != joint.twistMax ||
         previous.swingYLimit != joint.swingYLimit || previous.swingZLimit != joint.swingZLimit ||
         float(LengthSquare(geometry.twistReference - twistReference)) != 0)
     {
+        geometry.articulation = articulation;
         BuildConstraintGeometry(joint, selected, twistReference, geometry);
     }
 
@@ -77,6 +79,14 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
         line(tip, tip - direction * (length * .18f) - side * (length * .08f), width);
     };
     const Quaternion relative = Normalize(Quaternion(Invert(parent) * child));
+    if (articulation)
+    {
+        const auto angles = PARS::JointRotationVector(relative);
+        pointer(Quaternion(x, angles.GetX()) * twistReference, .062f);
+        pointer(Quaternion(y, angles.GetY()) * x, .08f);
+        pointer(Quaternion(z, angles.GetZ()) * x, .1f);
+        return;
+    }
     pointer(relative * x, .1f);
     XMFLOAT4 q;
     XMStoreFloat4(&q, relative);
@@ -132,6 +142,23 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
         }
     };
 
+    if (geometry.articulation)
+    {
+        // 회전 벡터의 단독 축 범위다. D6 원뿔로 그리면 다른 제한을 표시하게 된다.
+        const Motion motions[] = {joint.twist, joint.swingY, joint.swingZ};
+        const float lows[] = {joint.twistMin, -joint.swingYLimit, -joint.swingZLimit};
+        const float highs[] = {joint.twistMax, joint.swingYLimit, joint.swingZLimit};
+        const Vector3 axes[] = {x, y, z};
+        const Vector3 starts[] = {twistReference * .062f, x * .08f, x * radius};
+        const Vector3 colors[] = {red, green, Vector3(.3f, .55f, 1)};
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const float low = motions[axis] == Motion::Free ? -XM_PI : motions[axis] == Motion::Locked ? 0 : lows[axis];
+            const float high = motions[axis] == Motion::Free ? XM_PI : motions[axis] == Motion::Locked ? 0 : highs[axis];
+            sector(origin, axes[axis], starts[axis], low, high, motions[axis] == Motion::Free ? 0 : opacity, colors[axis]);
+        }
+        return;
+    }
     if (joint.swingY == Motion::Limited && joint.swingZ == Motion::Limited)
     {
         // 이 SDK는 ConeLimitHelperTanLess를 사용한다. 스윙 각도 좌표에서 타원을 구한 뒤

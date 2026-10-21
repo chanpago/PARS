@@ -71,6 +71,11 @@ public:
     uint32_t GetConstraintCount() const;
     physx::PxRigidDynamic* CreateDynamicBody(const physx::PxTransform& pose,
         const physx::PxGeometry& geometry, float mass, const char* name);
+    physx::PxArticulationReducedCoordinate* CreateArticulation();
+    physx::PxArticulationLink* CreateArticulationLink(physx::PxArticulationReducedCoordinate& articulation,
+        physx::PxArticulationLink* parent, const physx::PxTransform& pose,
+        const physx::PxGeometry& geometry, float mass, const char* name);
+    bool AddArticulation(physx::PxArticulationReducedCoordinate& articulation);
     physx::PxD6Joint* CreateJoint(physx::PxRigidActor& parent, const physx::PxTransform& parentFrame,
         physx::PxRigidActor& child, const physx::PxTransform& childFrame);
 

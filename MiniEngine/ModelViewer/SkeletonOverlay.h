@@ -28,7 +28,7 @@ public:
     // 조인트의 YZ 평면에서 0도 기준이 되는 단위 벡터다. 각도 표시만 변경한다.
     void ConstraintLimits(const PARS::PhysicsConstraint& joint, const Math::Matrix4& parent,
         const Math::Matrix4& child, uint32_t id, bool selected,
-        Math::Vector3 twistReference = Math::Vector3(Math::kYUnitVector));
+        Math::Vector3 twistReference = Math::Vector3(Math::kYUnitVector), bool articulation = false);
     void Render(GraphicsContext& context, ColorBuffer& target);
     bool RequestPick(float x, float y);
     bool PollPick(uint32_t& id);
@@ -73,6 +73,7 @@ private:
         PARS::PhysicsConstraint settings;
         Math::Vector3 twistReference{Math::kYUnitVector};
         bool selected = false, valid = false, projected = false;
+        bool articulation = false;
         std::vector<LimitLine> lines;
         std::vector<LimitTriangle> triangles;
         Math::Matrix4 clipTransform{Math::kIdentity};
