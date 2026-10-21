@@ -1025,11 +1025,21 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         if (ImGui::Begin(u8"캐릭터 애니메이션", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
 #if defined(_M_X64)
-            if (m_Comparison && ImGui::Button(u8"연속 동작 비교 시작"))
+            if (m_Comparison && ImGui::Button(u8"시뮬레이션 A 시작"))
             {
                 auto character = GetPreviewCharacter();
                 m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
                     character ? character->GetMesh().GetPhysicsAsset() : nullptr);
+            }
+            if (m_Comparison)
+            {
+                ImGui::SameLine();
+                if (ImGui::Button(u8"시뮬레이션 B 시작"))
+                {
+                    auto character = GetPreviewCharacter();
+                    m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
+                        character ? character->GetMesh().GetPhysicsAsset() : nullptr, RagdollComparisonRunner::Simulation::B);
+                }
             }
 #endif
             auto animation = GetPreviewAnimation();
@@ -1127,11 +1137,13 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         {
 #if defined(_M_X64)
             m_MeshViewer->RenderUI(context, m_Comparison != nullptr);
-            if (m_MeshViewer->ConsumeComparisonRequest() && m_Comparison)
+            const auto comparison = m_MeshViewer->ConsumeComparisonRequest();
+            if (comparison != SkeletalMeshViewer::ComparisonRequest::None && m_Comparison)
             {
                 auto character = GetPreviewCharacter();
                 m_Comparison->RequestLocomotionComparison(&m_MeshViewer->GetPhysicsAsset(),
-                    character ? character->GetMesh().GetPhysicsAsset() : nullptr);
+                    character ? character->GetMesh().GetPhysicsAsset() : nullptr,
+                    comparison == SkeletalMeshViewer::ComparisonRequest::B ? RagdollComparisonRunner::Simulation::B : RagdollComparisonRunner::Simulation::A);
             }
 #else
             m_MeshViewer->RenderUI(context);

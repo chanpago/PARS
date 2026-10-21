@@ -5,6 +5,7 @@
 #include "CommandListManager.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <sstream>
 
 using namespace Math;
@@ -57,16 +58,25 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
 {
     std::string error;
     auto playback = settings;
-    if (playback.sequence)
+    if (playback.simulation == Simulation::A || playback.simulation == Simulation::B)
     {
-        if (m_Models.size() < SequenceCount)
+        if (m_Models.size() < (playback.simulation == Simulation::A ? SequenceCount : 2))
         {
-            m_Message = u8"연속 비교에는 Idle, Walking, Slow Run 클립이 필요합니다.";
+            m_Message = playback.simulation == Simulation::B ? u8"시뮬레이션 B에는 Idle, Walking 클립이 필요합니다."
+                                                             : u8"시뮬레이션 A에는 Idle, Walking, Slow Run 클립이 필요합니다.";
             return false;
         }
         playback.clip = 0;
-        playback.duration = static_cast<float>(Sequence[SequenceCount - 1].endTime);
+        if (playback.simulation == Simulation::A)
+        {
+            playback.duration = static_cast<float>(Sequence[SequenceCount - 1].endTime);
+        }
         playback.speed = 0;
+    }
+    if (playback.simulation == Simulation::B && (!std::isfinite(playback.uTurnRadius) || playback.uTurnRadius < .5f || playback.uTurnRadius > 3 || playback.duration < 3))
+    {
+        m_Message = u8"시뮬레이션 B는 측정 시간 3~60초, 유턴 반경 0.5~3m를 사용합니다.";
+        return false;
     }
     if (!asset.Validate(error) || asset.bodies.empty() || playback.clip < 0 ||
         size_t(playback.clip) >= m_Models.size() || !std::isfinite(playback.duration) ||
@@ -77,6 +87,11 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
         return false;
     }
     Reset();
+    if (m_Settings.simulation != playback.simulation)
+    {
+        strcpy_s(m_ReportPath, playback.simulation == Simulation::B ? "ragdoll-comparison-b.html" : playback.simulation == Simulation::A ? "ragdoll-comparison-a.html"
+                                                                                                                                         : "ragdoll-comparison.html");
+    }
     m_Settings = playback;
     m_SourceLabel = m_RequestedSource.empty() ? "Supplied PA snapshot" : m_RequestedSource;
     // Recreate the scene as well as its actors so reruns start with identical solver state.
@@ -96,8 +111,9 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
     m_World.SetPhysicsPaused(true);
     // 서로의 배치만 제거한다. 진행 경로와 골반의 추종 오차는 기록에 남긴다.
     const float height = settings.suspended ? 1.0f : 0.0f;
-    m_Placements[0] = Vector3(-1.5f, height, 0);
-    m_Placements[1] = Vector3(1.5f, height, 0);
+    const float spacing = playback.simulation == Simulation::B ? playback.uTurnRadius + 1.5f : 1.5f;
+    m_Placements[0] = Vector3(-spacing, height, 0);
+    m_Placements[1] = Vector3(spacing, height, 0);
     for (int side = 0; side < 2; ++side)
     {
         auto* actor = m_World.SpawnActor<Actor>(side == 0 ? "Kinematic reference" : "Active ragdoll");
@@ -208,7 +224,7 @@ bool RagdollComparisonRunner::Step()
         return false;
     }
     const int clip = GetTargetClip();
-    const float distance = GetTravelDistance((m_Steps + 1) * PhysicsWorld::FixedDeltaTime);
+    const auto path = GetPathTransform((m_Steps + 1) * PhysicsWorld::FixedDeltaTime);
     for (int side = 0; side < 2; ++side)
     {
         auto& animation = m_Meshes[side]->GetAnimInstance();
@@ -218,7 +234,9 @@ bool RagdollComparisonRunner::Step()
             Fail(u8"다음 동작으로 블렌딩하지 못했습니다.");
             return false;
         }
-        m_Meshes[side]->GetOwner().SetActorLocation(m_Placements[side] + Vector3(0, 0, distance));
+        auto placement = path;
+        placement.SetTranslation(m_Placements[side] + path.GetTranslation());
+        m_Meshes[side]->GetOwner().SetActorTransform(placement);
     }
     m_World.RequestPhysicsStep();
     m_World.Tick(0);
@@ -237,9 +255,13 @@ bool RagdollComparisonRunner::Step()
 
 int RagdollComparisonRunner::GetTargetClip() const
 {
-    if (!m_Settings.sequence)
+    if (m_Settings.simulation == Simulation::SingleClip)
     {
         return m_Settings.clip;
+    }
+    if (m_Settings.simulation == Simulation::B)
+    {
+        return m_Steps >= static_cast<size_t>(std::round(Sequence[0].endTime / PhysicsWorld::FixedDeltaTime)) ? 1 : 0;
     }
     size_t clip = 0;
     while (clip + 1 < SequenceCount &&
@@ -252,9 +274,15 @@ int RagdollComparisonRunner::GetTargetClip() const
 
 float RagdollComparisonRunner::GetTravelDistance(double time) const
 {
-    if (!m_Settings.sequence)
+    if (m_Settings.simulation == Simulation::SingleClip)
     {
         return m_Settings.speed * static_cast<float>(time);
+    }
+    if (m_Settings.simulation == Simulation::B)
+    {
+        const double elapsed = std::max(0.0, time - Sequence[0].endTime);
+        const double blend = std::min(elapsed, double(BlendDuration));
+        return static_cast<float>(Sequence[1].speed * (blend * blend / (2 * BlendDuration) + elapsed - blend));
     }
     // 자세 블렌딩과 같은 시간 동안 경로 속도도 바꾼다. 구간별 속도를 적분해
     // 전환 시 위치가 뛰지 않으며, 일시정지나 렌더 FPS가 경로에 영향을 주지 않는다.
@@ -269,6 +297,46 @@ float RagdollComparisonRunner::GetTravelDistance(double time) const
         previousSpeed = stage.speed;
     }
     return static_cast<float>(distance);
+}
+
+AffineTransform RagdollComparisonRunner::GetPathTransform(double time) const
+{
+    float distance = GetTravelDistance(time);
+    if (m_Settings.simulation != Simulation::B)
+    {
+        return AffineTransform(Matrix3(kIdentity), Vector3(0, 0, distance));
+    }
+    // 3m 직선 두 개를 반원 두 개로 연결한다. 위치와 접선 방향이 경계에서 연속이며,
+    // 바디를 순간이동시키지 않고 애니메이션 목표의 월드 변환만 갱신한다.
+    constexpr float straight = 3;
+    const float radius = m_Settings.uTurnRadius;
+    const float arc = DirectX::XM_PI * radius;
+    distance = std::fmod(distance, 2 * (straight + arc));
+    float x = 0, z = 0, yaw = 0;
+    if (distance < straight)
+    {
+        z = distance;
+    }
+    else if (distance < straight + arc)
+    {
+        yaw = (distance - straight) / radius;
+        x = radius * (1 - std::cos(yaw));
+        z = straight + radius * std::sin(yaw);
+    }
+    else if (distance < 2 * straight + arc)
+    {
+        yaw = DirectX::XM_PI;
+        x = 2 * radius;
+        z = straight - (distance - straight - arc);
+    }
+    else
+    {
+        const float angle = (distance - 2 * straight - arc) / radius;
+        yaw = DirectX::XM_PI + angle;
+        x = radius * (1 + std::cos(angle));
+        z = -radius * std::sin(angle);
+    }
+    return AffineTransform(Matrix3::MakeYRotation(yaw), Vector3(x, 0, z));
 }
 
 void RagdollComparisonRunner::Advance(float deltaTime)
@@ -306,10 +374,11 @@ void RagdollComparisonRunner::Stop()
     }
 }
 
-void RagdollComparisonRunner::RequestLocomotionComparison(const PhysicsAsset* editor, const PhysicsAsset* character)
+void RagdollComparisonRunner::RequestLocomotionComparison(const PhysicsAsset* editor, const PhysicsAsset* character,
+    Simulation simulation)
 {
     Open();
-    if (m_State == State::Running || m_State == State::Paused || m_StartRequested)
+    if (m_StartRequested || ((m_State == State::Running || m_State == State::Paused) && m_Settings.simulation == simulation))
     {
         return;
     }
@@ -322,7 +391,7 @@ void RagdollComparisonRunner::RequestLocomotionComparison(const PhysicsAsset* ed
     }
     m_UseEditor = useEditor;
     m_RequestedAsset = *source;
-    m_RequestedSettings = Settings{};
+    m_RequestedSettings = Settings(simulation);
     m_RequestedSource = useEditor ? "Editor PA (snapshot at start)" : "Character PA (snapshot at start)";
     m_ResetRequested = false;
     m_StartRequested = true;
@@ -354,8 +423,8 @@ bool RagdollComparisonRunner::ConsumeFocusRequest()
 
 Vector3 RagdollComparisonRunner::GetViewCenter() const
 {
-    return Vector3(0, (m_Settings.suspended ? 1.0f : 0.0f) + 1.0f,
-        GetTravelDistance(m_Steps * PhysicsWorld::FixedDeltaTime));
+    return GetPathTransform(m_Steps * PhysicsWorld::FixedDeltaTime).GetTranslation() +
+        Vector3(0, (m_Settings.suspended ? 1.0f : 0.0f) + 1.0f, 0);
 }
 
 std::string RagdollComparisonRunner::GetDescription(bool korean) const
@@ -370,11 +439,17 @@ std::string RagdollComparisonRunner::GetDescription(bool korean) const
         const auto source = m_SourceLabel == "Editor PA (snapshot at start)" ? u8"에디터 PA (시작 시 복사)"
             : m_SourceLabel == "Character PA (snapshot at start)"            ? u8"캐릭터 PA (시작 시 복사)"
                                                                              : u8"입력된 PA (시작 시 복사)";
-        if (m_Settings.sequence)
+        if (m_Settings.simulation == Simulation::A)
         {
-            text << u8"연속 재생: 대기 0–2초 → 걷기 2–6초 → 달리기 (Slow Run) 6–10초"
+            text << u8"시뮬레이션 A | 연속 재생: 대기 0–2초 → 걷기 2–6초 → 달리기 (Slow Run) 6–10초"
                  << u8" | 전환 블렌딩: " << BlendDuration << u8"초 (각 구간 시간에 포함)"
                  << u8" | +Z 이동 속도: 0 → 1.6 → 3 m/s (블렌딩 중 선형 변경)";
+        }
+        else if (m_Settings.simulation == Simulation::B)
+        {
+            text << u8"시뮬레이션 B | 대기 2초 → 걷기 (Walking) | 직선 3m → 반원 유턴 반복"
+                 << u8" | 유턴 반경: " << m_Settings.uTurnRadius << u8"m | 걷기 속도: 1.6 m/s"
+                 << u8" | 전환 블렌딩 / 출발 가속: " << BlendDuration << u8"초 | 측정 시간: " << m_Settings.duration << u8"초";
         }
         else
         {
@@ -389,11 +464,17 @@ std::string RagdollComparisonRunner::GetDescription(bool korean) const
                                                                                                    : u8"부분 결과");
         return text.str();
     }
-    if (m_Settings.sequence)
+    if (m_Settings.simulation == Simulation::A)
     {
-        text << "Sequence: Idle 0-2 s -> Walking 2-6 s -> Slow Run 6-10 s"
+        text << "Simulation A | Sequence: Idle 0-2 s -> Walking 2-6 s -> Slow Run 6-10 s"
              << " | blend: " << BlendDuration << " s (included in each stage)"
              << " | +Z speed: 0 -> 1.6 -> 3 m/s (linear during blends)";
+    }
+    else if (m_Settings.simulation == Simulation::B)
+    {
+        text << "Simulation B | Idle 2 s -> Walking | repeat 3 m straight / semicircular U-turn"
+             << " | turn radius: " << m_Settings.uTurnRadius << " m | walking speed: 1.6 m/s"
+             << " | blend / acceleration: " << BlendDuration << " s | duration: " << m_Settings.duration << " s";
     }
     else
     {

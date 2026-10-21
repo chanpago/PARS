@@ -79,16 +79,46 @@ void RagdollComparisonRunner::DrawUI(const PhysicsAsset* editor, const PhysicsAs
         return;
     }
     ImGui::TextUnformatted(u8"키네마틱 기준 | 액티브 래그돌");
-    ImGui::TextWrapped(u8"플레이어와 분리된 더미 장면입니다. 두 더미가 같은 애니메이션과 블렌딩으로 지정된 +Z 경로를 따릅니다. "
+    ImGui::TextWrapped(u8"플레이어와 분리된 더미 장면입니다. 두 더미가 같은 애니메이션·블렌딩·경로를 따릅니다. "
                        u8"최초 배치 차이만 제거하며 원본 애니메이션을 절대 기준으로 사용합니다.");
+    const auto* source = m_UseEditor ? editor : character;
+    ImGui::BeginDisabled(!source || source->bodies.empty());
+    if (ImGui::Button(u8"시뮬레이션 A 시작"))
+    {
+        RequestLocomotionComparison(m_UseEditor ? editor : nullptr, character, Simulation::A);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(u8"시뮬레이션 B 시작"))
+    {
+        RequestLocomotionComparison(m_UseEditor ? editor : nullptr, character, Simulation::B);
+    }
+    ImGui::EndDisabled();
     const bool busy = m_State == State::Running || m_State == State::Paused;
     ImGui::BeginDisabled(busy);
     ImGui::Checkbox(u8"에디터 PA 사용 (저장하지 않은 편집 포함)", &m_UseEditor);
-    ImGui::Checkbox(u8"연속 재생: 대기 2초 → 걷기 4초 → 달리기 4초", &m_RequestedSettings.sequence);
-    if (m_RequestedSettings.sequence)
+    const char* simulations[] = {u8"시뮬레이션 A — 직선 대기 / 걷기 / 달리기", u8"시뮬레이션 B — 3m 직진 / 유턴 반복", u8"단일 애니메이션"};
+    int simulation = static_cast<int>(m_RequestedSettings.simulation);
+    ImGui::SetNextItemWidth(360);
+    if (ImGui::Combo(u8"실험 종류", &simulation, simulations, 3))
     {
+        m_RequestedSettings.simulation = static_cast<Simulation>(simulation);
+        m_RequestedSettings.duration = Settings(m_RequestedSettings.simulation).duration;
+    }
+    if (m_RequestedSettings.simulation == Simulation::A)
+    {
+        ImGui::TextUnformatted(u8"대기 2초 → 걷기 4초 → 달리기 4초");
         ImGui::TextWrapped(u8"총 10초 | 전환마다 0.2초 블렌딩 (구간 시간에 포함) | 달리기: Slow Run");
         ImGui::TextDisabled(u8"+Z 이동 속도: 0 → 1.6 → 3 m/s, 전환 중 0.2초 동안 서서히 변경");
+    }
+    else if (m_RequestedSettings.simulation == Simulation::B)
+    {
+        ImGui::TextWrapped(u8"대기 2초 → 걷기 | 3m 직진 → 반원 유턴 → 3m 직진 → 반원 유턴 반복");
+        ImGui::TextDisabled(u8"걷기 1.6 m/s | 출발 블렌딩 / 가속 0.2초 | 방향은 경로의 접선을 따릅니다.");
+        ImGui::SetNextItemWidth(110);
+        ImGui::DragFloat(u8"측정 시간 (초)", &m_RequestedSettings.duration, .5f, 3, 60, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(110);
+        ImGui::DragFloat(u8"유턴 반경 (m)", &m_RequestedSettings.uTurnRadius, .1f, .5f, 3, "%.1f", ImGuiSliderFlags_AlwaysClamp);
     }
     else
     {
@@ -113,7 +143,6 @@ void RagdollComparisonRunner::DrawUI(const PhysicsAsset* editor, const PhysicsAs
     }
     ImGui::Checkbox(u8"공중 지지 (+1 m): 바닥 접촉 없이 추종 성능 측정", &m_RequestedSettings.suspended);
     ImGui::EndDisabled();
-    const auto* source = m_UseEditor ? editor : character;
     ImGui::BeginDisabled(!source || source->bodies.empty() || busy);
     if (ImGui::Button(u8"시작 / 다시 실행"))
     {

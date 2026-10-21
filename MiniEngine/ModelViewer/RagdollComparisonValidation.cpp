@@ -59,6 +59,17 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
             "Pausing during a transition preserves the recording and blend clock");
         check(runner.Step() && runner.GetResults().GetFrames().back().blendAlpha > pausedBlend,
             "Single stepping advances the transition by one physics step");
+        runner.RequestLocomotionComparison(&asset, nullptr, RagdollComparisonRunner::Simulation::B);
+        check(runner.GetState() == RagdollComparisonRunner::State::Paused && runner.GetResults().GetFrames().size() == 122,
+            "Switching A to B is deferred until the safe update");
+        runner.ProcessRequests();
+        check(runner.GetState() == RagdollComparisonRunner::State::Running && runner.GetResults().GetFrames().empty() &&
+                runner.GetDescription().find("Simulation B") != std::string::npos,
+            "The B button starts a fresh U-turn simulation while A was paused");
+        runner.RequestLocomotionComparison(&asset, nullptr);
+        runner.ProcessRequests();
+        check(runner.GetDescription().find("Simulation A") != std::string::npos,
+            "The A button can switch back while B is running");
         runner.Reset();
         std::vector<ComparisonFrame> reference;
         for (int fps : {30, 60, 144})
@@ -155,13 +166,111 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
         Renderer::UpdateWorldRenderData(runner.GetWorld(), context);
         context.Finish(true);
         check(runner.Export("../../.tools/comparison-imported.html"), "Export actual imported locomotion-sequence results");
+        std::vector<ComparisonFrame> uTurnReference;
+        for (int fps : {30, 144})
+        {
+            RagdollComparisonRunner::Settings settings(RagdollComparisonRunner::Simulation::B);
+            check(runner.Start(asset, settings), "Start twenty-second Idle/Walking U-turn comparison");
+            std::vector<Actor*> dummies;
+            runner.GetWorld().ForEachActor([&](Actor& actor) {
+                dummies.push_back(&actor);
+            });
+            check(dummies.size() == 2, "B has exactly two non-player dummies");
+            const auto initial = dummies[0]->GetActorLocation();
+            const auto separation = dummies[1]->GetActorLocation() - initial;
+            auto previous = initial;
+            auto previousForward = dummies[0]->GetActorTransform().GetZ();
+            size_t previousSamples = 0;
+            bool pathValid = true, tangentValid = true, matchingTargets = true;
+            bool upperTurn = false, lowerTurn = false, returnStraight = false;
+            for (int frame = 0; frame < fps * 20; ++frame)
+            {
+                runner.Advance(1.0f / fps);
+                const size_t samples = runner.GetResults().GetFrames().size();
+                if (samples == previousSamples)
+                {
+                    continue;
+                }
+                const auto target = dummies[0]->GetActorTransform();
+                const auto other = dummies[1]->GetActorTransform();
+                const auto position = target.GetTranslation();
+                const auto forward = target.GetZ();
+                const auto local = position - initial;
+                const auto movement = position - previous;
+                const float distance = Math::Length(movement);
+                const float dt = float((samples - previousSamples) * PhysicsWorld::FixedDeltaTime);
+                const float x = float(local.GetX()), z = float(local.GetZ());
+                pathValid &= distance <= 1.6f * dt + 1e-4f && std::abs(float(local.GetY())) < 1e-5f;
+                if (z > 3.0001f || z < -.0001f)
+                {
+                    const float centerZ = z > 3 ? 3.0f : 0.0f;
+                    pathValid &= std::abs(std::hypot(x - 1, z - centerZ) - 1) < 1e-4f;
+                }
+                else
+                {
+                    pathValid &= std::min(std::abs(x), std::abs(x - 2)) < 1e-3f;
+                }
+                if (distance > 1e-5f)
+                {
+                    tangentValid &= float(Math::Dot(forward, movement / distance)) > .999f &&
+                        float(Math::Dot(previousForward, forward)) > .998f;
+                }
+                matchingTargets &= Math::Length(other.GetTranslation() - position - separation) < 1e-4f &&
+                    float(Math::Dot(other.GetZ(), forward)) > .99999f;
+                upperTurn |= z > 3.9f;
+                lowerTurn |= z < -.9f;
+                returnStraight |= std::abs(x - 2) < 1e-4f && z > 1 && z < 2 && float(forward.GetZ()) < -.999f;
+                previous = position;
+                previousForward = forward;
+                previousSamples = samples;
+            }
+            const auto& frames = runner.GetResults().GetFrames();
+            check(runner.GetState() == RagdollComparisonRunner::State::Complete && frames.size() == 1200,
+                "B records all twenty seconds and repeated turns");
+            check(pathValid && upperTurn && lowerTurn && returnStraight,
+                "The path has two 3 m straights and two 1 m semicircles without position jumps");
+            check(tangentValid && matchingTargets, "Both dummies face the curve tangent and follow identical translated paths");
+            bool clipsValid = true;
+            for (size_t i = 0; i < frames.size(); ++i)
+            {
+                const float blend = i < 120 ? 1 : std::min(1.0f, float(i - 119) / 12);
+                clipsValid &= frames[i].clipName == (i < 120 ? "Idle" : "Walking") && std::abs(frames[i].blendAlpha - blend) < 1e-5f;
+            }
+            check(clipsValid, "B blends Idle to Walking once and keeps Walking throughout the U-turns");
+            if (uTurnReference.empty())
+            {
+                uTurnReference = frames;
+            }
+            else
+            {
+                float maxDifference = 0;
+                for (size_t i = 0; i < frames.size(); ++i)
+                {
+                    maxDifference = std::max(maxDifference, std::abs(frames[i].clipTime - uTurnReference[i].clipTime));
+                    for (size_t b = 0; b < frames[i].bodies.size(); ++b)
+                    {
+                        maxDifference = std::max(maxDifference, std::abs(frames[i].bodies[b].positionError - uTurnReference[i].bodies[b].positionError));
+                        maxDifference = std::max(maxDifference, std::abs(frames[i].bodies[b].movementError - uTurnReference[i].bodies[b].movementError));
+                    }
+                    for (size_t j = 0; j < frames[i].joints.size(); ++j)
+                    {
+                        maxDifference = std::max(maxDifference, std::abs(frames[i].joints[j].trackingError - uTurnReference[i].joints[j].trackingError));
+                    }
+                }
+                check(maxDifference < 1e-4f, "B's complete U-turn recording is independent of render FPS");
+            }
+        }
+        check(runner.Export("../../.tools/comparison-uturn.html"), "Export B with the top-down U-turn trajectory");
+        check(owner.GetDynamicBodyCount() == ownerBodies && owner.GetConstraintCount() == ownerJoints &&
+                owner.GetStepCount() == ownerSteps,
+            "Switching and running both simulations leaves the player scene unchanged");
         const char* clipReports[] = {"../../.tools/comparison-pa-idle.html",
             "../../.tools/comparison-pa-walking.html", "../../.tools/comparison-pa-slowrun.html"};
         const float clipSpeeds[] = {0, 1.6f, 3.0f};
         for (int clip = 0; clip < 3; ++clip)
         {
             RagdollComparisonRunner::Settings settings;
-            settings.sequence = false;
+            settings.simulation = RagdollComparisonRunner::Simulation::SingleClip;
             settings.clip = clip;
             settings.speed = clipSpeeds[clip];
             check(runner.Start(asset, settings), "Start six-second locomotion PA validation");
@@ -223,7 +332,7 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
         std::string assetError;
         check(asset.Save("../../.tools/comparison-pa.physics.json", assetError), "Save the validated physics asset");
         RagdollComparisonRunner::Settings ground;
-        ground.sequence = false;
+        ground.simulation = RagdollComparisonRunner::Simulation::SingleClip;
         ground.duration = 1;
         ground.suspended = false;
         check(runner.Start(asset, ground), "Start floor-contact comparison");

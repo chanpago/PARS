@@ -220,13 +220,18 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         ImGui::TextDisabled(u8"| 본 %u개 | 바디 %zu개 | 관절 %zu개", m_Mesh->GetSkeletalMesh()->m_NumJoints,
             m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size());
         ImGui::BeginDisabled(!comparisonAvailable || m_PhysicsAsset.bodies.empty());
-        if (ImGui::Button(u8"연속 동작 비교 시작"))
+        if (ImGui::Button(u8"시뮬레이션 A 시작"))
         {
-            m_ComparisonRequested = true;
+            m_ComparisonRequested = ComparisonRequest::A;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(u8"시뮬레이션 B 시작"))
+        {
+            m_ComparisonRequested = ComparisonRequest::B;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::TextDisabled(u8"대기 2초 → 걷기 4초 → 달리기 4초 | 전환 블렌딩 | 현재 에디터 PA");
+        ImGui::TextDisabled(u8"A: 직선 대기 / 걷기 / 달리기 | B: 3m 직진 / 유턴 반복 | 현재 에디터 PA");
         ImGui::SetNextItemWidth(130);
         if (ImGui::BeginCombo("##Animation", ViewerLabels::Animation(animation.GetAnimationName(animation.GetCurrentAnimationIndex()))))
         {

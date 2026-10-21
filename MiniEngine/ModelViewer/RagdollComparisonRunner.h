@@ -24,13 +24,23 @@ public:
         Stopped,
         Failed
     };
+    enum class Simulation
+    {
+        A,
+        B,
+        SingleClip
+    };
     struct Settings
     {
-        // 연속 재생을 끈 경우에만 단일 클립, 시간, 속도를 사용한다.
+        explicit Settings(Simulation selected = Simulation::A)
+            : simulation(selected), duration(selected == Simulation::B ? 20.0f : 6.0f)
+        {
+        }
+        Simulation simulation;
+        // 단일 클립 모드에서 클립/속도를 사용한다. B와 단일 클립의 측정 시간은 조절할 수 있다.
         int clip = 1;
-        float duration = 6, speed = 1.6f;
+        float duration, speed = 1.6f, uTurnRadius = 1;
         bool suspended = true;
-        bool sequence = true;
     };
 
     RagdollComparisonRunner(PhysicsWorld& owner, const std::shared_ptr<const Model>* models,
@@ -43,7 +53,8 @@ public:
     void SetPaused(bool paused);
     void Stop();
     void DrawUI(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character);
-    void RequestLocomotionComparison(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character);
+    void RequestLocomotionComparison(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character,
+        Simulation simulation = Simulation::A);
     // UI 변경은 다음 Update의 렌더 명령 기록 전에 처리한다.
     void ProcessRequests();
     bool ConsumeFocusRequest();
@@ -84,6 +95,7 @@ private:
     bool Capture(bool baseline);
     int GetTargetClip() const;
     float GetTravelDistance(double time) const;
+    Math::AffineTransform GetPathTransform(double time) const;
     void Fail(const std::string& message);
     void DrawBodyResults();
     void DrawJointResults();
@@ -107,5 +119,5 @@ private:
     bool m_FollowLatest = true;
     bool m_FollowCamera = true;
     int m_SelectedBody = 0, m_SelectedJoint = 0, m_SelectedFrame = 0;
-    char m_ReportPath[512] = "ragdoll-comparison.html";
+    char m_ReportPath[512] = "ragdoll-comparison-a.html";
 };

@@ -123,6 +123,8 @@ table{font-size:9px;white-space:normal}td,th{padding:4px}button,input,select{dis
 <div class="grid"><div><p>기준 / 실제 이동 경로의 측면도 (가로 Z / 세로 Y, m)</p><canvas id="trajectory"></canvas><span class="legend">파랑: 키네마틱 기준 · 주황: 액티브 래그돌 실제 결과</span></div>
 <div><p>선택한 축의 각도 (°): <select id="axis"><option value="0">트위스트 X</option><option value="1">스윙 Y</option><option value="2">스윙 Z</option></select></p><canvas id="axisPlot"></canvas>
 <span class="legend">파랑: 원본 · 초록: 보정 목표 · 주황: 실제 · 회색: 축별 허용 범위 (스윙 원뿔은 두 축을 함께 제한)</span></div></div>
+<p>기준 / 실제 이동 경로의 평면도 (가로 X / 세로 Z, m · 같은 축척)</p><canvas id="trajectoryTop"></canvas>
+<span class="legend">파랑: 키네마틱 기준 · 주황: 액티브 래그돌 실제 결과 · 선택한 바디의 궤적을 위에서 본 모습입니다.</span>
 </section>
 <section><h2>관절 제한 위반 내역</h2><p class="muted">잠긴 축도 위반 여부를 검사하며, 자유 축에는 제한 초과가 없습니다.
 원뿔 초과량은 스윙 각도 좌표에서 경계까지의 방사 방향 거리(°)이며, 최단 회전 보정각과는 다릅니다.
@@ -231,9 +233,11 @@ table("bodies",["바디","위치 오차 평균 (cm)","위치 오차 RMS (cm)","�
 const jr=data.joints.map((j,i)=>{const c=stats(data.frames.map(f=>f.j[i].c*deg)),k=stats(data.frames.map(f=>f.j[i].k*deg)),t=stats(data.frames.map(f=>f.j[i].e*deg));
 return [j.name,c.mean,c.peak,c.at,k.mean,k.peak,t.peak,...axes.map((_,a)=>exposure(data.frames.map(f=>f.j[i].r.e[a])).percent)]});
 table("joints",["관절","평균 목표 보정 (°)","최대 목표 보정 (°)","최대 보정 시각 (초)","평균 추종 오차 (°)","최대 추종 오차 (°)","최대 전체 오차 (°)","트위스트 위반 (%)","스윙 Y 위반 (%)","스윙 Z 위반 (%)","원뿔 위반 (%)"],jr.sort((a,b)=>b[2]-a[2]));
-function chart(id,series,selected,xlabel="시간 (초)",bounds=[]){const c=$(id),ctx=c.getContext("2d"),w=c.width=1100,h=c.height=250;
+function chart(id,series,selected,xlabel="시간 (초)",bounds=[],equalScale=false){const c=$(id),ctx=c.getContext("2d"),w=c.width=equalScale?Math.max(200,c.clientWidth):1100,h=c.height=equalScale?Math.max(150,c.clientHeight):250;
 const all=series.flatMap(s=>s.points),xs=all.map(p=>p[0]),ys=all.map(p=>p[1]).concat(bounds);
 let xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(0,...ys),ymax=Math.max(...ys);if(xmax-xmin<1e-6)xmax=xmin+1;if(ymax-ymin<1e-6)ymax=ymin+1;
+if(equalScale){const scale=Math.max((xmax-xmin)/(w-90),(ymax-ymin)/(h-65))*1.1,cx=(xmin+xmax)/2,cy=(ymin+ymax)/2;
+xmin=cx-scale*(w-90)/2;xmax=cx+scale*(w-90)/2;ymin=cy-scale*(h-65)/2;ymax=cy+scale*(h-65)/2}
 const x=v=>60+(v-xmin)/(xmax-xmin)*(w-90),y=v=>h-35-(v-ymin)/(ymax-ymin)*(h-65);
 ctx.clearRect(0,0,w,h);ctx.font="14px system-ui";ctx.fillStyle="#52647b";ctx.fillText(fmt(ymax),3,23);ctx.fillText(fmt(ymin),3,h-32);ctx.fillText(fmt(xmin),60,h-9);ctx.fillText(fmt(xmax),w-80,h-9);ctx.fillText(xlabel,w/2,h-9);
 ctx.strokeStyle="#c4ceda";ctx.beginPath();ctx.moveTo(60,20);ctx.lineTo(60,h-35);ctx.lineTo(w-30,h-35);ctx.stroke();
@@ -247,6 +251,7 @@ $("time").textContent=`표본 ${fi+1} | 실험 시간 ${fmt(f.t)}초 | ${animati
 $("position").textContent=`${data.bodies[bi].name} | 기준 위치 XYZ (m): ${b.r.map(fmt).join(", ")} | 실제 위치 XYZ (m): ${b.a.map(fmt).join(", ")} | 위치 차이 (cm): ${b.d.map(v=>fmt(v*100)).join(", ")} | 이동량 차이 (cm/스텝): ${b.v.map(v=>fmt(v*100)).join(", ")}`;
 chart("bodyPlot",[{color:"#1674c5",points:data.frames.map(f=>[f.t,f.b[bi].p*100])},{color:"#bd590a",points:data.frames.map(f=>[f.t,f.b[bi].m*100])}],f.t);
 chart("trajectory",[{color:"#1674c5",points:data.frames.map(f=>[f.b[bi].r[2],f.b[bi].r[1]])},{color:"#bd590a",points:data.frames.map(f=>[f.b[bi].a[2],f.b[bi].a[1]])}],null,"Z (m)");
+chart("trajectoryTop",[{color:"#1674c5",points:data.frames.map(f=>[f.b[bi].r[0],f.b[bi].r[2]])},{color:"#bd590a",points:data.frames.map(f=>[f.b[bi].a[0],f.b[bi].a[2]])}],null,"X (m)",[],true);
 if(!data.joints.length)return;const j=f.j[ji],cfg=data.joints[ji];
 chart("jointPlot",[{color:"#1674c5",points:data.frames.map(f=>[f.t,f.j[ji].c*deg])},{color:"#bd590a",points:data.frames.map(f=>[f.t,f.j[ji].k*deg])}],f.t);
 const bounds=cfg.motion[a]===2?[]:cfg.motion[a]===0?[0]:[cfg.min[a]*deg,cfg.max[a]*deg];
@@ -259,6 +264,9 @@ const e=exposure(data.frames.map(f=>f.j[ji].r.e[a])),actual=exposure(data.frames
 $("range").textContent=axes.slice(0,3).map((name,a)=>{const v=data.frames.map(f=>f.j[ji].r.a[a]*deg);return `${name} 원본 범위: ${fmt(Math.min(...v))} ~ ${fmt(Math.max(...v))}°`}).join(" | ");
 const singular=data.frames.filter(f=>f.j[ji].r.singular).length;$("singular").textContent=singular?`주의: ${singular}개 표본은 스윙이 180°에 가까워 트위스트 분해가 불명확합니다. 조인트 기준 좌표계를 확인하세요.`:"";}
 ["body","joint","frame","axis"].forEach(id=>$(id).addEventListener("input",refresh));
+window.addEventListener("resize",refresh);
+window.addEventListener("beforeprint",refresh);
+window.addEventListener("afterprint",refresh);
 $("csv").onclick=()=>{const rows=[["종류","본 이름","실험 시간 (초)","클립 시간 (초)","애니메이션","블렌딩 비율","기준 X (m)","기준 Y (m)","기준 Z (m)","실제 X (m)","실제 Y (m)","실제 Z (m)","위치 차이 X (m)","위치 차이 Y (m)","위치 차이 Z (m)","이동량 차이 X (m/스텝)","이동량 차이 Y (m/스텝)","이동량 차이 Z (m/스텝)","위치 오차 (m)","이동량 오차 (m/스텝)","회전 오차 (rad)","목표 보정각 (rad)","추종 오차 (rad)","전체 오차 (rad)","원본 트위스트 (rad)","원본 스윙 Y (rad)","원본 스윙 Z (rad)","보정 트위스트 (rad)","보정 스윙 Y (rad)","보정 스윙 Z (rad)","실제 트위스트 (rad)","실제 스윙 Y (rad)","실제 스윙 Z (rad)","원본 트위스트 초과 (rad)","원본 스윙 Y 초과 (rad)","원본 스윙 Z 초과 (rad)","원본 원뿔 초과 (rad)"]];
 data.frames.forEach(f=>{f.b.forEach((b,i)=>rows.push(["바디",data.bodies[i].name,f.t,f.clip,animationName(f.animation),f.blend,...b.r,...b.a,...b.d,...b.v,b.p,b.m,b.q,...Array(16).fill("")]));
 f.j.forEach((j,i)=>rows.push(["관절",data.joints[i].name,f.t,f.clip,animationName(f.animation),f.blend,...Array(15).fill(""),j.c,j.k,j.e,...j.r.a,...j.b.a,...j.a.a,...j.r.e]))});
