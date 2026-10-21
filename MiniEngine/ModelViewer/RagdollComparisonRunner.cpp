@@ -111,9 +111,9 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
     m_World.SetPhysicsPaused(true);
     // 서로의 배치만 제거한다. 진행 경로와 골반의 추종 오차는 기록에 남긴다.
     const float height = settings.suspended ? 1.0f : 0.0f;
-    const float spacing = playback.simulation == Simulation::B ? playback.uTurnRadius + 1.5f : 1.5f;
-    m_Placements[0] = Vector3(-spacing, height, 0);
-    m_Placements[1] = Vector3(spacing, height, 0);
+    constexpr float halfSpacing = .75f;
+    m_Placements[0] = Vector3(-halfSpacing, height, 0);
+    m_Placements[1] = Vector3(halfSpacing, height, 0);
     for (int side = 0; side < 2; ++side)
     {
         auto* actor = m_World.SpawnActor<Actor>(side == 0 ? "Kinematic reference" : "Active ragdoll");
