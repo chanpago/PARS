@@ -42,6 +42,7 @@
 #include "ShadowCamera.h"
 #include "Display.h"
 #include "imgui.h"
+#include <fstream>
 #if defined(_M_X64)
 #include "PhysicsDemo.h"
 #include "RagdollComparisonRunner.h"
@@ -134,17 +135,29 @@ public:
         }
 #if defined(_M_X64)
         std::wstring comparisonCapture;
-        if (m_Comparison && CommandLineArgs::GetString(L"comparisoncapture", comparisonCapture))
+        const bool captureReturn = CommandLineArgs::GetString(L"comparisonreturncapture", comparisonCapture);
+        if (m_Comparison && (captureReturn || CommandLineArgs::GetString(L"comparisoncapture", comparisonCapture)))
         {
             // Read back the rendered buffers; PrintWindow cannot capture a DX12 flip-model window.
             if (++m_ComparisonCaptureFrames == 10)
             {
                 g_OverlayBuffer.ExportToFile(comparisonCapture + L".launch.ui");
             }
-            if (m_Comparison->GetState() == RagdollComparisonRunner::State::Complete)
+            const bool returned = captureReturn && !m_Comparison->IsShowingScene() && !m_WasComparing &&
+                !m_Comparison->GetResults().GetFrames().empty();
+            if (returned || (!captureReturn && m_Comparison->GetState() == RagdollComparisonRunner::State::Complete))
             {
                 g_OverlayBuffer.ExportToFile(comparisonCapture + L".ui");
                 g_SceneColorBuffer.ExportToFile(comparisonCapture + L".scene");
+                if (captureReturn)
+                {
+                    const auto* player = GetPlayerController();
+                    const bool controlsRestored = player && player->IsInputEnabled() && !m_FreeCamera &&
+                        !(m_MeshViewer && m_MeshViewer->WantsInput());
+                    std::ofstream report(comparisonCapture + L".txt");
+                    report << (controlsRestored ? "PASS" : "FAIL") << ": returned to the player scene with movement input and follow camera\n"
+                           << "samples=" << m_Comparison->GetResults().GetFrames().size() << '\n';
+                }
                 return true;
             }
         }
@@ -700,6 +713,7 @@ void ModelViewer::Update(float deltaT)
 #if defined(_M_X64)
     if (m_Comparison)
     {
+        const bool returnToPlayer = m_Comparison->ConsumePlayerControlRequest();
         m_Comparison->ProcessRequests();
         m_Comparison->Advance(deltaT);
         if (!m_WasComparing && m_Comparison->IsShowingScene())
@@ -717,9 +731,13 @@ void ModelViewer::Update(float deltaT)
                 m_MeshViewer->Close();
             }
         }
-        if (m_WasComparing && !m_Comparison->IsShowingScene())
+        if (returnToPlayer || (m_WasComparing && !m_Comparison->IsShowingScene()))
         {
-            SetFreeCamera(m_PreComparisonFreeCamera);
+            if (returnToPlayer && m_MeshViewer)
+            {
+                m_MeshViewer->Close();
+            }
+            SetFreeCamera(returnToPlayer ? false : m_PreComparisonFreeCamera);
             ResetPreviewCamera();
         }
         m_WasComparing = m_Comparison->IsShowingScene();
@@ -1039,6 +1057,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     auto character = GetPreviewCharacter();
                     m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
                         character ? character->GetMesh().GetPhysicsAsset() : nullptr, RagdollComparisonRunner::Simulation::B);
+                }
+                if (m_Comparison->IsShowingScene() && ImGui::Button(u8"캐릭터 조작으로 돌아가기 (WASD)"))
+                {
+                    m_Comparison->ReturnToPlayer();
                 }
             }
 #endif

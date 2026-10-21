@@ -377,6 +377,7 @@ void RagdollComparisonRunner::Stop()
 void RagdollComparisonRunner::RequestLocomotionComparison(const PhysicsAsset* editor, const PhysicsAsset* character,
     Simulation simulation)
 {
+    m_PlayerControlRequested = false;
     Open();
     if (m_StartRequested || ((m_State == State::Running || m_State == State::Paused) && m_Settings.simulation == simulation))
     {
@@ -418,6 +419,22 @@ bool RagdollComparisonRunner::ConsumeFocusRequest()
 {
     const bool requested = m_FocusRequested;
     m_FocusRequested = false;
+    return requested;
+}
+
+void RagdollComparisonRunner::ReturnToPlayer()
+{
+    // 결과와 더미는 보존한다. 플레이어 입력/카메라 복구는 다음 Update에서 처리한다.
+    Stop();
+    m_ShowScene = m_Open = m_FocusRequested = m_WindowFocusRequested = false;
+    m_StartRequested = m_ResetRequested = false;
+    m_PlayerControlRequested = true;
+}
+
+bool RagdollComparisonRunner::ConsumePlayerControlRequest()
+{
+    const bool requested = m_PlayerControlRequested;
+    m_PlayerControlRequested = false;
     return requested;
 }
 

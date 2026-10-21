@@ -58,6 +58,8 @@ public:
     // UI 변경은 다음 Update의 렌더 명령 기록 전에 처리한다.
     void ProcessRequests();
     bool ConsumeFocusRequest();
+    void ReturnToPlayer();
+    bool ConsumePlayerControlRequest();
     void Open()
     {
         m_Open = true;
@@ -115,6 +117,7 @@ private:
     std::string m_Message, m_SourceLabel, m_RequestedSource;
     bool m_Open = false, m_ShowScene = false, m_FocusRequested = false;
     bool m_WindowFocusRequested = false;
+    bool m_PlayerControlRequested = false;
     bool m_StartRequested = false, m_ResetRequested = false, m_UseEditor = true;
     bool m_FollowLatest = true;
     bool m_FollowCamera = true;

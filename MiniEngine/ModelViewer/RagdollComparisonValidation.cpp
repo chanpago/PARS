@@ -70,6 +70,23 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
         runner.ProcessRequests();
         check(runner.GetDescription().find("Simulation A") != std::string::npos,
             "The A button can switch back while B is running");
+        check(runner.Step(), "Record a sample before returning to the player mid-simulation");
+        runner.RequestLocomotionComparison(&asset, nullptr, RagdollComparisonRunner::Simulation::B);
+        runner.ReturnToPlayer();
+        runner.ProcessRequests();
+        runner.Advance(1);
+        check(!runner.IsShowingScene() && !runner.ShouldFollowCamera() && !runner.ConsumeFocusRequest() &&
+                runner.GetState() == RagdollComparisonRunner::State::Stopped && runner.GetResults().GetFrames().size() == 1,
+            "Returning mid-simulation stops recording, cancels queued starts and preserves results");
+        check(runner.ConsumePlayerControlRequest() && !runner.ConsumePlayerControlRequest(),
+            "Player input and camera restoration is requested exactly once");
+        runner.Open();
+        check(!runner.IsShowingScene() && runner.GetResults().GetFrames().size() == 1,
+            "Reopening the result window leaves the player scene active");
+        runner.RequestLocomotionComparison(&asset, nullptr, RagdollComparisonRunner::Simulation::B);
+        runner.ProcessRequests();
+        check(runner.IsShowingScene() && runner.GetState() == RagdollComparisonRunner::State::Running,
+            "Simulation buttons work again after returning to the player");
         runner.Reset();
         std::vector<ComparisonFrame> reference;
         for (int fps : {30, 60, 144})
@@ -261,6 +278,11 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
             }
         }
         check(runner.Export("../../.tools/comparison-uturn.html"), "Export B with the top-down U-turn trajectory");
+        runner.ReturnToPlayer();
+        runner.Advance(1);
+        check(!runner.IsShowingScene() && runner.ConsumePlayerControlRequest() &&
+                runner.GetState() == RagdollComparisonRunner::State::Complete && runner.GetResults().GetFrames().size() == 1200,
+            "Returning after completion preserves the full recording and its completed state");
         check(owner.GetDynamicBodyCount() == ownerBodies && owner.GetConstraintCount() == ownerJoints &&
                 owner.GetStepCount() == ownerSteps,
             "Switching and running both simulations leaves the player scene unchanged");

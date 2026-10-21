@@ -93,6 +93,11 @@ void RagdollComparisonRunner::DrawUI(const PhysicsAsset* editor, const PhysicsAs
         RequestLocomotionComparison(m_UseEditor ? editor : nullptr, character, Simulation::B);
     }
     ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button(u8"캐릭터 조작으로 돌아가기 (WASD)"))
+    {
+        ReturnToPlayer();
+    }
     const bool busy = m_State == State::Running || m_State == State::Paused;
     ImGui::BeginDisabled(busy);
     ImGui::Checkbox(u8"에디터 PA 사용 (저장하지 않은 편집 포함)", &m_UseEditor);
