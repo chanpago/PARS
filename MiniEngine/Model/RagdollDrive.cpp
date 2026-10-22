@@ -62,14 +62,14 @@ namespace PARS
         if (m_Articulation)
         {
             m_Articulation->setArticulationFlag(PxArticulationFlag::eDISABLE_SELF_COLLISION, m_DrivesEnabled);
-            m_Articulation->setSolverIterationCounts(32, 8);
+            m_Articulation->setSolverIterationCounts(16, 4);
             UpdateArticulationDrives();
         }
         else
         {
             for (auto* body : m_Bodies)
             {
-                body->is<PxRigidDynamic>()->setSolverIterationCounts(m_DrivesEnabled ? 32 : 16, m_DrivesEnabled ? 8 : 4);
+                body->is<PxRigidDynamic>()->setSolverIterationCounts(16, 4);
             }
         }
         WakeBodies();
