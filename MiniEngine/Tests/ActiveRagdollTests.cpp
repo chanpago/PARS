@@ -279,6 +279,104 @@ namespace
         std::puts("PASS: articulated arm gravity, idle turning, ownership and passive/animation lifecycle");
     }
 
+    std::vector<float> SamplePelvisInertiaResponse(float massScale, float sizeScale, Vector3 axis)
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize pelvis inertia world");
+        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "floor");
+        PhysicsAsset asset;
+        PhysicsBody pelvis;
+        pelvis.bone = "pelvis";
+        pelvis.shape = PhysicsShapeType::Box;
+        pelvis.halfExtents = XMFLOAT3(.12f * sizeScale, .24f * sizeScale, .08f * sizeScale);
+        pelvis.mass = 4.0f * massScale;
+        PhysicsBody child = pelvis;
+        child.bone = "child";
+        child.mass = 2.0f * massScale;
+        asset.bodies = {pelvis, child};
+        PhysicsConstraint joint;
+        joint.parentBone = pelvis.bone;
+        joint.childBone = child.bone;
+        joint.twist = joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
+        asset.constraints.push_back(joint);
+        ConfigureDefaultDrives(asset);
+        // 중력/접촉/지레팔 효과를 분리하고 질량과 축별 형상 관성에 대한 응답만 비교한다.
+        const auto initial = Pose(Vector3(0, 3, 0));
+        const std::vector<std::string> names{pelvis.bone, child.bone};
+        Ragdoll ragdoll;
+        std::string error;
+        Check(ragdoll.Create(world, asset, names, {initial, initial}, Vector3(kZero), error),
+            "Create articulated pelvis inertia fixture");
+        PxArticulationReducedCoordinate* articulation = nullptr;
+        Check(floor->getScene()->getArticulations(&articulation, 1) == 1, "Find pelvis articulation");
+        PxArticulationLink* links[2]{};
+        Check(articulation->getLinks(links, 2) == 2, "Find pelvis inertia links");
+        for (auto* link : links)
+        {
+            link->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+            link->setAngularDamping(0);
+            link->setLinearDamping(0);
+        }
+        ragdoll.SetDrivesEnabled(true);
+        Check(ragdoll.SetRootSupported(true, error), "Enable articulated pelvis support");
+        const auto target = Pose(Vector3(0, 3, 0), Quaternion(axis, .4f));
+        Check(ragdoll.UpdateDriveTargets({target, target}, 0, error), "Set pelvis target without target acceleration spike");
+        std::vector<float> errors;
+        for (int frame = 0; frame < 120; ++frame)
+        {
+            Check(ragdoll.UpdateDriveTargets({target, target}, 1.0f / 60.0f, error), "Update inertia-based pelvis control");
+            world.Step();
+            Check(ragdoll.IsFinite() && ragdoll.GetKinematicBodyCount() == 0, "Pelvis control stays finite and dynamic");
+            errors.push_back(ragdoll.GetRootRotationError());
+        }
+        const auto pose = articulation->getRootGlobalPose();
+        const auto angular = articulation->getRootAngularVelocity();
+        Check(ragdoll.SetRootSupported(false, error), "Release inertia-based pelvis control");
+        Check((pose.p - articulation->getRootGlobalPose().p).magnitude() < 1e-7f &&
+            std::abs(pose.q.dot(articulation->getRootGlobalPose().q)) > .999999f &&
+            (angular - articulation->getRootAngularVelocity()).magnitude() < 1e-7f,
+            "Releasing pelvis support preserves pose and angular velocity");
+        links[0]->addTorque(PxVec3(0, .5f, 0), PxForceMode::eIMPULSE);
+        world.Step();
+        const float releasedSpeed = articulation->getRootAngularVelocity().magnitude();
+        for (int frame = 0; frame < 30; ++frame)
+        {
+            Check(ragdoll.UpdateDriveTargets({target, target}, 1.0f / 60.0f, error), "Update unsupported articulation");
+            world.Step();
+        }
+        Check(releasedSpeed > .001f && articulation->getRootAngularVelocity().magnitude() > releasedSpeed * .9f,
+            "Unsupported pelvis does not receive a hidden restoring torque");
+        ragdoll.Destroy();
+        Check(world.GetErrorCount() == 0 && world.GetDynamicBodyCount() == 0 && world.GetConstraintCount() == 0,
+            "Pelvis inertia fixture releases all physics objects");
+        return errors;
+    }
+
+    void TestPelvisInertiaResponse()
+    {
+        std::vector<float> reference;
+        float maximumDifference = 0;
+        for (const auto axis : {Vector3(kXUnitVector), Vector3(kYUnitVector), Vector3(kZUnitVector)})
+        {
+            for (const auto scales : {PxVec2(1, 1), PxVec2(8, 1), PxVec2(1, 3)})
+            {
+                const auto response = SamplePelvisInertiaResponse(scales.x, scales.y, axis);
+                if (reference.empty())
+                {
+                    reference = response;
+                }
+                for (size_t frame = 0; frame < response.size(); ++frame)
+                {
+                    maximumDifference = (std::max)(maximumDifference, std::abs(reference[frame] - response[frame]));
+                }
+                Check(response.back() < .005f, "Inertia-based pelvis converges to the stationary target");
+            }
+        }
+        std::printf("pelvis mass/shape/axis response difference=%.6f rad\n", maximumDifference);
+        Check(maximumDifference < .003f, "Same pelvis frequency and damping ratio normalize mass and axis inertia");
+        std::puts("PASS: articulated pelvis inertia response and support release");
+    }
+
     void TestDynamicPelvis()
     {
         PhysicsWorld world;
@@ -371,6 +469,12 @@ namespace
         wall->release();
         std::puts("PASS: dynamic pelvis force limits, animated targets, impacts, blocked contact and support lifecycle");
     }
+}
+
+void RunPelvisDriveTests()
+{
+    TestPelvisInertiaResponse();
+    TestDynamicPelvis();
 }
 
 void RunActiveRagdollTests()
@@ -526,6 +630,7 @@ void RunActiveRagdollTests()
     std::puts("PASS: active target frames, limit projection, PD hinge tracking, torque limits, impulse recovery and mode preservation");
     world.Shutdown();
     TestDynamicPelvis();
+    TestPelvisInertiaResponse();
     TestAccelerationDrives();
     TestArticulatedArm();
 }

@@ -91,6 +91,9 @@ namespace PARS
         bool IsFinite() const;
 
     private:
+        static constexpr float PelvisAngularFrequency = 16.0f;
+        static constexpr float PelvisAngularDampingRatio = 1.0f;
+
         bool CreateArticulation(PhysicsWorld& world, const std::vector<Math::Matrix4>& boneWorld, std::string& error);
         bool RebuildSimulation(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity);
         void SetArticulationVelocities(const std::vector<Math::Vector3>& linear, const std::vector<Math::Vector3>& angular);

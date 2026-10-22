@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 
 using namespace PARS;
@@ -157,11 +158,17 @@ void RunPhysicsAssetTests();
 void RunRagdollTests();
 void RunAnatomicalLimitTests();
 void RunActiveRagdollTests();
+void RunPelvisDriveTests();
 void RunRagdollComparisonTests();
 void RunSpringArmTests();
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--pelvis-only") == 0)
+    {
+        RunPelvisDriveTests();
+        return 0;
+    }
     TestHierarchy();
     TestLifecycle();
     TestPoseSampling();

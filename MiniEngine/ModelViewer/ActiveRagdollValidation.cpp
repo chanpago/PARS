@@ -8,9 +8,135 @@
 #include <stdexcept>
 #include <chrono>
 #include <cmath>
+#include <fstream>
+#include <iomanip>
 
 using namespace Math;
 using namespace PARS;
+
+// 실제 캐릭터에 같은 회전 목표를 재생해 골반과 각 관절의 추종 오차를 기록한다.
+bool RunPelvisDriveValidation(World& world, Character& character, const std::wstring& reportPath,
+    uint32_t profile, uint32_t clip)
+{
+    std::ofstream report(reportPath);
+    std::ofstream samples(reportPath + L".csv");
+    try
+    {
+        if (!report || !samples || profile > 2 || clip > 2)
+        {
+            throw std::runtime_error("Invalid pelvis validation output or configuration");
+        }
+        auto& mesh = character.GetMesh();
+        auto& ragdoll = mesh.GetRagdoll();
+        auto& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
+        auto& physics = *world.GetPhysicsWorld();
+        const auto asset = *mesh.GetPhysicsAsset();
+        PhysicsSkeleton skeleton;
+        std::string error;
+        if (!mesh.BuildPhysicsSkeleton(skeleton, error) || !character.StopRagdoll(error))
+        {
+            throw std::runtime_error(error);
+        }
+        character.GetCharacterMovement().StopMovementImmediately();
+        animation.SetLocomotionEnabled(false);
+        animation.SetAutoCycleEnabled(false);
+        animation.PlayAnimation(clip);
+        physics.ResetClock();
+        world.SetPhysicsPaused(false);
+        world.SetPhysicsTimeScale(1.0f);
+        constexpr float deltaTime = 1.0f / 60.0f;
+        for (unsigned frame = 0; frame < 24; ++frame)
+        {
+            world.Tick(deltaTime);
+        }
+        character.GetCharacterMovement().SetTickEnabled(false);
+        const auto base = character.GetActorTransform();
+        if (!character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) ||
+            !ragdoll.SetRootSupported(true, error) || !ragdoll.UsesArticulation())
+        {
+            throw std::runtime_error("Could not start supported articulation: " + error);
+        }
+        for (unsigned frame = 0; frame < 120; ++frame)
+        {
+            world.Tick(deltaTime);
+        }
+        samples << std::setprecision(9);
+        samples << "frame,time_s,yaw_rad,joint,joint_error_rad,world_position_error_m,"
+            "root_rotation_error_rad,root_position_error_m,target_clamp_rad,lowest_point_m\n";
+        float maxRootRotation = 0;
+        float maxRootPosition = 0;
+        float maxJointError = 0;
+        for (unsigned frame = 0; frame < 360; ++frame)
+        {
+            const float time = frame * deltaTime;
+            float yaw = 0;
+            if (profile == 1)
+            {
+                const float phase = Clamp((time - 1.0f) / 3.0f, 0.0f, 1.0f);
+                const float wave = std::sin(phase * XM_PI);
+                yaw = XM_PI * wave * wave;
+            }
+            else if (profile == 2)
+            {
+                yaw = XM_PI * (Clamp((time - 1.0f) / .25f, 0.0f, 1.0f) -
+                    Clamp((time - 3.0f) / .25f, 0.0f, 1.0f));
+            }
+            auto transform = base;
+            transform.SetBasis(Matrix3::MakeYRotation(yaw) * base.GetBasis());
+            character.SetActorTransform(transform);
+            world.Tick(deltaTime);
+            if (physics.GetLastSubsteps() != 1 || !ragdoll.IsFinite() || ragdoll.GetKinematicBodyCount() != 0)
+            {
+                throw std::runtime_error("Expected one finite, fully dynamic step per sample");
+            }
+            std::vector<Matrix4> target;
+            if (!EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), target, error))
+            {
+                throw std::runtime_error(error);
+            }
+            const float rootRotation = ragdoll.GetRootRotationError();
+            const float rootPosition = ragdoll.GetRootPositionError();
+            maxRootRotation = Max(maxRootRotation, rootRotation);
+            maxRootPosition = Max(maxRootPosition, rootPosition);
+            for (const auto& joint : asset.constraints)
+            {
+                const int parent = asset.FindBody(joint.parentBone);
+                const int child = asset.FindBody(joint.childBone);
+                const auto parentLocal = asset.bodies[parent].GetLocalTransform();
+                const auto childLocal = asset.bodies[child].GetLocalTransform();
+                auto desired = EvaluateJointDriveTarget(joint,
+                    PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[parent]]) * parentLocal,
+                    PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[child]]) * childLocal, false);
+                desired = ClampArticulationDriveTarget(joint, desired);
+                const auto actual = EvaluateJointDriveTarget(joint, ragdoll.GetBoneWorld(parent) * parentLocal,
+                    ragdoll.GetBoneWorld(child) * childLocal, false);
+                const float dot = std::abs(XMVectorGetX(XMVector4Dot(desired, actual)));
+                const float angleError = 2.0f * std::acos(Clamp(dot, 0.0f, 1.0f));
+                const float positionError = Length(Vector3(ragdoll.GetBoneWorld(child).GetW()) -
+                    Vector3(PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[child]]).GetW()));
+                maxJointError = Max(maxJointError, angleError);
+                samples << frame << ',' << time << ',' << yaw << ',' << joint.childBone << ',' << angleError << ','
+                    << positionError << ',' << rootRotation << ',' << rootPosition << ','
+                    << ragdoll.GetMaxTargetClampAngle() << ',' << ragdoll.GetLowestPoint() << '\n';
+            }
+        }
+        if (physics.GetErrorCount() != 0)
+        {
+            throw std::runtime_error("PhysX reported an error during pelvis validation");
+        }
+        report << "profile=" << profile << " clip=" << clip << " dt=" << deltaTime << '\n';
+        report << "max_root_rotation_rad=" << maxRootRotation << " max_root_position_m=" << maxRootPosition
+            << " max_joint_error_rad=" << maxJointError << '\n';
+        // 오차는 비교용 측정치다. 유한 상태라는 사실만으로 추종 성능이 좋아졌다고 판정하지 않는다.
+        report << "PASS: pelvis validation completed 360 dynamic fixed steps\n";
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        report << "FAIL: " << exception.what() << std::endl;
+        return false;
+    }
+}
 
 void RunActiveRagdollValidation(World& world, Character& character, std::ostream& report)
 {

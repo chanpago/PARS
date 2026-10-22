@@ -207,7 +207,7 @@ namespace PARS
         }
         if (m_SupportJoint)
         {
-            // 골반은 동적 상태를 유지한다. 월드에 고정된 D6 조인트가 제한된 힘/토크를 가하며,
+            // 골반은 동적 상태를 유지한다. 월드에 연결된 D6 드라이브가 힘/토크를 가하며,
             // 다른 조인트와 접촉 제약도 같은 암시적 풀이 과정에서 함께 계산한다.
             // 선형/SLERP 드라이브의 두 속도는 모두 자식 속도에서 월드 속도를 뺀 값이다.
             PxVec3 linear(0), angular(0);
@@ -347,7 +347,7 @@ namespace PARS
             error = "Could not create pelvis force/torque drive.";
             return false;
         }
-        // 6개 축을 모두 자유롭게 둔다. 크기가 제한된 모터의 힘만으로 골반을 지지한다.
+        // 6개 축을 모두 자유롭게 두고 모터로 골반을 지지한다.
         // 이 런타임 조인트는 PA의 인체 관절 제약과 별개다.
         drive->setName("PelvisForceTorque");
         for (int axis = 0; axis < PxD6Axis::eCOUNT; ++axis)
@@ -361,14 +361,26 @@ namespace PARS
         {
             mass += part->getMass();
         }
-        // 래그돌 전체 질량에 비례해 초기 지지 게인을 설정한다. 선형 힘 제한은 월드 축마다 N 단위,
-        // SLERP 토크 제한은 솔버의 각도 제약 행마다 Nm 단위다.
+        // 위치 지지는 전체 질량을 기준으로 omega=30, zeta=1에 해당한다. 힘 제한은 축마다 N 단위다.
         const PxD6JointDrive position(mass * 900.0f, mass * 60.0f, mass * 60.0f, false);
         for (auto axis : {PxD6Drive::eX, PxD6Drive::eY, PxD6Drive::eZ})
         {
             drive->setDrive(axis, position);
         }
-        drive->setDrive(PxD6Drive::eSLERP, PxD6JointDrive(mass * 200.0f, mass * 10.0f, mass * 20.0f, false));
+        if (m_Articulation)
+        {
+            // 가속도 드라이브: Kp=omega^2, Kd=2*zeta*omega. PhysX가 각 제약 축의 관성 응답으로
+            // 토크를 환산한다. 연결된 링크의 응답을 사용하며 골반 질량만 곱하지 않는다.
+            // 질량 기반 토크 상한을 제거하고, SDK의 유한 최댓값을 사용한다.
+            const PxD6JointDrive rotation(PelvisAngularFrequency * PelvisAngularFrequency,
+                2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency, PX_MAX_F32, true);
+            drive->setDrive(PxD6Drive::eSLERP, rotation);
+        }
+        else
+        {
+            // 역동역학 보상이 없는 구형 D6 PA는 기존 지지 설정을 사용한다.
+            drive->setDrive(PxD6Drive::eSLERP, PxD6JointDrive(mass * 200.0f, mass * 10.0f, mass * 20.0f, false));
+        }
         // 다음 애니메이션 목표가 들어올 때까지 현재 포즈를 유지한다. 지지를 다시 켤 때
         // 포즈가 갑자기 바뀌거나 유한차분 속도가 급증하는 것을 방지한다.
         drive->setDrivePosition(body->getGlobalPose());

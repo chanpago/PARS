@@ -412,6 +412,31 @@ namespace PARS
             }
         }
         m_PreviousArticulationTargetVelocity = compensate && deltaTime > 0 ? targetVelocity : std::vector<float>();
+        if (m_SupportJoint)
+        {
+            // 활성 제어 중에는 아래 질량행렬 PD가 골반 회전을 담당한다. 두 PD를 중복 적용하지 않는다.
+            const PxD6JointDrive rotation = compensate ? PxD6JointDrive() :
+                PxD6JointDrive(PelvisAngularFrequency * PelvisAngularFrequency,
+                    2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency, PX_MAX_F32, true);
+            m_SupportJoint->setDrive(PxD6Drive::eSLERP, rotation);
+        }
+        if (compensate && deltaTime > 0 && m_HasSupportTarget)
+        {
+            const auto* root = m_Bodies[m_ArticulationRoot];
+            const PxVec3 error = RotationVector(m_SupportJoint->getDrivePosition().q * root->getGlobalPose().q.getConjugate());
+            const PxVec3 velocity = root->getAngularVelocity();
+            const float stiffness = PelvisAngularFrequency * PelvisAngularFrequency;
+            const float damping = 2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency;
+            const float denominator = 1.0f + damping * deltaTime + stiffness * deltaTime * deltaTime;
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                // 다음 스텝의 각도/속도로 PD를 평가하는 후진 오일러 근사다.
+                // 회전 가속도를 먼저 정하고, M 전체에 곱해 축별 관성과 관절 반작용을 함께 반영한다.
+                targetAcceleration[3 + axis] = (targetAcceleration[3 + axis] +
+                    stiffness * (error[axis] - deltaTime * velocity[axis]) +
+                    damping * (targetVelocity[3 + axis] - velocity[axis])) / denominator;
+            }
+        }
         std::vector<float> inertias;
         if (m_DrivesEnabled)
         {
@@ -443,9 +468,27 @@ namespace PARS
         if (compensate)
         {
             // 기준 자세와 실제 속도를 사용해 연결된 몸 전체의 중력/회전 하중을 계산한다.
-            // 부유 베이스의 앞 6개 항은 골반의 외부 힘/토크이며, 관절 모터에는 그 뒤의 항만 적용한다.
+            // 부유 베이스의 앞 6개 항은 골반의 외부 힘/토크이며, 관절 모터에는 그 뒤의 항을 적용한다.
             m_Articulation->computeGravityCompensation(cache);
             m_Articulation->computeCoriolisCompensation(cache);
+            if (deltaTime > 0 && m_HasSupportTarget)
+            {
+                // G + C + M*a의 골반 회전 행(3~5)을 월드 공간 토크로 적용한다.
+                // a에는 위에서 구한 골반 PD 보정이 포함된다. 같은 a를 아래 관절 행에도 사용하므로
+                // 골반 보정에 필요한 팔다리의 반작용까지 계산된다. 위치 지지는 D6가 담당한다.
+                PxVec3 rootTorque(0);
+                for (unsigned axis = 0; axis < 3; ++axis)
+                {
+                    const unsigned row = 3 + axis;
+                    rootTorque[axis] = cache.gravityCompensationForce[row] + cache.coriolisForce[row];
+                    for (unsigned column = 0; column < count; ++column)
+                    {
+                        rootTorque[axis] += cache.massMatrix[row * count + column] * targetAcceleration[column];
+                    }
+                }
+                // addTorque는 누적되므로 설정 변경(deltaTime=0)에서는 적용하지 않는다.
+                m_Bodies[m_ArticulationRoot]->addTorque(rootTorque, PxForceMode::eFORCE, false);
+            }
         }
         for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
         {

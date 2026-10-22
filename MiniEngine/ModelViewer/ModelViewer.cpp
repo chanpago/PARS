@@ -49,6 +49,8 @@
 #include "PhysicsDemo.h"
 #include "RagdollComparisonRunner.h"
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
+bool RunPelvisDriveValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath,
+    uint32_t profile, uint32_t clip);
 bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const PARS::PhysicsAsset& asset,
     PhysicsWorld& owner, const std::wstring& reportPath);
 #endif
@@ -348,7 +350,19 @@ void ModelViewer::Startup(void)
             LoadIBLTextures();
             LoadAnimationPreview(forceRebuild);
             std::wstring ragdollReport;
-            if (CommandLineArgs::GetString(L"ragdolltest", ragdollReport))
+            if (CommandLineArgs::GetString(L"pelvistest", ragdollReport))
+            {
+                uint32_t profile = 2;
+                uint32_t clip = 0;
+                CommandLineArgs::GetInteger(L"turnprofile", profile);
+                CommandLineArgs::GetInteger(L"testclip", clip);
+                if (auto* character = GetPreviewCharacter())
+                {
+                    RunPelvisDriveValidation(m_World, *character, ragdollReport, profile, clip);
+                }
+                m_RagdollTestDone = true;
+            }
+            else if (CommandLineArgs::GetString(L"ragdolltest", ragdollReport))
             {
                 if (auto* character = GetPreviewCharacter())
                 {
