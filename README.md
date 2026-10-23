@@ -16,6 +16,8 @@ An overview of the project's goals, technical approach, and planned implementati
 
 [View the PARS presentation (Korean)](https://www.canva.com/design/DAHYFBn98Zc/BCHxzDVSFVDVx0fE3fzTkA/edit)
 
+[2주차 발표 자료](https://canva.link/yow5q7gh7rrlmi0)
+
 1. Install Visual Studio 2022 17.14 or later with **Desktop development with C++**,
    the **MSVC v143** tools, **C++ CMake tools for Windows** (CMake 3.25+), and a
    Windows SDK. Install Git if it is not already available.
