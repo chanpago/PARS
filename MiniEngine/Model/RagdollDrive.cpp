@@ -146,17 +146,28 @@ namespace PARS
 
     bool Ragdoll::UpdateDriveTargets(const std::vector<Matrix4>& boneWorld, float deltaTime, std::string& error)
     {
+        // 애니메이션 본의 월드 목표 자세를 PA 바디와 관절의 목표로 변환해 PhysX에 전달한다.
+        // 실제 몸체의 움직임은 이 함수가 끝난 뒤 PhysicsWorld::Step()의 simulate()에서 계산된다.
+        // IsActive()는 물리 바디가 생성되어 있는지 확인한다. 액티브 래그돌 모드 검사와는 다르다.
         if (!IsActive() || !std::isfinite(deltaTime) || deltaTime < 0)
         {
             error = "Invalid drive update.";
             return false;
         }
 #if defined(_M_X64)
+        // [1] 본의 월드 목표 자세 -> PA 물리 바디의 월드 목표 자세
+        // m_Bodies는 실제 PhysX 바디들, 아래 bodies는 이번 스텝에 계산할 목표 행렬 배열이다.
         std::vector<Matrix4> bodies;
+
+        // reserve는 메모리만 확보한다. 각 목표 행렬은 반복문 끝의 push_back으로 추가한다.
         bodies.reserve(m_Bodies.size());
+
+        // 골반 지지 드라이브에 전달할 목표 위치/회전. 지지 바디를 찾으면 아래에서 채운다.
         PxTransform supportedPose(PxIdentity);
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
+            // i는 물리 바디 번호, node는 그 바디가 연결된 모델의 본 노드 번호다.
+            // 모든 본에 물리 바디가 있는 것은 아니므로 두 번호를 구분해야 한다.
             const int node = m_BoneNodes[i];
             if (node < 0 || size_t(node) >= boneWorld.size())
             {
@@ -164,14 +175,23 @@ namespace PARS
                 return false;
             }
 
+            // 본의 월드 행렬에서 스케일/전단을 제거하고 위치/회전으로 된 강체 좌표계를 만든다.
+            // 여기에 PA의 본 기준 바디 offset/rotation을 곱해 바디의 월드 목표 자세를 구한다.
+            // 예: 어깨에 있는 상완 본의 기준점에서 팔 중간에 있는 캡슐 중심으로 옮기는 변환이다.
             const auto transform = PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform();
+
+            // 목표 행렬에서 월드 위치(frame.offset)와 회전(frame.rotation)을 꺼낸다.
+            // PhysicsJointFrame 구조체를 사용하는 것이며, 여기서 관절을 생성하지는 않는다.
             const auto frame = PhysicsJointFrame::FromTransform(transform);
 
+            // 목표 회전이 PhysX에서 사용할 수 있는 정상적인 쿼터니언인지 검사한다.
             if (!ToPx(Quaternion(DirectX::XMLoadFloat4(&frame.rotation))).isSane())
             {
                 error = "Invalid drive target rotation.";
                 return false;
             }
+            // 지지 대상으로 선택한 루트 바디(현재 캐릭터의 골반)는 목표를 따로 보관한다.
+            // 지지가 꺼져 있으면 m_SupportBody == -1이므로 이 분기를 건너뛴다.
             if (int(i) == m_SupportBody)
             {
                 supportedPose = PxTransform(PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
@@ -183,8 +203,11 @@ namespace PARS
                     return false;
                 }
             }
+            // bodies[i]에는 실제 현재 자세가 아니라 애니메이션을 따라갈 바디 목표 자세가 들어간다.
             bodies.push_back(transform);
         }
+        // [2] 부모/자식 바디의 목표 자세 -> 관절 좌표계에서의 목표 상대 회전
+        // targets의 인덱스는 바디 번호가 아니라 PA 관절 번호다.
         std::vector<Quaternion> targets;
         targets.reserve(m_Joints.size());
         m_MaxTargetClampAngle = 0;
@@ -192,9 +215,12 @@ namespace PARS
         {
             const auto& a = bodies[m_Asset.FindBody(data.parentBone)];
             const auto& b = bodies[m_Asset.FindBody(data.childBone)];
+            // a, b에 PA의 부모/자식 관절 프레임을 반영해 두 관절 프레임 사이의 회전을 구한다.
+            // D6 경로는 이 함수에서 제한을 적용하고, Articulation 경로는 아래에서 별도로 제한한다.
             auto target = EvaluateJointDriveTarget(data, a, b, !m_Articulation);
             if (m_Articulation)
             {
+                // 잠긴 축과 각 축의 허용 회전 범위를 반영해 구동 목표를 제한한다.
                 target = ClampArticulationDriveTarget(data, target);
             }
             if (!ToPx(target).isSane())
@@ -203,20 +229,26 @@ namespace PARS
                 return false;
             }
             targets.push_back(target);
+            // 원래 애니메이션 목표에서 얼마나 제한됐는지 진단할 최대 각도 차이를 기록한다.
             m_MaxTargetClampAngle = PxMax(m_MaxTargetClampAngle, Angle(ToPx(target), ToPx(EvaluateJointDriveTarget(data, a, b, false))));
         }
+        // [3] 골반 지지 드라이브의 월드 목표 자세와 목표 속도 갱신
         if (m_SupportJoint)
         {
             // 골반은 동적 상태를 유지한다. 월드에 연결된 D6 드라이브가 힘/토크를 가하며,
             // 다른 조인트와 접촉 제약도 같은 암시적 풀이 과정에서 함께 계산한다.
             // 선형/SLERP 드라이브의 두 속도는 모두 자식 속도에서 월드 속도를 뺀 값이다.
             PxVec3 linear(0), angular(0);
+            // 이전 목표와 이번 목표의 차이 / dt로 목표 선속도와 각속도를 구한다.
+            // 실제 골반 속도를 읽는 단계가 아니다. 첫 목표이거나 dt가 0이면 목표 속도는 0이다.
             if (m_HasSupportTarget && deltaTime > 0)
             {
                 const auto previous = m_SupportJoint->getDrivePosition();
+                // 목표가 급변할 때 속도가 과도하게 커지지 않도록 선속도를 10 m/s로 제한한다.
                 linear = LimitMagnitude((supportedPose.p - previous.p) / deltaTime, 10.0f);
                 PxQuat delta = supportedPose.q * previous.q.getConjugate();
 
+                // q와 -q는 같은 회전이다. 짧은 방향의 회전 차이를 사용하도록 부호를 맞춘다.
                 if (delta.w < 0)
                 {
                     delta = -delta;
@@ -224,17 +256,22 @@ namespace PARS
                 PxReal angle;
                 PxVec3 axis;
                 delta.toRadiansAndUnitAxis(angle, axis);
+                // 회전 차이를 축/각도로 풀어 목표 각속도를 구하고 20 rad/s로 제한한다.
                 angular = axis * PxMin(angle / deltaTime, 20.0f);
             }
+            // 동적 골반이 따라갈 목표를 설정한다. 골반을 이 위치로 순간이동시키는 호출은 아니다.
             m_SupportJoint->setDrivePosition(supportedPose);
             m_SupportJoint->setDriveVelocity(linear, angular);
             m_HasSupportTarget = true;
         }
+        // [4] 관절별 목표 회전/각속도를 PhysX 드라이브에 전달
         for (size_t i = 0; i < targets.size(); ++i)
         {
             const PxQuat q = ToPx(targets[i]);
             PxVec3 angular(0);
+            // 이전 관절 목표가 있어야 시간 차분으로 목표 각속도를 계산할 수 있다.
             const bool history = m_HasDriveTargets && m_DriveTargets.size() == targets.size() && deltaTime > 0;
+            // 목표가 바뀌었거나 실제 자세가 목표에서 멀면 잠든 물리 객체도 다시 깨운다.
             bool changed = !history || Angle(q, ToPx(m_DriveTargets[i])) > 1e-4f;
             const auto& data = m_Asset.constraints[i];
             if (m_DrivesEnabled && HasEnabledAngularDrive(data))
@@ -242,15 +279,18 @@ namespace PARS
                 PxRigidActor* a;
                 PxRigidActor* b;
                 m_Joints[i]->getActors(a, b);
+                // 목표 바디 배열과 달리 여기서는 실제 물리 바디의 현재 관절 프레임을 읽는다.
                 const PxQuat parent = a->getGlobalPose().q * m_Joints[i]->getLocalPose(PxJointActorIndex::eACTOR0).q;
                 const PxQuat child = b->getGlobalPose().q * m_Joints[i]->getLocalPose(PxJointActorIndex::eACTOR1).q;
                 // 작은 팔다리는 관성이 작아 정지된 모터 목표에서 멀리 떨어져 있어도 PhysX의 에너지 기반
                 // 수면 임계값을 만족할 수 있다. 이 경우에도 목표 오차를 계속 해결하도록 한다.
                 changed |= Angle(parent.getConjugate() * child, q) > .03f;
             }
+            // 두 목표 회전의 차이로 추종할 각속도를 구한다. 현재 자세 오차와는 구분한다.
             if (history)
             {
                 PxQuat delta = q * ToPx(m_DriveTargets[i]).getConjugate();
+                // q와 -q는 같은 회전이다. 짧은 방향의 회전 차이를 사용하도록 부호를 맞춘다.
                 if (delta.w < 0)
                 {
                     delta = -delta;
@@ -258,6 +298,7 @@ namespace PARS
                 PxReal angle;
                 PxVec3 axis;
                 delta.toRadiansAndUnitAxis(angle, axis);
+                // 회전 차이를 축/각도로 풀어 목표 각속도를 구하고 20 rad/s로 제한한다.
                 angular = axis * PxMin(angle / deltaTime, 20.0f);
                 // 이 SDK의 SWING_TWIST 제약 행은 부모 속도에서 자식 속도를 뺀 값을 사용한다.
                 // SLERP는 자식 속도에서 부모 속도를 뺀 값을 사용한다(ExtD6JointSolverPrep 참고).
@@ -268,17 +309,25 @@ namespace PARS
             }
             if (m_Articulation)
             {
+                // Articulation이 사용하는 좌표계로 변환해 3축 목표 각도/각속도를 설정한다.
                 SetArticulationTarget(i, targets[i], Vector3(angular.x, angular.y, angular.z));
                 if (changed)
                 {
                     m_Articulation->wakeUp();
                 }
             }
+            // D6 경로의 관절 목표도 설정한다. Articulation 경로의 D6는 진단 좌표계용이다.
             m_Joints[i]->setDrivePosition(PxTransform(PxVec3(0), q), changed);
             m_Joints[i]->setDriveVelocity(PxVec3(0), angular, changed);
         }
+        // 다음 고정 스텝에서 목표 각속도를 계산할 수 있도록 이번 목표를 보관한다.
         m_DriveTargets = std::move(targets);
         m_HasDriveTargets = true;
+        // [5] Articulation의 PD 구동 설정과 추가 보상 토크 갱신 (D6 전용 경로는 내부에서 반환)
+        // 관절 PD의 강성/감쇠 등을 설정한다. 관절 PD 토크 자체는 이후 PhysX가 계산한다.
+        // 드라이브와 골반 지지가 켜져 있으면 중력 + 코리올리/원심력 + 목표 가속도 관성 토크를 계산한다.
+        // 관절의 추가 보상은 cache.jointForce에 넣고 applyCache로 전달한다. 관절 PD 토크와 직접 합산하지 않는다.
+        // 골반 회전 PD는 이 함수 내부에서 목표 가속도에 반영하는 별도 처리가 있다.
         UpdateArticulationDrives(deltaTime);
         error.clear();
         return true;

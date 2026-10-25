@@ -43,6 +43,9 @@ namespace PARS
         bool HasPendingDestroy() const;
 
         void BeginPlay();
+        // 시작된 월드에서 아직 BeginPlay하지 않은 Actor만 초기화한다. 입력 처리나 시간 갱신은 하지 않는다.
+        // Actor 설정을 마친 뒤 순회 밖에서 호출하며, 초기화 중 생성한 Actor는 다음 호출에서 처리한다.
+        void InitializePendingActors();
         void Tick(float deltaTime);
         bool HasBegunPlay() const
         {

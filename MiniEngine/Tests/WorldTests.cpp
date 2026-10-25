@@ -1,6 +1,8 @@
 #include "../Core/GameFramework/World.h"
 #include "../Core/GameFramework/SceneComponent.h"
 #include "../Core/GameFramework/Pawn.h"
+#include "../Core/GameFramework/CapsuleComponent.h"
+#include "../Core/PhysicsWorld.h"
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -14,7 +16,7 @@ namespace
         if (!value) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
     }
 
-    struct Record { int begins = 0, ticks = 0, ends = 0, destroyed = 0; };
+    struct Record { int begins = 0, ticks = 0, prepares = 0, fixedTicks = 0, ends = 0, destroyed = 0; };
 
     class ProbeComponent : public ActorComponent
     {
@@ -25,6 +27,8 @@ namespace
     protected:
         void BeginPlay() override { ++m_Record.begins; if (onBegin) onBegin(GetOwner()); }
         void TickComponent(float) override { ++m_Record.ticks; if (onTick) onTick(GetOwner()); }
+        void PreparePhysics(float) override { ++m_Record.prepares; }
+        void FixedTickComponent(float) override { ++m_Record.fixedTicks; }
         void EndPlay() override { ++m_Record.ends; if (onEnd) onEnd(GetOwner()); }
     private:
         Record& m_Record;
@@ -86,6 +90,64 @@ namespace
         world.Clear();
         Check(a.begins == 2 && a.ends == 2 && a.destroyed == 2, "World can restart after Clear");
         std::puts("PASS: World ownership, identity, independent actors and lifecycle");
+    }
+
+    void TestPendingInitialization()
+    {
+        Record existing, pending, discarded, spawned;
+        World world;
+        world.SpawnActor<ProbeActor>("Existing", existing);
+        world.InitializePendingActors();
+        Check(existing.begins == 0 && !world.HasBegunPlay(), "Pending initialization does not start the World");
+        world.BeginPlay();
+
+        auto actor = world.SpawnActor<ProbeActor>("Pending", pending);
+        actor->SetActorLocation(Math::Vector3(1, 2, 3));
+        world.SpawnActor<ProbeActor>("Discarded", discarded)->Destroy();
+        actor->probe->onBegin = [&](Actor& self) {
+            Check(float(self.GetActorLocation().GetY()) == 2, "BeginPlay sees the configured actor transform");
+            world.SpawnActor<ProbeActor>("SpawnedDuringBegin", spawned);
+            world.InitializePendingActors();
+            Check(spawned.begins == 0, "Recursive initialization waits until the current traversal finishes");
+        };
+
+        world.InitializePendingActors();
+        Check(actor->HasBegunPlay() && actor->probe->HasBegunPlay(), "Explicit initialization starts actors and components");
+        Check(existing.begins == 1 && pending.begins == 1 && discarded.begins == 0 && spawned.begins == 0,
+            "Only eligible actors present at the start are initialized");
+        world.InitializePendingActors();
+        world.InitializePendingActors();
+        Check(existing.begins == 1 && pending.begins == 1 && spawned.begins == 1,
+            "Repeated initialization starts deferred actors without restarting existing actors");
+        for (const auto* record : {&existing, &pending, &discarded, &spawned})
+            Check(record->ticks == 0 && record->prepares == 0 && record->fixedTicks == 0,
+                "Initialization never dispatches frame updates or physics preparation");
+        world.Tick(0.1f);
+        Check(existing.ticks == 1 && pending.ticks == 1 && spawned.ticks == 1 && discarded.ticks == 0,
+            "Explicitly initialized actors participate in the next normal tick");
+        std::puts("PASS: explicit actor initialization without frame updates");
+    }
+
+    void TestPendingPhysicsInitialization()
+    {
+        World world;
+        Check(world.InitializePhysics(false), "Initialize physics for pending actors");
+        world.BeginPlay();
+        auto actor = world.SpawnActor<Actor>("PendingCapsule");
+        auto& capsule = actor->CreateDefaultSubobject<CapsuleComponent>("Capsule");
+        actor->SetRootComponent(capsule);
+        actor->SetActorLocation(Math::Vector3(0, 2, 0));
+        Check(!capsule.HasPhysicsCollision(), "Physics objects wait until actor initialization");
+        world.SetPhysicsPaused(true);
+        world.RequestPhysicsStep();
+
+        world.InitializePendingActors();
+        Check(capsule.HasPhysicsCollision(), "BeginPlay creates physics objects before the first tick");
+        Check(world.GetPhysicsWorld()->GetStepCount() == 0, "Initialization does not advance physics even with a pending single step");
+        world.Tick(0.0f);
+        Check(world.GetPhysicsWorld()->GetStepCount() == 1, "Initialization preserves the requested step for the next tick");
+        Check(world.GetPhysicsWorld()->GetErrorCount() == 0, "Physics initialization and the first step report no errors");
+        std::puts("PASS: physics initialization without consuming a pending simulation step");
     }
 
     void TestMutationDuringTick()
@@ -179,6 +241,8 @@ namespace
 void RunWorldTests()
 {
     TestOwnership();
+    TestPendingInitialization();
+    TestPendingPhysicsInitialization();
     TestMutationDuringTick();
     TestLifecycleMutations();
     TestStandaloneEndPlayReentry();

@@ -146,6 +146,15 @@ namespace PARS
             return;
         }
         m_Playing = true;
+        InitializePendingActors();
+    }
+
+    void World::InitializePendingActors()
+    {
+        if (!m_Playing || m_Clearing || m_IterationDepth != 0)
+        {
+            return;
+        }
         ForEachActor([](Actor& actor) {
             if (!actor.HasBegunPlay())
             {
@@ -162,18 +171,7 @@ namespace PARS
         }
         // 입력 -> 고정 간격 이동/애니메이션/물리 -> 최종 포즈 순서다. 새 Actor는 BeginPlay 전에
         // 설정을 마치며, 생성 도중 진행 중인 틱 순회에 끼어들지 않는다.
-        {
-            IterationScope scope(m_IterationDepth);
-            const size_t count = m_Actors.size();
-            for (size_t i = 0; i < count; ++i)
-            {
-                Actor* actor = m_Actors[i].get();
-                if (!actor->IsPendingDestroy() && !actor->HasBegunPlay())
-                {
-                    actor->BeginPlay();
-                }
-            }
-        }
+        InitializePendingActors();
 
         if (!m_Playing)
         {
@@ -187,12 +185,11 @@ namespace PARS
             {
                 Actor* actor = m_Actors[i].get();
 
-                // 이 부분에서 Prephysics Tick을 호출한다. PrePhysics Tick은 물리 시뮬레이션이 시작되기 전에 호출되는 Tick이다. 이 Tick에서 Actor의 위치를 업데이트하고, 물리 시뮬레이션에 필요한 데이터를 준비한다.
-                // 모든 액터들은 일반적으로 PostPhysics를 사용하지만, 이 프로젝트에서는 PlayerController가 PrePhysics를 사용한다. PlayerController는 입력을 받아서 Pawn의 위치를 업데이트하는 역할을 한다.
-                // 따라서 PlayerController는 PrePhysics Tick에서 입력을 처리하고, Pawn의 위치를 업데이트해야 한다.
-                // PlayerController만 PrePhysics를 사용하는 이유는 그래야 이어지는 이동, 물리 계산이 바로 입력을 반영할 수 있기 때문이다.
-                // PostPhysics Tick은 물리 시뮬레이션이 끝난 후에 호출되며, 이 Tick에서 Actor의 위치를 최종적으로 업데이트하고, 렌더링에 필요한 데이터를 준비한다.
-                // 이 부분에서는 PlayerController의 Tick을 보통 수행한다. PlayerController가 조종하는 폰의 이동입력을 갱신해서 pawn에 이동을 누적한다.
+                // PrePhysics는 함수가 아니라 "물리 계산 전에 Tick할 Actor"를 구분하는 실행 그룹이다.
+                // 이 그룹에 속한 Actor의 Tick(deltaTime)을 호출하며, 현재 PlayerController가 해당한다.
+                // PlayerController::Tick()은 달리기 여부를 Pawn에 전달하고, 이동 방향 입력을 누적한다.
+                // 실제 위치 변경은 이후 CharacterMovementComponent::FixedTickComponent()에서 처리한다.
+                // 아래에서 별도로 호출하는 PreparePhysics()와는 다른 단계다.
                 if (!actor->IsPendingDestroy() && actor->HasBegunPlay() && actor->GetTickGroup() == Actor::TickGroup::PrePhysics)
                 {
                     actor->Tick(deltaTime);

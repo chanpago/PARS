@@ -67,6 +67,8 @@ namespace PARS
             return false;
         }
 
+        // 본의 계층과 연결 정보, m_Pose: 애니메이션으로 계산한 로컬 자세, 메시 컴포넌트의 월드 변환, 결과: worldPose - 본별 월드 공간 목표 자세
+        // 본의 로컬 자세에 부모 계층의 변환과 컴포넌트의 월드 변환을 반영해서, 각 본이 월드의 어디에 어떤 방향으로 있어야 하는지 계산
         return EvaluatePhysicsPose(skeleton, m_AnimInstance->GetPose(), component, worldPose, error);
     }
 

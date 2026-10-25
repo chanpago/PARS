@@ -153,6 +153,9 @@ namespace PARS
         {
             return;
         }
+
+        // 어떤 애니메이션을 재생할지 갱신
+        // 캐릭터 이동 속도로 대기·걷기·달리기를 선택
         if (m_Playing && !m_Clips.empty())
         {
             NativeUpdateAnimation(deltaTime);
@@ -177,6 +180,9 @@ namespace PARS
                 m_Playing = false;
             }
         }
+
+        // 실제 본 자세 계산
+        // clip에서 키프레임 데이터와 시간 간격 정보를 읽어와서 두 프레임 사이의 비율을 계산하고 m_pose에 저장
         EvaluatePose();
     }
 
@@ -186,13 +192,22 @@ namespace PARS
         {
             return;
         }
+
+        // m_Skeleton은 기준 스켈레톤 정보를 가진 model
+        // m_Pose 는 vector<GraphNode>
+        // clip에서 키프레임 데이터와 시간 간격 정보를 읽어와서 두 프레임 사이의 비율을 계산하고 m_pose에 저장
         m_Pose.resize(m_Skeleton->m_NumNodes);
         std::memcpy(m_Pose.data(), m_Skeleton->m_SceneGraph.get(), m_Pose.size() * sizeof(GraphNode));
         if (!m_Clips.empty())
         {
+            // 현재 시간에 해당하는 자세를 계산해서 덮어씀
             const auto& clip = m_Clips[m_CurrentClip];
-            EvaluateAnimationPose(clip.source->m_Animations[clip.animationIndex], clip.source->m_CurveData.get(),
-                clip.source->m_KeyFrameData.get(), m_Pose.data(), static_cast<uint32_t>(m_Pose.size()), m_Time);
+            EvaluateAnimationPose(
+                clip.source->m_Animations[clip.animationIndex], // 사용할 애니메이션
+                clip.source->m_CurveData.get(),                 // 어느 노드의 어떤 값을 바꿀지
+                clip.source->m_KeyFrameData.get(),              // 저장된 키프레임 값
+                m_Pose.data(),                                  // 배열의 노드 수
+                static_cast<uint32_t>(m_Pose.size()), m_Time);  // 샘플링할 재생 시간
         }
         if (IsBlending())
         {

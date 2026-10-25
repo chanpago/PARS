@@ -128,12 +128,17 @@ namespace PARS
 
         // 캐릭터 이동이 컴포넌트 루트를 이미 갱신한 상태다. simulate() 전에 애니메이션을
         // 샘플링해 PVD와 렌더링이 모두 이 포즈를 사용하도록 한다.
+        // 이버 스텝에서의 애니메이션 자세를 구한다.
+        // 애니메이션 재생 시간을 진행시키고, 그 시간에 해당하는 본들의 자세를 계산
+        // clip에서 키프레임 데이터와 시간 간격 정보를 읽어와서 두 프레임 사이의 비율을 계산하고 m_pose에 저장
         m_AnimInstance->UpdateAnimation(deltaTime);
+
         if (IsActiveRagdoll())
         {
             std::vector<Math::Matrix4> target;
-            if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError) ||
-                !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
+
+            // 이 부분에서 액티브 래그돌 물리처리를한다(pd구동 및 추가보상토크계산)
+            if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError) || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {
                 // 목표 갱신에 실패하면 전신 패시브 물리 시뮬레이션으로 전환한다.
                 // 골반의 힘/토크 지지를 제거하면서 목표 갱신 오류 메시지는 보존한다.

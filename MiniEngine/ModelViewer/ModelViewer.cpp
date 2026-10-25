@@ -348,6 +348,10 @@ void ModelViewer::Startup(void)
             PostEffects::EnableAdaptation = false;
             SSAO::Enable = false;
             LoadIBLTextures();
+
+            // [Startup의 캐릭터 초기화 진입점]
+            // 이 함수 안에서 모델·애니메이션·PA를 설정한 뒤 m_World.InitializePendingActors()를 호출한다.
+            // 새 Actor와 컴포넌트의 BeginPlay로 물리 객체를 생성하고, 첫 포즈의 렌더 데이터까지 준비한다.
             LoadAnimationPreview(forceRebuild);
             std::wstring ragdollReport;
             if (CommandLineArgs::GetString(L"pelvistest", ragdollReport))
@@ -381,6 +385,8 @@ void ModelViewer::Startup(void)
 
     if (!hasModel && !hasPhysicsOption)
     {
+        // [Startup의 캐릭터 초기화 진입점] 위 물리 데모 경로를 사용하지 않을 때의 프리뷰 초기화다.
+        // 이 함수 내부의 m_World.InitializePendingActors()에서 새 Actor와 컴포넌트의 BeginPlay를 실행한다.
         LoadAnimationPreview(forceRebuild);
         return;
     }
@@ -440,6 +446,20 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         return;
     }
 
+
+    /*
+    idle,walk,run에 사용할 모델 데이터를 파일에서 읽어 models배열에 저장한다. 
+    가져오는 데이터는 다음과 같다.
+    - 외형 정보: 메시, 재질, 텍스처
+    - 본 정보: 본 목록과 계층, 스키닝 연결 정보, 역바인드 행렬
+    - 애니메이션 정보: 시간에 따른 본의 위치·회전·크기 변화
+
+    완료되면 
+    models[0] → Idle 모델 데이터
+    models[1] → Walking 모델 데이터
+    models[2] → SlowRun 모델 데이터
+    이렇게 저장됨
+    */
     std::shared_ptr<const Model> models[kPreviewCount];
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
@@ -452,26 +472,40 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
 
+    // [캐릭터 생성] 앞에서 읽은 Model 데이터를 사용할 실제 캐릭터 Actor를 월드에 만든다.
     // World가 소유하는 Character를 첫 BeginPlay/Tick 전에 설정한다.
     auto* character = m_World.SpawnActor<PARS::Character>("MixamoCharacter");
     if (!character)
     {
         return;
     }
+    // 캐릭터가 가진 SkeletalMeshComponent의 참조다. 외형, 애니메이션, PA를 이 컴포넌트에 연결한다.
     auto& mesh = character->GetMesh();
+
+    // [외형·본 연결 및 애니메이션 등록] 외형은 Idle 모델 하나를 사용하고, 동작은 세 모델에서 가져온다.
+    // 이 반복문은 PA의 충돌체나 물리 관절을 읽지 않는다. PA 설정은 아래의 별도 단계에서 수행한다.
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
+        // 앞에서 로딩해 둔 Model을 참조한다. 여기서 모델 파일을 다시 읽는 것은 아니다.
         const auto& model = models[i];
+
+        // 첫 번째 모델(Idle)의 외형과 본 구조를 캐릭터의 기준 스켈레탈 메시로 한 번만 설정한다.
         if (i == 0)
         {
             if (!mesh.SetSkeletalMesh(model))
             {
                 m_PreviewError = u8"캐릭터 모델에 사용할 수 있는 스켈레톤이 없습니다.";
+                // 초기화에 실패한 캐릭터를 World가 정리하도록 파괴를 요청한다.
                 character->Destroy();
                 return;
             }
+
+            // 재생 시간, 클립 선택과 전환을 관리할 객체를 만든다. 실제 재생 시작은 아래 PlayAnimation에서 한다.
             mesh.SetAnimInstance(std::make_unique<PreviewAnimInstance>(mesh));
         }
+
+        // 각 Model의 첫 번째 애니메이션을 Idle / Walking / Slow Run이라는 이름으로 등록한다.
+        // 기준 메시와 본 구조·바인드 포즈가 호환되는지 검사하며, Walking/SlowRun의 외형으로 교체하지 않는다.
         if (!mesh.GetAnimInstance().AddAnimation(kPreviewNames[i], model))
         {
             m_PreviewError = std::string(u8"애니메이션과 캐릭터의 스켈레톤이 다릅니다: ") + kPreviewNames[i];
@@ -479,16 +513,20 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             return;
         }
     }
+    // [캐릭터 배치] Actor 원점은 캡슐 중심이므로, 반높이만큼 올려 캡슐 아래쪽을 지면 높이에 맞춘다.
     const float halfHeight = character->GetCapsuleComponent().GetHalfHeight();
     character->SetActorLocation(Vector3(2.0f, halfHeight, 0.0f));
 #if defined(_M_X64)
     if (!m_PhysicsDemo)
 #endif
     {
+        // 물리 데모가 없는 미리보기에서는 모델의 경계 구 반지름을 10으로 맞춰 보기 좋게 확대한다.
         const float scale = 10.0f / float(mesh.GetLocalBounds().GetRadius());
         character->SetActorTransform(AffineTransform(Matrix3::MakeScale(scale), Vector3(0, halfHeight * scale, 0)));
     }
     m_PreviewCharacter = character->GetHandle();
+
+    // [물리 에셋(PA) 로딩·적용] 여기서부터 충돌 형상, 질량, 물리 관절 제한 등의 설정을 준비한다.
     // 실행 작업 폴더와 관계없이 캐릭터 에셋 옆의 PA를 저장/복원한다.
     const std::wstring defaultPAPath = root + L"Mixamo.physics.json";
     const int pathLength = static_cast<int>(defaultPAPath.size());
@@ -504,6 +542,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     if (GetFileAttributesW(defaultPAPath.c_str()) != INVALID_FILE_ATTRIBUTES)
     {
         PARS::PhysicsAsset savedPA;
+        // Load는 JSON 파일을 읽고, SetPhysicsAsset은 본 이름 호환성을 검사한 뒤 메시 컴포넌트에 적용한다.
         loadedPA = savedPA.Load(m_DefaultPAPath, loadError) && mesh.SetPhysicsAsset(savedPA, loadError);
     }
     else if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND)
@@ -516,6 +555,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     }
     else
     {
+        // 저장된 PA가 없거나 읽기·적용에 실패하면, 기준 스켈레톤과 포즈로 기본 PA 생성을 시도한다.
         PARS::PhysicsSkeleton physicsSkeleton;
         PARS::PhysicsAsset defaultPA;
         const std::vector<GraphNode> reference(models[0]->m_SceneGraph.get(), models[0]->m_SceneGraph.get() + models[0]->m_NumNodes);
@@ -530,12 +570,14 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_RagdollMessage = u8"저장된 PA를 불러오지 못했습니다: " + loadError + "\n" + m_RagdollMessage;
         }
     }
+    // [애니메이션 재생·조작 연결] 등록한 0번 클립(Idle)을 처음부터 반복 재생하도록 설정한다.
     mesh.GetAnimInstance().PlayAnimation(0);
     auto animation = GetPreviewAnimation();
     bool characterControl = false;
 #if defined(_M_X64)
     characterControl = m_PhysicsDemo != nullptr;
 #endif
+    // 물리 데모에서는 실제 이동 속도에 맞춰 Idle/Walking/Slow Run을 선택하도록 한다.
     animation->SetLocomotionEnabled(characterControl);
     if (characterControl)
     {
@@ -551,8 +593,11 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
 
-    m_World.Tick(0.0f);
+    // Startup() -> LoadAnimationPreview() -> 여기: 프레임 갱신 없이 Actor 초기화를 실행하는 실제 호출 위치다.
+    // [캐릭터 초기화] 설정을 마친 Actor의 BeginPlay를 실행하고, 현재 포즈에 맞춰 PA 물리 객체를 생성한다.
+    m_World.InitializePendingActors();
     auto& context = GraphicsContext::Begin(L"Initialize Character Pose");
+    // 현재 포즈의 스키닝 행렬 등 렌더 데이터를 준비하고, GPU 명령 완료를 기다린다.
     Renderer::UpdateWorldRenderData(m_World, context);
     context.Finish(true);
     m_PreviewReady = true;
@@ -780,25 +825,36 @@ namespace Graphics
 
 void ModelViewer::Update(float deltaT)
 {
+    // deltaT는 이번 프레임의 경과 시간(초)이다. 이 Update 구간의 실행 시간을 프로파일러에 기록한다.
     ScopedTimer _prof(L"Update State");
 #if defined(_M_X64)
+    // [1. 비교 실험 갱신] 비교용 월드는 아래의 플레이어 월드(m_World)와 별도로 진행한다.
     if (m_Comparison)
     {
+        // UI의 플레이어 조작 복귀 요청을 읽고 지운다. 실제 입력/카메라 복구는 아래에서 수행한다.
         const bool returnToPlayer = m_Comparison->ConsumePlayerControlRequest();
+        // 예약된 비교 시작/초기화 요청을 처리한다. 객체를 교체할 때는 내부에서 GPU 완료를 기다린다.
         m_Comparison->ProcessRequests();
+        // 비교가 실행 중이면 경과 시간을 누적해 1/60초 단위로 비교 시뮬레이션과 측정 기록을 갱신한다.
         m_Comparison->Advance(deltaT);
         if (!m_WasComparing && m_Comparison->IsShowingScene())
         {
+            // 비교 화면에 처음 들어올 때, 나중에 복원할 카메라 모드를 저장한다.
             m_PreComparisonFreeCamera = m_FreeCamera;
         }
+        // 비교 화면을 비춰 달라는 요청을 한 번만 소비한다.
         if (m_Comparison->ConsumeFocusRequest() && m_Comparison->IsShowingScene())
         {
+            // 비교 경로의 중심을 바라보도록 카메라의 위치, 주시점, 위쪽 방향을 설정한다.
             const auto target = m_Comparison->GetViewCenter();
             m_Camera.SetEyeAtUp(target + Vector3(5, 3, 7), target, Vector3(kYUnitVector));
+            // 플레이어 조작을 끄고 자유 카메라를 사용한다.
             SetFreeCamera(true);
+            // 설정한 카메라 자세로 뷰/투영 결합 행렬과 프러스텀을 갱신한다.
             m_Camera.Update();
             if (m_MeshViewer)
             {
+                // 비교 화면을 조작할 수 있도록 메시 에디터 창을 닫는다.
                 m_MeshViewer->Close();
             }
         }
@@ -806,23 +862,30 @@ void ModelViewer::Update(float deltaT)
         {
             if (returnToPlayer && m_MeshViewer)
             {
+                // 플레이어에게 조작권을 돌려줄 때 메시 에디터도 닫는다.
                 m_MeshViewer->Close();
             }
+            // 명시적인 복귀 요청이면 플레이어 카메라로, 비교 화면 종료면 이전 카메라 모드로 돌아간다.
             SetFreeCamera(returnToPlayer ? false : m_PreComparisonFreeCamera);
+            // 복원한 모드에 맞춰 카메라 위치와 추적 지연 상태를 초기화한다.
             ResetPreviewCamera();
         }
+        // 다음 프레임에서 비교 화면 진입/종료를 판별할 수 있도록 현재 상태를 저장한다.
         m_WasComparing = m_Comparison->IsShowingScene();
     }
 #endif
 
+    // [2. 삭제 처리] Destroy가 예약된 Actor의 리소스를 안전한 시점에 회수한다.
     if (m_World.HasPendingDestroy())
     {
         // 이전 GPU 프레임이 Actor 메시를 아직 참조할 수 있다. 삭제할 때만 완료를 기다리며,
         // 일반적인 월드 갱신에서는 GPU가 유휴 상태가 되도록 강제하지 않는다.
         g_CommandManager.IdleGPU();
+        // 삭제 대기 Actor의 EndPlay를 호출하고 실제 객체 메모리를 해제한다.
         m_World.CollectGarbage();
     }
 
+    // [3. 입력과 자유 카메라] 패드 숄더 버튼을 처음 누른 프레임에 디버그 화면 배율을 변경한다.
     if (GameInput::IsFirstPressed(GameInput::kLShoulder))
     {
         DebugZoom.Decrement();
@@ -832,26 +895,37 @@ void ModelViewer::Update(float deltaT)
         DebugZoom.Increment();
     }
 
+    // 현재 렌더 타깃의 세로/가로 비율을 카메라 투영에 반영한다.
     m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
+    // 조작 가능 여부, 카메라 조준 방향, 이동/달리기 입력을 설정한다. 실제 이동은 아래 World::Tick에서 처리한다.
     UpdateCharacterInput(deltaT);
 
+    // 플레이어 추적 카메라를 사용하지 않고, 메시 에디터가 입력을 점유하지 않을 때 카메라를 직접 조작한다.
     if ((!GetPlayerController() || m_FreeCamera) && !(m_MeshViewer && m_MeshViewer->WantsInput()))
     {
+        // 마우스 버튼을 누르는 동안 시점 회전을 허용하고, 카메라 컨트롤러의 이동/회전을 갱신한다.
         m_CameraController->EnableMouseInput(GameInput::IsPressed(GameInput::kMouse1));
         m_CameraController->Update(deltaT);
     }
 
+    // 이후 스키닝 행렬/상수 버퍼 등의 렌더 데이터 갱신에 사용할 GPU 명령 기록을 시작한다.
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Update");
+    // [4. 플레이어 월드 갱신] 새 Actor 초기화 -> 입력 반영 -> 이동/애니메이션/물리 -> 최종 포즈 순으로 처리한다.
+    // 물리 스텝에서는 FixedTick으로 PD 목표와 보상 토크 등을 준비한 뒤 PhysX simulate/fetchResults를 실행한다.
+    // deltaT를 누적해 고정 간격으로 진행하므로, 한 렌더 프레임의 물리 스텝 수는 0회 이상일 수 있다.
     m_World.Tick(deltaT);
 
 #if defined(_M_X64)
     if (m_PhysicsDemo)
     {
+        // 물리 디버거(PVD) 연결 상태를 갱신하고, 물리 스텝이 진행됐으면 낙하 상자의 높이를 기록한다.
+        // 이 함수는 데모의 관측/연결 관리이며, 월드 물리 계산은 바로 위 World::Tick에서 수행한다.
         m_PhysicsDemo->Update(deltaT);
     }
 #endif
     if (GetPlayerController() && !m_FreeCamera)
     {
+        // [5. 추적 카메라] 이동/물리 처리 후의 캐릭터 위치를 따라 스프링암의 충돌·지연과 카메라를 갱신한다.
         UpdateFollowCamera(deltaT);
     }
 #if defined(_M_X64)
@@ -859,24 +933,31 @@ void ModelViewer::Update(float deltaT)
     {
         if (m_Comparison->ShouldFollowCamera())
         {
+            // 비교 추적 옵션이 켜져 있으면 비교 경로의 현재 중심을 바라보도록 카메라를 갱신한다.
             const auto target = m_Comparison->GetViewCenter();
             m_Camera.SetEyeAtUp(target + Vector3(5, 3, 7), target, Vector3(kYUnitVector));
             m_Camera.Update();
         }
+        // 비교용 월드의 최종 포즈를 스키닝 행렬과 GPU 렌더 데이터에 반영한다.
         Renderer::UpdateWorldRenderData(m_Comparison->GetWorld(), gfxContext);
     }
 #endif
 
+    // [6. 렌더 데이터 준비] 플레이어 월드에서 BeginPlay를 마친 메시들의 최종 포즈를 GPU 데이터에 반영한다.
     Renderer::UpdateWorldRenderData(m_World, gfxContext);
+    // -model 등으로 로드한 독립 모델의 애니메이션/변환을 갱신한다. 모델이 없으면 내부에서 즉시 반환한다.
     m_ModelInst.Update(gfxContext, deltaT);
 
     if (m_MeshViewer)
     {
+        // 메시 에디터가 열려 있고 메시가 있으면, 에디터 전용 월드의 Tick을 진행한다.
         m_MeshViewer->Update(deltaT);
     }
 
+    // 기록한 GPU 갱신 명령을 제출한다. 인자 기본값이 false이므로 여기서는 GPU 완료를 기다리지 않는다.
     gfxContext.Finish();
 
+    // [7. 그리기 영역 준비] 이어지는 RenderScene에서 사용할 TAA 샘플 오프셋과 뷰포트/시저를 설정한다.
     // TAA를 위해 뷰포트 오프셋으로 프레임마다 샘플 위치를 조금씩 이동시킨다.
     // D3D에서는 소수 오프셋을 사용할 때 뷰포트의 암묵적인 시저 영역이
     // floor(TopLeftXY)와 floor(TopLeftXY + WidthHeight)로 정해진다.
@@ -887,11 +968,13 @@ void ModelViewer::Update(float deltaT)
     // 이 값을 사용한다.
     TemporalEffects::GetJitterOffset(m_MainViewport.TopLeftX, m_MainViewport.TopLeftY);
 
+    // 뷰포트는 화면에 투영할 영역과 깊이 범위를 정한다.
     m_MainViewport.Width = (float)g_SceneColorBuffer.GetWidth();
     m_MainViewport.Height = (float)g_SceneColorBuffer.GetHeight();
     m_MainViewport.MinDepth = 0.0f;
     m_MainViewport.MaxDepth = 1.0f;
 
+    // 시저 사각형은 실제 픽셀을 기록할 수 있는 영역을 렌더 타깃 전체로 제한한다.
     m_MainScissor.left = 0;
     m_MainScissor.top = 0;
     m_MainScissor.right = (LONG)g_SceneColorBuffer.GetWidth();

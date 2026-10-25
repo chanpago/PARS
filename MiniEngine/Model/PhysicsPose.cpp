@@ -82,8 +82,7 @@ namespace PARS
         }
     }
 
-    bool EvaluatePhysicsPose(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& pose,
-        const Matrix4& component, std::vector<Matrix4>& world, std::string& error)
+    bool EvaluatePhysicsPose(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& pose, const Matrix4& component, std::vector<Matrix4>& world, std::string& error)
     {
         std::vector<Matrix4> scene;
         if (!SceneTransforms(skeleton, pose, component, scene))
@@ -92,10 +91,13 @@ namespace PARS
             return false;
         }
         world = scene;
+
+        // scene은 노드단위, 모델의 노드 수만큼
         for (size_t i = 0; i < scene.size(); ++i)
         {
             if (skeleton.meshNodes[i] >= 0)
             {
+                // 사용하는 메쉬(여기서는 일반적으로 하나)의 월드 값을 가져와서 로컬본에 다 적용한다.
                 world[i] = scene[skeleton.meshNodes[i]] * scene[i];
             }
         }
