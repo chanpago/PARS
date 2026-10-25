@@ -155,6 +155,8 @@ namespace PARS
             return false;
         }
 #if defined(_M_X64)
+
+
         // [1] 본의 월드 목표 자세 -> PA 물리 바디의 월드 목표 자세
         // m_Bodies는 실제 PhysX 바디들, 아래 bodies는 이번 스텝에 계산할 목표 행렬 배열이다.
         std::vector<Matrix4> bodies;
@@ -206,6 +208,8 @@ namespace PARS
             // bodies[i]에는 실제 현재 자세가 아니라 애니메이션을 따라갈 바디 목표 자세가 들어간다.
             bodies.push_back(transform);
         }
+
+
         // [2] 부모/자식 바디의 목표 자세 -> 관절 좌표계에서의 목표 상대 회전
         // targets의 인덱스는 바디 번호가 아니라 PA 관절 번호다.
         std::vector<Quaternion> targets;
@@ -217,7 +221,7 @@ namespace PARS
             const auto& b = bodies[m_Asset.FindBody(data.childBone)];
             // a, b에 PA의 부모/자식 관절 프레임을 반영해 두 관절 프레임 사이의 회전을 구한다.
             // D6 경로는 이 함수에서 제한을 적용하고, Articulation 경로는 아래에서 별도로 제한한다.
-            auto target = EvaluateJointDriveTarget(data, a, b, !m_Articulation);
+            Math::Quaternion target = EvaluateJointDriveTarget(data, a, b, !m_Articulation);
             if (m_Articulation)
             {
                 // 잠긴 축과 각 축의 허용 회전 범위를 반영해 구동 목표를 제한한다.
@@ -232,6 +236,8 @@ namespace PARS
             // 원래 애니메이션 목표에서 얼마나 제한됐는지 진단할 최대 각도 차이를 기록한다.
             m_MaxTargetClampAngle = PxMax(m_MaxTargetClampAngle, Angle(ToPx(target), ToPx(EvaluateJointDriveTarget(data, a, b, false))));
         }
+
+
         // [3] 골반 지지 드라이브의 월드 목표 자세와 목표 속도 갱신
         if (m_SupportJoint)
         {
@@ -264,6 +270,8 @@ namespace PARS
             m_SupportJoint->setDriveVelocity(linear, angular);
             m_HasSupportTarget = true;
         }
+
+
         // [4] 관절별 목표 회전/각속도를 PhysX 드라이브에 전달
         for (size_t i = 0; i < targets.size(); ++i)
         {
@@ -323,6 +331,9 @@ namespace PARS
         // 다음 고정 스텝에서 목표 각속도를 계산할 수 있도록 이번 목표를 보관한다.
         m_DriveTargets = std::move(targets);
         m_HasDriveTargets = true;
+
+
+
         // [5] Articulation의 PD 구동 설정과 추가 보상 토크 갱신 (D6 전용 경로는 내부에서 반환)
         // 관절 PD의 강성/감쇠 등을 설정한다. 관절 PD 토크 자체는 이후 PhysX가 계산한다.
         // 드라이브와 골반 지지가 켜져 있으면 중력 + 코리올리/원심력 + 목표 가속도 관성 토크를 계산한다.

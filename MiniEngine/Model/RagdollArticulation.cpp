@@ -376,6 +376,10 @@ namespace PARS
 #endif
     }
 
+    // 추가 보상 토크(중력 + 코리올리/원심력 + 목표 가속도에 필요한 관성 토크)는 우리 코드에서 계산해 PhysX에 전달한다.
+    // 일반 관절 PD는 목표 회전/각속도와 강성/감쇠 계수를 전달하고, PD 토크 자체는 PhysX가 simulate()에서 계산한다.
+    // 따라서 cache.jointForce에는 관절의 추가 보상 토크만 넣는다. 일반 관절 PD 토크를 여기서 직접 더하지 않는다.
+    // 골반 회전 PD는 예외로, 이 함수 안에서 보정을 계산해 목표 가속도와 골반 토크에 반영한다.
     void Ragdoll::UpdateArticulationDrives(float deltaTime)
     {
 #if defined(_M_X64)
