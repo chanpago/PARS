@@ -8,12 +8,13 @@ namespace PARS { class World; class Character; }
 class RagdollImpactTest
 {
 public:
-    static constexpr float SphereRadius = .3f;
+    static constexpr float SphereRadius = .15f;
     explicit RagdollImpactTest(PARS::World& world) : m_World(world) {}
     ~RagdollImpactTest();
     bool Initialize(std::shared_ptr<const Model> idle, const PARS::PhysicsAsset& asset);
     bool Reset();
     bool FireFrom(const PARS::Character& player);
+    bool FireAimed(const PARS::Character& player, Math::Vector3 cameraPosition, Math::Vector3 cameraDirection);
     void ClearProjectiles();
     void Update();
     void DrawUI(PARS::Character* player);
@@ -24,6 +25,7 @@ public:
     const std::string& GetStatusMessage() const { return m_Message; }
 
 private:
+    bool FireAt(const PARS::Character& player, Math::Vector3 target, bool checkMuzzle = false);
     struct Shot { physx::PxRigidDynamic* body; uint64_t expiresAtStep; };
     PARS::World& m_World;
     PARS::ActorHandle m_Dummy;
@@ -31,6 +33,6 @@ private:
     FootSoleDebug m_FootSoles;
     std::vector<Shot> m_Shots;
     Math::Vector3 m_HipsReference{Math::kZero};
-    float m_Mass = 10, m_Speed = 15, m_MaxHipsDisplacement = 0;
+    float m_Mass = 50, m_Speed = 75, m_MaxHipsDisplacement = 0;
     std::string m_Message;
 };

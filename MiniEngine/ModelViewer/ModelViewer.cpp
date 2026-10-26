@@ -235,6 +235,7 @@ private:
     unique_ptr<PhysicsDemo> m_PhysicsDemo;
     FootSoleDebug m_FootSoles;
     unique_ptr<RagdollImpactTest> m_ImpactTest;
+    bool m_IsAiming = false;
     uint32_t m_ImpactCaptureFrames = 0;
     unique_ptr<RagdollComparisonRunner> m_Comparison;
     bool m_WasComparing = false;
@@ -767,7 +768,7 @@ void ModelViewer::SetFreeCamera(bool freeCamera)
     {
         const auto forward = m_Camera.GetForwardVec();
         m_ControlYaw = std::atan2(float(forward.GetX()), float(forward.GetZ()));
-        m_ControlPitch = Clamp(std::asin(Clamp(-float(forward.GetY()), -1.0f, 1.0f)), -0.1f, 1.1f);
+        m_ControlPitch = Clamp(std::asin(Clamp(-float(forward.GetY()), -1.0f, 1.0f)), -1.1f, 1.1f);
         if (m_SpringArm)
         {
             m_SpringArm->ResetLagState();
@@ -813,15 +814,11 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
         m_ControlPitch -= GetAnalogInput(kAnalogMouseY);
     }
     m_ControlYaw = std::remainder(m_ControlYaw, XM_2PI);
-    m_ControlPitch = Clamp(m_ControlPitch, -0.1f, 1.1f);
+    m_ControlPitch = Clamp(m_ControlPitch, -1.1f, 1.1f);
     player->SetControlYaw(m_ControlYaw);
     player->SetMoveInput(float(IsPressed(kKey_w)) - float(IsPressed(kKey_s)) + GetAnalogInput(kAnalogLeftStickY),
         float(IsPressed(kKey_d)) - float(IsPressed(kKey_a)) + GetAnalogInput(kAnalogLeftStickX),
         IsPressed(kKey_lshift) || IsPressed(kKey_rshift) || IsPressed(kLThumbClick));
-#if defined(_M_X64)
-    if (m_ImpactTest && player->IsInputEnabled() && !ImGui::GetIO().WantCaptureKeyboard && IsFirstPressed(kKey_r))
-        m_ImpactTest->FireFrom(*character);
-#endif
 }
 
 void ModelViewer::UpdateFollowCamera(float deltaTime)
@@ -990,6 +987,23 @@ void ModelViewer::Update(float deltaT)
         UpdateFollowCamera(deltaT);
     }
 #if defined(_M_X64)
+    // 이번 프레임의 이동과 카메라 회전을 반영한 뒤, 화면 중앙과 같은 시선으로 발사한다.
+    const auto* player = GetPlayerController();
+    auto* character = GetPreviewCharacter();
+    const bool canFire = m_ImpactTest && player && player->IsInputEnabled() && character &&
+        character->CanControlMovement() && !m_FreeCamera &&
+        !(m_MeshViewer && m_MeshViewer->WantsInput()) && !(m_Comparison && m_Comparison->IsShowingScene());
+    const auto& io = ImGui::GetIO();
+    m_IsAiming = canFire && !io.WantCaptureMouse && GameInput::IsPressed(GameInput::kMouse1);
+    const bool fireKey = !io.WantCaptureKeyboard && GameInput::IsFirstPressed(GameInput::kKey_r);
+    const bool fireMouse = m_IsAiming && GameInput::IsFirstPressed(GameInput::kMouse0);
+    if (canFire && (fireKey || fireMouse))
+    {
+        if (m_IsAiming)
+            m_ImpactTest->FireAimed(*character, m_Camera.GetPosition(), m_Camera.GetForwardVec());
+        else
+            m_ImpactTest->FireFrom(*character);
+    }
     if (m_Comparison)
     {
         if (m_Comparison->ShouldFollowCamera())
@@ -1253,6 +1267,25 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
 void ModelViewer::RenderUI(GraphicsContext& context)
 {
 #if defined(_M_X64)
+    if (m_IsAiming)
+    {
+        const auto* viewport = ImGui::GetMainViewport();
+        const ImVec2 center(viewport->Pos.x + viewport->Size.x * .5f, viewport->Pos.y + viewport->Size.y * .5f);
+        auto* draw = ImGui::GetForegroundDrawList();
+        const float scale = (std::max)(1.0f, viewport->Size.y / 720.0f);
+        const ImVec2 axes[] = {ImVec2(1, 0), ImVec2(-1, 0), ImVec2(0, 1), ImVec2(0, -1)};
+        for (const auto& axis : axes)
+        {
+            const ImVec2 start(center.x + axis.x * 5 * scale, center.y + axis.y * 5 * scale);
+            const ImVec2 end(center.x + axis.x * 13 * scale, center.y + axis.y * 13 * scale);
+            draw->AddLine(start, end, IM_COL32(0, 0, 0, 220), 4 * scale);
+            draw->AddLine(start, end, IM_COL32(255, 255, 255, 255), 2 * scale);
+        }
+        draw->AddCircleFilled(center, 3 * scale, IM_COL32(0, 0, 0, 220));
+        draw->AddCircleFilled(center, 1.5f * scale, IM_COL32(255, 255, 255, 255));
+        // 조준 중에는 표적을 가리는 디버그 패널을 잠시 숨긴다.
+        return;
+    }
     if (m_PhysicsDemo)
     {
         m_PhysicsDemo->RenderUI();
@@ -1419,7 +1452,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                         }
                     }
                     ImGui::TextWrapped(m_FreeCamera ? u8"자유 카메라: WASD + Q/E 이동. Tab: 캐릭터 조작." : u8"캐릭터: WASD 이동, Shift 달리기. Tab: 자유 카메라.");
-                    ImGui::TextWrapped(u8"마우스 오른쪽 버튼을 누르면 시점을 움직입니다. 애니메이션 버튼으로 수동 미리보기를 시작합니다.");
+                    ImGui::TextWrapped(u8"우클릭 유지로 시점 이동·조준, 조준 중 좌클릭 또는 R로 구를 발사합니다. 애니메이션 버튼으로 수동 미리보기를 시작합니다.");
                 }
                 else
 #endif

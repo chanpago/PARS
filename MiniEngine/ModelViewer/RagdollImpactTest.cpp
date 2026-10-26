@@ -70,20 +70,56 @@ bool RagdollImpactTest::Reset()
 bool RagdollImpactTest::FireFrom(const Character& player)
 {
     auto* dummy = GetDummy();
+    return dummy && FireAt(player, dummy->GetMesh().GetRagdoll().GetPosition());
+}
+
+bool RagdollImpactTest::FireAimed(const Character& player, Vector3 cameraPosition, Vector3 cameraDirection)
+{
+    auto* physics = m_World.GetPhysicsWorld();
+    if (!physics) return false;
+    const auto toPx = [](Vector3 v) { return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ())); };
+    PxVec3 ray = toPx(cameraDirection);
+    if (!toPx(cameraPosition).isFinite() || !ray.isFinite() || ray.magnitudeSquared() < 1e-8f)
+    {
+        m_Message = u8"조준 방향을 확인하세요.";
+        return false;
+    }
+    ray.normalize();
+    // 화면 중앙의 가장 가까운 표면을 조준한다. 자기 몸은 제외하고, 빈 공간은 1km 앞을 사용한다.
+    PxRaycastHit hit;
+    const PxVec3 target = physics->Raycast(toPx(cameraPosition), ray * 1000.0f, hit, &player)
+        ? hit.position : toPx(cameraPosition) + ray * 1000.0f;
+    const PxVec3 origin = toPx(player.GetActorLocation()) + PxVec3(0, .15f, 0);
+    if ((target - origin).dot(ray) <= 0)
+    {
+        m_Message = u8"플레이어 앞쪽의 지점을 조준하세요.";
+        return false;
+    }
+    return FireAt(player, Vector3(target.x, target.y, target.z), true);
+}
+
+bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool checkMuzzle)
+{
+    auto* dummy = GetDummy();
     auto* physics = m_World.GetPhysicsWorld();
     if (!dummy || !physics || !dummy->GetMesh().GetRagdoll().IsActive()) return false;
-    const Vector3 target = dummy->GetMesh().GetRagdoll().GetPosition();
     const Vector3 origin = player.GetActorLocation() + Vector3(0, .15f, 0);
     const Vector3 delta = target - origin;
     const float clearance = player.GetCapsuleComponent().GetRadius() + SphereRadius + .15f;
     if (float(Length(delta)) < clearance + SphereRadius)
     {
-        m_Message = u8"더미에서 조금 더 떨어져 발사하세요.";
+        m_Message = u8"목표에서 조금 더 떨어져 발사하세요.";
         return false;
     }
     const Vector3 direction = Normalize(delta);
     const Vector3 muzzle = origin + direction * clearance;
     const auto toPx = [](Vector3 v) { return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ())); };
+    // 카메라에서 보이는 표적이라도 발사 위치 앞이 막혀 있으면 장애물 너머에 구를 생성하지 않는다.
+    if (checkMuzzle && physics->SweepSphereDistance(toPx(origin), toPx(muzzle - origin), SphereRadius, &player) < clearance - .001f)
+    {
+        m_Message = u8"발사 위치가 막혀 있습니다. 장애물에서 떨어져 발사하세요.";
+        return false;
+    }
     auto* sphere = physics->CreateDynamicBody(PxTransform(toPx(muzzle)), PxSphereGeometry(SphereRadius),
         m_Mass, "Impact sphere");
     if (!sphere)
@@ -100,7 +136,7 @@ bool RagdollImpactTest::FireFrom(const Character& player)
         m_Shots.erase(m_Shots.begin());
     }
     m_Shots.push_back({sphere, physics->GetStepCount() + 600});
-    m_HipsReference = target;
+    m_HipsReference = dummy->GetMesh().GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
     m_Message.clear();
     return true;
@@ -145,12 +181,13 @@ void RagdollImpactTest::DrawUI(Character* player)
     ImGui::SetNextWindowSize(ImVec2(420, 570), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(u8"PARS - 더미 충격 테스트"))
     {
-        ImGui::TextUnformatted(u8"R: 플레이어 앞에서 더미 골반 방향으로 구 발사");
-        ImGui::TextUnformatted(u8"반지름 30cm / 중력과 실제 충돌 적용");
+        ImGui::TextWrapped("%s", u8"우클릭 유지: 조준 / 조준 중 좌클릭 또는 R: 발사");
+        ImGui::TextWrapped("%s", u8"조준하지 않을 때 R: 더미 골반으로 발사");
+        ImGui::TextUnformatted(u8"반지름 15cm / 중력과 실제 충돌 적용");
         ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 50, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
         ImGui::BeginDisabled(!player);
-        if (ImGui::Button(u8"구 발사 (R)") && player) FireFrom(*player);
+        if (ImGui::Button(u8"더미로 구 발사") && player) FireFrom(*player);
         ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button(u8"더미 초기화")) Reset();
