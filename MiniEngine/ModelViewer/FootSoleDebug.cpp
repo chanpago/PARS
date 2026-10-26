@@ -18,7 +18,7 @@ namespace
     constexpr PxU32 FootColors[] = {0xff44ccff, 0xffffbb44};
     constexpr PxU32 HitColor = 0xff55ff77, MissColor = 0xffcc5566;
     constexpr PxU32 HullColor = 0xffee66ff;
-    constexpr PxU32 ComColor = 0xffffdd44, OutsideColor = 0xffff4444, UnknownColor = 0xffffaa44;
+    constexpr PxU32 ComColor = 0xffffdd44, OutsideColor = 0xffff0000, UnknownColor = 0xff000000;
 
     bool Matches(const std::string& name, const char* leaf)
     {
@@ -63,6 +63,27 @@ namespace
     {
         Line(lines, point - Vector3(radius, 0, 0), point + Vector3(radius, 0, 0), color);
         Line(lines, point - Vector3(0, 0, radius), point + Vector3(0, 0, radius), color);
+    }
+
+    void ProjectionMarker(std::vector<PxDebugLine>& lines, Vector3 point, PxU32 color, bool bold)
+    {
+        constexpr float radius = .025f;
+        // GPU 라인은 1픽셀이므로 촘촘히 겹쳐 원과 십자에 12mm 폭을 준다.
+        const int strokes = bold ? 13 : 1;
+        const int segments = bold ? 48 : 24;
+        for (int stroke = 0; stroke < strokes; ++stroke)
+        {
+            const float offset = bold ? (stroke - 6) * .001f : 0;
+            Line(lines, point + Vector3(-radius, 0, offset), point + Vector3(radius, 0, offset), color);
+            Line(lines, point + Vector3(offset, 0, -radius), point + Vector3(offset, 0, radius), color);
+            const float ringRadius = radius + offset;
+            for (int segment = 0; segment < segments; ++segment)
+            {
+                const float a = XM_2PI * segment / segments, b = XM_2PI * (segment + 1) / segments;
+                Line(lines, point + Vector3(std::cos(a) * ringRadius, 0, std::sin(a) * ringRadius),
+                    point + Vector3(std::cos(b) * ringRadius, 0, std::sin(b) * ringRadius), color);
+            }
+        }
     }
 }
 
@@ -229,14 +250,7 @@ void FootSoleDebug::BuildLines(PARS::SkeletalMeshComponent& mesh, const PhysicsW
             const Vector3 projected(m_ProjectedCenterOfMass.x, m_ProjectedCenterOfMass.y, m_ProjectedCenterOfMass.z);
             const PxU32 color = m_SupportHull.empty() ? UnknownColor : m_ComInsideHull ? HitColor : OutsideColor;
             Line(lines, center, projected, ComColor);
-            Point(lines, projected, color, .025f);
-            // 투영점은 원으로도 표시해 발의 작은 꼭짓점 표식과 구분한다.
-            for (int i = 0; i < 24; ++i)
-            {
-                const float a = XM_2PI * i / 24, b = XM_2PI * (i + 1) / 24;
-                Line(lines, projected + Vector3(std::cos(a) * .025f, 0, std::sin(a) * .025f),
-                    projected + Vector3(std::cos(b) * .025f, 0, std::sin(b) * .025f), color);
-            }
+            ProjectionMarker(lines, projected, color, m_SupportHull.empty() || !m_ComInsideHull);
         }
     }
 }
@@ -259,7 +273,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     {
         ImGui::Text(u8"전체 질량 %.2f kg / COM (%.3f, %.3f, %.3f) m", m_TotalMass,
             m_CenterOfMass.x, m_CenterOfMass.y, m_CenterOfMass.z);
-        ImGui::TextUnformatted(u8"노랑: COM과 수직선 / 투영 원: 초록=영역 안, 빨강=영역 밖, 주황=판정 불가");
+        ImGui::TextUnformatted(u8"노랑: COM과 수직선 / 투영 원: 초록=영역 안, 굵은 빨강=영역 밖, 굵은 검정=판정 불가");
         ImGui::Text(u8"COM 판정: %s", !m_HasComProjection ? u8"지면 투영점 없음" :
             m_SupportHull.empty() ? u8"지지 영역 없음" : m_ComInsideHull ? u8"영역 안 (경계 포함)" : u8"영역 밖");
     }
