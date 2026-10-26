@@ -305,7 +305,8 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         }
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip(u8"빨간 원뿔: 스윙 허용 범위. 초록 부채꼴: 회전 허용 범위. 노랑: 현재 방향 / 트위스트. 제한 표시를 클릭하면 해당 관절을 선택합니다.");
+            ImGui::SetTooltip("%s\n%s", ViewerLabels::ConstraintLimits(m_PhysicsAsset.UsesArticulation()),
+                u8"제한 표시를 클릭하면 해당 관절을 선택합니다.");
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(120);
@@ -315,11 +316,15 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
             CancelInteraction();
             m_GizmoMode = mode;
         }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(u8"바디 선택 시 Space: 이동 → 회전 → 크기 순서로 전환합니다.");
+        }
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip(u8"뷰포트: 우클릭 + WASD 이동, Q/E 아래/위, Shift 빠르게\n휠: 앞뒤 이동 | F: 메시 맞춤 | Esc: 취소\n그래프: 노드 클릭 선택, 휠 확대/축소, 가운데 버튼 드래그 이동");
+            ImGui::SetTooltip(u8"뷰포트: 우클릭 + WASD 이동, Q/E 아래/위, Shift 빠르게\n휠: 앞뒤 이동 | F: 메시 맞춤 | Esc: 취소\n바디 선택 시 Space: 이동 → 회전 → 크기 기즈모 전환\n그래프: 노드 클릭 선택, 휠 확대/축소, 가운데 버튼 드래그 이동");
         }
         // 같은 프레임에 마우스 오른쪽 버튼과 W/E가 들어올 수 있으므로 모드와 버튼을 함께 검사한다.
         if (m_Focused && !ImGui::GetIO().WantTextInput && m_DragAxis < 0 && !m_Flying &&
@@ -342,6 +347,10 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
             if (ImGui::IsKeyPressed(ImGuiKey_R, false) && !(m_EditPhysics && m_EditConstraints))
             {
                 keyMode = 2;
+            }
+            if (EditingBody() && !ImGui::IsAnyItemActive() && ImGui::Shortcut(ImGuiKey_Space))
+            {
+                keyMode = (m_GizmoMode + 1) % 3;
             }
             if (keyMode != m_GizmoMode)
             {

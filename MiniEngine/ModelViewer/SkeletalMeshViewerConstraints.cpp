@@ -1,5 +1,6 @@
 ﻿#include "SkeletalMeshViewer.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "ViewerLabels.h"
 #include "imgui.h"
 #include <cmath>
 #include <cstring>
@@ -255,23 +256,23 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     }
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip(u8"해부학적 축 보정과 비대칭 가동 범위 보정을 포함하여 두 기준 좌표계를 다시 설정합니다.");
+        ImGui::SetTooltip(u8"자식 본 위치에서 자식 바디 방향으로 두 좌표계를 일치시킵니다. 기존 두 좌표계의 상대 회전 보정은 초기화됩니다.");
     }
-    ImGui::TextDisabled(u8"위치 잠금 | X 트위스트, Y/Z 스윙");
     const bool articulation = m_PhysicsAsset.UsesArticulation();
+    ImGui::TextDisabled(articulation ? u8"위치 잠금 | 회전 벡터 X/Y/Z" : u8"위치 잠금 | X 트위스트, Y/Z 스윙");
     ImGui::TextWrapped(articulation ?
-        u8"Articulation은 회전 벡터의 X/Y/Z 성분을 각각 제한합니다. 표시된 부채꼴은 각 축 단독 범위입니다. 잠금은 매우 좁은 내부 제한으로 풉니다. 기존 D6 원뿔과 결합 회전의 경계가 다릅니다." :
+        u8"Articulation은 부모 관절 좌표계에서 상대 회전을 회전 벡터 X/Y/Z로 나누어 제한합니다. 부채꼴은 각 축만 회전할 때의 범위이며, 세 축을 함께 회전할 때의 전체 허용 영역을 뜻하지 않습니다." :
         u8"스윙 값은 부모 좌표계 기준 원뿔의 반각입니다. 좌표계 회전에 따라 허용 범위가 치우칠 수 있어 0도가 기준 자세와 같지 않을 수 있습니다. 두 좌표계를 함께 이동하면 이 보정을 유지합니다.");
-    changed |= EditMotion(u8"트위스트 X", joint.twist);
+    changed |= EditMotion(articulation ? u8"회전 X" : u8"트위스트 X", joint.twist);
     ImGui::BeginDisabled(joint.twist != PhysicsJointMotion::Limited);
     changed |= EditAngle(u8"최소각", joint.twistMin, -179.9f, XMConvertToDegrees(joint.twistMax) - .1f);
     changed |= EditAngle(u8"최대각", joint.twistMax, XMConvertToDegrees(joint.twistMin) + .1f, 179.9f);
     ImGui::EndDisabled();
-    changed |= EditMotion(u8"스윙 Y", joint.swingY);
+    changed |= EditMotion(articulation ? u8"회전 Y" : u8"스윙 Y", joint.swingY);
     ImGui::BeginDisabled(joint.swingY != PhysicsJointMotion::Limited);
     changed |= EditAngle(u8"Y 제한각", joint.swingYLimit, .1f, 179.9f);
     ImGui::EndDisabled();
-    changed |= EditMotion(u8"스윙 Z", joint.swingZ);
+    changed |= EditMotion(articulation ? u8"회전 Z" : u8"스윙 Z", joint.swingZ);
     ImGui::BeginDisabled(joint.swingZ != PhysicsJointMotion::Limited);
     changed |= EditAngle(u8"Z 제한각", joint.swingZLimit, .1f, 179.9f);
     ImGui::EndDisabled();
@@ -300,7 +301,10 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         ImGui::BeginDisabled(locked);
         changed |= ImGui::Checkbox(articulation ? u8"세 축의 주파수·감쇠비·토크 설정 공유" : u8"SLERP (회전 게인 공유)", &joint.useSlerpDrive);
         ImGui::EndDisabled();
-        const char* names[] = {u8"트위스트 X 드라이브", u8"스윙 Y 드라이브", u8"스윙 Z 드라이브"};
+        const char* names[] = {
+            articulation ? u8"X 회전 드라이브" : u8"트위스트 X 드라이브",
+            articulation ? u8"Y 회전 드라이브" : u8"스윙 Y 드라이브",
+            articulation ? u8"Z 회전 드라이브" : u8"스윙 Z 드라이브"};
         const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
         for (int axis = 0; axis < (joint.useSlerpDrive ? 1 : 3); ++axis)
         {
@@ -339,8 +343,10 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         }
     }
     ImGui::EndDisabled();
-    ImGui::TextWrapped(u8"빨간 원뿔/호: 스윙 허용 범위. 초록 부채꼴: X 트위스트 허용 범위. 노랑: 현재 자식 방향 / 스윙을 제거한 트위스트. 두 제한은 관절 중심을 공유합니다. 주황: 떨어진 연결점.");
-    ImGui::TextWrapped(u8"트위스트 0도는 몸의 정면, 손바닥 또는 팔꿈치/무릎 힌지의 아래팔/정강이 방향을 기준으로 합니다. 부채꼴과 바늘은 스윙을 제거한 X축 회전을 표시합니다.");
+    ImGui::TextWrapped("%s", ViewerLabels::ConstraintLimits(articulation));
+    ImGui::TextWrapped(articulation ?
+        u8"부채꼴은 부모 관절 좌표계를 기준으로 표시합니다. 세 회전 성분이 모두 0이면 부모·자식 관절 좌표계가 정렬된 상태입니다. 기준 자세가 반드시 0도인 것은 아닙니다." :
+        u8"트위스트 0도는 몸의 정면, 손바닥 또는 팔꿈치/무릎 힌지의 아래팔/정강이 방향을 기준으로 합니다. 부채꼴과 바늘은 스윙을 제거한 X축 회전을 표시합니다.");
     if (changed)
     {
         m_PhysicsDirty = true;
