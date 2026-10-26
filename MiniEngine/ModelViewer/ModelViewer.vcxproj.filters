@@ -12,6 +12,13 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="FootSoleDebug.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="FootSoleDebug.h" />
+    <ClInclude Include="FootSupportHull.h" />
+  </ItemGroup>
+  <ItemGroup>
     <CopyFileToFolders Include="Textures\Atrium_diffuseIBL.dds">
       <Filter>Textures</Filter>
     </CopyFileToFolders>

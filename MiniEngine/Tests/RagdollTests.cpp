@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 
 using namespace Math;
 using namespace PARS;
@@ -23,6 +24,69 @@ namespace
         result.xform = Matrix4(Matrix3::MakeScale(scale), position);
         result.rotation = Quaternion(kIdentity); result.scale = XMFLOAT3(scale, scale, scale);
         return result;
+    }
+
+    void TestCenterOfMass()
+    {
+        using namespace physx;
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize COM scene");
+        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -1, 0)), PxVec3(10, .5f, 10), "COM floor");
+        Check(floor != nullptr, "Create COM floor");
+        auto& scene = *floor->getScene();
+        const std::vector<std::string> names{"hip", "leg"};
+        const std::vector<Matrix4> pose{
+            Matrix4(OrthogonalTransform(Quaternion(Vector3(kZUnitVector), XM_PIDIV2), Vector3(1, 3, 0))),
+            Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(3, 3, 0)))};
+        PhysicsBody hip, leg;
+        hip.bone = names[0]; hip.shape = PhysicsShapeType::Sphere; hip.radius = .1f; hip.mass = 3;
+        leg = hip; leg.bone = names[1]; leg.mass = 1;
+        PhysicsAsset asset; asset.bodies = {hip, leg};
+        PhysicsConstraint joint; joint.parentBone = names[0]; joint.childBone = names[1];
+        joint.SetWorldFrame(pose[0], pose[1], pose[1]);
+        asset.constraints = {joint};
+        std::string error;
+        Vector3 center(kZero);
+        float totalMass = -1;
+        Ragdoll empty;
+        Check(!empty.GetCenterOfMass(center, totalMass) && totalMass == 0, "Empty ragdoll has no COM");
+        for (bool articulation : {false, true})
+        {
+            auto configured = asset;
+            if (articulation) ConfigureDefaultDrives(configured);
+            Ragdoll ragdoll;
+            Check(ragdoll.Create(world, configured, names, pose, Vector3(kZero), error) &&
+                ragdoll.UsesArticulation() == articulation, "Create COM fixture on D6/articulation");
+            Check(ragdoll.GetCenterOfMass(center, totalMass) && std::abs(totalMass - 4) < 1e-5f &&
+                float(Length(center - Vector3(1.5f, 3, 0))) < 1e-4f,
+                "COM is weighted by each body's mass and excludes the floor");
+            PxRigidBody* heavy = nullptr;
+            if (articulation)
+            {
+                PxArticulationReducedCoordinate* rig = nullptr;
+                Check(scene.getArticulations(&rig, 1) == 1, "Find COM articulation");
+                PxArticulationLink* links[2];
+                Check(rig->getLinks(links, 2) == 2, "Find COM links");
+                for (auto* link : links) if (std::strcmp(link->getName(), "hip") == 0) heavy = link;
+            }
+            else
+            {
+                PxActor* actors[2];
+                Check(scene.getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors, 2) == 2, "Find COM bodies");
+                for (auto* actor : actors) if (std::strcmp(actor->getName(), "hip") == 0) heavy = actor->is<PxRigidBody>();
+            }
+            Check(heavy != nullptr, "Find the heavier COM body");
+            heavy->setCMassLocalPose(PxTransform(PxVec3(1, 0, 0)));
+            Check(ragdoll.GetCenterOfMass(center, totalMass) &&
+                float(Length(center - Vector3(1.5f, 3.75f, 0))) < 1e-4f,
+                "A rotated body's local COM offset affects the world COM");
+            heavy->setMass(7);
+            Check(ragdoll.GetCenterOfMass(center, totalMass) && std::abs(totalMass - 8) < 1e-5f &&
+                float(Length(center - Vector3(1.25f, 3.875f, 0))) < 1e-4f,
+                "COM reads current PhysX mass rather than cached PA mass");
+        }
+        Check(world.GetErrorCount() == 0, "COM queries and local mass frames have no PhysX errors");
+        std::puts("PASS: whole-body COM, unequal masses and rotated local mass frames on D6/articulation");
     }
 
     void CheckBodyMaterials(physx::PxRigidStatic& floor, const PhysicsAsset& asset)
@@ -69,6 +133,7 @@ namespace
 
 void RunRagdollTests()
 {
+    TestCenterOfMass();
     // A skin root ignores the .01 armature above it. The mesh supplies that
     // scale exactly once, as in the imported Mixamo skeleton and DefaultVS.
     PhysicsSkeleton skeleton{{"armature", "hip", "helper", "leg", "toe", "mesh"},

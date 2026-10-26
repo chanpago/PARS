@@ -81,6 +81,9 @@
     <ClCompile Include="PhysicsDemo.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="FootSoleDebug.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="RagdollValidation.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
     </ClCompile>
@@ -99,6 +102,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PhysicsDemo.h" />
+    <ClInclude Include="FootSoleDebug.h" />
+    <ClInclude Include="FootSupportHull.h" />
     <ClInclude Include="RagdollComparisonRunner.h" />
     <ClInclude Include="SkeletalMeshViewer.h" />
     <ClInclude Include="SkeletonOverlay.h" />

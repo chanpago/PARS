@@ -79,6 +79,8 @@ namespace PARS
         }
         Math::Matrix4 GetBoneWorld(size_t body) const;
         Math::Vector3 GetPosition() const;
+        // 실제 바디의 월드 질량중심을 질량으로 가중 평균한다. 바디가 없으면 false다.
+        bool GetCenterOfMass(Math::Vector3& center, float& totalMass) const;
         void AddVelocity(Math::Vector3 velocity);
         // PxActor::userData로 소유자를 식별해 이동 쿼리에서 자기 자신을 제외한다.
         void SetQueryOwner(void* owner);

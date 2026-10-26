@@ -47,6 +47,7 @@
 #include <fstream>
 #if defined(_M_X64)
 #include "PhysicsDemo.h"
+#include "FootSoleDebug.h"
 #include "RagdollComparisonRunner.h"
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
 bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
@@ -221,6 +222,7 @@ private:
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
     unique_ptr<PhysicsDemo> m_PhysicsDemo;
+    FootSoleDebug m_FootSoles;
     unique_ptr<RagdollComparisonRunner> m_Comparison;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
@@ -1039,6 +1041,9 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     }
     const auto& runtime = mesh.GetRagdoll();
     ImGui::Text(u8"PhysX: 바디 %zu개 / 관절 %zu개", runtime.GetBodyCount(), runtime.GetJointCount());
+#if defined(_M_X64)
+    m_FootSoles.DrawUI(mesh);
+#endif
     if (runtime.IsActive())
     {
         ImGui::Text(u8"모드: %s", mesh.IsActiveRagdoll() ? u8"액티브 래그돌" : character.IsRagdoll() ? u8"패시브 래그돌"
@@ -1588,6 +1593,12 @@ void ModelViewer::RenderScene(void)
     if (m_PhysicsDemo && !(m_Comparison && m_Comparison->IsShowingScene()))
     {
         m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
+        if (auto* character = GetPreviewCharacter())
+        {
+            std::vector<physx::PxDebugLine> lines;
+            m_FootSoles.BuildLines(character->GetMesh(), *m_World.GetPhysicsWorld(), lines);
+            m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
+        }
     }
 #endif
     // 일부 시스템은 동적/스키닝 메시를 더 잘 추적하려고 픽셀별 속도 버퍼를 생성한다.

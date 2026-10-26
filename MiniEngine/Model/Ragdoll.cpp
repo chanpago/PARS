@@ -445,6 +445,33 @@ namespace PARS
     {
         return IsActive() ? Vector3(GetBoneWorld(0).GetW()) : Vector3(kZero);
     }
+    bool Ragdoll::GetCenterOfMass(Vector3& center, float& totalMass) const
+    {
+        center = Vector3(kZero);
+        totalMass = 0;
+#if defined(_M_X64)
+        double massSum = 0, x = 0, y = 0, z = 0;
+        for (const auto* body : m_Bodies)
+        {
+            const float mass = body->getMass();
+            const PxVec3 position = (body->getGlobalPose() * body->getCMassLocalPose()).p;
+            if (!std::isfinite(mass) || mass <= 0 || !position.isFinite())
+                return false;
+            massSum += mass;
+            x += double(mass) * position.x;
+            y += double(mass) * position.y;
+            z += double(mass) * position.z;
+        }
+        if (massSum <= 0)
+            return false;
+        center = Vector3(float(x / massSum), float(y / massSum), float(z / massSum));
+        totalMass = float(massSum);
+        return true;
+#else
+        return false;
+#endif
+    }
+
     void Ragdoll::AddVelocity(Vector3 velocity)
     {
         if (!IsSimulating())

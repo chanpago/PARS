@@ -477,6 +477,28 @@ float PhysicsWorld::SweepSphereDistance(const PxVec3& origin, const PxVec3& disp
     return PxMin(allowed, distance);
 }
 
+bool PhysicsWorld::Raycast(const PxVec3& origin, const PxVec3& displacement,
+    PxRaycastHit& hit, const void* ignoredOwner) const
+{
+    const float distance = displacement.magnitude();
+    if (!m_Scene || !origin.isFinite() || !displacement.isFinite() ||
+        !std::isfinite(distance) || distance < 1e-6f)
+    {
+        return false;
+    }
+    OwnerQueryFilter filter(ignoredOwner);
+    PxRaycastBuffer result;
+    // OwnerQueryFilter의 postFilter는 스윕 전용이다. 레이는 preFilter만 사용한다.
+    m_Scene->raycast(origin, displacement / distance, distance, result, PxHitFlag::eDEFAULT,
+        PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER), &filter);
+    if (!result.hasBlock)
+    {
+        return false;
+    }
+    hit = result.block;
+    return true;
+}
+
 PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsule& capsule, const PxVec3& displacement)
 {
     CapsuleMoveResult result;

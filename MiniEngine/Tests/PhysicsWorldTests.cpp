@@ -1,4 +1,5 @@
 #include "PhysicsWorld.h"
+#include "../ModelViewer/FootSupportHull.h"
 
 #include <cmath>
 #include <cstdio>
@@ -17,6 +18,83 @@ namespace
             std::fprintf(stderr, "FAIL: %s\n", message);
             std::exit(1);
         }
+    }
+
+    void TestFootProjectionRaycast()
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize foot projection scene");
+        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -.25f, 0)),
+            PxVec3(2, .25f, 2), "Projection floor");
+        Check(floor != nullptr, "Create projection floor");
+        PxRaycastHit hit;
+        const PxVec3 down(0, -.2f, 0);
+        Check(world.Raycast(PxVec3(1, .1f, 0), down, hit) && hit.actor == floor &&
+            std::abs(hit.distance - .1f) < 1e-5f && std::abs(hit.position.y) < 1e-5f,
+            "Foot point within 20 cm projects to the real floor");
+        Check(!world.Raycast(PxVec3(1, .201f, 0), down, hit),
+            "Foot point above 20 cm has no projection");
+        Check(!world.Raycast(PxVec3(3, .1f, 0), down, hit),
+            "No imaginary floor beyond a platform edge");
+        int owner = 0;
+        auto* ownBody = world.CreateDynamicBox(PxTransform(PxVec3(0, .1f, 0)),
+            PxVec3(.03f), 1, "Own foot");
+        Check(ownBody != nullptr, "Create own foot query obstacle");
+        ownBody->userData = &owner;
+        Check(world.Raycast(PxVec3(0, .19f, 0), down, hit) && hit.actor == ownBody,
+            "Raycast normally sees the nearest rigid body");
+        Check(world.Raycast(PxVec3(0, .19f, 0), down, hit, &owner) && hit.actor == floor,
+            "Foot projection ignores its own character and finds the ground");
+        Check(world.GetErrorCount() == 0, "Foot projection query has no PhysX errors");
+        std::puts("PASS: foot projection raycast range, platform edge and owner filtering");
+    }
+
+    void TestFootSupportHull()
+    {
+        const std::vector<PxVec3> left = {
+            {-.15f, .4f, -.1f}, {-.05f, .4f, -.1f},
+            {-.05f, .4f, .1f}, {-.15f, .4f, .1f}};
+        auto points = left;
+        points.insert(points.end(), {{.05f, .4f, 0}, {.15f, .4f, 0},
+            {.15f, .4f, .2f}, {.05f, .4f, .2f}});
+        points.push_back(left[0]);
+        points.emplace_back(0.0f, .4f, .05f); // Interior point must not affect the boundary.
+        const auto hull = PARS::BuildFootSupportHull(points);
+        Check(hull.size() == 6, "Offset feet form a six-vertex support hull");
+        double area = 0;
+        for (size_t i = 0; i < hull.size(); ++i)
+        {
+            const auto& a = hull[i];
+            const auto& b = hull[(i + 1) % hull.size()];
+            Check(a.y == .4f, "Hull preserves the real hit height");
+            area += double(a.x) * b.z - double(a.z) * b.x;
+            for (const auto& point : points)
+                Check((double(b.x) - a.x) * (double(point.z) - a.z) -
+                    (double(b.z) - a.z) * (double(point.x) - a.x) >= -1e-8,
+                    "Every projected point lies inside the counterclockwise hull");
+        }
+        Check(std::abs(area * .5 - .07) < 1e-7, "Support hull spans the space between feet");
+        Check(PARS::BuildFootSupportHull(left).size() == 4, "One supported foot has its own hull");
+        Check(PARS::BuildFootSupportHull({}).empty(), "No projected points have no support polygon");
+        Check(PARS::BuildFootSupportHull({left[0]}).empty(), "One point has no support polygon");
+        Check(PARS::BuildFootSupportHull({left[0], left[1]}).empty(), "Two points have no support polygon");
+        Check(PARS::BuildFootSupportHull({{0, 0, 0}, {1, 0, 0}, {2, 0, 0}, {1, 1, 0}}).empty(),
+            "Collinear and duplicate XZ points have no support polygon");
+        const auto oneFoot = PARS::BuildFootSupportHull(left);
+        Check(PARS::IsInsideFootSupportHull(oneFoot, PxVec3(-.1f, 100, 0)),
+            "COM inside a foot is supported regardless of its height");
+        Check(PARS::IsInsideFootSupportHull(hull, PxVec3(0, 2, .05f)),
+            "COM between supported feet lies in the combined hull");
+        Check(PARS::IsInsideFootSupportHull(oneFoot, PxVec3(-.15f, 0, 0)) &&
+            PARS::IsInsideFootSupportHull(oneFoot, left[0]), "Hull edges and vertices count as inside");
+        Check(!PARS::IsInsideFootSupportHull(oneFoot, PxVec3(-.1501f, 0, 0)) &&
+            !PARS::IsInsideFootSupportHull(oneFoot, PxVec3(0, 0, 0)),
+            "COM beyond an edge or the remaining foot is outside");
+        Check(!PARS::IsInsideFootSupportHull({}, PxVec3(0)) &&
+            !PARS::IsInsideFootSupportHull({left[0], left[1]}, left[0]),
+            "Missing or degenerate support polygons cannot contain COM");
+        std::puts("PASS: foot support hull, both feet, one foot and degenerate projections");
+        std::puts("PASS: COM containment, boundary, height independence and missing support");
     }
 
     float SimulateAtRate(int fps, double seconds)
@@ -48,6 +126,8 @@ namespace
 
 int main(int argc, char** argv)
 {
+    TestFootProjectionRaycast();
+    TestFootSupportHull();
     const float reference = SimulateAtRate(60, 0.5);
     Check(std::abs(SimulateAtRate(30, 0.5) - reference) < 1e-5f, "30/60 FPS agree in flight");
     Check(std::abs(SimulateAtRate(144, 0.5) - reference) < 1e-5f, "144/60 FPS agree in flight");

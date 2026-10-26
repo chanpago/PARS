@@ -197,6 +197,10 @@ bool PhysicsDemo::Startup()
     m_LinePSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE);
     m_LinePSO.SetDepthStencilState(DepthStateReadOnly);
     m_LinePSO.Finalize();
+    m_OverlayLinePSO = m_LinePSO;
+    m_OverlayLinePSO.SetDepthStencilState(DepthStateDisabled);
+    m_OverlayLinePSO.SetRenderTargetFormat(g_SceneColorBuffer.GetFormat(), DXGI_FORMAT_UNKNOWN);
+    m_OverlayLinePSO.Finalize();
     return true;
 }
 
@@ -465,6 +469,13 @@ void PhysicsDemo::RenderCapsules(GraphicsContext& context, const Math::Camera& c
 {
     std::vector<PxDebugLine> lines;
     m_World.GetCapsuleDebugLines(lines);
+    RenderDebugLines(context, camera, viewport, scissor, lines);
+}
+
+void PhysicsDemo::RenderDebugLines(GraphicsContext& context, const Math::Camera& camera,
+    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
+    const std::vector<PxDebugLine>& lines, bool throughGeometry)
+{
     if (lines.empty())
     {
         return;
@@ -477,12 +488,19 @@ void PhysicsDemo::RenderCapsules(GraphicsContext& context, const Math::Camera& c
         vertices.push_back({line.pos0, PxVec3(0, 1, 0), color});
         vertices.push_back({line.pos1, PxVec3(0, 1, 0), color});
     }
-    context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ, true);
-    context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
+    context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, throughGeometry);
+    if (throughGeometry)
+    {
+        context.SetRenderTarget(g_SceneColorBuffer.GetRTV());
+    }
+    else
+    {
+        context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ, true);
+        context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
+    }
     context.SetViewportAndScissor(viewport, scissor);
     context.SetRootSignature(m_RootSignature);
-    context.SetPipelineState(m_LinePSO);
+    context.SetPipelineState(throughGeometry ? m_OverlayLinePSO : m_LinePSO);
     context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
     context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
     context.SetDynamicVB(0, static_cast<UINT>(vertices.size()), sizeof(Vertex), vertices.data());

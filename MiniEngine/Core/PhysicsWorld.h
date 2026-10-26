@@ -54,6 +54,9 @@ public:
     // 구형 프로브가 장애물에 닿기 전까지 이동할 수 있는 거리(m). 자기 Actor와 트리거는 제외한다.
     float SweepSphereDistance(const physx::PxVec3& origin, const physx::PxVec3& displacement,
         float radius, const void* ignoredOwner = nullptr) const;
+    // 변위 길이 안의 가장 가까운 표면. 자기 Actor와 트리거는 제외한다.
+    bool Raycast(const physx::PxVec3& origin, const physx::PxVec3& displacement,
+        physx::PxRaycastHit& hit, const void* ignoredOwner = nullptr) const;
     uint32_t GetQueryCapsuleCount() const
     {
         return static_cast<uint32_t>(m_QueryCapsules.size());

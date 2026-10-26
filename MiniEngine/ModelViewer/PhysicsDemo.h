@@ -27,6 +27,9 @@ public:
     void RenderUI();
     void RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
+    void RenderDebugLines(GraphicsContext& context, const Math::Camera& camera,
+        const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
+        const std::vector<physx::PxDebugLine>& lines, bool throughGeometry = false);
 
 private:
     void ResetBox();
@@ -43,6 +46,7 @@ private:
     RootSignature m_RootSignature;
     GraphicsPSO m_PSO;
     GraphicsPSO m_LinePSO;
+    GraphicsPSO m_OverlayLinePSO;
     physx::PxRigidStatic* m_Walls[5] = {};
     bool m_DropReady = true;
     static constexpr int HistoryCapacity = 240;
