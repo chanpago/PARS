@@ -795,6 +795,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PhysicsWorld.h" />
+    <ClInclude Include="PhysicsMaterial.h" />
     <ClCompile Include="PhysicsWorld.cpp" />
   </ItemGroup>
   <ItemGroup>

@@ -196,7 +196,7 @@ namespace PARS
                     geometry.storeAny(PxBoxGeometry(body.halfExtents.x, body.halfExtents.y, body.halfExtents.z));
                     break;
                 }
-                auto* actor = world.CreateDynamicBody(transform, geometry.any(), body.mass, body.bone.c_str());
+                auto* actor = world.CreateDynamicBody(transform, geometry.any(), body.mass, body.bone.c_str(), body.material);
                 if (!actor)
                 {
                     error = "Could not create ragdoll body: " + body.bone;

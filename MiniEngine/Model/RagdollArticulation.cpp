@@ -152,7 +152,7 @@ namespace PARS
                     break;
                 }
                 auto* parentLink = parent[i] < 0 ? nullptr : m_Bodies[parent[i]]->is<PxArticulationLink>();
-                auto* link = world.CreateArticulationLink(*m_Articulation, parentLink, pose, geometry.any(), body.mass, body.bone.c_str());
+                auto* link = world.CreateArticulationLink(*m_Articulation, parentLink, pose, geometry.any(), body.mass, body.bone.c_str(), body.material);
                 if (!link)
                 {
                     error = "Could not create articulation link: " + body.bone;

@@ -373,6 +373,23 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     }
     ImGui::SetNextItemWidth(110);
     changed |= ImGui::DragFloat(u8"질량 (kg)", &body.mass, .1f, .001f, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::CollapsingHeader(u8"물리 머터리얼"))
+    {
+        ImGui::SetNextItemWidth(110);
+        changed |= ImGui::DragFloat(u8"정지 마찰", &body.material.staticFriction, .01f, 0, 10, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::SetNextItemWidth(110);
+        changed |= ImGui::DragFloat(u8"운동 마찰", &body.material.dynamicFriction, .01f, 0, 10, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::SetNextItemWidth(110);
+        changed |= ImGui::DragFloat(u8"반발 계수", &body.material.restitution, .01f, 0, 1, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        int combine = static_cast<int>(body.material.frictionCombine);
+        ImGui::SetNextItemWidth(110);
+        if (ImGui::Combo(u8"마찰 결합", &combine, u8"평균\0작은 값\0곱\0큰 값\0"))
+        {
+            body.material.frictionCombine = static_cast<PARS::PhysicsFrictionCombine>(combine);
+            changed = true;
+        }
+        ImGui::TextWrapped(u8"기본 바닥에서 이 바디만 미끄럽게 하려면 마찰을 낮추고 '작은 값'을 선택하세요.");
+    }
     if (ImGui::Button(u8"회전 초기화"))
     {
         body.rotation = XMFLOAT4(0, 0, 0, 1);

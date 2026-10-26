@@ -46,6 +46,23 @@ namespace
                                                                                                                    : "free";
     }
 
+    const char* FrictionCombineName(PARS::PhysicsFrictionCombine mode)
+    {
+        const char* names[] = {"average", "minimum", "multiply", "maximum"};
+        return names[static_cast<unsigned>(mode)];
+    }
+
+    PARS::PhysicsFrictionCombine ReadFrictionCombine(const json& value)
+    {
+        const auto name = value.get<std::string>();
+        for (const auto mode : {PARS::PhysicsFrictionCombine::Average, PARS::PhysicsFrictionCombine::Minimum,
+                 PARS::PhysicsFrictionCombine::Multiply, PARS::PhysicsFrictionCombine::Maximum})
+        {
+            if (name == FrictionCombineName(mode)) return mode;
+        }
+        throw std::runtime_error("Unknown friction combine mode.");
+    }
+
     PARS::PhysicsJointMotion ReadMotion(const json& value)
     {
         const auto name = value.get<std::string>();
@@ -282,6 +299,10 @@ namespace PARS
             {
                 error = "Body rotation must be a unit quaternion.";
             }
+            else if (!body.material.IsValid())
+            {
+                error = "Invalid body material: friction must be finite and nonnegative, restitution in [0, 1], and combine mode valid.";
+            }
             if (!error.empty())
             {
                 return false;
@@ -360,7 +381,7 @@ namespace PARS
             const auto destination = WidePath(path);
             temporary = destination + L".tmp";
             json root;
-            root["version"] = 4;
+            root["version"] = 5;
             root["driveUnits"] = "mode-dependent-radians-seconds-Nm";
             root["units"] = "metres";
             root["angleUnits"] = "radians";
@@ -377,6 +398,11 @@ namespace PARS
                 entry["radius"] = body.radius;
                 entry["halfLength"] = body.halfLength;
                 entry["mass"] = body.mass;
+                auto& material = entry["material"];
+                material["staticFriction"] = body.material.staticFriction;
+                material["dynamicFriction"] = body.material.dynamicFriction;
+                material["restitution"] = body.material.restitution;
+                material["frictionCombine"] = FrictionCombineName(body.material.frictionCombine);
                 root["bodies"].push_back(entry);
             }
             root["constraints"] = json::array();
@@ -447,7 +473,7 @@ namespace PARS
             json root;
             input >> root;
             const int version = root.at("version").get<int>();
-            if ((version < 1 || version > 4) || root.at("units").get<std::string>() != "metres")
+            if ((version < 1 || version > 5) || root.at("units").get<std::string>() != "metres")
             {
                 throw std::runtime_error("Unsupported PhysicsAsset version or units.");
             }
@@ -455,7 +481,7 @@ namespace PARS
             {
                 throw std::runtime_error("Unsupported angular drive units.");
             }
-            if (version == 4 && root.at("driveUnits").get<std::string>() != "mode-dependent-radians-seconds-Nm")
+            if (version >= 4 && root.at("driveUnits").get<std::string>() != "mode-dependent-radians-seconds-Nm")
             {
                 throw std::runtime_error("Unsupported angular drive units.");
             }
@@ -493,6 +519,14 @@ namespace PARS
                 body.radius = entry.at("radius").get<float>();
                 body.halfLength = entry.at("halfLength").get<float>();
                 body.mass = entry.at("mass").get<float>();
+                if (version >= 5 && entry.count("material"))
+                {
+                    const auto& material = entry.at("material");
+                    body.material.staticFriction = material.at("staticFriction").get<float>();
+                    body.material.dynamicFriction = material.at("dynamicFriction").get<float>();
+                    body.material.restitution = material.at("restitution").get<float>();
+                    body.material.frictionCombine = ReadFrictionCombine(material.at("frictionCombine"));
+                }
                 candidate.bodies.push_back(body);
             }
             if (version >= 2)
@@ -540,7 +574,7 @@ namespace PARS
                             const auto& value = drives.at(axis);
                             drive.enabled = value.at("enabled").get<bool>();
                             drive.maxTorque = value.at("maxTorque").get<float>();
-                            if (version == 4)
+                            if (version >= 4)
                             {
                                 const auto type = value.at("type").get<std::string>();
                                 if (type != "acceleration" && type != "force")

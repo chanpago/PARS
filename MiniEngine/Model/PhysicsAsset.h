@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "VectorMath.h"
+#include "PhysicsMaterial.h"
 #include <string>
 #include <vector>
 
@@ -27,6 +28,7 @@ namespace PARS
         float radius = .05f;
         float halfLength = .1f; // 원통 부분의 반길이이며, 양 끝의 반구는 제외한다.
         float mass = 1;
+        PhysicsMaterialSettings material;
 
         Math::Matrix4 GetLocalTransform() const;
     };

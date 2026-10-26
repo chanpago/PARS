@@ -74,6 +74,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="PhysicsWorld.h" />
+    <ClInclude Include="PhysicsMaterial.h" />
     <ClInclude Include="BitonicSort.h" />
     <ClInclude Include="BuddyAllocator.h" />
     <ClInclude Include="BufferManager.h" />

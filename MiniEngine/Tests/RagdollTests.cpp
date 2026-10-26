@@ -24,6 +24,47 @@ namespace
         result.rotation = Quaternion(kIdentity); result.scale = XMFLOAT3(scale, scale, scale);
         return result;
     }
+
+    void CheckBodyMaterials(physx::PxRigidStatic& floor, const PhysicsAsset& asset)
+    {
+        using namespace physx;
+        auto& scene = *floor.getScene();
+        std::vector<PxActor*> dynamics(scene.getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC));
+        scene.getActors(PxActorTypeFlag::eRIGID_DYNAMIC, dynamics.data(), static_cast<PxU32>(dynamics.size()));
+        std::vector<PxRigidActor*> bodies;
+        for (auto* actor : dynamics) bodies.push_back(static_cast<PxRigidActor*>(actor));
+        std::vector<PxArticulationReducedCoordinate*> articulations(scene.getNbArticulations());
+        scene.getArticulations(articulations.data(), static_cast<PxU32>(articulations.size()));
+        for (auto* articulation : articulations)
+        {
+            std::vector<PxArticulationLink*> links(articulation->getNbLinks());
+            articulation->getLinks(links.data(), static_cast<PxU32>(links.size()));
+            for (auto* link : links) bodies.push_back(link);
+        }
+        PxShape* floorShape = nullptr;
+        PxMaterial* floorMaterial = nullptr;
+        Check(floor.getShapes(&floorShape, 1) == 1 && floorShape->getMaterials(&floorMaterial, 1) == 1,
+            "Read floor material");
+        Check(floorMaterial->getStaticFriction() == .6f && floorMaterial->getDynamicFriction() == .5f &&
+            floorMaterial->getRestitution() == .1f && floorMaterial->getFrictionCombineMode() == PxCombineMode::eAVERAGE,
+            "Per-body overrides do not mutate the shared floor material");
+        size_t checked = 0;
+        for (auto* body : bodies)
+        {
+            const int index = body->getName() ? asset.FindBody(body->getName()) : -1;
+            if (index < 0) continue;
+            const auto& expected = asset.bodies[index].material;
+            PxShape* shape = nullptr;
+            PxMaterial* material = nullptr;
+            Check(body->getShapes(&shape, 1) == 1 && shape->getMaterials(&material, 1) == 1, "Read PA body material");
+            Check(material->getStaticFriction() == expected.staticFriction && material->getDynamicFriction() == expected.dynamicFriction &&
+                material->getRestitution() == expected.restitution &&
+                static_cast<int>(material->getFrictionCombineMode()) == static_cast<int>(expected.frictionCombine),
+                "Each runtime shape retains its own PA friction, restitution and combine mode");
+            ++checked;
+        }
+        Check(checked == asset.bodies.size(), "Inspect every body on both physics backends");
+    }
 }
 
 void RunRagdollTests()
@@ -69,7 +110,9 @@ void RunRagdollTests()
     asset.constraints[0].swingY = PhysicsJointMotion::Free;
     PhysicsWorld physics;
     Check(physics.Initialize(false), "Initialize ragdoll world");
-    physics.CreateStaticBox(physx::PxTransform(physx::PxVec3(0, -.25f, 0)), physx::PxVec3(100, .25f, 100), "RagdollFloor");
+    auto* floor = physics.CreateStaticBox(physx::PxTransform(physx::PxVec3(0, -.25f, 0)), physx::PxVec3(100, .25f, 100), "RagdollFloor");
+    Check(floor != nullptr, "Create ragdoll floor");
+    const auto baseMaterialCount = floor->getScene()->getPhysics().getNbMaterials();
     Ragdoll ragdoll;
     Check(ragdoll.Create(physics, asset, skeleton.names, initial, Vector3(kZero), error) &&
         ragdoll.GetBodyCount() == 3 && ragdoll.GetJointCount() == 2, "Create all three PA shapes and D6 joints");
@@ -142,14 +185,19 @@ void RunRagdollTests()
         Check(edited.UpdateBody(1, editedBody), "Rebase both joints of an edited middle collider");
         auto editedToe = edited.bodies[2];
         editedToe.shape = PhysicsShapeType::Box;
+        editedToe.material.staticFriction = .1f;
+        editedToe.material.dynamicFriction = .05f;
+        editedToe.material.frictionCombine = PhysicsFrictionCombine::Minimum;
         editedToe.offset = XMFLOAT3(-.04f, .03f, .08f);
         XMStoreFloat4(&editedToe.rotation, Quaternion(Vector3(kXUnitVector), .5f));
         Check(edited.UpdateBody(2, editedToe), "Rebase an edited end collider after its parent was edited");
         Check(ragdoll.Create(physics, edited, skeleton.names, initial, Vector3(kZero), error, false),
             "Apply edited colliders to a kinematic character");
+        CheckBodyMaterials(*floor, edited);
         ragdoll.SetCollisionEnabled(false);
         Check(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.UsesArticulation() == articulation,
             "Start the edited PA using the requested D6/articulation backend");
+        CheckBodyMaterials(*floor, edited);
         Check(ragdoll.GetMaxAnchorError() < .0001f, "Edited colliders retain coincident anchors at simulation start");
         std::vector<Matrix4> editedTargets;
         for (size_t i = 0; i < bodyNodes.size(); ++i)
@@ -167,9 +215,39 @@ void RunRagdollTests()
             Check(Near(initial[i], reconstructed[i]),
                 "Edited PA preserves skinning, imported scale and helper bones when simulation begins");
         }
+        Check(ragdoll.SetSimulating(false, Vector3(kZero), error), "Return material overrides to kinematic mode");
+        CheckBodyMaterials(*floor, edited);
         ragdoll.Destroy();
+        Check(floor->getScene()->getPhysics().getNbMaterials() == baseMaterialCount,
+            "Destroy and backend rebuild release custom materials without leaks");
     }
     std::puts("PASS: collider edits preserve joint anchors and skinning on D6/articulation simulation start");
+
+    PhysicsMaterialSettings slippery;
+    slippery.staticFriction = .1f;
+    slippery.dynamicFriction = .05f;
+    slippery.frictionCombine = PhysicsFrictionCombine::Minimum;
+    auto* normal = physics.CreateDynamicBody(physx::PxTransform(physx::PxVec3(-4, .1f, -2)),
+        physx::PxBoxGeometry(.15f, .1f, .15f), 1, "NormalMaterial");
+    auto* ice = physics.CreateDynamicBody(physx::PxTransform(physx::PxVec3(-4, .1f, 2)),
+        physx::PxBoxGeometry(.15f, .1f, .15f), 1, "SlipperyMaterial", slippery);
+    Check(normal && ice, "Create independent contact-friction probes");
+    const auto angularLocks = physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_X |
+        physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_Y | physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z;
+    normal->setRigidDynamicLockFlags(angularLocks);
+    ice->setRigidDynamicLockFlags(angularLocks);
+    for (int step = 0; step < 60; ++step) physics.Step();
+    const float normalStart = normal->getGlobalPose().p.x, iceStart = ice->getGlobalPose().p.x;
+    normal->setLinearVelocity(physx::PxVec3(2, 0, 0));
+    ice->setLinearVelocity(physx::PxVec3(2, 0, 0));
+    for (int step = 0; step < 60; ++step) physics.Step();
+    const float normalDistance = normal->getGlobalPose().p.x - normalStart, iceDistance = ice->getGlobalPose().p.x - iceStart;
+    Check(normalDistance < .8f && iceDistance > 1.2f && iceDistance > normalDistance + .7f,
+        "Minimum-combined low friction slides farther on the unchanged default floor");
+    std::printf("PASS: contact material sliding distances: default=%.3f m, slippery=%.3f m\n", normalDistance, iceDistance);
+    normal->release();
+    ice->release();
+    Check(floor->getScene()->getPhysics().getNbMaterials() == baseMaterialCount, "Contact probes release custom materials");
     Check(physics.GetErrorCount() == 0, "No PhysX errors during create, simulate, destroy and restart");
     std::puts("PASS: ragdoll skin/world conversion, imported scale, all shapes, D6 fall, floor contact and repeated lifecycle");
 }

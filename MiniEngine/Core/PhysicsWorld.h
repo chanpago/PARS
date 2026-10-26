@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <PxPhysicsAPI.h>
+#include "PhysicsMaterial.h"
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -70,11 +71,13 @@ public:
     uint32_t GetDynamicBodyCount() const;
     uint32_t GetConstraintCount() const;
     physx::PxRigidDynamic* CreateDynamicBody(const physx::PxTransform& pose,
-        const physx::PxGeometry& geometry, float mass, const char* name);
+        const physx::PxGeometry& geometry, float mass, const char* name,
+        const PARS::PhysicsMaterialSettings& material = {});
     physx::PxArticulationReducedCoordinate* CreateArticulation();
     physx::PxArticulationLink* CreateArticulationLink(physx::PxArticulationReducedCoordinate& articulation,
         physx::PxArticulationLink* parent, const physx::PxTransform& pose,
-        const physx::PxGeometry& geometry, float mass, const char* name);
+        const physx::PxGeometry& geometry, float mass, const char* name,
+        const PARS::PhysicsMaterialSettings& material = {});
     bool AddArticulation(physx::PxArticulationReducedCoordinate& articulation);
     physx::PxD6Joint* CreateJoint(physx::PxRigidActor& parent, const physx::PxTransform& parentFrame,
         physx::PxRigidActor& child, const physx::PxTransform& childFrame);
@@ -105,6 +108,7 @@ public:
 
 private:
     bool CreateScene();
+    physx::PxMaterial* CreateBodyMaterial(const PARS::PhysicsMaterialSettings& settings);
     PhysicsWorld* m_ServiceOwner = nullptr;
     class ErrorCallback : public physx::PxDefaultErrorCallback
     {

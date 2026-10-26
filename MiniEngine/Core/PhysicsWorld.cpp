@@ -683,13 +683,42 @@ void PhysicsWorld::SetPvdSceneQueries(bool enabled)
     }
 }
 
-PxRigidDynamic* PhysicsWorld::CreateDynamicBody(const PxTransform& pose, const PxGeometry& geometry, float mass, const char* name)
+PxMaterial* PhysicsWorld::CreateBodyMaterial(const PARS::PhysicsMaterialSettings& settings)
+{
+    if (!m_Physics || !m_Material || !settings.IsValid())
+    {
+        return nullptr;
+    }
+    const PARS::PhysicsMaterialSettings defaults;
+    if (settings.staticFriction == defaults.staticFriction && settings.dynamicFriction == defaults.dynamicFriction &&
+        settings.restitution == defaults.restitution && settings.frictionCombine == defaults.frictionCombine)
+    {
+        m_Material->acquireReference();
+        return m_Material;
+    }
+    auto* material = m_Physics->createMaterial(settings.staticFriction, settings.dynamicFriction, settings.restitution);
+    if (material)
+    {
+        const PxCombineMode::Enum modes[] = {PxCombineMode::eAVERAGE, PxCombineMode::eMIN, PxCombineMode::eMULTIPLY, PxCombineMode::eMAX};
+        material->setFrictionCombineMode(modes[static_cast<unsigned>(settings.frictionCombine)]);
+    }
+    return material;
+}
+
+PxRigidDynamic* PhysicsWorld::CreateDynamicBody(const PxTransform& pose, const PxGeometry& geometry, float mass, const char* name,
+    const PARS::PhysicsMaterialSettings& settings)
 {
     if (!m_Scene || !pose.isValid() || !std::isfinite(mass) || mass <= 0)
     {
         return nullptr;
     }
-    auto* body = PxCreateDynamic(*m_Physics, pose, geometry, *m_Material, 1.0f);
+    auto* material = CreateBodyMaterial(settings);
+    if (!material)
+    {
+        return nullptr;
+    }
+    auto* body = PxCreateDynamic(*m_Physics, pose, geometry, *material, 1.0f);
+    material->release(); // The shape retains its own material reference.
     if (!body)
     {
         return nullptr;
@@ -715,15 +744,27 @@ PxArticulationReducedCoordinate* PhysicsWorld::CreateArticulation()
 }
 
 PxArticulationLink* PhysicsWorld::CreateArticulationLink(PxArticulationReducedCoordinate& articulation,
-    PxArticulationLink* parent, const PxTransform& pose, const PxGeometry& geometry, float mass, const char* name)
+    PxArticulationLink* parent, const PxTransform& pose, const PxGeometry& geometry, float mass, const char* name,
+    const PARS::PhysicsMaterialSettings& settings)
 {
-    auto* link = articulation.createLink(parent, pose);
-    if (!link)
+    if (!pose.isValid() || !std::isfinite(mass) || mass <= 0)
     {
         return nullptr;
     }
-    if (!PxRigidActorExt::createExclusiveShape(*link, geometry, *m_Material) ||
-        !PxRigidBodyExt::setMassAndUpdateInertia(*link, mass))
+    auto* material = CreateBodyMaterial(settings);
+    if (!material)
+    {
+        return nullptr;
+    }
+    auto* link = articulation.createLink(parent, pose);
+    if (!link)
+    {
+        material->release();
+        return nullptr;
+    }
+    auto* shape = PxRigidActorExt::createExclusiveShape(*link, geometry, *material);
+    material->release();
+    if (!shape || !PxRigidBodyExt::setMassAndUpdateInertia(*link, mass))
     {
         link->release();
         return nullptr;

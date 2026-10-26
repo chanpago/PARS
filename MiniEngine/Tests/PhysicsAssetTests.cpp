@@ -86,7 +86,12 @@ namespace
         edited = asset.bodies[1];
         edited.radius *= 2;
         edited.mass *= 3;
+        edited.material.staticFriction = .1f;
+        edited.material.dynamicFriction = .05f;
+        edited.material.frictionCombine = PhysicsFrictionCombine::Minimum;
         Check(asset.UpdateBody(1, edited), "Edit collider dimensions and mass without changing its transform");
+        Check(asset.bodies[1].material.staticFriction == .1f &&
+            asset.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Minimum, "Body edits retain material settings");
         for (size_t i = 0; i < asset.constraints.size(); ++i)
         {
             Check(std::memcmp(&asset.constraints[i].parentFrame, &framesBeforeResize[i].parentFrame, sizeof(PhysicsJointFrame)) == 0 &&
@@ -120,6 +125,13 @@ void RunPhysicsAssetTests()
         body.offset = DirectX::XMFLOAT3(.1f, .2f, .3f);
         DirectX::XMStoreFloat4(&body.rotation, Quaternion(Vector3(kZUnitVector), .4f));
         body.radius = .12f; body.halfLength = .23f; body.mass = 4.5f;
+        if (i == 1)
+        {
+            body.material.staticFriction = .1f;
+            body.material.dynamicFriction = .05f;
+            body.material.restitution = 0;
+            body.material.frictionCombine = PhysicsFrictionCombine::Minimum;
+        }
         original.bodies.push_back(body);
     }
     Check(Near(Vector3((frame * original.bodies[0].GetLocalTransform()).GetW()), Vector3(frame * Vector3(.1f, .2f, .3f))),
@@ -160,6 +172,9 @@ void RunPhysicsAssetTests()
             Near(Vector3(a.offset), Vector3(b.offset)) && Near(Vector3(a.halfExtents), Vector3(b.halfExtents)) &&
             Near(Quaternion(DirectX::XMLoadFloat4(&a.rotation)) * Vector3(kXUnitVector), Quaternion(DirectX::XMLoadFloat4(&b.rotation)) * Vector3(kXUnitVector)),
             "Round trip preserves attachment, transform, geometry and mass");
+        Check(a.material.staticFriction == b.material.staticFriction && a.material.dynamicFriction == b.material.dynamicFriction &&
+            a.material.restitution == b.material.restitution && a.material.frictionCombine == b.material.frictionCombine,
+            "Per-body friction, restitution and combine mode survive a PA round trip");
     }
     Check(loaded.constraints.size() == 1, "Round trip preserves joint count");
     const auto& savedJoint = loaded.constraints[0];
@@ -175,6 +190,20 @@ void RunPhysicsAssetTests()
         "Joint round trip preserves frames, radians, all motion modes and collision setting");
     Check(loaded.FindConstraint(joint.childBone, joint.parentBone) == 0, "Joint pair lookup ignores order");
     PhysicsAsset invalid = loaded;
+    for (float value : {-1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+    {
+        invalid = loaded; invalid.bodies[1].material.staticFriction = value;
+        Check(!invalid.Validate(error), "Reject invalid static friction");
+        invalid = loaded; invalid.bodies[1].material.dynamicFriction = value;
+        Check(!invalid.Validate(error), "Reject invalid dynamic friction");
+        invalid = loaded; invalid.bodies[1].material.restitution = value;
+        Check(!invalid.Validate(error), "Reject invalid restitution");
+    }
+    invalid = loaded; invalid.bodies[1].material.restitution = 1.1f;
+    Check(!invalid.Save(path, error), "Restitution above one cannot overwrite a saved PA");
+    invalid = loaded; invalid.bodies[1].material.frictionCombine = static_cast<PhysicsFrictionCombine>(99);
+    Check(!invalid.Validate(error), "Reject unknown friction combine enum");
+    invalid = loaded;
     invalid.constraints[0].drives[0].maxTorque = -1;
     Check(!invalid.Validate(error), "Reject negative drive torque");
     invalid = loaded; invalid.constraints[0].drives[0].stiffness = std::numeric_limits<float>::quiet_NaN();
@@ -252,6 +281,32 @@ void RunPhysicsAssetTests()
     nlohmann::json saved;
     { std::ifstream input(path); input >> saved; }
     const auto writeJson = [&](const nlohmann::json& value) { std::ofstream output(path); output << value.dump(); };
+    Check(saved.at("version").get<int>() == 5, "Per-body materials use PA version 5");
+    auto corruptMaterial = saved;
+    corruptMaterial["bodies"][1]["material"]["frictionCombine"] = "unknown";
+    writeJson(corruptMaterial);
+    Check(!loaded.Load(path, error) && loaded.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Minimum,
+        "Invalid material load preserves the existing PA");
+    corruptMaterial = saved;
+    corruptMaterial["bodies"][1]["material"]["restitution"] = 2;
+    writeJson(corruptMaterial);
+    Check(!loaded.Load(path, error) && loaded.bodies[1].material.restitution == 0, "Invalid material values reject the whole load");
+    auto defaultMaterial = saved;
+    defaultMaterial["bodies"][1].erase("material");
+    writeJson(defaultMaterial);
+    PhysicsAsset defaultsLoaded;
+    Check(defaultsLoaded.Load(path, error) && defaultsLoaded.bodies[1].material.staticFriction == .6f &&
+        defaultsLoaded.bodies[1].material.dynamicFriction == .5f && defaultsLoaded.bodies[1].material.restitution == .1f &&
+        defaultsLoaded.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Average,
+        "Omitted material uses the original shared material values");
+    auto legacyMaterial = saved;
+    legacyMaterial["version"] = 4;
+    for (auto& body : legacyMaterial["bodies"]) body.erase("material");
+    writeJson(legacyMaterial);
+    Check(defaultsLoaded.Load(path, error) && defaultsLoaded.bodies[1].material.staticFriction == .6f &&
+        defaultsLoaded.bodies[1].material.dynamicFriction == .5f && defaultsLoaded.bodies[1].material.restitution == .1f &&
+        defaultsLoaded.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Average &&
+        defaultsLoaded.constraints[0].drives[0].stiffness == 135, "Existing v4 PAs retain material and drive behavior");
     auto corruptJoint = saved;
     corruptJoint["constraints"][0]["childBone"] = "unknown";
     writeJson(corruptJoint);
@@ -292,7 +347,7 @@ void RunPhysicsAssetTests()
     Check(loaded.Load(path, error) && loaded.bodies.size() == 3 && loaded.constraints.empty(),
         "Legacy version 1 body-only file loads and clears previous joints");
     writeJson(saved);
-    Check(loaded.Load(path, error), "Restore version 4 asset");
+    Check(loaded.Load(path, error), "Restore version 5 asset");
     original.bodies[0].radius = -1;
     Check(!original.Save(path, error), "Reject negative radius before overwriting saved asset");
     Check(loaded.Load(path, error) && loaded.bodies[0].radius == .12f, "Failed save preserves previous file");
