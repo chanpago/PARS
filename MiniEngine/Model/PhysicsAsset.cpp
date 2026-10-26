@@ -178,6 +178,37 @@ namespace PARS
         return -1;
     }
 
+    bool PhysicsAsset::UpdateBody(size_t index, const PhysicsBody& updated)
+    {
+        if (index >= bodies.size() || updated.bone != bodies[index].bone ||
+            !ValidFrame(PhysicsJointFrame{updated.offset, updated.rotation}))
+        {
+            return false;
+        }
+        const auto& previous = bodies[index];
+        if (previous.offset.x != updated.offset.x || previous.offset.y != updated.offset.y || previous.offset.z != updated.offset.z ||
+            previous.rotation.x != updated.rotation.x || previous.rotation.y != updated.rotation.y ||
+            previous.rotation.z != updated.rotation.z || previous.rotation.w != updated.rotation.w)
+        {
+            // Bone * NewBody * NewJoint == Bone * OldBody * OldJoint.
+            // 양쪽 관절 좌표계를 각각 보존해 비대칭 제한의 상대 회전도 유지한다.
+            const Matrix4 correction = Invert(updated.GetLocalTransform()) * previous.GetLocalTransform();
+            for (auto& joint : constraints)
+            {
+                if (joint.parentBone == previous.bone)
+                {
+                    joint.parentFrame = PhysicsJointFrame::FromTransform(correction * joint.parentFrame.GetTransform());
+                }
+                if (joint.childBone == previous.bone)
+                {
+                    joint.childFrame = PhysicsJointFrame::FromTransform(correction * joint.childFrame.GetTransform());
+                }
+            }
+        }
+        bodies[index] = updated;
+        return true;
+    }
+
     void PhysicsAsset::RemoveBody(size_t index)
     {
         if (index >= bodies.size())

@@ -194,6 +194,7 @@ void SkeletalMeshViewer::CancelInteraction()
         else if (EditingBody())
         {
             m_PhysicsAsset.bodies[m_SelectedBody] = m_DragBodyOriginal;
+            m_PhysicsAsset.constraints = m_DragBodyConstraintsOriginal;
             m_PhysicsDirty = m_DragWasDirty;
         }
         else if (m_SelectedBone >= 0 && !m_EditPose.empty())
@@ -202,6 +203,7 @@ void SkeletalMeshViewer::CancelInteraction()
         }
     }
     m_DragAxis = -1;
+    m_DragBodyConstraintsOriginal.clear();
     m_Flying = false;
     m_HasPickRequest = false;
     m_PickPose.clear();
@@ -384,6 +386,7 @@ void SkeletalMeshViewer::BeginGizmoDrag(uint32_t axis)
     if (EditingBody())
     {
         m_DragBodyOriginal = m_PhysicsAsset.bodies[m_SelectedBody];
+        m_DragBodyConstraintsOriginal = m_PhysicsAsset.constraints;
         m_DragWasDirty = m_PhysicsDirty;
     }
     if (EditingConstraint())
@@ -448,6 +451,7 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
     if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
     {
         m_DragAxis = -1;
+        m_DragBodyConstraintsOriginal.clear();
         return;
     }
     const float dx = mouseX - m_ClickX, dy = mouseY - m_ClickY;
@@ -481,8 +485,7 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
     }
     if (EditingBody())
     {
-        auto& body = m_PhysicsAsset.bodies[m_SelectedBody];
-        body = m_DragBodyOriginal;
+        auto body = m_DragBodyOriginal;
         if (m_GizmoMode == 0)
         {
             XMStoreFloat3(&body.offset, Vector3(body.offset) + m_DragLocalDirection * (amount * m_DragLength));
@@ -511,6 +514,10 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
                 body.radius = Clamp(body.radius * factor, .001f, 100.0f);
             }
         }
+        // 매 프레임 보정 오차가 누적되지 않도록 드래그 시작 시점의 바디와 관절에서 계산한다.
+        m_PhysicsAsset.bodies[m_SelectedBody] = m_DragBodyOriginal;
+        m_PhysicsAsset.constraints = m_DragBodyConstraintsOriginal;
+        m_PhysicsAsset.UpdateBody(m_SelectedBody, body);
         m_PhysicsDirty = true;
         return;
     }

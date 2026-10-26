@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #pragma warning(push)
@@ -24,10 +25,84 @@ namespace
         return Near(Vector3(a.GetW()), Vector3(b.GetW())) && Near(Vector3(a.GetX()), Vector3(b.GetX())) &&
             Near(Vector3(a.GetY()), Vector3(b.GetY())) && Near(Vector3(a.GetZ()), Vector3(b.GetZ()));
     }
+
+    void TestBodyEditFrames()
+    {
+        PhysicsAsset asset;
+        std::vector<Matrix4> bones;
+        for (int i = 0; i < 4; ++i)
+        {
+            PhysicsBody body;
+            body.bone = "edit-bone-" + std::to_string(i);
+            body.offset = DirectX::XMFLOAT3(.1f, -.2f, .05f);
+            DirectX::XMStoreFloat4(&body.rotation, Quaternion(Vector3(kZUnitVector), .4f));
+            asset.bodies.push_back(body);
+            bones.push_back(Matrix4(OrthogonalTransform(Quaternion(Vector3(kYUnitVector), .2f * i), Vector3(float(i), 2, -1))));
+        }
+        for (int i = 1; i < 4; ++i)
+        {
+            PhysicsConstraint joint;
+            joint.parentBone = asset.bodies[i - 1].bone;
+            joint.childBone = asset.bodies[i].bone;
+            joint.SetWorldFrame(bones[i - 1] * asset.bodies[i - 1].GetLocalTransform(),
+                bones[i] * asset.bodies[i].GetLocalTransform(), bones[i]);
+            // Asymmetric limits intentionally use different parent and child orientations.
+            joint.parentFrame = PhysicsJointFrame::FromTransform(joint.parentFrame.GetTransform() *
+                Matrix4(Matrix3(Quaternion(Vector3(kZUnitVector), .3f)), Vector3(kZero)));
+            asset.constraints.push_back(joint);
+        }
+        const auto original = asset;
+        const auto checkFrames = [&]() {
+            for (size_t i = 0; i < asset.constraints.size(); ++i)
+            {
+                Check(SameFrame(bones[i] * asset.bodies[i].GetLocalTransform() * asset.constraints[i].parentFrame.GetTransform(),
+                          bones[i] * original.bodies[i].GetLocalTransform() * original.constraints[i].parentFrame.GetTransform()) &&
+                        SameFrame(bones[i + 1] * asset.bodies[i + 1].GetLocalTransform() * asset.constraints[i].childFrame.GetTransform(),
+                          bones[i + 1] * original.bodies[i + 1].GetLocalTransform() * original.constraints[i].childFrame.GetTransform()),
+                    "Body edits preserve incoming/outgoing joint anchors, axes and asymmetric frame bias");
+            }
+        };
+        auto edited = asset.bodies[1];
+        edited.offset = DirectX::XMFLOAT3(-.3f, .15f, .2f);
+        DirectX::XMStoreFloat4(&edited.rotation, Quaternion(Vector3(kXUnitVector), .8f) * Quaternion(Vector3(kYUnitVector), -.6f));
+        edited.shape = PhysicsShapeType::Box;
+        edited.halfExtents = DirectX::XMFLOAT3(.2f, .1f, .05f);
+        Check(asset.UpdateBody(1, edited), "Edit collider transform and primitive together");
+        Check(asset.bodies[1].shape == PhysicsShapeType::Box && Near(Vector3(asset.bodies[1].offset), Vector3(edited.offset)),
+            "Body edit applies the requested shape and offset");
+        checkFrames();
+        edited.rotation = DirectX::XMFLOAT4(0, 0, 0, 1);
+        Check(asset.UpdateBody(1, edited), "Reset collider rotation while preserving joint frames");
+        checkFrames();
+        Check(asset.UpdateBody(1, original.bodies[1]), "Restore original collider transform");
+        checkFrames();
+        for (size_t i = 0; i < asset.constraints.size(); ++i)
+        {
+            Check(SameFrame(asset.constraints[i].parentFrame.GetTransform(), original.constraints[i].parentFrame.GetTransform()) &&
+                    SameFrame(asset.constraints[i].childFrame.GetTransform(), original.constraints[i].childFrame.GetTransform()),
+                "Restoring a body also restores its joint attachment frames");
+        }
+        const auto framesBeforeResize = asset.constraints;
+        edited = asset.bodies[1];
+        edited.radius *= 2;
+        edited.mass *= 3;
+        Check(asset.UpdateBody(1, edited), "Edit collider dimensions and mass without changing its transform");
+        for (size_t i = 0; i < asset.constraints.size(); ++i)
+        {
+            Check(std::memcmp(&asset.constraints[i].parentFrame, &framesBeforeResize[i].parentFrame, sizeof(PhysicsJointFrame)) == 0 &&
+                    std::memcmp(&asset.constraints[i].childFrame, &framesBeforeResize[i].childFrame, sizeof(PhysicsJointFrame)) == 0,
+                "Size and mass edits leave joint frames byte-for-byte unchanged");
+        }
+        Check(!asset.UpdateBody(asset.bodies.size(), edited), "Reject an invalid body edit index");
+        edited.bone = "different-bone";
+        Check(!asset.UpdateBody(1, edited), "Body editing cannot silently change the attached bone");
+        std::puts("PASS: collider editing preserves all connected joint frames and asymmetric limits");
+    }
 }
 
 void RunPhysicsAssetTests()
 {
+    TestBodyEditFrames();
     const Matrix4 scaled = Matrix4(OrthogonalTransform(Quaternion(Vector3(kZUnitVector), .7f), Vector3(1, 2, 3))) *
         Matrix4::MakeScale(Vector3(.01f, .02f, .03f));
     const Matrix4 frame = PhysicsBoneFrame(scaled);

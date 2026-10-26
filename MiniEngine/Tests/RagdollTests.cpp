@@ -112,6 +112,64 @@ void RunRagdollTests()
         Check(ragdoll.SetSimulating(true, Vector3(1, 0, 0), error), "Restart ragdoll");
         physics.Step(); ragdoll.Destroy();
     }
+
+    // Reproduce the old editor bug: changing a collider without rebasing its
+    // body-local joints makes articulation reconstruction move the skinned bones.
+    auto editedBody = asset.bodies[1];
+    editedBody.offset = XMFLOAT3(.17f, -.08f, .12f);
+    XMStoreFloat4(&editedBody.rotation, Quaternion(Vector3(kYUnitVector), .7f) * Quaternion(Vector3(kZUnitVector), -.9f));
+    editedBody.shape = PhysicsShapeType::Capsule;
+    auto uncorrected = asset;
+    ConfigureDefaultDrives(uncorrected);
+    uncorrected.bodies[1] = editedBody;
+    Check(ragdoll.Create(physics, uncorrected, skeleton.names, initial, Vector3(kZero), error, false),
+        "Create uncorrected collider edit reproduction");
+    ragdoll.SetCollisionEnabled(false);
+    Check(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.UsesArticulation(),
+        "Start articulation with stale collider-local joint frames");
+    Check(float(Length(Vector3(ragdoll.GetBoneWorld(1).GetW()) - Vector3(initial[3].GetW()))) > .01f,
+        "Stale joint frames reproduce the bone displacement before the first physics step");
+    ragdoll.Destroy();
+
+    const std::vector<int> bodyNodes{1, 3, 4};
+    for (bool articulation : {false, true})
+    {
+        auto edited = asset;
+        if (articulation)
+        {
+            ConfigureDefaultDrives(edited);
+        }
+        Check(edited.UpdateBody(1, editedBody), "Rebase both joints of an edited middle collider");
+        auto editedToe = edited.bodies[2];
+        editedToe.shape = PhysicsShapeType::Box;
+        editedToe.offset = XMFLOAT3(-.04f, .03f, .08f);
+        XMStoreFloat4(&editedToe.rotation, Quaternion(Vector3(kXUnitVector), .5f));
+        Check(edited.UpdateBody(2, editedToe), "Rebase an edited end collider after its parent was edited");
+        Check(ragdoll.Create(physics, edited, skeleton.names, initial, Vector3(kZero), error, false),
+            "Apply edited colliders to a kinematic character");
+        ragdoll.SetCollisionEnabled(false);
+        Check(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.UsesArticulation() == articulation,
+            "Start the edited PA using the requested D6/articulation backend");
+        Check(ragdoll.GetMaxAnchorError() < .0001f, "Edited colliders retain coincident anchors at simulation start");
+        std::vector<Matrix4> editedTargets;
+        for (size_t i = 0; i < bodyNodes.size(); ++i)
+        {
+            const auto& bone = initial[bodyNodes[i]];
+            Check(Near(ragdoll.GetBoneWorld(i), PhysicsBoneFrame(bone)),
+                "Collider translation, rotation and primitive edits do not change initial physics bone poses");
+            editedTargets.push_back(ragdoll.GetBoneWorld(i) * Invert(PhysicsBoneFrame(bone)) * bone);
+        }
+        Check(OverridePhysicsPose(skeleton, pose, component, bodyNodes, editedTargets, finalPose) &&
+                EvaluatePhysicsPose(skeleton, finalPose, component, reconstructed, error),
+            "Reconstruct skinning after starting simulation with edited colliders");
+        for (size_t i = 0; i < initial.size(); ++i)
+        {
+            Check(Near(initial[i], reconstructed[i]),
+                "Edited PA preserves skinning, imported scale and helper bones when simulation begins");
+        }
+        ragdoll.Destroy();
+    }
+    std::puts("PASS: collider edits preserve joint anchors and skinning on D6/articulation simulation start");
     Check(physics.GetErrorCount() == 0, "No PhysX errors during create, simulate, destroy and restart");
     std::puts("PASS: ragdoll skin/world conversion, imported scale, all shapes, D6 fall, floor contact and repeated lifecycle");
 }

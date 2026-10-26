@@ -164,6 +164,13 @@ void RunSpringArmTests();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--ragdoll-only") == 0)
+    {
+        RunPhysicsAssetTests();
+        RunRagdollTests();
+        RunAnatomicalLimitTests();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--pelvis-only") == 0)
     {
         RunPelvisDriveTests();

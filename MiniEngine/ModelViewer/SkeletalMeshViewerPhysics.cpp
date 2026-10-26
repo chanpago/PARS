@@ -342,7 +342,7 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     {
         return;
     }
-    auto& body = m_PhysicsAsset.bodies[m_SelectedBody];
+    auto body = m_PhysicsAsset.bodies[m_SelectedBody];
     bool changed = false;
     ImGui::SetNextItemWidth(100);
     int shape = static_cast<int>(body.shape);
@@ -394,6 +394,10 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     }
     if (changed)
     {
+        if (m_SelectedBody >= 0)
+        {
+            m_PhysicsAsset.UpdateBody(m_SelectedBody, body);
+        }
         m_PhysicsDirty = true;
         m_PhysicsMessage.clear();
     }

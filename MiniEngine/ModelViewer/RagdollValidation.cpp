@@ -5,6 +5,7 @@
 #include "PhysicsWorld.h"
 #include "PreviewAnimInstance.h"
 #include "CommandListManager.h"
+#include "Util/CommandLineArg.h"
 #include <fstream>
 #include <stdexcept>
 #include <cmath>
@@ -12,6 +13,151 @@
 #include <cstdio>
 
 using namespace Math;
+
+// Exercise the saved PA on the imported animations, including the switch before
+// the first physics step. Contacts and drive response cannot explain a jump here.
+bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath)
+{
+    std::ofstream report(reportPath);
+    std::ofstream samples(reportPath + L".csv");
+    std::string error;
+    const auto check = [&](bool condition, const char* message) {
+        report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
+        if (!condition) throw std::runtime_error(message);
+    };
+    try
+    {
+        auto& mesh = character.GetMesh();
+        auto& runtime = mesh.GetRagdoll();
+        auto& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
+        auto* physics = world.GetPhysicsWorld();
+        check(report.good() && samples.good() && physics && mesh.GetPhysicsAsset(), "Loaded character PA and physics world");
+        std::wstring testAsset;
+        if (CommandLineArgs::GetString(L"patestasset", testAsset))
+        {
+            const int length = WideCharToMultiByte(CP_UTF8, 0, testAsset.data(), static_cast<int>(testAsset.size()), nullptr, 0, nullptr, nullptr);
+            check(length > 0, "Comparison PA path is valid UTF-8");
+            std::string path(length, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, testAsset.data(), static_cast<int>(testAsset.size()), &path[0], length, nullptr, nullptr);
+            PARS::PhysicsAsset candidate;
+            check(candidate.Load(path, error) && mesh.SetPhysicsAsset(candidate, error), "Load comparison PA");
+        }
+        uint32_t contacts = 1, diagnostic = 0;
+        CommandLineArgs::GetInteger(L"patestcontacts", contacts);
+        CommandLineArgs::GetInteger(L"patestdiagnostic", diagnostic);
+        runtime.SetCollisionEnabled(contacts != 0);
+        samples << "clip,step,bone,world_rotation_error_rad,joint_error_rad,clamp_rad,position_error_m,actual_x,actual_y,actual_z,target_x,target_y,target_z\n";
+        const auto& asset = *mesh.GetPhysicsAsset();
+        PARS::PhysicsSkeleton skeleton;
+        check(mesh.BuildPhysicsSkeleton(skeleton, error), "Imported skeleton is available");
+        animation.SetLocomotionEnabled(false);
+        animation.SetAutoCycleEnabled(false);
+        world.SetPhysicsPaused(false);
+        world.SetPhysicsTimeScale(1);
+        constexpr float dt = 1.0f / 60;
+        for (uint32_t clip = 0; clip < 3; ++clip)
+        {
+            check(character.StopRagdoll(error), "Restore kinematic animation");
+            character.GetCharacterMovement().StopMovementImmediately();
+            animation.PlayAnimation(clip);
+            physics->ResetClock();
+            for (unsigned step = 0; step < 24; ++step) world.Tick(dt);
+            std::vector<Matrix4> before, after;
+            check(PARS::EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), before, error),
+                "Evaluate animated pose before switching");
+            const auto steps = physics->GetStepCount();
+            check(character.SetPhysicsMode(PARS::PhysicsAnimationMode::ActiveRagdoll, error) && runtime.AreDrivesEnabled(),
+                "Switch kinematic PA to active ragdoll");
+            check(physics->GetStepCount() == steps, "No physics step has run during the switch");
+            check(PARS::EvaluatePhysicsPose(skeleton, mesh.GetFinalPose(), Matrix4(mesh.GetComponentTransform()), after, error),
+                "Evaluate skinning pose after switching");
+            float maxPosition = 0, maxBasis = 0;
+            for (size_t node = 0; node < before.size(); ++node)
+            {
+                maxPosition = Max(maxPosition, float(Length(Vector3(after[node].GetW()) - Vector3(before[node].GetW()))));
+                const auto a = PARS::PhysicsBoneFrame(before[node]), b = PARS::PhysicsBoneFrame(after[node]);
+                maxBasis = Max(maxBasis, Max(float(Length(Vector3(a.GetX()) - Vector3(b.GetX()))),
+                    float(Length(Vector3(a.GetY()) - Vector3(b.GetY())))));
+            }
+            for (size_t body = 0; body < asset.bodies.size(); ++body)
+            {
+                if (asset.bodies[body].bone.find("Foot") == std::string::npos) continue;
+                const int node = runtime.GetBoneNodes()[body];
+                const Vector3 delta = Vector3(runtime.GetBoneWorld(body).GetW()) - Vector3(before[node].GetW());
+                report << "clip=" << clip << " bone=" << asset.bodies[body].bone
+                    << " switch_delta_m=" << float(delta.GetX()) << ',' << float(delta.GetY()) << ',' << float(delta.GetZ())
+                    << " distance_m=" << float(Length(delta)) << std::endl;
+            }
+            report << "clip=" << clip << " max_skin_position_delta_m=" << maxPosition << " max_basis_delta=" << maxBasis << std::endl;
+            if (!diagnostic) check(maxPosition < .001f && maxBasis < .001f, "Active transition preserves all visible bones within 1 mm");
+            check(runtime.SetRootSupported(true, error), "Enable active pelvis support");
+            float maxAnchor = 0;
+            float maxHeadAngle = 0, maxFootAngle = 0, maxFootClamp = 0;
+            for (unsigned step = 0; step < 480; ++step)
+            {
+                world.Tick(dt);
+                maxAnchor = Max(maxAnchor, runtime.GetMaxAnchorError());
+                if (!runtime.IsFinite()) check(false, "Active simulation remains finite");
+                std::vector<Matrix4> target;
+                if (!PARS::EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), target, error))
+                    check(false, "Evaluate active animation target");
+                const auto angle = [](Quaternion a, Quaternion b) {
+                    return 2.0f * std::acos(Clamp(std::abs(XMVectorGetX(XMVector4Dot(Normalize(a), Normalize(b)))), 0.0f, 1.0f));
+                };
+                for (const auto& joint : asset.constraints)
+                {
+                    const int parent = asset.FindBody(joint.parentBone), child = asset.FindBody(joint.childBone);
+                    const auto parentLocal = asset.bodies[parent].GetLocalTransform(), childLocal = asset.bodies[child].GetLocalTransform();
+                    const auto desiredBone = PARS::PhysicsBoneFrame(target[runtime.GetBoneNodes()[child]]);
+                    const auto actualBone = runtime.GetBoneWorld(child);
+                    const auto desired = PARS::EvaluateJointDriveTarget(joint,
+                        PARS::PhysicsBoneFrame(target[runtime.GetBoneNodes()[parent]]) * parentLocal, desiredBone * childLocal, false);
+                    const auto limited = PARS::ClampArticulationDriveTarget(joint, desired);
+                    const auto actual = PARS::EvaluateJointDriveTarget(joint, runtime.GetBoneWorld(parent) * parentLocal, actualBone * childLocal, false);
+                    const auto actualVector = PARS::JointRotationVector(actual), targetVector = PARS::JointRotationVector(desired);
+                    const float worldAngle = angle(Quaternion(Matrix3(desiredBone)), Quaternion(Matrix3(actualBone)));
+                    const float clampAngle = angle(desired, limited);
+                    if (step >= 120)
+                    {
+                        if (joint.childBone.find("Head") != std::string::npos) maxHeadAngle = Max(maxHeadAngle, worldAngle);
+                        if (joint.childBone.find("Foot") != std::string::npos)
+                        {
+                            maxFootAngle = Max(maxFootAngle, worldAngle);
+                            maxFootClamp = Max(maxFootClamp, clampAngle);
+                        }
+                    }
+                    samples << clip << ',' << step << ',' << joint.childBone << ','
+                        << worldAngle << ',' << angle(limited, actual) << ',' << clampAngle << ','
+                        << float(Length(Vector3(desiredBone.GetW()) - Vector3(actualBone.GetW()))) << ','
+                        << float(actualVector.GetX()) << ',' << float(actualVector.GetY()) << ',' << float(actualVector.GetZ()) << ','
+                        << float(targetVector.GetX()) << ',' << float(targetVector.GetY()) << ',' << float(targetVector.GetZ()) << '\n';
+                }
+            }
+            report << "clip=" << clip << " max_anchor_gap_m=" << maxAnchor
+                << " target_clamp_rad=" << runtime.GetMaxTargetClampAngle() << std::endl;
+            check(maxAnchor < .001f, "480 active steps preserve connected joint anchors");
+            report << "clip=" << clip << " max_head_error_deg=" << XMConvertToDegrees(maxHeadAngle)
+                << " max_foot_error_deg=" << XMConvertToDegrees(maxFootAngle)
+                << " max_foot_clamp_deg=" << XMConvertToDegrees(maxFootClamp) << std::endl;
+            if (!diagnostic)
+            {
+                check(maxHeadAngle < XMConvertToRadians(8), "Head follows gait without large contact-induced oscillation");
+                check(maxFootAngle < XMConvertToRadians(15), "Feet follow gait with bounded contact response");
+                check(maxFootClamp < XMConvertToRadians(1), "Ankle limits accommodate the imported gait");
+            }
+        }
+        check(character.StopRagdoll(error) && physics->GetErrorCount() == 0, "Return to animation without PhysX errors");
+        report << (diagnostic ? "DIAGNOSTIC: " : "PASS: ") << "saved PA active transitions and gait on Idle, Walking and SlowRun" << std::endl;
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        report << "FAIL: " << exception.what() << " | " << error << std::endl;
+        character.StopRagdoll(error);
+        return false;
+    }
+}
+
 void RunActiveRagdollValidation(PARS::World& world, PARS::Character& character, std::ostream& report);
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath)
 {

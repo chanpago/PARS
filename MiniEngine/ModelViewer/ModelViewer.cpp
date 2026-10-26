@@ -49,6 +49,7 @@
 #include "PhysicsDemo.h"
 #include "RagdollComparisonRunner.h"
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
+bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
 bool RunPelvisDriveValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath,
     uint32_t profile, uint32_t clip);
 bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const PARS::PhysicsAsset& asset,
@@ -363,6 +364,14 @@ void ModelViewer::Startup(void)
                 if (auto* character = GetPreviewCharacter())
                 {
                     RunPelvisDriveValidation(m_World, *character, ragdollReport, profile, clip);
+                }
+                m_RagdollTestDone = true;
+            }
+            else if (CommandLineArgs::GetString(L"patransitiontest", ragdollReport))
+            {
+                if (auto* character = GetPreviewCharacter())
+                {
+                    RunPATransitionValidation(m_World, *character, ragdollReport);
                 }
                 m_RagdollTestDone = true;
             }

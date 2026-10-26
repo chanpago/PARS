@@ -93,6 +93,9 @@ namespace PARS
         bool UsesArticulation() const;
         int FindBody(const std::string& bone) const;
         int FindConstraint(const std::string& boneA, const std::string& boneB) const;
+        // 같은 본의 바디를 편집하면서 연결된 관절의 본 기준 위치/방향을 유지한다.
+        // 형상/크기/질량만 바뀌면 관절 좌표계는 그대로 둔다.
+        bool UpdateBody(size_t index, const PhysicsBody& updated);
         // 바디를 제거하면 연결된 조인트도 모두 제거한다.
         void RemoveBody(size_t index);
         bool Validate(std::string& error) const;

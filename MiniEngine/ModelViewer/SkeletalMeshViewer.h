@@ -156,6 +156,7 @@ private:
     float m_ViewportHeight = 1;
     PARS::PhysicsAsset m_PhysicsAsset;
     PARS::PhysicsBody m_DragBodyOriginal;
+    std::vector<PARS::PhysicsConstraint> m_DragBodyConstraintsOriginal;
     PARS::PhysicsConstraint m_DragConstraintOriginal;
     bool m_EditConstraints = false, m_ShowConstraints = true, m_ShowLimits = true, m_MoveBothFrames = true;
     int m_SelectedConstraint = -1, m_ConstraintParent = -1, m_ConstraintFrame = 0;
