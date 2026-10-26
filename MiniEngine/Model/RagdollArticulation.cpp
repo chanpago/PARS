@@ -121,7 +121,7 @@ namespace PARS
         }
         m_Articulation->setName("RagdollArticulation");
         m_Articulation->setArticulationFlag(PxArticulationFlag::eDRIVE_LIMITS_ARE_FORCES, true);
-        m_Articulation->setSolverIterationCounts(16, 4);
+        m_Articulation->setSolverIterationCounts(32, 8);
         m_Bodies.resize(count, nullptr);
         m_BoneNodes.resize(count);
         m_ArticulationJoints.resize(m_Asset.constraints.size(), nullptr);
