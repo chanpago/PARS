@@ -89,6 +89,54 @@ namespace
         std::puts("PASS: whole-body COM, unequal masses and rotated local mass frames on D6/articulation");
     }
 
+    void TestMovementBlocking()
+    {
+        using namespace physx;
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize PA movement queries");
+        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -.5f, 0)), PxVec3(10, .5f, 10), "Floor");
+        auto* wall = world.CreateStaticBox(PxTransform(PxVec3(0, 1, 2)), PxVec3(10, 2, .1f), "Wall");
+        auto* trigger = world.CreateStaticBox(PxTransform(PxVec3(0, .5f, .5f)), PxVec3(2, 1, .05f), "Trigger");
+        Check(floor && wall && trigger, "Create PA movement obstacles");
+        PxShape* triggerShape = nullptr;
+        trigger->getShapes(&triggerShape, 1);
+        triggerShape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, false);
+        triggerShape->setFlag(PxShapeFlag::eTRIGGER_SHAPE, true);
+        PhysicsBody root, limb;
+        root.bone = "root"; root.shape = PhysicsShapeType::Box; root.halfExtents = XMFLOAT3(.1f, .15f, .1f);
+        limb.bone = "limb"; limb.shape = PhysicsShapeType::Capsule; limb.radius = .04f; limb.halfLength = .08f;
+        limb.offset = XMFLOAT3(.06f, 0, .02f);
+        XMStoreFloat4(&limb.rotation, Quaternion(Vector3(kYUnitVector), XM_PIDIV2));
+        const std::vector<std::string> names{"root", "limb"};
+        const std::vector<Matrix4> pose{Matrix4(Matrix3(kIdentity), Vector3(0, .15f, 0)),
+            Matrix4(Matrix3(kIdentity), Vector3(0, .55f, 0))};
+        PhysicsConstraint joint; joint.parentBone = names[0]; joint.childBone = names[1];
+        joint.SetWorldFrame(pose[0] * root.GetLocalTransform(), pose[1] * limb.GetLocalTransform(), pose[1]);
+        for (bool articulation : {false, true})
+        {
+            PhysicsAsset asset; asset.bodies = {root, limb}; asset.constraints = {joint};
+            if (articulation) ConfigureDefaultDrives(asset);
+            Ragdoll ragdoll; std::string error;
+            Check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error), "Create PA movement bodies");
+            const auto forward = ragdoll.ConstrainHorizontalMovement(pose, Vector3(0, 0, 4));
+            Check(float(forward.GetZ()) > 1.65f && float(forward.GetZ()) < 1.77f,
+                "PA box and rotated capsule stop at the wall without using the wider movement capsule");
+            const auto diagonal = ragdoll.ConstrainHorizontalMovement(pose, Vector3(3, 0, 4));
+            Check(std::abs(float(diagonal.GetX()) - 3) < .001f && float(diagonal.GetZ()) < 1.77f,
+                "PA movement slides tangentially along the wall");
+            auto target = pose;
+            for (auto& bone : target) bone.SetW(bone.GetW() + Vector4(0, 0, 1.78f, 0));
+            Check(float(Length(ragdoll.ConstrainHorizontalMovement(target, Vector3(0, 0, .02f)))) < 1e-5f,
+                "A blocked target cannot keep advancing while physical bodies lag behind it");
+            Check(std::abs(float(ragdoll.ConstrainHorizontalMovement(target, Vector3(0, 0, -.2f)).GetZ()) + .2f) < 1e-5f,
+                "Movement can back out of an overlapping target instead of sticking to the wall");
+            Check(std::abs(float(ragdoll.ConstrainHorizontalMovement(pose, Vector3(1, 0, 0)).GetX()) - 1) < 1e-5f,
+                "Ground contact and own PA bodies do not block horizontal movement");
+        }
+        Check(world.GetErrorCount() == 0, "PA movement queries produce no PhysX errors");
+        std::puts("PASS: PA geometry wall blocking, sliding, target lead prevention and self/ground/trigger filtering");
+    }
+
     void CheckBodyMaterials(physx::PxRigidStatic& floor, const PhysicsAsset& asset)
     {
         using namespace physx;
@@ -134,6 +182,7 @@ namespace
 void RunRagdollTests()
 {
     TestCenterOfMass();
+    TestMovementBlocking();
     // A skin root ignores the .01 armature above it. The mesh supplies that
     // scale exactly once, as in the imported Mixamo skeleton and DefaultVS.
     PhysicsSkeleton skeleton{{"armature", "hip", "helper", "leg", "toe", "mesh"},

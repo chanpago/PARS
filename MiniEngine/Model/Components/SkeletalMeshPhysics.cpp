@@ -72,6 +72,17 @@ namespace PARS
         return EvaluatePhysicsPose(skeleton, m_AnimInstance->GetPose(), component, worldPose, error);
     }
 
+    Vector3 SkeletalMeshComponent::ConstrainHorizontalMovement(Vector3 displacement) const
+    {
+        std::vector<Matrix4> target;
+        std::string error;
+        if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, error))
+        {
+            return Vector3(kZero);
+        }
+        return m_Ragdoll.ConstrainHorizontalMovement(target, displacement);
+    }
+
     void SkeletalMeshComponent::BeginPlay()
     {
         if (m_PhysicsAsset && !m_Ragdoll.IsActive())

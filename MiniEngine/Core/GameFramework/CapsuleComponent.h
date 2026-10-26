@@ -45,6 +45,15 @@ namespace PARS
         {
             return m_PhysicsEnabled;
         }
+        // 수평 차단을 꺼도 중력, 지면 접지와 천장 충돌은 유지한다.
+        void SetHorizontalBlockingEnabled(bool enabled)
+        {
+            m_HorizontalBlockingEnabled = enabled;
+        }
+        bool IsHorizontalBlockingEnabled() const
+        {
+            return m_HorizontalBlockingEnabled;
+        }
         struct MoveResult
         {
             bool grounded = false, ceiling = false, wall = false;
@@ -74,5 +83,6 @@ namespace PARS
         float m_Radius = 0.3f;
         float m_HalfHeight = 0.9f;
         bool m_PhysicsEnabled = true;
+        bool m_HorizontalBlockingEnabled = true;
     };
 }

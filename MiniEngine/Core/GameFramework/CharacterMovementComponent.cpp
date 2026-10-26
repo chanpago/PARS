@@ -56,7 +56,9 @@ namespace PARS
         }
         m_VerticalSpeed = m_Grounded && m_VerticalSpeed <= 0 ? -0.5f : Max(m_VerticalSpeed - 9.81f * dt, -50.0f);
         const Vector3 before = capsule->GetComponentTransform().GetTranslation();
-        const auto collision = capsule->Move((horizontal + Vector3(0, m_VerticalSpeed, 0)) * dt, dt);
+        const Vector3 requested = horizontal * dt;
+        const Vector3 allowed = m_HorizontalMoveConstraint ? m_HorizontalMoveConstraint(requested) : requested;
+        const auto collision = capsule->Move(allowed + Vector3(0, m_VerticalSpeed * dt, 0), dt);
         m_Grounded = collision.grounded;
         if (collision.grounded || (collision.ceiling && m_VerticalSpeed > 0))
         {

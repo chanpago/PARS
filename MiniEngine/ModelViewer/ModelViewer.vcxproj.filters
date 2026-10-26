@@ -13,10 +13,13 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FootSoleDebug.cpp" />
+    <ClCompile Include="RagdollImpactTest.cpp" />
+    <ClCompile Include="RagdollImpactValidation.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FootSoleDebug.h" />
     <ClInclude Include="FootSupportHull.h" />
+    <ClInclude Include="RagdollImpactTest.h" />
   </ItemGroup>
   <ItemGroup>
     <CopyFileToFolders Include="Textures\Atrium_diffuseIBL.dds">

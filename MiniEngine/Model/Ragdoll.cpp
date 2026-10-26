@@ -47,8 +47,124 @@ namespace PARS
             return motion == PhysicsJointMotion::Locked ? PxD6Motion::eLOCKED : motion == PhysicsJointMotion::Limited ? PxD6Motion::eLIMITED
                                                                                                                       : PxD6Motion::eFREE;
         }
+
+        class MovementQueryFilter : public PxQueryFilterCallback
+        {
+        public:
+            MovementQueryFilter(const std::vector<PxRigidBody*>& bodies, const void* owner)
+                : m_Bodies(bodies), m_Owner(owner)
+            {
+            }
+            PxVec3 direction{0};
+            PxQueryHitType::Enum preFilter(const PxFilterData&, const PxShape* shape,
+                const PxRigidActor* actor, PxHitFlags&) override
+            {
+                return !shape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) ||
+                        shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ||
+                        (m_Owner && actor->userData == m_Owner) ||
+                        std::find(m_Bodies.begin(), m_Bodies.end(), actor) != m_Bodies.end()
+                    ? PxQueryHitType::eNONE : PxQueryHitType::eBLOCK;
+            }
+            PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit& hit,
+                const PxShape*, const PxRigidActor*) override
+            {
+                const auto& sweep = static_cast<const PxSweepHit&>(hit);
+                // 지면 접촉은 물리 솔버에 맡기고, 벽 안쪽으로 들어가는 수평 이동만 제한한다.
+                return sweep.normal.y < .70710678f && sweep.normal.dot(direction) < -1e-5f
+                    ? PxQueryHitType::eBLOCK : PxQueryHitType::eNONE;
+            }
+
+        private:
+            const std::vector<PxRigidBody*>& m_Bodies;
+            const void* m_Owner;
+        };
     }
 #endif
+    Vector3 Ragdoll::ConstrainHorizontalMovement(const std::vector<Matrix4>& boneWorld, Vector3 displacement) const
+    {
+#if defined(_M_X64)
+        const PxVec3 requested(float(displacement.GetX()), 0, float(displacement.GetZ()));
+        if (!requested.isFinite())
+        {
+            return Vector3(kZero);
+        }
+        if (!IsActive() || !m_CollisionEnabled || requested.magnitudeSquared() < 1e-12f)
+        {
+            return Vector3(requested.x, 0, requested.z);
+        }
+        std::vector<PxTransform> targets;
+        for (size_t i = 0; i < m_Bodies.size(); ++i)
+        {
+            const int node = m_BoneNodes[i];
+            if (node < 0 || size_t(node) >= boneWorld.size())
+            {
+                return Vector3(kZero);
+            }
+            const auto target = ToPx(PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform());
+            if (!target.isValid())
+            {
+                return Vector3(kZero);
+            }
+            targets.push_back(target);
+        }
+        MovementQueryFilter filter(m_Bodies, m_QueryOwner);
+        PxVec3 moved(0), remaining = requested;
+        constexpr float margin = .002f;
+        for (int iteration = 0; iteration < 3 && remaining.magnitudeSquared() > 1e-12f; ++iteration)
+        {
+            const float distance = remaining.magnitude();
+            filter.direction = remaining / distance;
+            float allowed = distance;
+            PxVec3 normal(0);
+            for (size_t i = 0; i < m_Bodies.size(); ++i)
+            {
+                const auto* body = m_Bodies[i];
+                auto* scene = body->getScene();
+                if (!scene)
+                {
+                    continue;
+                }
+                std::vector<PxShape*> shapes(body->getNbShapes());
+                body->getShapes(shapes.data(), static_cast<PxU32>(shapes.size()));
+                for (const auto* shape : shapes)
+                {
+                    if (!shape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE))
+                    {
+                        continue;
+                    }
+                    // 실제 바디뿐 아니라 목표 형상도 검사해 바디가 막혔을 때 루트만 계속 전진하지 않게 한다.
+                    for (auto pose : {body->getGlobalPose() * shape->getLocalPose(), targets[i] * shape->getLocalPose()})
+                    {
+                        pose.p += moved;
+                        PxSweepBuffer hit;
+                        scene->sweep(shape->getGeometry(), pose, filter.direction, distance + margin, hit,
+                            PxHitFlag::eDEFAULT | PxHitFlag::eMTD,
+                            PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::ePOSTFILTER), &filter);
+                        if (hit.hasBlock && hit.block.distance - margin < allowed)
+                        {
+                            allowed = PxMax(0.0f, hit.block.distance - margin);
+                            normal = hit.block.normal;
+                        }
+                    }
+                }
+            }
+            const PxVec3 travel = filter.direction * allowed;
+            moved += travel;
+            remaining -= travel;
+            normal.y = 0;
+            if (normal.normalize() < 1e-6f)
+            {
+                break;
+            }
+            remaining -= normal * PxMin(0.0f, remaining.dot(normal));
+        }
+        return Vector3(moved.x, 0, moved.z);
+#else
+        (void)boneWorld;
+        return displacement;
+#endif
+    }
+
     Ragdoll::~Ragdoll()
     {
         Destroy();

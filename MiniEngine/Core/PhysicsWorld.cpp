@@ -381,6 +381,7 @@ namespace
         }
         const void* ignoredOwner;
         PxVec3 direction{0};
+        bool verticalOnly = false;
         PxQueryHitType::Enum preFilter(const PxFilterData&, const PxShape* shape,
             const PxRigidActor* actor, PxHitFlags&) override
         {
@@ -394,7 +395,8 @@ namespace
         {
             const auto& sweep = static_cast<const PxSweepHit&>(hit);
             // 바닥과 접촉해도 접선 방향 이동이나 바닥에서 멀어지는 이동은 막지 않는다.
-            return sweep.normal.dot(direction) < -1e-5f ? PxQueryHitType::eBLOCK : PxQueryHitType::eNONE;
+            return (!verticalOnly || PxAbs(sweep.normal.y) >= WalkableNormal) && sweep.normal.dot(direction) < -1e-5f
+                ? PxQueryHitType::eBLOCK : PxQueryHitType::eNONE;
         }
     };
 
@@ -402,16 +404,17 @@ namespace
     class CapsulePenetration : public PxOverlapCallback
     {
     public:
-        CapsulePenetration(const PhysicsQueryCapsule& capsule)
+        CapsulePenetration(const PhysicsQueryCapsule& capsule, bool verticalOnly = false)
             : PxOverlapCallback(hits, 32),
-              geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre))
+              geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre)), verticalOnly(verticalOnly)
         {
         }
         void Consider(const PxGeometry& other, const PxTransform& otherPose)
         {
             PxVec3 normal;
             float depth;
-            if (PxGeometryQuery::computePenetration(normal, depth, geometry, pose, other, otherPose) && depth > deepest)
+            if (PxGeometryQuery::computePenetration(normal, depth, geometry, pose, other, otherPose) && depth > deepest &&
+                (!verticalOnly || PxAbs(normal.y) >= WalkableNormal))
             {
                 deepest = depth;
                 direction = normal;
@@ -435,6 +438,7 @@ namespace
         PxVec3 direction{0};
 
     private:
+        bool verticalOnly;
         PxOverlapHit hits[32];
     };
 }
@@ -499,7 +503,8 @@ bool PhysicsWorld::Raycast(const PxVec3& origin, const PxVec3& displacement,
     return true;
 }
 
-PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsule& capsule, const PxVec3& displacement)
+PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsule& capsule, const PxVec3& displacement,
+    bool blockHorizontal)
 {
     CapsuleMoveResult result;
     if (!m_Scene || !capsule.centre.isFinite() || !displacement.isFinite())
@@ -507,15 +512,21 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         return result;
     }
     OwnerQueryFilter filter(capsule.owner);
+    filter.verticalOnly = !blockHorizontal;
+    if (!blockHorizontal)
+    {
+        // 수평 입력은 그대로 적용하고, 새 위치에서 지면/천장과의 수직 충돌만 해결한다.
+        capsule.centre += PxVec3(displacement.x, 0, displacement.z);
+    }
     // 스윕을 시도하기 전에 생성/순간이동으로 발생한 파고듦을 해결한다.
     for (int iteration = 0; iteration < 8; ++iteration)
     {
-        CapsulePenetration overlaps(capsule);
+        CapsulePenetration overlaps(capsule, !blockHorizontal);
         m_Scene->overlap(overlaps.geometry, overlaps.pose, overlaps,
             PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::eNO_BLOCK), &filter);
         for (const auto& other : m_QueryCapsules)
         {
-            if (other.get() != &capsule)
+            if (blockHorizontal && other.get() != &capsule)
             {
                 overlaps.Consider(CapsuleGeometry(*other), CapsulePose(other->centre));
             }
@@ -524,7 +535,15 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         {
             break;
         }
-        capsule.centre += overlaps.direction * PxMin(overlaps.deepest + SweepEpsilon, 2.0f);
+        if (blockHorizontal)
+        {
+            capsule.centre += overlaps.direction * PxMin(overlaps.deepest + SweepEpsilon, 2.0f);
+        }
+        else
+        {
+            // 경사면에서도 수평 위치를 밀어내지 않고 필요한 높이만 복구한다.
+            capsule.centre.y += PxClamp((overlaps.deepest + SweepEpsilon) / overlaps.direction.y, -2.0f, 2.0f);
+        }
     }
 
     const auto sweep = [&](const PxVec3& origin, const PxVec3& delta, PxGeomSweepHit& hit) {
@@ -548,7 +567,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         // 다른 캐릭터도 프록시 바디를 등록하지 않고 쿼리 형상으로만 처리한다.
         for (const auto& other : m_QueryCapsules)
         {
-            if (other.get() == &capsule)
+            if (!blockHorizontal || other.get() == &capsule)
             {
                 continue;
             }
@@ -574,7 +593,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
     const PxVec3 horizontal(displacement.x, 0, displacement.z);
     bool stepped = false;
     PxGeomSweepHit obstruction;
-    if (floorContact && floor.normal.y > .01f && sweep(capsule.centre, horizontal, obstruction) && obstruction.normal.y < WalkableNormal)
+    if (blockHorizontal && floorContact && floor.normal.y > .01f && sweep(capsule.centre, horizontal, obstruction) && obstruction.normal.y < WalkableNormal)
     {
         // 기존의 25cm 계단 허용 높이를 유지한다. 세 이동 구간이 모두 막히지 않아야 하고
         // 착지면도 걸을 수 있어야 한다. 낮은 천장을 뚫고 올라가지 않도록 한다.
@@ -637,7 +656,10 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
     };
     if (!stepped)
     {
-        slide(horizontal, false);
+        if (blockHorizontal)
+        {
+            slide(horizontal, false);
+        }
         slide(PxVec3(0, displacement.y, 0), true);
     }
     if (displacement.y <= 0)

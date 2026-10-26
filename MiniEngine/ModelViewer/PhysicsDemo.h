@@ -25,6 +25,9 @@ public:
     void Render(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor, bool comparisonScene = false);
     void RenderUI();
+    void RenderSpheres(GraphicsContext& context, const Math::Camera& camera,
+        const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
+        const std::vector<physx::PxRigidDynamic*>& spheres, float radius);
     void RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     void RenderDebugLines(GraphicsContext& context, const Math::Camera& camera,

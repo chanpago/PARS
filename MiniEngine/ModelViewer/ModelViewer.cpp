@@ -48,9 +48,13 @@
 #if defined(_M_X64)
 #include "PhysicsDemo.h"
 #include "FootSoleDebug.h"
+#include "RagdollImpactTest.h"
+bool RunRagdollImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
+    const std::wstring& path);
 #include "RagdollComparisonRunner.h"
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
 bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
+bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
 bool RunPelvisDriveValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath,
     uint32_t profile, uint32_t clip);
 bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const PARS::PhysicsAsset& asset,
@@ -140,6 +144,13 @@ public:
             return true;
         }
 #if defined(_M_X64)
+        std::wstring impactCapture;
+        if (CommandLineArgs::GetString(L"impactcapture", impactCapture) && ++m_ImpactCaptureFrames == 12)
+        {
+            g_OverlayBuffer.ExportToFile(impactCapture + L".ui");
+            g_SceneColorBuffer.ExportToFile(impactCapture + L".scene");
+            return true;
+        }
         std::wstring comparisonCapture;
         const bool captureReturn = CommandLineArgs::GetString(L"comparisonreturncapture", comparisonCapture);
         if (m_Comparison && (captureReturn || CommandLineArgs::GetString(L"comparisoncapture", comparisonCapture)))
@@ -223,6 +234,8 @@ private:
 #if defined(_M_X64)
     unique_ptr<PhysicsDemo> m_PhysicsDemo;
     FootSoleDebug m_FootSoles;
+    unique_ptr<RagdollImpactTest> m_ImpactTest;
+    uint32_t m_ImpactCaptureFrames = 0;
     unique_ptr<RagdollComparisonRunner> m_Comparison;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
@@ -357,7 +370,15 @@ void ModelViewer::Startup(void)
             // 새 Actor와 컴포넌트의 BeginPlay로 물리 객체를 생성하고, 첫 포즈의 렌더 데이터까지 준비한다.
             LoadAnimationPreview(forceRebuild);
             std::wstring ragdollReport;
-            if (CommandLineArgs::GetString(L"pelvistest", ragdollReport))
+            if (CommandLineArgs::GetString(L"impacttest", ragdollReport))
+            {
+                if (m_MeshViewer) m_MeshViewer->Close();
+                if (m_ImpactTest && GetPreviewCharacter())
+                    RunRagdollImpactValidation(*m_ImpactTest, m_World, *GetPreviewCharacter(), ragdollReport);
+                std::wstring capture;
+                m_RagdollTestDone = !CommandLineArgs::GetString(L"impactcapture", capture);
+            }
+            else if (CommandLineArgs::GetString(L"pelvistest", ragdollReport))
             {
                 uint32_t profile = 2;
                 uint32_t clip = 0;
@@ -374,6 +395,14 @@ void ModelViewer::Startup(void)
                 if (auto* character = GetPreviewCharacter())
                 {
                     RunPATransitionValidation(m_World, *character, ragdollReport);
+                }
+                m_RagdollTestDone = true;
+            }
+            else if (CommandLineArgs::GetString(L"pawalltest", ragdollReport))
+            {
+                if (auto* character = GetPreviewCharacter())
+                {
+                    RunCharacterWallValidation(m_World, *character, ragdollReport);
                 }
                 m_RagdollTestDone = true;
             }
@@ -607,6 +636,17 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     // Startup() -> LoadAnimationPreview() -> 여기: 프레임 갱신 없이 Actor 초기화를 실행하는 실제 호출 위치다.
     // [캐릭터 초기화] 설정을 마친 Actor의 BeginPlay를 실행하고, 현재 포즈에 맞춰 PA 물리 객체를 생성한다.
     m_World.InitializePendingActors();
+#if defined(_M_X64)
+    if (m_PhysicsDemo && mesh.GetPhysicsAsset())
+    {
+        m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World);
+        if (!m_ImpactTest->Initialize(models[0], *mesh.GetPhysicsAsset()))
+        {
+            m_RagdollMessage = m_ImpactTest->GetStatusMessage();
+            m_ImpactTest.reset();
+        }
+    }
+#endif
     auto& context = GraphicsContext::Begin(L"Initialize Character Pose");
     // 현재 포즈의 스키닝 행렬 등 렌더 데이터를 준비하고, GPU 명령 완료를 기다린다.
     Renderer::UpdateWorldRenderData(m_World, context);
@@ -778,6 +818,10 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
     player->SetMoveInput(float(IsPressed(kKey_w)) - float(IsPressed(kKey_s)) + GetAnalogInput(kAnalogLeftStickY),
         float(IsPressed(kKey_d)) - float(IsPressed(kKey_a)) + GetAnalogInput(kAnalogLeftStickX),
         IsPressed(kKey_lshift) || IsPressed(kKey_rshift) || IsPressed(kLThumbClick));
+#if defined(_M_X64)
+    if (m_ImpactTest && player->IsInputEnabled() && !ImGui::GetIO().WantCaptureKeyboard && IsFirstPressed(kKey_r))
+        m_ImpactTest->FireFrom(*character);
+#endif
 }
 
 void ModelViewer::UpdateFollowCamera(float deltaTime)
@@ -807,6 +851,7 @@ void ModelViewer::Cleanup(void)
     m_MeshViewer.reset();
 #if defined(_M_X64)
     m_Comparison.reset();
+    m_ImpactTest.reset();
 #endif
     m_PreviewCharacter = {};
     m_PlayerController = {};
@@ -936,6 +981,7 @@ void ModelViewer::Update(float deltaT)
         // 물리 디버거(PVD) 연결 상태를 갱신하고, 물리 스텝이 진행됐으면 낙하 상자의 높이를 기록한다.
         // 이 함수는 데모의 관측/연결 관리이며, 월드 물리 계산은 바로 위 World::Tick에서 수행한다.
         m_PhysicsDemo->Update(deltaT);
+        if (m_ImpactTest) m_ImpactTest->Update();
     }
 #endif
     if (GetPlayerController() && !m_FreeCamera)
@@ -1210,6 +1256,8 @@ void ModelViewer::RenderUI(GraphicsContext& context)
     if (m_PhysicsDemo)
     {
         m_PhysicsDemo->RenderUI();
+        if (m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
+            m_ImpactTest->DrawUI(GetPreviewCharacter());
         if (!m_PreviewMode)
         {
             return;
@@ -1277,6 +1325,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     ImGui::Text(u8"속도: %.2f m/s | %s", movement.GetGroundSpeed(),
                         movement.IsMovingOnGround() ? u8"지면 접촉" : u8"공중");
                     ImGui::Text(u8"블렌딩: %.0f%%", animation->GetBlendAlpha() * 100.0f);
+                    ImGui::TextUnformatted(character->GetMesh().IsActiveRagdoll()
+                            ? u8"수평 충돌: PA 리지드바디"
+                            : character->IsRagdoll() ? u8"수평 이동 제어: 꺼짐 (패시브 래그돌)"
+                                                     : u8"수평 충돌: 이동 캡슐");
                 }
                 if (auto character = GetPreviewCharacter())
                 {
@@ -1593,6 +1645,14 @@ void ModelViewer::RenderScene(void)
     if (m_PhysicsDemo && !(m_Comparison && m_Comparison->IsShowingScene()))
     {
         m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
+        if (m_ImpactTest)
+        {
+            m_PhysicsDemo->RenderSpheres(gfxContext, m_Camera, viewport, scissor,
+                m_ImpactTest->GetProjectiles(), RagdollImpactTest::SphereRadius);
+            std::vector<physx::PxDebugLine> lines;
+            m_ImpactTest->BuildLines(lines);
+            m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
+        }
         if (auto* character = GetPreviewCharacter())
         {
             std::vector<physx::PxDebugLine> lines;

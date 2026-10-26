@@ -14,6 +14,114 @@
 
 using namespace Math;
 
+bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath)
+{
+    using namespace PARS;
+    using namespace physx;
+    std::ofstream report(reportPath);
+    const auto check = [&](bool condition, const char* message) {
+        report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
+        if (!condition) throw std::runtime_error(message);
+    };
+    auto* physics = world.GetPhysicsWorld();
+    PxRigidStatic* wall = nullptr;
+    try
+    {
+        check(report.good() && physics && character.GetMesh().GetPhysicsAsset(), "Load actual character and saved PA");
+        const auto errors = physics->GetErrorCount();
+        wall = physics->CreateStaticBox(PxTransform(PxVec3(2, 2, 3.1f)), PxVec3(2, 2, .1f), "PA wall validation");
+        check(wall != nullptr, "Create wall with its front face at Z=3m");
+        const auto bodyFront = [&]() {
+            auto* scene = wall->getScene();
+            float front = -100;
+            const auto consider = [&](const PxRigidActor* body) {
+                if (body->userData == &character) front = PxMax(front, body->getWorldBounds(1.0f).maximum.z);
+            };
+            std::vector<PxActor*> actors(scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC));
+            scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors.data(), static_cast<PxU32>(actors.size()));
+            for (auto* actor : actors) consider(actor->is<PxRigidActor>());
+            std::vector<PxArticulationReducedCoordinate*> rigs(scene->getNbArticulations());
+            scene->getArticulations(rigs.data(), static_cast<PxU32>(rigs.size()));
+            for (auto* rig : rigs)
+            {
+                std::vector<PxArticulationLink*> links(rig->getNbLinks());
+                rig->getLinks(links.data(), static_cast<PxU32>(links.size()));
+                for (auto* link : links) consider(link);
+            }
+            return front;
+        };
+        auto& mesh = character.GetMesh();
+        auto& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
+        auto& movement = character.GetCharacterMovement();
+        auto& capsule = character.GetCapsuleComponent();
+        world.SetPhysicsPaused(false);
+        world.SetPhysicsTimeScale(1);
+        for (bool active : {false, true})
+        {
+            std::string error;
+            check(character.StopRagdoll(error), "Reset mode before wall approach");
+            movement.StopMovementImmediately();
+            character.SetActorTransform(AffineTransform(Matrix3(kIdentity), Vector3(2, capsule.GetHalfHeight(), 0)));
+            animation.SetAutoCycleEnabled(false);
+            animation.SetLocomotionEnabled(true);
+            animation.SetPlaying(true);
+            animation.PlayAnimation(0);
+            world.Tick(0);
+            if (active)
+            {
+                check(character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
+                        mesh.GetRagdoll().SetRootSupported(true, error), "Enable actual articulated active ragdoll");
+            }
+            for (int i = 0; i < 60; ++i) world.Tick(1.0f / 60);
+            check(capsule.IsHorizontalBlockingEnabled() == !active,
+                "Animation uses capsule blocking and active ragdoll disables capsule wall blocking");
+            float maximumFront = bodyFront(), maximumRoot = 0;
+            for (int i = 0; i < 360; ++i)
+            {
+                character.SetRunRequested(true);
+                character.AddMovementInput(Vector3(0, 0, 1));
+                world.Tick(1.0f / 60);
+                maximumFront = Max(maximumFront, bodyFront());
+                maximumRoot = Max(maximumRoot, float(character.GetActorLocation().GetZ()));
+                if (!mesh.GetRagdoll().IsFinite()) check(false, "Bodies remain finite during sustained wall input");
+            }
+            report << "active=" << active << " root_max_z=" << maximumRoot << " body_front_max_z=" << maximumFront
+                   << " final_speed=" << movement.GetGroundSpeed() << std::endl;
+            check(maximumRoot > 2 && maximumRoot < 3 && movement.GetGroundSpeed() < .1f,
+                "Sustained run input reaches the wall and stops the movement target");
+            if (active)
+            {
+                check(maximumFront < 3.02f && mesh.GetRagdoll().GetKinematicBodyCount() == 0,
+                    "Actual dynamic PA bodies stay on the near side of the wall throughout the approach");
+            }
+            else
+            {
+                check(maximumRoot < 2.70f, "Kinematic movement stops at the original capsule radius and skin");
+            }
+            const float stoppedAt = character.GetActorLocation().GetZ();
+            for (int i = 0; i < 60; ++i)
+            {
+                character.AddMovementInput(Vector3(0, 0, -1));
+                world.Tick(1.0f / 60);
+            }
+            check(float(character.GetActorLocation().GetZ()) < stoppedAt - .5f, "Character can retreat from the wall");
+        }
+        std::string error;
+        check(character.StopRagdoll(error) && capsule.IsHorizontalBlockingEnabled(),
+            "Returning to animation immediately restores capsule wall blocking");
+        check(physics->GetErrorCount() == errors, "No PhysX errors in mode-specific wall collision");
+        wall->release();
+        report << "PASS: imported character capsule/PA wall blocking" << std::endl;
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        if (wall) wall->release();
+        report << "FAILED: " << exception.what() << std::endl;
+        return false;
+    }
+}
+
 // Exercise the saved PA on the imported animations, including the switch before
 // the first physics step. Contacts and drive response cannot explain a jump here.
 bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath)

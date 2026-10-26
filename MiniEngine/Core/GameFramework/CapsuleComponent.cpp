@@ -105,7 +105,7 @@ namespace PARS
         // Actor를 직접 수정하면 순간이동으로 처리한다. 일반 이동은 쿼리용 형상을 스윕한 뒤
         // 충돌을 해결한 중심 위치를 컴포넌트 계층에 다시 반영한다.
         m_QueryCapsule->centre = requested;
-        const auto flags = m_PhysicsWorld->MoveQueryCapsule(*m_QueryCapsule, delta);
+        const auto flags = m_PhysicsWorld->MoveQueryCapsule(*m_QueryCapsule, delta, m_HorizontalBlockingEnabled);
         result.grounded = flags.grounded;
         result.ceiling = flags.ceiling;
         result.wall = flags.wall;

@@ -1,5 +1,6 @@
 #pragma once
 #include "PawnMovementComponent.h"
+#include <functional>
 
 namespace PARS
 {
@@ -19,6 +20,10 @@ namespace PARS
         }
         float GetGroundSpeed() const;
         void StopMovementImmediately();
+        void SetHorizontalMoveConstraint(std::function<Math::Vector3(Math::Vector3)> constraint)
+        {
+            m_HorizontalMoveConstraint = std::move(constraint);
+        }
 
     protected:
         void PreparePhysics(float deltaTime) override;
@@ -32,5 +37,6 @@ namespace PARS
         Math::Vector3 m_Input{Math::kZero};
         bool m_Grounded = false;
         float m_VerticalSpeed = 0;
+        std::function<Math::Vector3(Math::Vector3)> m_HorizontalMoveConstraint;
     };
 }

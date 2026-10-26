@@ -164,6 +164,12 @@ void RunSpringArmTests();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--movement-only") == 0)
+    {
+        RunCharacterMovementTests();
+        RunSpringArmTests();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--ragdoll-only") == 0)
     {
         RunPhysicsAssetTests();

@@ -39,6 +39,7 @@ namespace PARS
 
     void Character::SyncRagdollMovement()
     {
+        m_Capsule->SetHorizontalBlockingEnabled(!m_Mesh->IsActiveRagdoll());
         if (!IsRagdoll())
         {
             return;
@@ -84,6 +85,7 @@ namespace PARS
             return false;
         }
         m_Mesh->StopRagdoll();
+        m_Capsule->SetHorizontalBlockingEnabled(true);
         m_Movement->StopMovementImmediately();
         m_Movement->SetTickEnabled(m_MovementWasEnabled);
         error.clear();
@@ -99,6 +101,9 @@ namespace PARS
         m_Movement->SetUpdatedComponent(*m_Capsule);
         m_Mesh = &CreateDefaultSubobject<SkeletalMeshComponent>("SkeletalMeshComponent");
         m_Mesh->AttachToComponent(*m_Capsule);
+        m_Movement->SetHorizontalMoveConstraint([this](Math::Vector3 displacement) {
+            return m_Mesh->IsActiveRagdoll() ? m_Mesh->ConstrainHorizontalMovement(displacement) : displacement;
+        });
         // Actor 원점은 캡슐 중심이며, 가져온 메시의 원점은 발 위치에 있다.
         m_Mesh->SetRelativeLocation(Math::Vector3(0, -m_Capsule->GetHalfHeight(), 0));
     }

@@ -86,6 +86,9 @@ namespace PARS
         void SetQueryOwner(void* owner);
         // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
         void SetCollisionEnabled(bool enabled);
+        // 실제 PA 형상과 애니메이션 목표를 스윕해 벽 너머로 이동 목표가 누적되지 않게 한다.
+        Math::Vector3 ConstrainHorizontalMovement(const std::vector<Math::Matrix4>& boneWorld,
+            Math::Vector3 displacement) const;
         // 통합 테스트와 PVD 패널에서도 사용하는 진단 정보다.
         float GetMaxAnchorError() const;
         float GetMaxAngularError(size_t* worstJoint = nullptr) const;

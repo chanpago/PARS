@@ -8,6 +8,7 @@
 #include "CompiledShaders/PhysicsDemoVS.h"
 #include "CompiledShaders/PhysicsDemoPS.h"
 #include <cfloat>
+#include <cmath>
 #include <Windows.h>
 #include <TlHelp32.h>
 
@@ -462,6 +463,44 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
         context.SetDynamicVB(0, count, sizeof(Vertex), vertices);
         context.Draw(count);
     }
+}
+
+void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& camera,
+    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
+    const std::vector<PxRigidDynamic*>& spheres, float radius)
+{
+    if (spheres.empty()) return;
+    constexpr int latitudeCount = 12, longitudeCount = 24;
+    std::vector<Vertex> vertices;
+    vertices.reserve(spheres.size() * latitudeCount * longitudeCount * 6);
+    const auto normal = [=](int latitude, int longitude)
+    {
+        const float a = -PxHalfPi + PxPi * latitude / latitudeCount;
+        const float b = PxTwoPi * longitude / longitudeCount;
+        return PxVec3(std::cos(a) * std::cos(b), std::sin(a), std::cos(a) * std::sin(b));
+    };
+    for (const auto* sphere : spheres)
+    {
+        const auto pose = sphere->getGlobalPose();
+        for (int y = 0; y < latitudeCount; ++y)
+            for (int x = 0; x < longitudeCount; ++x)
+            {
+                const PxVec3 corners[] = {normal(y, x), normal(y + 1, x), normal(y + 1, x + 1),
+                    normal(y, x), normal(y + 1, x + 1), normal(y, x + 1)};
+                for (const auto& n : corners)
+                    vertices.push_back({pose.transform(n * radius), pose.q.rotate(n), PxVec3(1, .65f, .08f)});
+            }
+    }
+    context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
+    context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV());
+    context.SetViewportAndScissor(viewport, scissor);
+    context.SetRootSignature(m_RootSignature);
+    context.SetPipelineState(m_PSO);
+    context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
+    context.SetDynamicVB(0, static_cast<UINT>(vertices.size()), sizeof(Vertex), vertices.data());
+    context.Draw(static_cast<UINT>(vertices.size()));
 }
 
 void PhysicsDemo::RenderCapsules(GraphicsContext& context, const Math::Camera& camera,

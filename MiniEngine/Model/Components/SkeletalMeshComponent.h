@@ -58,6 +58,7 @@ namespace PARS
         {
             return m_Ragdoll;
         }
+        Math::Vector3 ConstrainHorizontalMovement(Math::Vector3 displacement) const;
         const std::string& GetPhysicsError() const
         {
             return m_PhysicsError;

@@ -246,6 +246,63 @@ namespace
         std::puts("PASS: movement queries exclude only their own PA, preserving foreign and untagged collision");
     }
 
+    void TestHorizontalBlockingDisabled()
+    {
+        Fixture f;
+        auto* physics = f.world.GetPhysicsWorld();
+        auto* capsule = f.character->capsule;
+        physics->CreateStaticBox(PxTransform(PxVec3(0, 1, 2)), PxVec3(10, 1, .25f), "Wall");
+        capsule->SetHorizontalBlockingEnabled(false);
+        f.player->SetMoveInput(1, 0, true);
+        for (int frame = 0; frame < 120; ++frame)
+        {
+            f.Frames(1);
+            Check(f.character->movement->IsMovingOnGround() && Near(f.character->GetActorLocation().GetY(), .92f, .002f),
+                "Passing through a wall preserves floor contact throughout the overlap");
+        }
+        Check(float(f.character->GetActorLocation().GetZ()) > 6 &&
+                Near(f.character->movement->GetGroundSpeed(), CharacterMovementComponent::RunSpeed),
+            "Disabling horizontal blocking allows running through a wall without slowing down");
+        f.player->SetMoveInput(0, 0, false);
+        f.character->movement->StopMovementImmediately();
+        f.character->SetActorLocation(Vector3(0, .92f, 2));
+        capsule->Move(Vector3(kZero), 1.0f / 60);
+        Check(Near(f.character->GetActorLocation().GetZ(), 2, .001f),
+            "Overlap recovery does not push an unblocked capsule out of a wall horizontally");
+
+        auto* other = f.world.SpawnActor<TestCharacter>();
+        other->SetActorLocation(Vector3(0, .92f, 2));
+        f.Frames(1);
+        Check(Near(f.character->GetActorLocation().GetZ(), 2, .001f),
+            "Another query capsule cannot displace an unblocked mover");
+        f.character->SetActorLocation(Vector3(0, .92f, 0));
+        capsule->Move(Vector3(0, 0, 4), 1.0f / 60);
+        Check(Near(f.character->GetActorLocation().GetZ(), 4, .001f),
+            "Unblocked horizontal movement passes through other query capsules");
+
+        auto* ceiling = physics->CreateStaticBox(PxTransform(PxVec3(0, 2.5f, 0)), PxVec3(2, .25f, 2), "Ceiling");
+        f.character->SetActorLocation(Vector3(0, .92f, 0));
+        Check(capsule->Move(Vector3(0, 5, 0), 1.0f / 60).ceiling &&
+                float(f.character->GetActorLocation().GetY()) < 1.34f,
+            "Disabling horizontal blocking retains ceiling collision");
+        ceiling->release();
+        f.character->SetActorLocation(Vector3(0, .7f, 0));
+        capsule->Move(Vector3(kZero), 1.0f / 60);
+        Check(Near(f.character->GetActorLocation().GetY(), .92f, .001f),
+            "Unblocked movement still recovers floor penetration vertically");
+        f.character->SetActorLocation(Vector3(0, 10, 0));
+        Check(capsule->Move(Vector3(0, -50, 0), 1.0f / 60).grounded &&
+                Near(f.character->GetActorLocation().GetY(), .92f, .001f),
+            "Unblocked horizontal movement still cannot fall through the floor");
+        Check(capsule->HasPhysicsCollision() && physics->GetQueryCapsuleCount() == 2 && physics->GetDynamicBodyCount() == 0,
+            "Ground queries and debug capsules remain registered without rigid proxy bodies");
+        capsule->SetHorizontalBlockingEnabled(true);
+        Check(capsule->Move(Vector3(0, 0, 5), 1.0f / 60).wall &&
+                float(f.character->GetActorLocation().GetZ()) < 1.48f,
+            "Horizontal wall blocking can be restored immediately");
+        std::puts("PASS: optional horizontal blocking, continuous floor contact, overlap recovery, ceiling and restore");
+    }
+
     void TestSkeletonHierarchy()
     {
         // Two scene roots, nested children and siblings. Joint indices need not
@@ -301,6 +358,7 @@ void RunCharacterMovementTests()
     TestCollisionAndLifetime();
     TestQueryCapsules();
     TestMovementQueryOwners();
+    TestHorizontalBlockingDisabled();
     TestPoseBlending();
     TestSkeletonHierarchy();
 }
