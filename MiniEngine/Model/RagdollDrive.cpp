@@ -219,8 +219,10 @@ namespace PARS
         {
             const auto& a = bodies[m_Asset.FindBody(data.parentBone)];
             const auto& b = bodies[m_Asset.FindBody(data.childBone)];
+
             // a, b에 PA의 부모/자식 관절 프레임을 반영해 두 관절 프레임 사이의 회전을 구한다.
             // D6 경로는 이 함수에서 제한을 적용하고, Articulation 경로는 아래에서 별도로 제한한다.
+            // Articulation이라면 EvaluateJointDriveTarget에서 부모 조인트 좌표계 기준 자식 조인트의 회전 정도를 쿼터니언으로 정규화한다.
             Math::Quaternion target = EvaluateJointDriveTarget(data, a, b, !m_Articulation);
             if (m_Articulation)
             {
@@ -273,6 +275,7 @@ namespace PARS
 
 
         // [4] 관절별 목표 회전/각속도를 PhysX 드라이브에 전달
+		// targets에는 각 관절의 목표 회전이 들어 있다(쿼터니언, 부모관절 기준 상대적 차이). 목표 각속도는 이전 목표와 이번 목표의 차이를 시간으로 나눠 계산한다.
         for (size_t i = 0; i < targets.size(); ++i)
         {
             const PxQuat q = ToPx(targets[i]);
@@ -297,17 +300,36 @@ namespace PARS
             // 두 목표 회전의 차이로 추종할 각속도를 구한다. 현재 자세 오차와는 구분한다.
             if (history)
             {
+                // 이 식이 나오는 이유는 생각해보면,
+				// 이번목표 = delta * 이전목표 이니까(delta는 차이) 
+                // 이번목표 * 이번목표역회전 = delta
+				// q가 이번목표 , m_DriveTargets[i]가 이전목표
                 PxQuat delta = q * ToPx(m_DriveTargets[i]).getConjugate();
-                // q와 -q는 같은 회전이다. 짧은 방향의 회전 차이를 사용하도록 부호를 맞춘다.
+
+                // 같은 회전 변화라도, 더 짧게 도는 방향으로 각속도를 계산하려는것. 의도적으로 그런것이다.
+                // 현재처럼 한 고정 스텝 동안 목표가 조금씩 변하는 상황에서는 짧은 쪽으로 계산하는게 맞다
+                // w가 0보다 작으면 각도가 180도 이상이라는 뜻이므로 이때 모든 성분의 부호를 뒤집으면 같은 회전을 반대축으로 180이하만큼 도는 표현으로 바꿀 수 있다.
+                // 간단히 쿼터니언에 대해 정리하자면, 어느 축을 중심으로 몇도를 회전할지를 쿼터니언의 네 성분(x,y,z,w)로 표현함.
+				// 회전축이 길이 인 벡터 u = (ux, uy, uz)이고 회전각이 θ라면, 쿼터니언은 다음과 같이 표현됨:
+				// x = ux * sin(θ/2), y = uy * sin(θ/2), z = uz * sin(θ/2), w = cos(θ/2)
+                // 즉, xyz에는 회전축 방향을 담고, xyz의 크기와 w에 회전량을 담는 구조 
                 if (delta.w < 0)
                 {
                     delta = -delta;
                 }
                 PxReal angle;
                 PxVec3 axis;
+
+                // 이전 목표와 이번 목표 사이의 회전 변화량을 쿼터니언으로 계산
+                // 거기서 회전 축과 회전각을 꺼냄
+                // 회전각을 경과 시간으로 나눠 xyz 성분의 목표 각속도 벡터를 만듦
+                //여기서 변화량은 실제 바디가 회전한 양이 아니라, 애니메이션 목표  회전이 변한 양
+                // 이걸 반으로 3축의 각속도에 대한 벡터를 angular에 저장한다
                 delta.toRadiansAndUnitAxis(angle, axis);
+
                 // 회전 차이를 축/각도로 풀어 목표 각속도를 구하고 20 rad/s로 제한한다.
                 angular = axis * PxMin(angle / deltaTime, 20.0f);
+
                 // 이 SDK의 SWING_TWIST 제약 행은 부모 속도에서 자식 속도를 뺀 값을 사용한다.
                 // SLERP는 자식 속도에서 부모 속도를 뺀 값을 사용한다(ExtD6JointSolverPrep 참고).
                 if (!m_Articulation && !data.useSlerpDrive)
@@ -318,6 +340,8 @@ namespace PARS
             if (m_Articulation)
             {
                 // Articulation이 사용하는 좌표계로 변환해 3축 목표 각도/각속도를 설정한다.
+                // 위에서 구한 angular를 기준으로 세팅한다
+
                 SetArticulationTarget(i, targets[i], Vector3(angular.x, angular.y, angular.z));
                 if (changed)
                 {
@@ -333,6 +357,14 @@ namespace PARS
         m_HasDriveTargets = true;
 
 
+
+        //////////////////////////////////////////
+        // 1. 각 물리 바디의 월드 목표 위치·회전 계산 → bodies 배열에 저장.
+        // 2. 각 관절의 목표 상대 회전 계산·제한 → 쿼터니언으로 targets에 저장.
+        // 3. 골반 지지가 켜져 있으면 → 골반 지지 드라이브에 목표 위치·회전과 목표 선속도·각속도 전달.
+        // 4. 각 관절 드라이브에 목표 회전과 목표 각속도 전달 → 각속도는 이전 목표와 이번 목표의 차이로 계산한 PxVec3.
+        // 단, 아티큘레이션에서는 4번 내부에서 쿼터니언과 각속도 벡터를 해당 관절 좌표계에 맞춰 변환하고, 축별 목표값으로 전달.
+        //////////////////////////////////////////
 
         // [5] Articulation의 PD 구동 설정과 추가 보상 토크 갱신 (D6 전용 경로는 내부에서 반환)
         // 관절 PD의 강성/감쇠 등을 설정한다. 관절 PD 토크 자체는 이후 PhysX가 계산한다.

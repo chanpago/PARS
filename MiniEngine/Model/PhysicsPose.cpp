@@ -85,6 +85,8 @@ namespace PARS
     bool EvaluatePhysicsPose(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& pose, const Matrix4& component, std::vector<Matrix4>& world, std::string& error)
     {
         std::vector<Matrix4> scene;
+
+		// 이 부분 SceneTranforms에서 본 부모-자식 관계를 따라서 본의 로컬 변환을 누적하여 지금 프레임에 필요한 본 구조를 계산한다.(로컬) 
         if (!SceneTransforms(skeleton, pose, component, scene))
         {
             error = "Invalid physics skeleton hierarchy.";
@@ -98,6 +100,7 @@ namespace PARS
             if (skeleton.meshNodes[i] >= 0)
             {
                 // 사용하는 메쉬(여기서는 일반적으로 하나)의 월드 값을 가져와서 로컬본에 다 적용한다.
+				// 앞서 SceneTranforms에서 계산한 본의 로컬 변환에 메쉬의 월드 변환을 곱해서, 본이 월드에서 어디에 위치해야 하는지 계산한다.
                 world[i] = scene[skeleton.meshNodes[i]] * scene[i];
             }
         }
@@ -144,8 +147,24 @@ namespace PARS
     Quaternion EvaluateJointDriveTarget(const PhysicsConstraint& joint, const Matrix4& parentBodyTarget,
         const Matrix4& childBodyTarget, bool clampToLimits)
     {
-        Quaternion q = Normalize(Quaternion(Invert(parentBodyTarget * joint.parentFrame.GetTransform()) *
-            (childBodyTarget * joint.childFrame.GetTransform())));
+        // 부모, 자식 관절 프레임의 월드 목표를 가져와서 
+		// auto parentJointWorld = parentBodyTarget * joint.parentFrame.GetTransform();
+		// auto childJointWorld = childBodyTarget * joint.childFrame.GetTransform();
+        // 
+		// 자식 관절의 목표를 부모 관절 좌표계로 변환한다.
+		// auto relative = invert(parentJointWorld) * childJointWorld;
+
+		// 상대 행렬에서 회전만 꺼내 단위 쿼터니언으로 정규화한다.
+		// Quaternion q = Normalize(Quaternion(relative));
+
+        // 처음에는 이해하기 햇갈렸는데 이식을 보면된다.
+		// relative = Invert(parentJointWorld) * childJointWorld 원래는 이건데 
+		// parentJointWorld * relative = childJointWorld 이게 성립하잖아. 
+        // 그래서 맞는말. 따라서 이 작업은 부모 조인트 기준으로 자식 조인트의 회전을 계산하고 그 쿼터니언을 정규화하는것
+
+        Quaternion q = Normalize(Quaternion(Invert(parentBodyTarget * joint.parentFrame.GetTransform()) * (childBodyTarget * joint.childFrame.GetTransform())));
+
+        // Articulation이라면 여기서 종료
         if (!clampToLimits)
         {
             return q;

@@ -138,6 +138,17 @@ namespace PARS
             std::vector<Math::Matrix4> target;
 
             // 이 부분에서 액티브 래그돌 물리처리를한다(pd구동 및 추가보상토크계산)
+			// EvaluateAnimationPhysicsPose부분에서 이번 프레임의 애니메이션의 목표 본 자세를 월드 기준으로 계산하고 target에 저장한다.
+            // 
+            // UpdateDriveTargets부분은 좀 길다 순서대로 설명하면,
+            // 1. 앞서 계산한 target(애니메이션 목표 본 자세)을 기반으로 이번 프레임의 리지드바디의 목표 자세를 계산한다.
+            // 2. 1에서 계산한 리지드 바디의 목표 자세를 기반으로 각 조인트의 목표 자세를 계산
+            // 3. 골반 보정을 실행한다. 위치, 속도
+            // 4. targets에 있는 부모기준 상대각 차이 쿼터니언을 physx가 읽을 수 있도록 vec3기반 각속도벡터로 만든다.
+            // 5. Articulation Drive update <- 이 부분이 중요하다
+            //      - 골반보정
+            //      - 타겟을 목표로 유효관성을 계산하고 중력보상, 코리올리-원심력 보상을 토크값에 더함
+            //      - 각 관절의 각 축에 얼마만큼의 PD를 적용시킬지 계산
             if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError) || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {
                 // 목표 갱신에 실패하면 전신 패시브 물리 시뮬레이션으로 전환한다.

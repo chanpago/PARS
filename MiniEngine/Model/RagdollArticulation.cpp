@@ -391,15 +391,22 @@ namespace PARS
         const bool compensate = m_DrivesEnabled && IsRootSupported();
         const unsigned count = 6 + m_Articulation->getDofs();
         std::vector<float> targetVelocity(count, 0), targetAcceleration(count, 0);
+
+        // 드라이브와 골반 지지가 모두 켜져 있을 때 발동
         if (compensate)
         {
+            // 골반보정을 얼마나 할건지 위치와 각속도를 가져온다
             PxVec3 linear, angular;
             m_SupportJoint->getDriveVelocity(linear, angular);
+
+            // 이 부분에서 6개의 항목에 관해서 값을 채운다. 3개의 목표 선속도 값, 3개의 각속도 보정 값
             for (int axis = 0; axis < 3; ++axis)
             {
                 targetVelocity[axis] = linear[axis];
                 targetVelocity[3 + axis] = angular[axis];
             }
+
+            // 골반 6개를 제외하고 관절 수 * 3개의 목표 각속도
             for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
             {
                 for (int axis = 0; axis < 3; ++axis)
@@ -407,6 +414,8 @@ namespace PARS
                     targetVelocity[6 + m_ArticulationDofOffsets[i] + axis] = m_ArticulationJoints[i]->getDriveVelocity(AngularAxes[axis]);
                 }
             }
+            
+            // 이전 각속도와 이번 각속도의 차이를 경과시간 만큼 나누어서 목표 각가속도를 채운다
             if (deltaTime > 0 && m_PreviousArticulationTargetVelocity.size() == count)
             {
                 for (unsigned axis = 0; axis < count; ++axis)
@@ -415,6 +424,8 @@ namespace PARS
                 }
             }
         }
+
+
         m_PreviousArticulationTargetVelocity = compensate && deltaTime > 0 ? targetVelocity : std::vector<float>();
         if (m_SupportJoint)
         {
@@ -424,6 +435,8 @@ namespace PARS
                     2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency, PX_MAX_F32, true);
             m_SupportJoint->setDrive(PxD6Drive::eSLERP, rotation);
         }
+
+        // 여기서는 골반의 pd보정으로 골반의 회전만 처리한다
         if (compensate && deltaTime > 0 && m_HasSupportTarget)
         {
             const auto* root = m_Bodies[m_ArticulationRoot];
@@ -431,7 +444,7 @@ namespace PARS
             const PxVec3 velocity = root->getAngularVelocity();
             const float stiffness = PelvisAngularFrequency * PelvisAngularFrequency;
             const float damping = 2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency;
-            const float denominator = 1.0f + damping * deltaTime + stiffness * deltaTime * deltaTime;
+            const float denominator = 1.0f + damping * deltaTime + stiffness * deltaTime * deltaTime; // pd식 분모
             for (unsigned axis = 0; axis < 3; ++axis)
             {
                 // 다음 스텝의 각도/속도로 PD를 평가하는 후진 오일러 근사다.
@@ -441,17 +454,37 @@ namespace PARS
                     damping * (targetVelocity[3 + axis] - velocity[axis])) / denominator;
             }
         }
+
+        // 각 관절 축을 돌리는데 필요한 "유효 관성"을 계산하는 부분. 이후 관절 PD의 강성,감쇠를 관성에 맞춰 정할 때 사용
         std::vector<float> inertias;
         if (m_DrivesEnabled)
         {
-            m_Articulation->copyInternalStateToCache(cache, PxArticulationCacheFlag::eALL);
-            m_Articulation->commonInit();
-            m_Articulation->computeMassMatrix(cache);
+            // 원하는 타겟을 입력하면, 각 관절에 필요한 토크가 함께 계산됨 이게 바로 관성행렬(질량 행렬 M)
+            // 질량 행렬은 골반과 관절의 가속도를 만들기 위해 필요한 힘, 토크의 관계를 나타냄. 연결된 바디들 사이의 영향도 포함
+            m_Articulation->copyInternalStateToCache(cache, PxArticulationCacheFlag::eALL); // 현재 물리 상태 복사
+            m_Articulation->commonInit();                                                   // 계산 준비
+            m_Articulation->computeMassMatrix(cache);                                       // 몸 전체의 질량행렬 계산
+
+
             std::vector<unsigned> freeAxes;
             if (!IsRootSupported())
             {
                 freeAxes = {0, 1, 2, 3, 4, 5};
             }
+            
+            /*
+                일종의 방어코드 
+                예시) 팔꿈치 코터를 돌리는 상황
+                몸통 - [어깨 관절] - 상완 - [팔꿈치 모터] - 하완
+                이 상황에서 팔꿈치 모터가 하완을 돌리면, 상완에도 반대 토크가 들어간다(하완이 시계방향으로 돌때, 상완은 반시계)
+                여기서 두갈래로 나뉜다. 
+                1. 어깨가 잠겼거나 모터로 잡아주면 -> 상완이 버티는것으로보고 계산
+                2. 어깨가 움직일 수 있고 모터가 없으면 -> 상완도 반작용으로 돌아갈 수 있다고 보고 계산함
+                중요한건 "상완이 버티는 경우와 같이 돌아가는 경우에는, 팔꿈치 모터가 느끼는 관성이 달리진다" 따라서 팔꿈치 모터의 강성, 감쇠를 정할 때 이 차이를 알아야한다.
+                이걸 freeAxes에 넣어서 controlInertias()에 팔꿈치 관성 계산할때, 이 어깨 축도 같이 움직일 수 있다고 고려해 라는 명령
+
+                하지만, 지금 구현에서는 대부분의 관절에 PD드라이브를 켜는 방식이라서 freeAxes에 추가되는 축은 없다.
+            */   
             for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
             {
                 const auto& data = m_Asset.constraints[i];
@@ -459,8 +492,7 @@ namespace PARS
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     const auto& drive = data.drives[data.useSlerpDrive ? 0 : axis];
-                    const bool driven = drive.enabled && drive.maxTorque > 0 &&
-                        (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
+                    const bool driven = drive.enabled && drive.maxTorque > 0 && (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
                     if (motions[axis] != PhysicsJointMotion::Locked && !driven)
                     {
                         freeAxes.push_back(6 + m_ArticulationDofOffsets[i] + axis);
@@ -471,10 +503,14 @@ namespace PARS
         }
         if (compensate)
         {
-            // 기준 자세와 실제 속도를 사용해 연결된 몸 전체의 중력/회전 하중을 계산한다.
-            // 부유 베이스의 앞 6개 항은 골반의 외부 힘/토크이며, 관절 모터에는 그 뒤의 항을 적용한다.
+            // 중력보상과 코리올리 관성보상을 PxArticulationCache객체 cache에 멤버 포인터들이 가리키는 배열에 값을 저장한다.
+            // 계산은 physX가 해줌. 그리고 아직 값을 적용시키는건아니고 cache에 저장만함
             m_Articulation->computeGravityCompensation(cache);
             m_Articulation->computeCoriolisCompensation(cache);
+
+            // 이 부분에서 아티큘레이션의 루트 즉, 골반만 먼저 중력보상, 코리올리 원심력보상을 addTorque()로 적용한다.
+            // 골반만 따로하는 이유는 골반은 부모 관절이 없으므로, 골반 자체의 월드 회전을 제어하려면 외부 토크를 가해야하기 때문이다.
+            // 따라서 골반 토크를 별도로 적용하고, 뒤에서 관절 토크들을 적용하는 구조다.
             if (deltaTime > 0 && m_HasSupportTarget)
             {
                 // G + C + M*a의 골반 회전 행(3~5)을 월드 공간 토크로 적용한다.
@@ -494,6 +530,8 @@ namespace PARS
                 m_Bodies[m_ArticulationRoot]->addTorque(rootTorque, PxForceMode::eFORCE, false);
             }
         }
+
+        // 각 관절 축에 필요한 보상 토크를 계산해 적용한다.
         for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
         {
             const auto& data = m_Asset.constraints[i];
@@ -501,13 +539,14 @@ namespace PARS
             for (int axis = 0; axis < 3; ++axis)
             {
                 const auto& drive = data.drives[data.useSlerpDrive ? 0 : axis];
-                const bool enabled = m_DrivesEnabled && drive.enabled && drive.maxTorque > 0 &&
-                    motions[axis] != PhysicsJointMotion::Locked;
+                const bool enabled = m_DrivesEnabled && drive.enabled && drive.maxTorque > 0 && motions[axis] != PhysicsJointMotion::Locked;
                 const unsigned dof = m_ArticulationDofOffsets[i] + axis;
                 float feedForward = 0;
                 if (enabled && compensate)
                 {
+                    // 중력보상 + 코리올리 보상
                     feedForward = cache.gravityCompensationForce[6 + dof] + cache.coriolisForce[6 + dof];
+
                     // 부모와 이웃 관절의 목표 가속도까지 질량 행렬에 곱해 관성 하중을 미리 보상한다.
                     // 예: 무릎이 가속할 때 발목이 감당하는 토크를 발목 오차가 커지기 전에 제공한다.
                     for (unsigned column = 0; column < count; ++column)
@@ -517,18 +556,26 @@ namespace PARS
                     // 토크 상한의 영향을 비교하기 위해 보상토크 제한을 임시로 해제한다.
                     // feedForward = PxClamp(feedForward, -drive.maxTorque, drive.maxTorque);
                 }
+
+                // 보상토크를 저장한다.
                 cache.jointForce[dof] = feedForward;
+
+
                 // 상한 해제 실험: 보상 사용량을 차감하지 않고 PD에 사실상 무제한 토크를 허용한다.
                 // const float remainingTorque = enabled ? PxMax(0.0f, drive.maxTorque - PxAbs(feedForward)) : 0;
                 const float remainingTorque = enabled ? PX_MAX_F32 : 0;
+
                 // 최신 Articulation에는 구형 internalCompliance가 없다. 다른 모터의 지지 상태를 반영한
                 // 관성으로 Kp=I*omegaN^2, Kd=2*zeta*I*omegaN을 만들고 암시적 토크 드라이브에 전달한다.
                 const float inertia = enabled && drive.useAcceleration ? inertias[6 + dof] : 1.0f;
-                const PxArticulationDrive motor(enabled ? inertia * drive.GetStiffness() : 0,
-                    enabled ? inertia * drive.GetDamping() : 0, remainingTorque, PxArticulationDriveType::eFORCE);
+                const PxArticulationDrive motor(enabled ? inertia * drive.GetStiffness() : 0, enabled ? inertia * drive.GetDamping() : 0, remainingTorque, PxArticulationDriveType::eFORCE);
+
+                // 앞서 계산한 관성과 각 축에 대한 pd 구동식으로 motor값에 저장하고 관절 PD모터가 목표(target)을 얼마나 강하게 따라갈지 설정하는 함수
                 m_ArticulationJoints[i]->setDriveParams(AngularAxes[axis], motor);
             }
         }
+
+        // 아티큘레이션의 갱신된 캐시를 저장
         m_Articulation->applyCache(cache, PxArticulationCacheFlag::eFORCE, false);
 #else
         (void)deltaTime;
