@@ -785,7 +785,11 @@ void ModelViewer::UpdateFollowCamera(float deltaTime)
     {
         return;
     }
-    const Vector3 target = character->IsRagdoll() ? character->GetMesh().GetRagdoll().GetPosition() + Vector3(0, .25f, 0) : character->GetActorLocation() + Vector3(0, 0.55f, 0);
+    // 액티브 래그돌의 골반 진동이 카메라에 전달되지 않도록 캡슐 중심을 따라간다.
+    const bool followPelvis = character->GetMesh().GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll;
+    const Vector3 target = followPelvis
+        ? character->GetMesh().GetRagdoll().GetPosition() + Vector3(0, .25f, 0)
+        : character->GetActorLocation() + Vector3(0, .55f, 0);
     m_SpringArm->SetWorldTransform(AffineTransform(Matrix3(kIdentity), target));
     m_SpringArm->SetControlRotation(m_ControlYaw, m_ControlPitch);
     m_SpringArm->UpdateArm(deltaTime);
