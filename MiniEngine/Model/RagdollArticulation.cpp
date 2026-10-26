@@ -395,7 +395,7 @@ namespace PARS
         // 드라이브와 골반 지지가 모두 켜져 있을 때 발동
         if (compensate)
         {
-            // 골반보정을 얼마나 할건지 위치와 각속도를 가져온다
+            // 골반 지지 드라이브에 등록된 목표 선속도, 각속도를 읽는다
             PxVec3 linear, angular;
             m_SupportJoint->getDriveVelocity(linear, angular);
 
@@ -459,7 +459,7 @@ namespace PARS
         std::vector<float> inertias;
         if (m_DrivesEnabled)
         {
-            // 원하는 타겟을 입력하면, 각 관절에 필요한 토크가 함께 계산됨 이게 바로 관성행렬(질량 행렬 M)
+            // 각 관절에 필요한 토크가 함께 계산됨 이게 바로 관성행렬(질량 행렬 M). 현재 물리자세, 질량, 관성,연결 구조로 행렬을 계산
             // 질량 행렬은 골반과 관절의 가속도를 만들기 위해 필요한 힘, 토크의 관계를 나타냄. 연결된 바디들 사이의 영향도 포함
             m_Articulation->copyInternalStateToCache(cache, PxArticulationCacheFlag::eALL); // 현재 물리 상태 복사
             m_Articulation->commonInit();                                                   // 계산 준비
@@ -575,7 +575,7 @@ namespace PARS
             }
         }
 
-        // 아티큘레이션의 갱신된 캐시를 저장
+        // cache.jointforce의 관절 보상 토크를 아티큘레이션에 적용
         m_Articulation->applyCache(cache, PxArticulationCacheFlag::eFORCE, false);
 #else
         (void)deltaTime;

@@ -302,7 +302,7 @@ namespace PARS
             {
                 // 이 식이 나오는 이유는 생각해보면,
 				// 이번목표 = delta * 이전목표 이니까(delta는 차이) 
-                // 이번목표 * 이번목표역회전 = delta
+                // 이번목표 * 이전목표역회전 = delta
 				// q가 이번목표 , m_DriveTargets[i]가 이전목표
                 PxQuat delta = q * ToPx(m_DriveTargets[i]).getConjugate();
 

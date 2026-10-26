@@ -86,7 +86,7 @@ namespace PARS
     {
         std::vector<Matrix4> scene;
 
-		// 이 부분 SceneTranforms에서 본 부모-자식 관계를 따라서 본의 로컬 변환을 누적하여 지금 프레임에 필요한 본 구조를 계산한다.(로컬) 
+		// 이 부분 SceneTranforms에서 본 부모-자식 관계를 따라서 본의 꼐층을 누적한 변환. 지금 프레임에 필요한 본 구조를 계산한다.(로컬) 
         if (!SceneTransforms(skeleton, pose, component, scene))
         {
             error = "Invalid physics skeleton hierarchy.";

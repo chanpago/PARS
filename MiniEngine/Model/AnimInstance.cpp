@@ -206,7 +206,7 @@ namespace PARS
                 clip.source->m_Animations[clip.animationIndex], // 사용할 애니메이션
                 clip.source->m_CurveData.get(),                 // 어느 노드의 어떤 값을 바꿀지
                 clip.source->m_KeyFrameData.get(),              // 저장된 키프레임 값
-                m_Pose.data(),                                  // 배열의 노드 수
+                m_Pose.data(),                                  // 결과를 기록할 포즈 배열의 포인터. m_pose에는 보간된 본 자세가 저장
                 static_cast<uint32_t>(m_Pose.size()), m_Time);  // 샘플링할 재생 시간
         }
         if (IsBlending())
