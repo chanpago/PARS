@@ -147,6 +147,7 @@ void RagdollComparisonRunner::DrawUI(const PhysicsAsset* editor, const PhysicsAs
         ImGui::DragFloat(u8"이동 속도 (m/s)", &m_RequestedSettings.speed, .1f, 0, 3, "%.2f", ImGuiSliderFlags_AlwaysClamp);
     }
     ImGui::Checkbox(u8"공중 지지 (+1 m): 바닥 접촉 없이 추종 성능 측정", &m_RequestedSettings.suspended);
+    ImGui::TextDisabled(u8"기본 A/B는 바닥에서 실행합니다. 발의 마찰과 미끄러짐은 공중 지지를 끄고 비교하세요.");
     ImGui::EndDisabled();
     ImGui::BeginDisabled(!source || source->bodies.empty() || busy);
     if (ImGui::Button(u8"시작 / 다시 실행"))

@@ -40,7 +40,7 @@ public:
         // 단일 클립 모드에서 클립/속도를 사용한다. B와 단일 클립의 측정 시간은 조절할 수 있다.
         int clip = 1;
         float duration, speed = 1.6f, uTurnRadius = 1;
-        bool suspended = true;
+        bool suspended = false;
     };
 
     RagdollComparisonRunner(PhysicsWorld& owner, const std::shared_ptr<const Model>* models,
