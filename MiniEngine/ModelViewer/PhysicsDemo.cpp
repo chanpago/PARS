@@ -17,10 +17,25 @@ using namespace Graphics;
 
 namespace
 {
-    const PxVec3 FloorHalfExtents(6.0f, 0.25f, 6.0f);
+    const PxVec3 FloorHalfExtents(15.0f, 0.25f, 15.0f);
     const PxVec3 BoxHalfExtents(0.5f);
-    const PxVec3 WallCentres[] = {{6, 0.75f, 0}, {-6, 0.75f, 0}, {0, 0.75f, 6}, {0, 0.75f, -6}, {0, 0.75f, -2.5f}};
-    const PxVec3 WallExtents[] = {{.2f, .75f, 6}, {.2f, .75f, 6}, {6, .75f, .2f}, {6, .75f, .2f}, {1.5f, .75f, .25f}};
+    // 외곽 벽의 위치와 길이는 바닥 크기에 맞추고 내부 장애물은 기존 배치를 유지한다.
+    const PxVec3 WallCentres[] =
+    {
+        {FloorHalfExtents.x, 0.75f, 0},
+        {-FloorHalfExtents.x, 0.75f, 0},
+        {0, 0.75f, FloorHalfExtents.z},
+        {0, 0.75f, -FloorHalfExtents.z},
+        {0, 0.75f, -2.5f}
+    };
+    const PxVec3 WallExtents[] =
+    {
+        {.2f, .75f, FloorHalfExtents.z},
+        {.2f, .75f, FloorHalfExtents.z},
+        {FloorHalfExtents.x, .75f, .2f},
+        {FloorHalfExtents.x, .75f, .2f},
+        {1.5f, .75f, .25f}
+    };
 
     DWORD FindPvdProcess()
     {
