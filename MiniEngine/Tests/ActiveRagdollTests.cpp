@@ -558,8 +558,8 @@ namespace
         auto* scene = floor->getScene();
         PxActor* actor = nullptr; scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, &actor, 1);
         auto* body = actor->is<PxRigidDynamic>();
-        // With omega=16 and no linear gravity feed-forward, equilibrium is target + g/omega^2.
-        const PxVec3 gravityOffset = scene->getGravity() / (16.0f * 16.0f);
+        // 위치 주파수 30에서 별도의 중력 보상 힘이 없으므로 평형점은 목표 + g/30²이다.
+        const PxVec3 gravityOffset = scene->getGravity() / (30.0f * 30.0f);
         const Vector3 equilibriumOffset(gravityOffset.x, gravityOffset.y, gravityOffset.z);
         const auto positionErrorFromEquilibrium = [&](const Matrix4& target)
         {
@@ -582,7 +582,7 @@ namespace
             "Pelvis linear acceleration obeys the finite force limit");
         for (int i = 0; i < 240; ++i) step(initial);
         Check(positionErrorFromEquilibrium(initial) < .002f && ragdoll.GetRootRotationError() < .02f,
-            "Frequency-16 position support settles at the expected gravity equilibrium");
+            "Frequency-30 position support settles at the expected gravity equilibrium");
         float positionError = 0, rotationError = 0;
         Matrix4 target = initial;
         for (int i = 0; i < 360; ++i)
