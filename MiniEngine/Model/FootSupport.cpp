@@ -171,7 +171,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     sample.sampleNumber = sampleNumber;
     sample.completedPhysicsStep = physics.GetStepCount();
 
-    // COM remains useful even when this skeleton has no recognized foot bodies.
+    // 여기서 COM을 계산한다. 계산은 Articulation의 함수를 사용
     auto& ragdoll = mesh.GetRagdoll();
     Vector3 center(kZero);
     sample.hasCenterOfMass = ragdoll.GetCenterOfMass(center, sample.totalMass);
@@ -184,6 +184,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         return;
     }
 
+    // 양발 아래 지지영역 A를 만들고, COM의 위치를 비교해서 골반 지지계수 w를 계산하는부분
     std::vector<PxVec3> supportPoints;
     supportPoints.reserve(8);
     double supportHeight = 0;
@@ -202,6 +203,8 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         const Quaternion rotation = Quaternion(Vector3(kZUnitVector), XMConvertToRadians(settings.rotation.z)) *
             Quaternion(Vector3(kYUnitVector), XMConvertToRadians(settings.rotation.y)) *
             Quaternion(Vector3(kXUnitVector), XMConvertToRadians(settings.rotation.x));
+
+        // 실제 발 위치에 맞춰 사각형을 배치
         const Matrix4 world = bodyWorld * sole.soleInBody * Matrix4(OrthogonalTransform(rotation, Vector3(settings.offset)));
         const float w = settings.halfWidth, l = settings.halfLength;
         const Vector3 local[] = {Vector3(-w, 0, -l), Vector3(w, 0, -l), Vector3(w, 0, l), Vector3(-w, 0, l)};
@@ -209,6 +212,8 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         {
             foot.corners[i] = ToPx(Vector3(world * local[i]));
             PxRaycastHit hit;
+
+            // 사각형 아래로 레이를 쏨 20cm
             foot.projected[i] = physics.Raycast(foot.corners[i], down, hit, &mesh.GetOwner());
             foot.distances[i] = foot.projected[i] ? hit.distance : RayLength;
             foot.projections[i] = foot.projected[i] ? hit.position : foot.corners[i] + down;
@@ -220,6 +225,8 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         }
     }
     sample.projectedPointCount = supportPoints.size();
+
+    // 모인 지지점으로 영역 A를 만들고 COM을 투영
     sample.hull = BuildFootSupportHull(std::move(supportPoints));
     if (sample.hasCenterOfMass && sample.projectedPointCount > 0)
     {
@@ -229,6 +236,12 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         sample.hasComProjection = true;
         sample.comInsideHull = IsInsideFootSupportHull(sample.hull, sample.projectedCenterOfMass);
     }
+
+    // A와 완충 영역 B를 기준으로 지지 계수를 계산
+    // A안 1
+    // A와 B사이 0~1
+    // B바깥 0
+    // 여기서 저장한 weight를 다음 updateautomaticrootsupport에서 읽어서 골반 지지 강도에 적용
     sample.balance = EvaluateFootSupportBalance(sample.hull, sample.hasComProjection
         ? sample.projectedCenterOfMass : PxVec3(std::numeric_limits<float>::quiet_NaN()), m_BufferScale);
 }
