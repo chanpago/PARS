@@ -373,9 +373,14 @@ void ModelViewer::Startup(void)
             std::wstring ragdollReport;
             if (CommandLineArgs::GetString(L"impacttest", ragdollReport))
             {
-                if (m_MeshViewer) m_MeshViewer->Close();
+                if (m_MeshViewer)
+                {
+                    m_MeshViewer->Close();
+                }
                 if (m_ImpactTest && GetPreviewCharacter())
+                {
                     RunRagdollImpactValidation(*m_ImpactTest, m_World, *GetPreviewCharacter(), ragdollReport);
+                }
                 std::wstring capture;
                 m_RagdollTestDone = !CommandLineArgs::GetString(L"impactcapture", capture);
             }
@@ -978,7 +983,10 @@ void ModelViewer::Update(float deltaT)
         // 물리 디버거(PVD) 연결 상태를 갱신하고, 물리 스텝이 진행됐으면 낙하 상자의 높이를 기록한다.
         // 이 함수는 데모의 관측/연결 관리이며, 월드 물리 계산은 바로 위 World::Tick에서 수행한다.
         m_PhysicsDemo->Update(deltaT);
-        if (m_ImpactTest) m_ImpactTest->Update();
+        if (m_ImpactTest)
+        {
+            m_ImpactTest->Update();
+        }
     }
 #endif
     if (GetPlayerController() && !m_FreeCamera)
@@ -1000,9 +1008,13 @@ void ModelViewer::Update(float deltaT)
     if (canFire && (fireKey || fireMouse))
     {
         if (m_IsAiming)
+        {
             m_ImpactTest->FireAimed(*character, m_Camera.GetPosition(), m_Camera.GetForwardVec());
+        }
         else
+        {
             m_ImpactTest->FireFrom(*character);
+        }
     }
     if (m_Comparison)
     {
@@ -1290,7 +1302,9 @@ void ModelViewer::RenderUI(GraphicsContext& context)
     {
         m_PhysicsDemo->RenderUI();
         if (m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
+        {
             m_ImpactTest->DrawUI(GetPreviewCharacter());
+        }
         if (!m_PreviewMode)
         {
             return;
@@ -1361,7 +1375,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     ImGui::TextUnformatted(character->GetMesh().IsActiveRagdoll()
                             ? u8"수평 충돌: PA 리지드바디"
                             : character->IsRagdoll() ? u8"수평 이동 제어: 꺼짐 (패시브 래그돌)"
-                                                     : u8"수평 충돌: 이동 캡슐");
+                                : u8"수평 충돌: 이동 캡슐");
                 }
                 if (auto character = GetPreviewCharacter())
                 {

@@ -5,18 +5,28 @@
 #include "GameFramework/Actor.h"
 
 class Model;
-namespace PARS { class World; class Character; }
+namespace PARS
+{
+    class World;
+    class Character;
+}
 
 class RagdollImpactTest
 {
 public:
     static constexpr float SphereRadius = .15f;
-    explicit RagdollImpactTest(PARS::World& world) : m_World(world) {}
+    explicit RagdollImpactTest(PARS::World& world)
+        : m_World(world)
+    {
+    }
     ~RagdollImpactTest();
     bool Initialize(std::shared_ptr<const Model> idle, const PARS::PhysicsAsset& asset);
     bool Reset();
     bool SetAutomaticSupport(bool enabled);
-    bool UsesAutomaticSupport() const { return m_AutomaticSupport; }
+    bool UsesAutomaticSupport() const
+    {
+        return m_AutomaticSupport;
+    }
     bool SetProjectileSettings(float mass, float speed);
     bool FireFrom(const PARS::Character& player);
     bool FireAimed(const PARS::Character& player, Math::Vector3 cameraPosition, Math::Vector3 cameraDirection);
@@ -26,12 +36,22 @@ public:
     void BuildLines(std::vector<physx::PxDebugLine>& lines);
     PARS::Character* GetDummy() const;
     std::vector<physx::PxRigidDynamic*> GetProjectiles() const;
-    float GetMaxHipsDisplacement() const { return m_MaxHipsDisplacement; }
-    const std::string& GetStatusMessage() const { return m_Message; }
+    float GetMaxHipsDisplacement() const
+    {
+        return m_MaxHipsDisplacement;
+    }
+    const std::string& GetStatusMessage() const
+    {
+        return m_Message;
+    }
 
 private:
     bool FireAt(const PARS::Character& player, Math::Vector3 target, bool checkMuzzle = false);
-    struct Shot { physx::PxRigidDynamic* body; uint64_t expiresAtStep; };
+    struct Shot
+    {
+        physx::PxRigidDynamic* body;
+        uint64_t expiresAtStep;
+    };
     PARS::World& m_World;
     PARS::ActorHandle m_Dummy;
     PARS::PhysicsAsset m_Asset;

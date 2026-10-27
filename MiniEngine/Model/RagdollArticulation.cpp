@@ -92,20 +92,31 @@ namespace PARS
         {
             const size_t n = freeAxes.size();
             const auto lower = FactorFreeMass(cache.massMatrix, count, freeAxes);
-            for (unsigned axis : freeAxes) acceleration[axis] = 0;
+            for (unsigned axis : freeAxes)
+            {
+                acceleration[axis] = 0;
+            }
             std::vector<double> solution(n);
             for (size_t i = 0; i < n; ++i)
             {
                 const unsigned row = freeAxes[i];
                 double value = -weight * (cache.gravityCompensationForce[row] + cache.coriolisForce[row]);
                 for (unsigned j = 0; j < count; ++j)
+                {
                     value -= cache.massMatrix[row * count + j] * double(acceleration[j]);
-                for (size_t j = 0; j < i; ++j) value -= lower[i * n + j] * solution[j];
+                }
+                for (size_t j = 0; j < i; ++j)
+                {
+                    value -= lower[i * n + j] * solution[j];
+                }
                 solution[i] = value / lower[i * n + i];
             }
             for (size_t i = n; i-- > 0;)
             {
-                for (size_t j = i + 1; j < n; ++j) solution[i] -= lower[j * n + i] * solution[j];
+                for (size_t j = i + 1; j < n; ++j)
+                {
+                    solution[i] -= lower[j * n + i] * solution[j];
+                }
                 solution[i] /= lower[i * n + i];
                 acceleration[freeAxes[i]] = float(solution[i]);
             }
@@ -461,10 +472,15 @@ namespace PARS
             }
         }
 
-
         // Weight edits at dt=0 must not erase the history needed by the next real step.
-        if (!compensate) m_PreviousArticulationTargetVelocity.clear();
-        else if (deltaTime > 0) m_PreviousArticulationTargetVelocity = targetVelocity;
+        if (!compensate)
+        {
+            m_PreviousArticulationTargetVelocity.clear();
+        }
+        else if (deltaTime > 0)
+        {
+            m_PreviousArticulationTargetVelocity = targetVelocity;
+        }
         if (m_SupportJoint)
         {
             // 활성 제어 중에는 아래 질량행렬 PD가 골반 회전을 담당한다. 두 PD를 중복 적용하지 않는다.
@@ -504,10 +520,14 @@ namespace PARS
             m_Articulation->commonInit();                                                   // 계산 준비
             m_Articulation->computeMassMatrix(cache);                                       // 몸 전체의 질량행렬 계산
 
-
             for (unsigned axis = 0; axis < 6; ++axis)
-                if (!IsRootAxisSupported(axis)) freeAxes.push_back(axis);
-            
+            {
+                if (!IsRootAxisSupported(axis))
+                {
+                    freeAxes.push_back(axis);
+                }
+            }
+
             /*
                 일종의 방어코드 
                 예시) 팔꿈치 코터를 돌리는 상황
@@ -540,12 +560,19 @@ namespace PARS
             {
                 auto releasedAxes = freeAxes;
                 for (unsigned axis = 0; axis < 6; ++axis)
-                    if (IsRootAxisSupported(axis)) releasedAxes.push_back(axis);
+                {
+                    if (IsRootAxisSupported(axis))
+                    {
+                        releasedAxes.push_back(axis);
+                    }
+                }
                 const auto released = ControlInertias(cache.massMatrix, count, releasedAxes);
                 // Continuous gain approximation between supported and freely responding bases.
                 // Avoid a sudden joint-PD gain change on the frame that support reaches zero.
                 for (unsigned axis = 6; axis < count; ++axis)
+                {
                     inertias[axis] = released[axis] + supportWeight * (inertias[axis] - released[axis]);
+                }
             }
         }
         if (compensate)

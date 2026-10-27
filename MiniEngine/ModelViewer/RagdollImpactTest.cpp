@@ -12,7 +12,10 @@ using namespace physx;
 RagdollImpactTest::~RagdollImpactTest()
 {
     ClearProjectiles();
-    if (auto* dummy = GetDummy()) dummy->Destroy();
+    if (auto* dummy = GetDummy())
+    {
+        dummy->Destroy();
+    }
 }
 
 Character* RagdollImpactTest::GetDummy() const
@@ -24,9 +27,14 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const Phys
 {
     m_Asset = asset;
     if (std::none_of(m_Asset.constraints.begin(), m_Asset.constraints.end(), HasEnabledAngularDrive))
+    {
         ConfigureDefaultDrives(m_Asset);
+    }
     auto* dummy = m_World.SpawnActor<Character>("IdleImpactDummy");
-    if (!dummy) return false;
+    if (!dummy)
+    {
+        return false;
+    }
     m_Dummy = dummy->GetHandle();
     dummy->GetCharacterMovement().SetTickEnabled(false);
     dummy->GetCapsuleComponent().SetPhysicsEnabled(false);
@@ -40,7 +48,9 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const Phys
     mesh.SetAnimInstance(std::make_unique<AnimInstance>(mesh));
     if (!mesh.GetAnimInstance().AddAnimation("Idle", idle) || !mesh.GetAnimInstance().PlayAnimation(0) ||
         !mesh.SetPhysicsAsset(m_Asset, m_Message))
+    {
         return false;
+    }
     m_World.InitializePendingActors();
     return Reset();
 }
@@ -48,21 +58,38 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const Phys
 bool RagdollImpactTest::Reset()
 {
     auto* dummy = GetDummy();
-    if (!dummy) return false;
+    if (!dummy)
+    {
+        return false;
+    }
     ClearProjectiles();
-    if (!dummy->GetMesh().SetAutomaticRootSupport(false, m_Message)) return false;
-    if (!dummy->StopRagdoll(m_Message)) return false;
+    if (!dummy->GetMesh().SetAutomaticRootSupport(false, m_Message))
+    {
+        return false;
+    }
+    if (!dummy->StopRagdoll(m_Message))
+    {
+        return false;
+    }
     dummy->SetActorLocation(Vector3(3.5f, dummy->GetCapsuleComponent().GetHalfHeight(), -2.5f));
     auto& mesh = dummy->GetMesh();
     mesh.GetAnimInstance().PlayAnimation(0);
-    if (!mesh.SetPhysicsAsset(m_Asset, m_Message)) return false;
+    if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
+    {
+        return false;
+    }
     // 캡슐 중심 대신 PA의 실제 최하단을 바닥에 맞춘다.
     const float lowest = mesh.GetRagdoll().GetLowestPoint();
     dummy->SetActorLocation(dummy->GetActorLocation() - Vector3(0, lowest, 0));
     if (!dummy->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_Message) ||
         !mesh.GetRagdoll().SetRootSupported(true, m_Message))
+    {
         return false;
-    if (!mesh.SetAutomaticRootSupport(m_AutomaticSupport, m_Message)) return false;
+    }
+    if (!mesh.SetAutomaticRootSupport(m_AutomaticSupport, m_Message))
+    {
+        return false;
+    }
     m_HipsReference = mesh.GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
     m_Message.clear();
@@ -78,7 +105,9 @@ bool RagdollImpactTest::SetAutomaticSupport(bool enabled)
 bool RagdollImpactTest::SetProjectileSettings(float mass, float speed)
 {
     if (!std::isfinite(mass) || !std::isfinite(speed) || mass < .1f || mass > 100 || speed < 1 || speed > 100)
+    {
         return false;
+    }
     m_Mass = mass;
     m_Speed = speed;
     return true;
@@ -93,8 +122,14 @@ bool RagdollImpactTest::FireFrom(const Character& player)
 bool RagdollImpactTest::FireAimed(const Character& player, Vector3 cameraPosition, Vector3 cameraDirection)
 {
     auto* physics = m_World.GetPhysicsWorld();
-    if (!physics) return false;
-    const auto toPx = [](Vector3 v) { return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ())); };
+    if (!physics)
+    {
+        return false;
+    }
+    const auto toPx = [](Vector3 v)
+    {
+        return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ()));
+    };
     PxVec3 ray = toPx(cameraDirection);
     if (!toPx(cameraPosition).isFinite() || !ray.isFinite() || ray.magnitudeSquared() < 1e-8f)
     {
@@ -119,7 +154,10 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool che
 {
     auto* dummy = GetDummy();
     auto* physics = m_World.GetPhysicsWorld();
-    if (!dummy || !physics || !dummy->GetMesh().GetRagdoll().IsActive()) return false;
+    if (!dummy || !physics || !dummy->GetMesh().GetRagdoll().IsActive())
+    {
+        return false;
+    }
     const Vector3 origin = player.GetActorLocation() + Vector3(0, .15f, 0);
     const Vector3 delta = target - origin;
     const float clearance = player.GetCapsuleComponent().GetRadius() + SphereRadius + .15f;
@@ -130,7 +168,10 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool che
     }
     const Vector3 direction = Normalize(delta);
     const Vector3 muzzle = origin + direction * clearance;
-    const auto toPx = [](Vector3 v) { return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ())); };
+    const auto toPx = [](Vector3 v)
+    {
+        return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ()));
+    };
     // 카메라에서 보이는 표적이라도 발사 위치 앞이 막혀 있으면 장애물 너머에 구를 생성하지 않는다.
     if (checkMuzzle && physics->SweepSphereDistance(toPx(origin), toPx(muzzle - origin), SphereRadius, &player) < clearance - .001f)
     {
@@ -161,14 +202,20 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool che
 
 void RagdollImpactTest::ClearProjectiles()
 {
-    for (const auto& shot : m_Shots) shot.body->release();
+    for (const auto& shot : m_Shots)
+    {
+        shot.body->release();
+    }
     m_Shots.clear();
 }
 
 std::vector<PxRigidDynamic*> RagdollImpactTest::GetProjectiles() const
 {
     std::vector<PxRigidDynamic*> bodies;
-    for (const auto& shot : m_Shots) bodies.push_back(shot.body);
+    for (const auto& shot : m_Shots)
+    {
+        bodies.push_back(shot.body);
+    }
     return bodies;
 }
 
@@ -177,19 +224,27 @@ void RagdollImpactTest::Update()
     const auto step = m_World.GetPhysicsWorld()->GetStepCount();
     m_Shots.erase(std::remove_if(m_Shots.begin(), m_Shots.end(), [&](const Shot& shot)
     {
-        if (step < shot.expiresAtStep) return false;
+        if (step < shot.expiresAtStep)
+        {
+            return false;
+        }
         shot.body->release();
         return true;
-    }), m_Shots.end());
+    }),
+        m_Shots.end());
     if (auto* dummy = GetDummy())
+    {
         m_MaxHipsDisplacement = Max(m_MaxHipsDisplacement,
             float(Length(dummy->GetMesh().GetRagdoll().GetPosition() - m_HipsReference)));
+    }
 }
 
 void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)
 {
     if (auto* dummy = GetDummy())
+    {
         m_FootSoles.BuildLines(dummy->GetMesh(), lines);
+    }
 }
 
 void RagdollImpactTest::DrawUI(Character* player)
@@ -204,22 +259,37 @@ void RagdollImpactTest::DrawUI(Character* player)
         ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
         ImGui::BeginDisabled(!player);
-        if (ImGui::Button(u8"더미로 구 발사") && player) FireFrom(*player);
+        if (ImGui::Button(u8"더미로 구 발사") && player)
+        {
+            FireFrom(*player);
+        }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button(u8"더미 초기화")) Reset();
-        if (ImGui::Button(u8"발사한 구 제거")) ClearProjectiles();
+        if (ImGui::Button(u8"더미 초기화"))
+        {
+            Reset();
+        }
+        if (ImGui::Button(u8"발사한 구 제거"))
+        {
+            ClearProjectiles();
+        }
         ImGui::SameLine();
         ImGui::Text(u8"남은 구: %zu개", m_Shots.size());
         if (auto* dummy = GetDummy())
         {
             auto& ragdoll = dummy->GetMesh().GetRagdoll();
             bool automatic = m_AutomaticSupport;
-            if (ImGui::Checkbox(u8"COM 자동 골반 지지", &automatic)) SetAutomaticSupport(automatic);
+            if (ImGui::Checkbox(u8"COM 자동 골반 지지", &automatic))
+            {
+                SetAutomaticSupport(automatic);
+            }
             ImGui::TextUnformatted(u8"모드 변경 시 더미를 초기화합니다.");
             bool supported = ragdoll.IsRootSupported();
             ImGui::BeginDisabled(m_AutomaticSupport);
-            if (ImGui::Checkbox(u8"더미 골반 지지", &supported)) ragdoll.SetRootSupported(supported, m_Message);
+            if (ImGui::Checkbox(u8"더미 골반 지지", &supported))
+            {
+                ragdoll.SetRootSupported(supported, m_Message);
+            }
             ImGui::EndDisabled();
             ImGui::Text(u8"지지 축: X %s / Y %s / Z %s / 회전 %s",
                 ragdoll.IsRootAxisSupported(0) ? "ON" : "OFF", ragdoll.IsRootAxisSupported(1) ? "ON" : "OFF",
@@ -228,14 +298,20 @@ void RagdollImpactTest::DrawUI(Character* player)
             ImGui::Text(u8"실제 Hips: (%.3f, %.3f, %.3f) m", float(hips.GetX()), float(hips.GetY()), float(hips.GetZ()));
             ImGui::Text(u8"기준 대비 골반 이동: %.2f cm / 최대 %.2f cm",
                 float(Length(hips - m_HipsReference)) * 100, m_MaxHipsDisplacement * 100);
-            if (supported) ImGui::Text(u8"목표 Y %.3f m / 지지 위치 오차 %.2f cm",
-                ragdoll.GetRootTargetHeight(), ragdoll.GetRootPositionError() * 100);
+            if (supported)
+            {
+                ImGui::Text(u8"목표 Y %.3f m / 지지 위치 오차 %.2f cm",
+                    ragdoll.GetRootTargetHeight(), ragdoll.GetRootPositionError() * 100);
+            }
             ImGui::TextUnformatted(u8"기준은 초기화 또는 마지막 발사 시점입니다.");
             ImGui::PushID("ImpactDummy");
             m_FootSoles.DrawUI(dummy->GetMesh());
             ImGui::PopID();
         }
-        if (!m_Message.empty()) ImGui::TextWrapped("%s", m_Message.c_str());
+        if (!m_Message.empty())
+        {
+            ImGui::TextWrapped("%s", m_Message.c_str());
+        }
     }
     ImGui::End();
 }

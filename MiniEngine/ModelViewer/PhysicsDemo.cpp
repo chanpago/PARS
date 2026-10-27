@@ -469,7 +469,10 @@ void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& ca
     const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
     const std::vector<PxRigidDynamic*>& spheres, float radius)
 {
-    if (spheres.empty()) return;
+    if (spheres.empty())
+    {
+        return;
+    }
     constexpr int latitudeCount = 12, longitudeCount = 24;
     std::vector<Vertex> vertices;
     vertices.reserve(spheres.size() * latitudeCount * longitudeCount * 6);
@@ -483,13 +486,17 @@ void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& ca
     {
         const auto pose = sphere->getGlobalPose();
         for (int y = 0; y < latitudeCount; ++y)
+        {
             for (int x = 0; x < longitudeCount; ++x)
             {
                 const PxVec3 corners[] = {normal(y, x), normal(y + 1, x), normal(y + 1, x + 1),
                     normal(y, x), normal(y + 1, x + 1), normal(y, x + 1)};
                 for (const auto& n : corners)
+                {
                     vertices.push_back({pose.transform(n * radius), pose.q.rotate(n), PxVec3(1, .65f, .08f)});
+                }
             }
+        }
     }
     context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
     context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);

@@ -406,7 +406,7 @@ namespace
     public:
         CapsulePenetration(const PhysicsQueryCapsule& capsule, bool verticalOnly = false)
             : PxOverlapCallback(hits, 32),
-              geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre)), verticalOnly(verticalOnly)
+            geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre)), verticalOnly(verticalOnly)
         {
         }
         void Consider(const PxGeometry& other, const PxTransform& otherPose)

@@ -101,7 +101,8 @@ namespace PARS
         m_Movement->SetUpdatedComponent(*m_Capsule);
         m_Mesh = &CreateDefaultSubobject<SkeletalMeshComponent>("SkeletalMeshComponent");
         m_Mesh->AttachToComponent(*m_Capsule);
-        m_Movement->SetHorizontalMoveConstraint([this](Math::Vector3 displacement) {
+        m_Movement->SetHorizontalMoveConstraint([this](Math::Vector3 displacement)
+        {
             return m_Mesh->IsActiveRagdoll() ? m_Mesh->ConstrainHorizontalMovement(displacement) : displacement;
         });
         // Actor 원점은 캡슐 중심이며, 가져온 메시의 원점은 발 위치에 있다.

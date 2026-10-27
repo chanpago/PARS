@@ -124,7 +124,10 @@ namespace PARS
 
         // Read the last completed physics state before preparing this step's drives.
         UpdateFootSupport();
-        if (!UpdateAutomaticRootSupport(m_PhysicsError)) return;
+        if (!UpdateAutomaticRootSupport(m_PhysicsError))
+        {
+            return;
+        }
 
         if (m_PhysicsMode == PhysicsAnimationMode::PassiveRagdoll)
         {

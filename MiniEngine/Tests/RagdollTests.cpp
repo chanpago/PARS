@@ -39,10 +39,18 @@ namespace
             Matrix4(OrthogonalTransform(Quaternion(Vector3(kZUnitVector), XM_PIDIV2), Vector3(1, 3, 0))),
             Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(3, 3, 0)))};
         PhysicsBody hip, leg;
-        hip.bone = names[0]; hip.shape = PhysicsShapeType::Sphere; hip.radius = .1f; hip.mass = 3;
-        leg = hip; leg.bone = names[1]; leg.mass = 1;
-        PhysicsAsset asset; asset.bodies = {hip, leg};
-        PhysicsConstraint joint; joint.parentBone = names[0]; joint.childBone = names[1];
+        hip.bone = names[0];
+        hip.shape = PhysicsShapeType::Sphere;
+        hip.radius = .1f;
+        hip.mass = 3;
+        leg = hip;
+        leg.bone = names[1];
+        leg.mass = 1;
+        PhysicsAsset asset;
+        asset.bodies = {hip, leg};
+        PhysicsConstraint joint;
+        joint.parentBone = names[0];
+        joint.childBone = names[1];
         joint.SetWorldFrame(pose[0], pose[1], pose[1]);
         asset.constraints = {joint};
         std::string error;
@@ -53,12 +61,16 @@ namespace
         for (bool articulation : {false, true})
         {
             auto configured = asset;
-            if (articulation) ConfigureDefaultDrives(configured);
+            if (articulation)
+            {
+                ConfigureDefaultDrives(configured);
+            }
             Ragdoll ragdoll;
             Check(ragdoll.Create(world, configured, names, pose, Vector3(kZero), error) &&
-                ragdoll.UsesArticulation() == articulation, "Create COM fixture on D6/articulation");
+                    ragdoll.UsesArticulation() == articulation,
+                "Create COM fixture on D6/articulation");
             Check(ragdoll.GetCenterOfMass(center, totalMass) && std::abs(totalMass - 4) < 1e-5f &&
-                float(Length(center - Vector3(1.5f, 3, 0))) < 1e-4f,
+                    float(Length(center - Vector3(1.5f, 3, 0))) < 1e-4f,
                 "COM is weighted by each body's mass and excludes the floor");
             PxRigidBody* heavy = nullptr;
             if (articulation)
@@ -67,22 +79,34 @@ namespace
                 Check(scene.getArticulations(&rig, 1) == 1, "Find COM articulation");
                 PxArticulationLink* links[2];
                 Check(rig->getLinks(links, 2) == 2, "Find COM links");
-                for (auto* link : links) if (std::strcmp(link->getName(), "hip") == 0) heavy = link;
+                for (auto* link : links)
+                {
+                    if (std::strcmp(link->getName(), "hip") == 0)
+                    {
+                        heavy = link;
+                    }
+                }
             }
             else
             {
                 PxActor* actors[2];
                 Check(scene.getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors, 2) == 2, "Find COM bodies");
-                for (auto* actor : actors) if (std::strcmp(actor->getName(), "hip") == 0) heavy = actor->is<PxRigidBody>();
+                for (auto* actor : actors)
+                {
+                    if (std::strcmp(actor->getName(), "hip") == 0)
+                    {
+                        heavy = actor->is<PxRigidBody>();
+                    }
+                }
             }
             Check(heavy != nullptr, "Find the heavier COM body");
             heavy->setCMassLocalPose(PxTransform(PxVec3(1, 0, 0)));
             Check(ragdoll.GetCenterOfMass(center, totalMass) &&
-                float(Length(center - Vector3(1.5f, 3.75f, 0))) < 1e-4f,
+                    float(Length(center - Vector3(1.5f, 3.75f, 0))) < 1e-4f,
                 "A rotated body's local COM offset affects the world COM");
             heavy->setMass(7);
             Check(ragdoll.GetCenterOfMass(center, totalMass) && std::abs(totalMass - 8) < 1e-5f &&
-                float(Length(center - Vector3(1.25f, 3.875f, 0))) < 1e-4f,
+                    float(Length(center - Vector3(1.25f, 3.875f, 0))) < 1e-4f,
                 "COM reads current PhysX mass rather than cached PA mass");
         }
         Check(world.GetErrorCount() == 0, "COM queries and local mass frames have no PhysX errors");
@@ -103,20 +127,33 @@ namespace
         triggerShape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, false);
         triggerShape->setFlag(PxShapeFlag::eTRIGGER_SHAPE, true);
         PhysicsBody root, limb;
-        root.bone = "root"; root.shape = PhysicsShapeType::Box; root.halfExtents = XMFLOAT3(.1f, .15f, .1f);
-        limb.bone = "limb"; limb.shape = PhysicsShapeType::Capsule; limb.radius = .04f; limb.halfLength = .08f;
+        root.bone = "root";
+        root.shape = PhysicsShapeType::Box;
+        root.halfExtents = XMFLOAT3(.1f, .15f, .1f);
+        limb.bone = "limb";
+        limb.shape = PhysicsShapeType::Capsule;
+        limb.radius = .04f;
+        limb.halfLength = .08f;
         limb.offset = XMFLOAT3(.06f, 0, .02f);
         XMStoreFloat4(&limb.rotation, Quaternion(Vector3(kYUnitVector), XM_PIDIV2));
         const std::vector<std::string> names{"root", "limb"};
         const std::vector<Matrix4> pose{Matrix4(Matrix3(kIdentity), Vector3(0, .15f, 0)),
             Matrix4(Matrix3(kIdentity), Vector3(0, .55f, 0))};
-        PhysicsConstraint joint; joint.parentBone = names[0]; joint.childBone = names[1];
+        PhysicsConstraint joint;
+        joint.parentBone = names[0];
+        joint.childBone = names[1];
         joint.SetWorldFrame(pose[0] * root.GetLocalTransform(), pose[1] * limb.GetLocalTransform(), pose[1]);
         for (bool articulation : {false, true})
         {
-            PhysicsAsset asset; asset.bodies = {root, limb}; asset.constraints = {joint};
-            if (articulation) ConfigureDefaultDrives(asset);
-            Ragdoll ragdoll; std::string error;
+            PhysicsAsset asset;
+            asset.bodies = {root, limb};
+            asset.constraints = {joint};
+            if (articulation)
+            {
+                ConfigureDefaultDrives(asset);
+            }
+            Ragdoll ragdoll;
+            std::string error;
             Check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error), "Create PA movement bodies");
             const auto forward = ragdoll.ConstrainHorizontalMovement(pose, Vector3(0, 0, 4));
             Check(float(forward.GetZ()) > 1.65f && float(forward.GetZ()) < 1.77f,
@@ -125,7 +162,10 @@ namespace
             Check(std::abs(float(diagonal.GetX()) - 3) < .001f && float(diagonal.GetZ()) < 1.77f,
                 "PA movement slides tangentially along the wall");
             auto target = pose;
-            for (auto& bone : target) bone.SetW(bone.GetW() + Vector4(0, 0, 1.78f, 0));
+            for (auto& bone : target)
+            {
+                bone.SetW(bone.GetW() + Vector4(0, 0, 1.78f, 0));
+            }
             Check(float(Length(ragdoll.ConstrainHorizontalMovement(target, Vector3(0, 0, .02f)))) < 1e-5f,
                 "A blocked target cannot keep advancing while physical bodies lag behind it");
             Check(std::abs(float(ragdoll.ConstrainHorizontalMovement(target, Vector3(0, 0, -.2f)).GetZ()) + .2f) < 1e-5f,

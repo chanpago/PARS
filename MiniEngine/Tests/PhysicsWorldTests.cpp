@@ -30,7 +30,7 @@ namespace
         PxRaycastHit hit;
         const PxVec3 down(0, -.2f, 0);
         Check(world.Raycast(PxVec3(1, .1f, 0), down, hit) && hit.actor == floor &&
-            std::abs(hit.distance - .1f) < 1e-5f && std::abs(hit.position.y) < 1e-5f,
+                std::abs(hit.distance - .1f) < 1e-5f && std::abs(hit.position.y) < 1e-5f,
             "Foot point within 20 cm projects to the real floor");
         Check(!world.Raycast(PxVec3(1, .201f, 0), down, hit),
             "Foot point above 20 cm has no projection");
@@ -55,8 +55,7 @@ namespace
             {-.15f, .4f, -.1f}, {-.05f, .4f, -.1f},
             {-.05f, .4f, .1f}, {-.15f, .4f, .1f}};
         auto points = left;
-        points.insert(points.end(), {{.05f, .4f, 0}, {.15f, .4f, 0},
-            {.15f, .4f, .2f}, {.05f, .4f, .2f}});
+        points.insert(points.end(), {{.05f, .4f, 0}, {.15f, .4f, 0}, {.15f, .4f, .2f}, {.05f, .4f, .2f}});
         points.push_back(left[0]);
         points.emplace_back(0.0f, .4f, .05f); // Interior point must not affect the boundary.
         const auto hull = PARS::BuildFootSupportHull(points);
@@ -69,9 +68,12 @@ namespace
             Check(a.y == .4f, "Hull preserves the real hit height");
             area += double(a.x) * b.z - double(a.z) * b.x;
             for (const auto& point : points)
+            {
                 Check((double(b.x) - a.x) * (double(point.z) - a.z) -
-                    (double(b.z) - a.z) * (double(point.x) - a.x) >= -1e-8,
+                            (double(b.z) - a.z) * (double(point.x) - a.x) >=
+                        -1e-8,
                     "Every projected point lies inside the counterclockwise hull");
+            }
         }
         Check(std::abs(area * .5 - .07) < 1e-7, "Support hull spans the space between feet");
         Check(PARS::BuildFootSupportHull(left).size() == 4, "One supported foot has its own hull");
@@ -86,12 +88,13 @@ namespace
         Check(PARS::IsInsideFootSupportHull(hull, PxVec3(0, 2, .05f)),
             "COM between supported feet lies in the combined hull");
         Check(PARS::IsInsideFootSupportHull(oneFoot, PxVec3(-.15f, 0, 0)) &&
-            PARS::IsInsideFootSupportHull(oneFoot, left[0]), "Hull edges and vertices count as inside");
+                PARS::IsInsideFootSupportHull(oneFoot, left[0]),
+            "Hull edges and vertices count as inside");
         Check(!PARS::IsInsideFootSupportHull(oneFoot, PxVec3(-.1501f, 0, 0)) &&
-            !PARS::IsInsideFootSupportHull(oneFoot, PxVec3(0, 0, 0)),
+                !PARS::IsInsideFootSupportHull(oneFoot, PxVec3(0, 0, 0)),
             "COM beyond an edge or the remaining foot is outside");
         Check(!PARS::IsInsideFootSupportHull({}, PxVec3(0)) &&
-            !PARS::IsInsideFootSupportHull({left[0], left[1]}, left[0]),
+                !PARS::IsInsideFootSupportHull({left[0], left[1]}, left[0]),
             "Missing or degenerate support polygons cannot contain COM");
         std::puts("PASS: foot support hull, both feet, one foot and degenerate projections");
         std::puts("PASS: COM containment, boundary, height independence and missing support");
@@ -134,11 +137,17 @@ namespace
         Check(std::abs(centroid.x - 14.0f / 9) < 1e-6f && std::abs(centroid.z - 8.0f / 9) < 1e-6f,
             "Expansion uses the polygon area centroid, not the vertex average");
         auto moved = hull;
-        const auto transform = [](PxVec3 v) { return PxVec3(100 - v.z, v.y + 7, 200 + v.x); };
-        for (auto& vertex : moved) vertex = transform(vertex);
+        const auto transform = [](PxVec3 v)
+        {
+            return PxVec3(100 - v.z, v.y + 7, 200 + v.x);
+        };
+        for (auto& vertex : moved)
+        {
+            vertex = transform(vertex);
+        }
         const auto movedBalance = EvaluateFootSupportBalance(moved, transform(PxVec3(1.5f, 0, 0)));
         Check(std::abs(movedBalance.weight - .5f) < 1e-6f &&
-            (movedBalance.center - transform(center.center)).magnitude() < 1e-5f,
+                (movedBalance.center - transform(center.center)).magnitude() < 1e-5f,
             "Translation and rotation move A, B and centroid without changing weight");
         Check(EvaluateFootSupportBalance(hull, PxVec3(2, 0, 0), 3).weight == .5f,
             "Changing B scale changes the fade interval");
@@ -152,8 +161,8 @@ namespace
                 "Missing, collinear and nonfinite support cannot produce a buffer or positive weight");
         }
         Check(EvaluateFootSupportBalance(hull, PxVec3(nan)).zone == FootSupportZone::Invalid &&
-            EvaluateFootSupportBalance(hull, PxVec3(0), 1).weight == 0 &&
-            EvaluateFootSupportBalance(hull, PxVec3(0), nan).weight == 0,
+                EvaluateFootSupportBalance(hull, PxVec3(0), 1).weight == 0 &&
+                EvaluateFootSupportBalance(hull, PxVec3(0), nan).weight == 0,
             "Invalid COM and expansion scales fail safely");
         std::puts("PASS: A/B centroid, expansion, radial weight, boundaries, transforms and invalid input");
     }

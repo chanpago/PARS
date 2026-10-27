@@ -33,9 +33,13 @@ namespace
     {
         const float x = std::abs(float(Dot(Vector3(world.GetX()), direction)));
         if (body.shape == PARS::PhysicsShapeType::Capsule)
+        {
             return body.radius + body.halfLength * x;
+        }
         if (body.shape == PARS::PhysicsShapeType::Sphere)
+        {
             return body.radius;
+        }
         return body.halfExtents.x * x +
             body.halfExtents.y * std::abs(float(Dot(Vector3(world.GetY()), direction))) +
             body.halfExtents.z * std::abs(float(Dot(Vector3(world.GetZ()), direction)));
@@ -63,8 +67,12 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
         for (size_t body = 0; body < asset->bodies.size(); ++body)
+        {
             if (Matches(asset->bodies[body].bone, FootNames[side]))
+            {
                 indices[side] = static_cast<int>(body);
+            }
+        }
     }
     bool unchanged = m_Initialized && m_Model == model;
     for (size_t side = 0; side < m_Feet.size(); ++side)
@@ -74,15 +82,21 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
             (index < 0 || SameGeometry(asset->bodies[index], m_Feet[side].source));
     }
     if (unchanged)
+    {
         return true;
+    }
 
     PARS::PhysicsSkeleton skeleton;
     if (!mesh.BuildPhysicsSkeleton(skeleton, m_Snapshot.message))
+    {
         return false;
+    }
     const std::vector<GraphNode> reference(model->m_SceneGraph.get(), model->m_SceneGraph.get() + model->m_NumNodes);
     std::vector<Matrix4> referenceWorld;
     if (!PARS::EvaluatePhysicsPose(skeleton, reference, Matrix4(kIdentity), referenceWorld, m_Snapshot.message))
+    {
         return false;
+    }
 
     m_Feet = {};
     m_Settings = {};
@@ -92,10 +106,14 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
     {
         const int index = indices[side];
         if (index < 0 || size_t(index) >= ragdoll.GetBodyCount() || size_t(index) >= ragdoll.GetBoneNodes().size())
+        {
             continue;
+        }
         const int node = ragdoll.GetBoneNodes()[index];
         if (node < 0 || size_t(node) >= referenceWorld.size())
+        {
             continue;
+        }
 
         auto& sole = m_Feet[side];
         sole.bodyIndex = index;
@@ -103,8 +121,12 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         const Matrix4 body = PARS::PhysicsBoneFrame(referenceWorld[node]) * sole.source.GetLocalTransform();
         Vector3 forward(body.GetX());
         for (size_t toe = 0; toe < skeleton.names.size(); ++toe)
+        {
             if (Matches(skeleton.names[toe], ToeNames[side]))
+            {
                 forward = Vector3(referenceWorld[toe].GetW()) - Vector3(referenceWorld[node].GetW());
+            }
+        }
         forward.SetY(0);
         forward = float(LengthSquare(forward)) > 1e-8f ? Normalize(forward) : Vector3(kZUnitVector);
         const Vector3 right = Normalize(Cross(up, forward));
@@ -133,7 +155,10 @@ void PARS::FootSupport::Reset()
 
 bool PARS::FootSupport::SetBufferScale(float scale)
 {
-    if (!std::isfinite(scale) || scale < 1.01f || scale > 10.0f) return false;
+    if (!std::isfinite(scale) || scale < 1.01f || scale > 10.0f)
+    {
+        return false;
+    }
     m_BufferScale = scale;
     return true;
 }
@@ -150,8 +175,14 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     auto& ragdoll = mesh.GetRagdoll();
     Vector3 center(kZero);
     sample.hasCenterOfMass = ragdoll.GetCenterOfMass(center, sample.totalMass);
-    if (sample.hasCenterOfMass) sample.centerOfMass = ToPx(center);
-    if (!Prepare(mesh)) return;
+    if (sample.hasCenterOfMass)
+    {
+        sample.centerOfMass = ToPx(center);
+    }
+    if (!Prepare(mesh))
+    {
+        return;
+    }
 
     std::vector<PxVec3> supportPoints;
     supportPoints.reserve(8);
@@ -160,7 +191,10 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
         const auto& sole = m_Feet[side];
-        if (sole.bodyIndex < 0 || size_t(sole.bodyIndex) >= ragdoll.GetBodyCount()) continue;
+        if (sole.bodyIndex < 0 || size_t(sole.bodyIndex) >= ragdoll.GetBodyCount())
+        {
+            continue;
+        }
         const auto& settings = m_Settings[side];
         auto& foot = sample.feet[side];
         foot.available = true;
@@ -198,4 +232,3 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     sample.balance = EvaluateFootSupportBalance(sample.hull, sample.hasComProjection
         ? sample.projectedCenterOfMass : PxVec3(std::numeric_limits<float>::quiet_NaN()), m_BufferScale);
 }
-

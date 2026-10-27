@@ -53,7 +53,10 @@ namespace PARS
         // Partial support keeps Y/rotation motors, optionally releases X/Z, and never teleports.
         // A zero weight removes the support joint and its associated compensation.
         bool SetRootSupport(float weight, bool horizontal, std::string& error);
-        float GetRootSupportWeight() const { return m_RootSupportWeight; }
+        float GetRootSupportWeight() const
+        {
+            return m_RootSupportWeight;
+        }
         bool IsRootAxisSupported(unsigned axis) const
         {
             return IsRootSupported() && axis < 6 && (m_SupportHorizontal || (axis != 0 && axis != 2));

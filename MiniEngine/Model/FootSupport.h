@@ -47,10 +47,22 @@ namespace PARS
         static constexpr float RayLength = .2f;
         void Update(SkeletalMeshComponent& mesh, const PhysicsWorld& physics);
         void Reset();
-        void ResetSoles() { m_Initialized = false; }
-        const FootSupportSnapshot& GetSnapshot() const { return m_Snapshot; }
-        FootSoleSettings& GetSoleSettings(size_t side) { return m_Settings.at(side); }
-        float GetBufferScale() const { return m_BufferScale; }
+        void ResetSoles()
+        {
+            m_Initialized = false;
+        }
+        const FootSupportSnapshot& GetSnapshot() const
+        {
+            return m_Snapshot;
+        }
+        FootSoleSettings& GetSoleSettings(size_t side)
+        {
+            return m_Settings.at(side);
+        }
+        float GetBufferScale() const
+        {
+            return m_BufferScale;
+        }
         bool SetBufferScale(float scale);
 
     private:

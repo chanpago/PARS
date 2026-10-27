@@ -576,14 +576,18 @@ namespace PARS
             const float mass = body->getMass();
             const PxVec3 position = (body->getGlobalPose() * body->getCMassLocalPose()).p;
             if (!std::isfinite(mass) || mass <= 0 || !position.isFinite())
+            {
                 return false;
+            }
             massSum += mass;
             x += double(mass) * position.x;
             y += double(mass) * position.y;
             z += double(mass) * position.z;
         }
         if (massSum <= 0)
+        {
             return false;
+        }
         center = Vector3(float(x / massSum), float(y / massSum), float(z / massSum));
         totalMass = float(massSum);
         return true;

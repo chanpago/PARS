@@ -15,7 +15,14 @@ namespace PARS
         PassiveRagdoll,
         ActiveRagdoll
     };
-    enum class RootSupportRelease { None, OutsideBuffer, NoSupport, Inactive, Error };
+    enum class RootSupportRelease
+    {
+        None,
+        OutsideBuffer,
+        NoSupport,
+        Inactive,
+        Error
+    };
     class SkeletalMeshComponent : public SkinnedMeshComponent
     {
     public:
@@ -60,12 +67,24 @@ namespace PARS
         {
             return m_Ragdoll;
         }
-        FootSupport& GetFootSupport() { return m_FootSupport; }
-        const FootSupport& GetFootSupport() const { return m_FootSupport; }
+        FootSupport& GetFootSupport()
+        {
+            return m_FootSupport;
+        }
+        const FootSupport& GetFootSupport() const
+        {
+            return m_FootSupport;
+        }
         // Explicit mode changes rearm the controller. The dummy changes mode only through Reset().
         bool SetAutomaticRootSupport(bool enabled, std::string& error);
-        bool UsesAutomaticRootSupport() const { return m_AutomaticRootSupport; }
-        RootSupportRelease GetRootSupportRelease() const { return m_RootSupportRelease; }
+        bool UsesAutomaticRootSupport() const
+        {
+            return m_AutomaticRootSupport;
+        }
+        RootSupportRelease GetRootSupportRelease() const
+        {
+            return m_RootSupportRelease;
+        }
         Math::Vector3 ConstrainHorizontalMovement(Math::Vector3 displacement) const;
         const std::string& GetPhysicsError() const
         {

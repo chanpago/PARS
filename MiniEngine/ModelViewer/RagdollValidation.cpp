@@ -19,9 +19,13 @@ bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, 
     using namespace PARS;
     using namespace physx;
     std::ofstream report(reportPath);
-    const auto check = [&](bool condition, const char* message) {
+    const auto check = [&](bool condition, const char* message)
+    {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
-        if (!condition) throw std::runtime_error(message);
+        if (!condition)
+        {
+            throw std::runtime_error(message);
+        }
     };
     auto* physics = world.GetPhysicsWorld();
     PxRigidStatic* wall = nullptr;
@@ -31,22 +35,33 @@ bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, 
         const auto errors = physics->GetErrorCount();
         wall = physics->CreateStaticBox(PxTransform(PxVec3(2, 2, 3.1f)), PxVec3(2, 2, .1f), "PA wall validation");
         check(wall != nullptr, "Create wall with its front face at Z=3m");
-        const auto bodyFront = [&]() {
+        const auto bodyFront = [&]()
+        {
             auto* scene = wall->getScene();
             float front = -100;
-            const auto consider = [&](const PxRigidActor* body) {
-                if (body->userData == &character) front = PxMax(front, body->getWorldBounds(1.0f).maximum.z);
+            const auto consider = [&](const PxRigidActor* body)
+            {
+                if (body->userData == &character)
+                {
+                    front = PxMax(front, body->getWorldBounds(1.0f).maximum.z);
+                }
             };
             std::vector<PxActor*> actors(scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC));
             scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors.data(), static_cast<PxU32>(actors.size()));
-            for (auto* actor : actors) consider(actor->is<PxRigidActor>());
+            for (auto* actor : actors)
+            {
+                consider(actor->is<PxRigidActor>());
+            }
             std::vector<PxArticulationReducedCoordinate*> rigs(scene->getNbArticulations());
             scene->getArticulations(rigs.data(), static_cast<PxU32>(rigs.size()));
             for (auto* rig : rigs)
             {
                 std::vector<PxArticulationLink*> links(rig->getNbLinks());
                 rig->getLinks(links.data(), static_cast<PxU32>(links.size()));
-                for (auto* link : links) consider(link);
+                for (auto* link : links)
+                {
+                    consider(link);
+                }
             }
             return front;
         };
@@ -72,7 +87,10 @@ bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, 
                 check(character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
                         mesh.GetRagdoll().SetRootSupported(true, error), "Enable actual articulated active ragdoll");
             }
-            for (int i = 0; i < 60; ++i) world.Tick(1.0f / 60);
+            for (int i = 0; i < 60; ++i)
+            {
+                world.Tick(1.0f / 60);
+            }
             check(capsule.IsHorizontalBlockingEnabled() == !active,
                 "Animation uses capsule blocking and active ragdoll disables capsule wall blocking");
             float maximumFront = bodyFront(), maximumRoot = 0;
@@ -83,10 +101,13 @@ bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, 
                 world.Tick(1.0f / 60);
                 maximumFront = Max(maximumFront, bodyFront());
                 maximumRoot = Max(maximumRoot, float(character.GetActorLocation().GetZ()));
-                if (!mesh.GetRagdoll().IsFinite()) check(false, "Bodies remain finite during sustained wall input");
+                if (!mesh.GetRagdoll().IsFinite())
+                {
+                    check(false, "Bodies remain finite during sustained wall input");
+                }
             }
             report << "active=" << active << " root_max_z=" << maximumRoot << " body_front_max_z=" << maximumFront
-                   << " final_speed=" << movement.GetGroundSpeed() << std::endl;
+                << " final_speed=" << movement.GetGroundSpeed() << std::endl;
             check(maximumRoot > 2 && maximumRoot < 3 && movement.GetGroundSpeed() < .1f,
                 "Sustained run input reaches the wall and stops the movement target");
             if (active)
@@ -116,7 +137,10 @@ bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, 
     }
     catch (const std::exception& exception)
     {
-        if (wall) wall->release();
+        if (wall)
+        {
+            wall->release();
+        }
         report << "FAILED: " << exception.what() << std::endl;
         return false;
     }

@@ -158,7 +158,10 @@ namespace PARS
 
         // A target replacement/reset has no elapsed time. Unlike a support-weight edit,
         // it must discard old target velocities so the next step cannot invent acceleration.
-        if (deltaTime == 0) m_PreviousArticulationTargetVelocity.clear();
+        if (deltaTime == 0)
+        {
+            m_PreviousArticulationTargetVelocity.clear();
+        }
 
         // [1] 본의 월드 목표 자세 -> PA 물리 바디의 월드 목표 자세
         // m_Bodies는 실제 PhysX 바디들, 아래 bodies는 이번 스텝에 계산할 목표 행렬 배열이다.
@@ -506,9 +509,15 @@ namespace PARS
     void Ragdoll::ConfigureRootSupportDrives()
     {
 #if defined(_M_X64)
-        if (!m_SupportJoint) return;
+        if (!m_SupportJoint)
+        {
+            return;
+        }
         float mass = 0;
-        for (const auto* part : m_Bodies) mass += part->getMass();
+        for (const auto* part : m_Bodies)
+        {
+            mass += part->getMass();
+        }
         const float w = m_RootSupportWeight;
         // Scale gains and force capacity, never the world-space target position.
         const PxD6JointDrive position(mass * 900.0f * w, mass * 60.0f * w, mass * 60.0f * w, false);
@@ -527,7 +536,10 @@ namespace PARS
     float Ragdoll::GetRootTargetHeight() const
     {
 #if defined(_M_X64)
-        if (m_SupportJoint) return m_SupportJoint->getDrivePosition().p.y;
+        if (m_SupportJoint)
+        {
+            return m_SupportJoint->getDrivePosition().p.y;
+        }
 #endif
         return float(GetPosition().GetY());
     }

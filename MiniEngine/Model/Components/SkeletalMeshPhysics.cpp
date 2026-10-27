@@ -96,8 +96,14 @@ namespace PARS
     {
         auto* world = GetOwner().GetWorld();
         auto* physics = world ? world->GetPhysicsWorld() : nullptr;
-        if (physics) m_FootSupport.Update(*this, *physics);
-        else m_FootSupport.Reset();
+        if (physics)
+        {
+            m_FootSupport.Update(*this, *physics);
+        }
+        else
+        {
+            m_FootSupport.Reset();
+        }
     }
 
     bool SkeletalMeshComponent::SetAutomaticRootSupport(bool enabled, std::string& error)
@@ -108,7 +114,9 @@ namespace PARS
             return false;
         }
         if (enabled != m_AutomaticRootSupport)
+        {
             m_RootSupportRelease = RootSupportRelease::None;
+        }
         m_AutomaticRootSupport = enabled;
         if (enabled)
         {
@@ -121,16 +129,31 @@ namespace PARS
 
     bool SkeletalMeshComponent::UpdateAutomaticRootSupport(std::string& error)
     {
-        if (!m_AutomaticRootSupport) return true;
+        if (!m_AutomaticRootSupport)
+        {
+            return true;
+        }
         const auto& balance = m_FootSupport.GetSnapshot().balance;
         if (m_RootSupportRelease == RootSupportRelease::None)
         {
-            if (!IsActiveRagdoll()) m_RootSupportRelease = RootSupportRelease::Inactive;
-            else if (balance.zone == FootSupportZone::Invalid) m_RootSupportRelease = RootSupportRelease::NoSupport;
-            else if (balance.weight <= 0) m_RootSupportRelease = RootSupportRelease::OutsideBuffer;
+            if (!IsActiveRagdoll())
+            {
+                m_RootSupportRelease = RootSupportRelease::Inactive;
+            }
+            else if (balance.zone == FootSupportZone::Invalid)
+            {
+                m_RootSupportRelease = RootSupportRelease::NoSupport;
+            }
+            else if (balance.weight <= 0)
+            {
+                m_RootSupportRelease = RootSupportRelease::OutsideBuffer;
+            }
         }
         const float weight = m_RootSupportRelease == RootSupportRelease::None ? balance.weight : 0;
-        if (m_Ragdoll.SetRootSupport(weight, false, error)) return true;
+        if (m_Ragdoll.SetRootSupport(weight, false, error))
+        {
+            return true;
+        }
         m_RootSupportRelease = RootSupportRelease::Error;
         std::string ignored;
         m_Ragdoll.SetRootSupported(false, ignored);
