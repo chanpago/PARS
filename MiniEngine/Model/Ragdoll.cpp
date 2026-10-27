@@ -574,21 +574,45 @@ namespace PARS
         for (const auto* body : m_Bodies)
         {
             const float mass = body->getMass();
-            const PxVec3 position = (body->getGlobalPose() * body->getCMassLocalPose()).p;
-            if (!std::isfinite(mass) || mass <= 0 || !position.isFinite())
+            if (!std::isfinite(mass) || mass <= 0)
             {
                 return false;
             }
             massSum += mass;
-            x += double(mass) * position.x;
-            y += double(mass) * position.y;
-            z += double(mass) * position.z;
+            if (!m_Articulation)
+            {
+                const PxVec3 position = (body->getGlobalPose() * body->getCMassLocalPose()).p;
+                if (!position.isFinite())
+                {
+                    return false;
+                }
+                x += double(mass) * position.x;
+                y += double(mass) * position.y;
+                z += double(mass) * position.z;
+            }
         }
         if (massSum <= 0)
         {
             return false;
         }
-        center = Vector3(float(x / massSum), float(y / massSum), float(z / massSum));
+        if (m_Articulation)
+        {
+            if (!m_Articulation->getScene())
+            {
+                return false;
+            }
+            // false를 전달해 월드 공간의 전체 질량중심을 구한다.
+            const PxVec3 position = m_Articulation->computeArticulationCOM(false);
+            if (!position.isFinite())
+            {
+                return false;
+            }
+            center = Vector3(position.x, position.y, position.z);
+        }
+        else
+        {
+            center = Vector3(float(x / massSum), float(y / massSum), float(z / massSum));
+        }
         totalMass = float(massSum);
         return true;
 #else
