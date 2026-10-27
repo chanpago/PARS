@@ -558,6 +558,14 @@ namespace
         auto* scene = floor->getScene();
         PxActor* actor = nullptr; scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, &actor, 1);
         auto* body = actor->is<PxRigidDynamic>();
+        // With omega=16 and no linear gravity feed-forward, equilibrium is target + g/omega^2.
+        const PxVec3 gravityOffset = scene->getGravity() / (16.0f * 16.0f);
+        const Vector3 equilibriumOffset(gravityOffset.x, gravityOffset.y, gravityOffset.z);
+        const auto positionErrorFromEquilibrium = [&](const Matrix4& target)
+        {
+            return float(Length(Vector3(ragdoll.GetBoneWorld(0).GetW()) -
+                Vector3(target.GetW()) - equilibriumOffset));
+        };
         const auto step = [&](const Matrix4& target) {
             Check(ragdoll.UpdateDriveTargets({target}, 1.0f / 60, error), "Update pelvis target");
             world.Step();
@@ -573,8 +581,8 @@ namespace
         Check(body->getLinearVelocity().x > .1f && body->getLinearVelocity().x <= 60.0f / 60 * 1.02f,
             "Pelvis linear acceleration obeys the finite force limit");
         for (int i = 0; i < 240; ++i) step(initial);
-        Check(ragdoll.GetRootPositionError() < .025f && ragdoll.GetRootRotationError() < .02f,
-            "Force/torque support holds a static world target against gravity");
+        Check(positionErrorFromEquilibrium(initial) < .002f && ragdoll.GetRootRotationError() < .02f,
+            "Frequency-16 position support settles at the expected gravity equilibrium");
         float positionError = 0, rotationError = 0;
         Matrix4 target = initial;
         for (int i = 0; i < 360; ++i)
@@ -586,12 +594,12 @@ namespace
             if (i > 60)
             {
                 const auto actual = ragdoll.GetBoneWorld(0);
-                positionError = (std::max)(positionError, float(Length(Vector3(actual.GetW()) - Vector3(target.GetW()))));
+                positionError = (std::max)(positionError, positionErrorFromEquilibrium(target));
                 rotationError = (std::max)(rotationError, Difference(Quaternion(actual), Quaternion(target)));
             }
         }
-        std::printf("dynamic pelvis moving error=%.6f m / %.6f rad\n", positionError, rotationError);
-        Check(positionError < .04f && rotationError < .04f, "Pelvis tracks world translation and rotation including PA offset/rotation");
+        std::printf("dynamic pelvis moving error relative to gravity equilibrium=%.6f m / %.6f rad\n", positionError, rotationError);
+        Check(positionError < .04f && rotationError < .04f, "Pelvis tracks moving gravity equilibrium and rotation including PA offset/rotation");
         for (int i = 0; i < 120; ++i) step(target);
         body->addForce(PxVec3(2, 1, 0), PxForceMode::eVELOCITY_CHANGE);
         body->addTorque(PxVec3(0, 3, 1), PxForceMode::eVELOCITY_CHANGE);
@@ -599,12 +607,12 @@ namespace
         for (int i = 0; i < 180; ++i)
         {
             step(target);
-            pushedPosition = (std::max)(pushedPosition, ragdoll.GetRootPositionError());
+            pushedPosition = (std::max)(pushedPosition, positionErrorFromEquilibrium(target));
             pushedRotation = (std::max)(pushedRotation, ragdoll.GetRootRotationError());
         }
         Check(pushedPosition > .02f && pushedRotation > .005f &&
-            ragdoll.GetRootPositionError() < .025f && ragdoll.GetRootRotationError() < .02f,
-            "Impulses displace and rotate the supported pelvis, then the drives recover");
+            positionErrorFromEquilibrium(target) < .002f && ragdoll.GetRootRotationError() < .02f,
+            "Impulses displace and rotate the pelvis, then the drives recover to gravity equilibrium");
         // Block the target with a wall: finite motors must yield to contact.
         auto* wall = world.CreateStaticBox(PxTransform(PxVec3(-1, 3, 1)), PxVec3(.1f, 2, 2), "pelvis wall");
         const auto blocked = Pose(Vector3(0, 3, 1));

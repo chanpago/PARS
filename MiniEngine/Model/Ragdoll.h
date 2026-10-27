@@ -108,6 +108,8 @@ namespace PARS
         bool IsFinite() const;
 
     private:
+        static constexpr float PelvisLinearFrequency = 16.0f;
+        static constexpr float PelvisLinearDampingRatio = 1.0f;
         static constexpr float PelvisAngularFrequency = 16.0f;
         static constexpr float PelvisAngularDampingRatio = 1.0f;
 

@@ -520,7 +520,8 @@ namespace PARS
         }
         const float w = m_RootSupportWeight;
         // Scale gains and force capacity, never the world-space target position.
-        const PxD6JointDrive position(mass * 900.0f * w, mass * 60.0f * w, mass * 60.0f * w, false);
+        const PxD6JointDrive position(mass * PelvisLinearFrequency * PelvisLinearFrequency * w,
+            2.0f * mass * PelvisLinearDampingRatio * PelvisLinearFrequency * w, mass * 60.0f * w, false);
         m_SupportJoint->setDrive(PxD6Drive::eX, m_SupportHorizontal ? position : PxD6JointDrive());
         m_SupportJoint->setDrive(PxD6Drive::eY, position);
         m_SupportJoint->setDrive(PxD6Drive::eZ, m_SupportHorizontal ? position : PxD6JointDrive());
