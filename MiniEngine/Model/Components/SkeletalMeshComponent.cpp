@@ -122,8 +122,10 @@ namespace PARS
             }
         }
 
-        // Read the last completed physics state before preparing this step's drives.
+        // 여기서 발 움직임을 계산하고 지지영역을 조사해 가중치를 구한다
         UpdateFootSupport();
+
+        //
         if (!UpdateAutomaticRootSupport(m_PhysicsError))
         {
             return;
