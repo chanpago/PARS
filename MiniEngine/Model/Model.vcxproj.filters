@@ -145,6 +145,9 @@
     <ClCompile Include="PhysicsAsset.cpp" />
     <ClCompile Include="PhysicsPose.cpp" />
     <ClInclude Include="PhysicsPose.h" />
+    <ClInclude Include="FootSupport.h" />
+    <ClInclude Include="FootSupportHull.h" />
+    <ClCompile Include="FootSupport.cpp" />
     <ClCompile Include="Ragdoll.cpp" />
     <ClCompile Include="RagdollDrive.cpp" />
     <ClCompile Include="RagdollArticulation.cpp" />

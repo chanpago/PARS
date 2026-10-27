@@ -89,11 +89,21 @@ namespace PARS
         {
             CreatePhysicsState(*m_PhysicsAsset, m_Ragdoll, m_PhysicsSkeleton, m_PhysicsError);
         }
+        UpdateFootSupport();
+    }
+
+    void SkeletalMeshComponent::UpdateFootSupport()
+    {
+        auto* world = GetOwner().GetWorld();
+        auto* physics = world ? world->GetPhysicsWorld() : nullptr;
+        if (physics) m_FootSupport.Update(*this, *physics);
+        else m_FootSupport.Reset();
     }
 
     void SkeletalMeshComponent::DestroyPhysicsState()
     {
         m_Ragdoll.Destroy();
+        m_FootSupport.Reset();
         m_PhysicsSkeleton = {};
         m_PhysicsPose.clear();
         m_RagdollSourcePose.clear();
@@ -268,6 +278,7 @@ namespace PARS
         m_PhysicsMode = mode;
         m_Ragdoll.SetDrivesEnabled(active);
         UpdatePhysicsPose();
+        UpdateFootSupport();
         error.clear();
         return true;
     }
@@ -357,5 +368,6 @@ namespace PARS
         m_BoneStretch.clear();
         m_ModelInstance.ClearSkinnedWorldBounds();
         UpdateKinematicPose(true);
+        UpdateFootSupport();
     }
 }

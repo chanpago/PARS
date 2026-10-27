@@ -172,7 +172,7 @@ void RagdollImpactTest::Update()
 void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)
 {
     if (auto* dummy = GetDummy())
-        m_FootSoles.BuildLines(dummy->GetMesh(), *m_World.GetPhysicsWorld(), lines);
+        m_FootSoles.BuildLines(dummy->GetMesh(), lines);
 }
 
 void RagdollImpactTest::DrawUI(Character* player)

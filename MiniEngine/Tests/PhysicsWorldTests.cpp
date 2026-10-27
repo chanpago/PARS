@@ -1,5 +1,5 @@
 #include "PhysicsWorld.h"
-#include "../ModelViewer/FootSupportHull.h"
+#include "../Model/FootSupportHull.h"
 
 #include <cmath>
 #include <cstdio>
@@ -97,6 +97,67 @@ namespace
         std::puts("PASS: COM containment, boundary, height independence and missing support");
     }
 
+    void TestFootSupportBalance()
+    {
+        using namespace PARS;
+        const auto hull = BuildFootSupportHull({{-1, .4f, -2}, {1, .4f, -2}, {1, .4f, 2}, {-1, .4f, 2}});
+        const auto center = EvaluateFootSupportBalance(hull, PxVec3(0));
+        Check(center.zone == FootSupportZone::Inside && center.weight == 1 && !center.hasDirection,
+            "COM at the area centroid has full weight without normalizing a zero vector");
+        Check(center.bufferHull.size() == 4 && center.bufferHull[0] == PxVec3(-2, .4f, -4),
+            "B doubles XZ distances while preserving surface height");
+        for (const PxVec3 direction : {PxVec3(1, 0, 0), PxVec3(0, 0, 2), PxVec3(1, 0, 2)})
+        {
+            const auto edgeA = EvaluateFootSupportBalance(hull, direction);
+            const auto middle = EvaluateFootSupportBalance(hull, direction * 1.5f);
+            const auto edgeB = EvaluateFootSupportBalance(hull, direction * 2);
+            const auto outside = EvaluateFootSupportBalance(hull, direction * 3);
+            Check(edgeA.weight == 1 && edgeA.zone == FootSupportZone::Inside,
+                "A edges and corners have full weight");
+            Check(std::abs(middle.weight - .5f) < 1e-6f && middle.zone == FootSupportZone::Buffer,
+                "Halfway between A and B has half weight along narrow, long and corner directions");
+            Check(edgeB.weight == 0 && edgeB.zone == FootSupportZone::Outside && outside.weight == 0,
+                "B boundary and exterior have zero weight");
+            Check(std::abs(middle.outerDistance - 2 * middle.innerDistance) < 1e-6f,
+                "Radial B distance uses the same direction as A");
+        }
+        float previous = 1;
+        for (int i = 0; i <= 100; ++i)
+        {
+            const float weight = EvaluateFootSupportBalance(hull, PxVec3(1 + i * .01f, 50, 0)).weight;
+            Check(weight <= previous && weight >= 0 && weight <= 1, "Weight decreases monotonically across the band");
+            previous = weight;
+        }
+        // This trapezoid's area centroid differs from the average of its vertices.
+        const auto trapezoid = BuildFootSupportHull({{0, 0, 0}, {4, 0, 0}, {2, 0, 2}, {0, 0, 2}});
+        const auto centroid = EvaluateFootSupportBalance(trapezoid, PxVec3(0)).center;
+        Check(std::abs(centroid.x - 14.0f / 9) < 1e-6f && std::abs(centroid.z - 8.0f / 9) < 1e-6f,
+            "Expansion uses the polygon area centroid, not the vertex average");
+        auto moved = hull;
+        const auto transform = [](PxVec3 v) { return PxVec3(100 - v.z, v.y + 7, 200 + v.x); };
+        for (auto& vertex : moved) vertex = transform(vertex);
+        const auto movedBalance = EvaluateFootSupportBalance(moved, transform(PxVec3(1.5f, 0, 0)));
+        Check(std::abs(movedBalance.weight - .5f) < 1e-6f &&
+            (movedBalance.center - transform(center.center)).magnitude() < 1e-5f,
+            "Translation and rotation move A, B and centroid without changing weight");
+        Check(EvaluateFootSupportBalance(hull, PxVec3(2, 0, 0), 3).weight == .5f,
+            "Changing B scale changes the fade interval");
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        for (const auto& invalid : {std::vector<PxVec3>{}, std::vector<PxVec3>{{0, 0, 0}, {1, 0, 0}},
+            std::vector<PxVec3>{{0, 0, 0}, {1, 0, 0}, {2, 0, 0}},
+            std::vector<PxVec3>{{nan, 0, 0}, {1, 0, 0}, {0, 0, 1}}})
+        {
+            const auto result = EvaluateFootSupportBalance(invalid, PxVec3(0));
+            Check(result.weight == 0 && result.zone == FootSupportZone::Invalid && result.bufferHull.empty(),
+                "Missing, collinear and nonfinite support cannot produce a buffer or positive weight");
+        }
+        Check(EvaluateFootSupportBalance(hull, PxVec3(nan)).zone == FootSupportZone::Invalid &&
+            EvaluateFootSupportBalance(hull, PxVec3(0), 1).weight == 0 &&
+            EvaluateFootSupportBalance(hull, PxVec3(0), nan).weight == 0,
+            "Invalid COM and expansion scales fail safely");
+        std::puts("PASS: A/B centroid, expansion, radial weight, boundaries, transforms and invalid input");
+    }
+
     float SimulateAtRate(int fps, double seconds)
     {
         PhysicsWorld world;
@@ -128,6 +189,7 @@ int main(int argc, char** argv)
 {
     TestFootProjectionRaycast();
     TestFootSupportHull();
+    TestFootSupportBalance();
     const float reference = SimulateAtRate(60, 0.5);
     Check(std::abs(SimulateAtRate(30, 0.5) - reference) < 1e-5f, "30/60 FPS agree in flight");
     Check(std::abs(SimulateAtRate(144, 0.5) - reference) < 1e-5f, "144/60 FPS agree in flight");

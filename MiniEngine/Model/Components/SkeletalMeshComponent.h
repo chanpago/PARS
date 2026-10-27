@@ -5,6 +5,7 @@
 #include "../PhysicsAsset.h"
 #include "../PhysicsPose.h"
 #include "../Ragdoll.h"
+#include "../FootSupport.h"
 
 namespace PARS
 {
@@ -58,6 +59,8 @@ namespace PARS
         {
             return m_Ragdoll;
         }
+        FootSupport& GetFootSupport() { return m_FootSupport; }
+        const FootSupport& GetFootSupport() const { return m_FootSupport; }
         Math::Vector3 ConstrainHorizontalMovement(Math::Vector3 displacement) const;
         const std::string& GetPhysicsError() const
         {
@@ -94,7 +97,9 @@ namespace PARS
         void DestroyPhysicsState();
         void UpdateKinematicPose(bool teleport);
         void UpdatePhysicsPose();
+        void UpdateFootSupport();
         Ragdoll m_Ragdoll;
+        FootSupport m_FootSupport;
         PhysicsSkeleton m_PhysicsSkeleton;
         std::vector<GraphNode> m_RagdollSourcePose, m_PhysicsPose;
         std::vector<Math::Matrix4> m_BoneStretch;

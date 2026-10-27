@@ -18,7 +18,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FootSoleDebug.h" />
-    <ClInclude Include="FootSupportHull.h" />
     <ClInclude Include="RagdollImpactTest.h" />
   </ItemGroup>
   <ItemGroup>

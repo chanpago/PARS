@@ -1689,7 +1689,7 @@ void ModelViewer::RenderScene(void)
         if (auto* character = GetPreviewCharacter())
         {
             std::vector<physx::PxDebugLine> lines;
-            m_FootSoles.BuildLines(character->GetMesh(), *m_World.GetPhysicsWorld(), lines);
+            m_FootSoles.BuildLines(character->GetMesh(), lines);
             m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
         }
     }

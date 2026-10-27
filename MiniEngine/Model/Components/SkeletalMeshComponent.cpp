@@ -62,6 +62,7 @@ namespace PARS
         m_PhysicsSkeleton = std::move(skeleton);
         m_PhysicsAsset = std::make_unique<const PhysicsAsset>(asset);
         m_PendingDriveSettings.reset();
+        UpdateFootSupport();
         m_PhysicsError.clear();
         error.clear();
         return true;
@@ -120,6 +121,9 @@ namespace PARS
                 m_PendingDriveSettings.reset();
             }
         }
+
+        // Read the last completed physics state before preparing this step's drives.
+        UpdateFootSupport();
 
         if (m_PhysicsMode == PhysicsAnimationMode::PassiveRagdoll)
         {

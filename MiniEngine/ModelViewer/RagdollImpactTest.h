@@ -1,8 +1,10 @@
 #pragma once
 
 #include "FootSoleDebug.h"
+#include "PhysicsAsset.h"
 #include "GameFramework/Actor.h"
 
+class Model;
 namespace PARS { class World; class Character; }
 
 class RagdollImpactTest

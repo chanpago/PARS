@@ -109,7 +109,6 @@
   <ItemGroup>
     <ClInclude Include="PhysicsDemo.h" />
     <ClInclude Include="FootSoleDebug.h" />
-    <ClInclude Include="FootSupportHull.h" />
     <ClInclude Include="RagdollImpactTest.h" />
     <ClInclude Include="RagdollComparisonRunner.h" />
     <ClInclude Include="SkeletalMeshViewer.h" />

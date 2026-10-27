@@ -25,6 +25,59 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(dummy->GetMesh().IsActiveRagdoll() && dummy->GetMesh().GetRagdoll().IsRootSupported(),
             "Dummy is dynamic with angular drives and pelvis support enabled");
         const auto tick = [&]() { world.Tick(1.0f / 60); test.Update(); };
+        auto& support = dummy->GetMesh().GetFootSupport();
+        check(support.GetSnapshot().hasCenterOfMass && !support.GetSnapshot().hull.empty() &&
+            !support.GetSnapshot().balance.bufferHull.empty(),
+            "Reset prepares COM and A/B before the first physics step or render");
+        world.SetPhysicsPaused(true);
+        FootSoleDebug debug;
+        debug.SetVisible(false);
+        std::vector<PxDebugLine> lines;
+        const auto pausedSample = support.GetSnapshot().sampleNumber;
+        debug.BuildLines(dummy->GetMesh(), lines);
+        tick();
+        check(lines.empty() && support.GetSnapshot().sampleNumber == pausedSample,
+            "Hidden debug and paused rendering do not change the physics snapshot");
+        const auto previousStep = world.GetPhysicsWorld()->GetStepCount();
+        world.RequestPhysicsStep();
+        tick();
+        check(support.GetSnapshot().sampleNumber == pausedSample + 1 &&
+            support.GetSnapshot().completedPhysicsStep == previousStep,
+            "Single stepping samples the completed body state once even with debug hidden");
+        debug.SetVisible(true);
+        const auto renderedSample = support.GetSnapshot().sampleNumber;
+        debug.BuildLines(dummy->GetMesh(), lines);
+        debug.BuildLines(dummy->GetMesh(), lines);
+        bool hasBufferLines = false;
+        for (const auto& line : lines) hasBufferLines |= line.color0 == 0xffffffff;
+        check(hasBufferLines && support.GetSnapshot().sampleNumber == renderedSample,
+            "Drawing B's white dashes reads the snapshot without running any queries");
+        const auto leftSettings = support.GetSoleSettings(0), rightSettings = support.GetSoleSettings(1);
+        support.GetSoleSettings(0).offset.y += 1;
+        world.RequestPhysicsStep();
+        tick();
+        check(support.GetSnapshot().projectedPointCount > 0 && support.GetSnapshot().projectedPointCount <= 4 &&
+            !support.GetSnapshot().hull.empty(), "One valid foot still produces its own A/B region");
+        support.GetSoleSettings(1).offset.y += 1;
+        world.RequestPhysicsStep();
+        tick();
+        check(support.GetSnapshot().hull.empty() && support.GetSnapshot().balance.bufferHull.empty() &&
+            support.GetSnapshot().balance.weight == 0 && !support.GetSnapshot().hasComProjection &&
+            dummy->GetMesh().GetRagdoll().IsRootSupported(),
+            "Missing support clears stale A/B and weight without changing pelvis support in observation mode");
+        support.GetSoleSettings(0) = leftSettings;
+        support.GetSoleSettings(1) = rightSettings;
+        check(test.Reset() && !support.GetSnapshot().hull.empty(), "Reset immediately replaces the invalid snapshot");
+        world.SetPhysicsPaused(false);
+        for (int fps : {30, 120})
+        {
+            const auto initialSample = support.GetSnapshot().sampleNumber;
+            const auto initialStep = world.GetPhysicsWorld()->GetStepCount();
+            for (int frame = 0; frame < fps; ++frame) world.Tick(1.0f / fps);
+            check(support.GetSnapshot().sampleNumber - initialSample == 60 &&
+                world.GetPhysicsWorld()->GetStepCount() - initialStep == 60,
+                "30/120 FPS each produce exactly 60 support samples per simulated second");
+        }
         float travel[2] = {};
         for (int trial = 0; trial < 2; ++trial)
         {

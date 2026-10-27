@@ -1,50 +1,29 @@
 ﻿#include "FootSoleDebug.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "FootSupportHull.h"
-#include "PhysicsPose.h"
 #include "imgui.h"
 #include <cmath>
-#include <cstring>
-#include <utility>
 
 using namespace Math;
 using namespace physx;
 
 namespace
 {
-    const char* const FootNames[] = {"LeftFoot", "RightFoot"};
-    const char* const ToeNames[] = {"LeftToeBase", "RightToeBase"};
-    const char* const FootLabels[] = {u8"왼발", u8"오른발"};
     constexpr PxU32 FootColors[] = {0xff44ccff, 0xffffbb44};
     constexpr PxU32 HitColor = 0xff55ff77, MissColor = 0xffcc5566;
-    constexpr PxU32 HullColor = 0xffee66ff;
+    constexpr PxU32 HullColor = 0xffee66ff, BufferColor = 0xffffffff;
     constexpr PxU32 ComColor = 0xffffdd44, OutsideColor = 0xffff0000, UnknownColor = 0xff000000;
 
-    bool Matches(const std::string& name, const char* leaf)
-    {
-        const auto separator = name.find_last_of(':');
-        return name.compare(separator == std::string::npos ? 0 : separator + 1,
-            std::string::npos, leaf) == 0;
-    }
+    Vector3 ToMath(const PxVec3& point) { return Vector3(point.x, point.y, point.z); }
 
-    bool SameGeometry(const PARS::PhysicsBody& a, const PARS::PhysicsBody& b)
+    void DashedLine(std::vector<PxDebugLine>& lines, const PxVec3& a, const PxVec3& b)
     {
-        return a.bone == b.bone && a.shape == b.shape && a.radius == b.radius && a.halfLength == b.halfLength &&
-            std::memcmp(&a.offset, &b.offset, sizeof(a.offset)) == 0 &&
-            std::memcmp(&a.rotation, &b.rotation, sizeof(a.rotation)) == 0 &&
-            std::memcmp(&a.halfExtents, &b.halfExtents, sizeof(a.halfExtents)) == 0;
-    }
-
-    float Extent(const PARS::PhysicsBody& body, const Matrix4& world, Vector3 direction)
-    {
-        const float x = std::abs(float(Dot(Vector3(world.GetX()), direction)));
-        if (body.shape == PARS::PhysicsShapeType::Capsule)
-            return body.radius + body.halfLength * x;
-        if (body.shape == PARS::PhysicsShapeType::Sphere)
-            return body.radius;
-        return body.halfExtents.x * x +
-            body.halfExtents.y * std::abs(float(Dot(Vector3(world.GetY()), direction))) +
-            body.halfExtents.z * std::abs(float(Dot(Vector3(world.GetZ()), direction)));
+        const PxVec3 delta = b - a;
+        const float length = delta.magnitude();
+        if (length < 1e-6f) return;
+        const PxVec3 direction = delta / length, offset(0, .004f, 0);
+        for (float distance = 0; distance < length; distance += .06f)
+            lines.emplace_back(a + offset + direction * distance,
+                a + offset + direction * PxMin(distance + .035f, length), BufferColor);
     }
 
     PxVec3 ToPx(Vector3 point)
@@ -87,231 +66,124 @@ namespace
     }
 }
 
-bool FootSoleDebug::Prepare(PARS::SkeletalMeshComponent& mesh)
+void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<PxDebugLine>& lines) const
 {
-    const auto* asset = mesh.GetPhysicsAsset();
-    const auto* model = mesh.GetSkeletalMesh().get();
-    const auto& ragdoll = mesh.GetRagdoll();
-    if (!asset || !model || !ragdoll.IsActive())
+    if (!m_Visible) return;
+    const auto& sample = mesh.GetFootSupport().GetSnapshot();
+    for (size_t side = 0; side < sample.feet.size(); ++side)
     {
-        m_Message = u8"발바닥을 표시할 물리 바디가 없습니다.";
-        return false;
-    }
-
-    std::array<int, 2> indices{-1, -1};
-    for (size_t side = 0; side < m_Feet.size(); ++side)
-    {
-        for (size_t body = 0; body < asset->bodies.size(); ++body)
-            if (Matches(asset->bodies[body].bone, FootNames[side]))
-                indices[side] = static_cast<int>(body);
-    }
-    bool unchanged = m_Initialized && m_Model == model;
-    for (size_t side = 0; side < m_Feet.size(); ++side)
-    {
-        const int index = indices[side];
-        unchanged = unchanged && index == m_Feet[side].bodyIndex &&
-            (index < 0 || SameGeometry(asset->bodies[index], m_Feet[side].source));
-    }
-    if (unchanged)
-        return true;
-
-    PARS::PhysicsSkeleton skeleton;
-    if (!mesh.BuildPhysicsSkeleton(skeleton, m_Message))
-        return false;
-    const std::vector<GraphNode> reference(model->m_SceneGraph.get(), model->m_SceneGraph.get() + model->m_NumNodes);
-    std::vector<Matrix4> referenceWorld;
-    if (!PARS::EvaluatePhysicsPose(skeleton, reference, Matrix4(kIdentity), referenceWorld, m_Message))
-        return false;
-
-    m_Feet = {};
-    const Vector3 up(kYUnitVector);
-    bool found = false;
-    for (size_t side = 0; side < m_Feet.size(); ++side)
-    {
-        const int index = indices[side];
-        if (index < 0 || size_t(index) >= ragdoll.GetBodyCount() || size_t(index) >= ragdoll.GetBoneNodes().size())
-            continue;
-        const int node = ragdoll.GetBoneNodes()[index];
-        if (node < 0 || size_t(node) >= referenceWorld.size())
-            continue;
-
-        auto& sole = m_Feet[side];
-        sole.bodyIndex = index;
-        sole.source = asset->bodies[index];
-        const Matrix4 body = PARS::PhysicsBoneFrame(referenceWorld[node]) * sole.source.GetLocalTransform();
-        Vector3 forward(body.GetX());
-        for (size_t toe = 0; toe < skeleton.names.size(); ++toe)
-            if (Matches(skeleton.names[toe], ToeNames[side]))
-                forward = Vector3(referenceWorld[toe].GetW()) - Vector3(referenceWorld[node].GetW());
-        forward.SetY(0);
-        forward = float(LengthSquare(forward)) > 1e-8f ? Normalize(forward) : Vector3(kZUnitVector);
-        const Vector3 right = Normalize(Cross(up, forward));
-
-        // 기준 자세에서 발바닥 방향과 높이를 정한다. 이후에는 실제 발의 기울기까지 따라간다.
-        const Vector3 center = Vector3(body.GetW()) - up * Extent(sole.source, body, up);
-        sole.soleInBody = Invert(body) * Matrix4(right, up, forward, center);
-        sole.halfWidth = Max(.005f, Extent(sole.source, body, right));
-        sole.halfLength = Max(.005f, Extent(sole.source, body, forward));
-        found = true;
-    }
-    m_Model = model;
-    m_Initialized = found;
-    m_Message = found ? "" : u8"LeftFoot / RightFoot 물리 바디를 찾을 수 없습니다.";
-    return found;
-}
-
-void FootSoleDebug::BuildLines(PARS::SkeletalMeshComponent& mesh, const PhysicsWorld& physics,
-    std::vector<PxDebugLine>& lines)
-{
-    m_SupportHull.clear();
-    m_ProjectedPointCount = 0;
-    m_HasCenterOfMass = m_HasComProjection = m_ComInsideHull = false;
-    m_TotalMass = 0;
-    if (!m_Visible || !Prepare(mesh))
-        return;
-    std::vector<PxVec3> supportPoints;
-    supportPoints.reserve(8);
-    const auto& ragdoll = mesh.GetRagdoll();
-    double supportHeight = 0;
-    const PxVec3 down(0, -RayLength, 0);
-    for (size_t side = 0; side < m_Feet.size(); ++side)
-    {
-        auto& sole = m_Feet[side];
-        if (sole.bodyIndex < 0)
-            continue;
-        const Matrix4 bodyWorld = ragdoll.GetBoneWorld(sole.bodyIndex) * sole.source.GetLocalTransform();
-        const Quaternion rotation = Quaternion(Vector3(kZUnitVector), XMConvertToRadians(sole.rotation.z)) *
-            Quaternion(Vector3(kYUnitVector), XMConvertToRadians(sole.rotation.y)) *
-            Quaternion(Vector3(kXUnitVector), XMConvertToRadians(sole.rotation.x));
-        const Matrix4 world = bodyWorld * sole.soleInBody * Matrix4(OrthogonalTransform(rotation, Vector3(sole.offset)));
-        const float w = sole.halfWidth, l = sole.halfLength;
-        const Vector3 local[] = {Vector3(-w, 0, -l), Vector3(w, 0, -l), Vector3(w, 0, l), Vector3(-w, 0, l)};
-        std::array<Vector3, 4> corners, projected;
-        for (size_t i = 0; i < corners.size(); ++i)
+        const auto& foot = sample.feet[side];
+        if (!foot.available) continue;
+        for (size_t i = 0; i < foot.corners.size(); ++i)
         {
-            corners[i] = Vector3(world * local[i]);
-            PxRaycastHit hit;
-            sole.projected[i] = physics.Raycast(ToPx(corners[i]), down, hit, &mesh.GetOwner());
-            sole.distances[i] = sole.projected[i] ? hit.distance : RayLength;
-            projected[i] = sole.projected[i] ? Vector3(hit.position.x, hit.position.y, hit.position.z)
-                                           : corners[i] + Vector3(0, -RayLength, 0);
-            if (m_ShowRays)
-                Line(lines, corners[i], projected[i], sole.projected[i] ? HitColor : MissColor);
-            Point(lines, corners[i], FootColors[side]);
-            if (sole.projected[i])
-            {
-                Point(lines, projected[i], HitColor);
-                supportPoints.push_back(hit.position);
-                supportHeight += hit.position.y;
-            }
-        }
-        for (size_t i = 0; i < corners.size(); ++i)
-        {
-            const size_t next = (i + 1) % corners.size();
-            Line(lines, corners[i], corners[next], FootColors[side]);
-            if (sole.projected[i] && sole.projected[next])
-                Line(lines, projected[i], projected[next], HitColor);
-        }
-    }
-    // 양발의 유효한 지면 투영점을 함께 감싸는 2D 지지 영역이다.
-    m_ProjectedPointCount = supportPoints.size();
-    m_SupportHull = PARS::BuildFootSupportHull(std::move(supportPoints));
-    Vector3 center(kZero);
-    m_HasCenterOfMass = ragdoll.GetCenterOfMass(center, m_TotalMass);
-    if (m_HasCenterOfMass)
-    {
-        m_CenterOfMass = ToPx(center);
-        if (m_ProjectedPointCount > 0)
-        {
-            // 현재 수평 바닥 기준: 유효한 발 투영점의 평균 높이에 수직으로 내린다.
-            m_ProjectedCenterOfMass = PxVec3(m_CenterOfMass.x,
-                float(supportHeight / m_ProjectedPointCount), m_CenterOfMass.z);
-            m_HasComProjection = true;
-            m_ComInsideHull = PARS::IsInsideFootSupportHull(m_SupportHull, m_ProjectedCenterOfMass);
+            const size_t next = (i + 1) % foot.corners.size();
+            const Vector3 corner = ToMath(foot.corners[i]), projected = ToMath(foot.projections[i]);
+            if (m_ShowRays) Line(lines, corner, projected, foot.projected[i] ? HitColor : MissColor);
+            Point(lines, corner, FootColors[side]);
+            Line(lines, corner, ToMath(foot.corners[next]), FootColors[side]);
+            if (foot.projected[i]) Point(lines, projected, HitColor);
+            if (foot.projected[i] && foot.projected[next])
+                Line(lines, projected, ToMath(foot.projections[next]), HitColor);
         }
     }
     if (m_ShowHull)
     {
-        for (size_t i = 0; i < m_SupportHull.size(); ++i)
+        for (size_t i = 0; i < sample.hull.size(); ++i)
         {
-            const auto& a = m_SupportHull[i];
-            const auto& b = m_SupportHull[(i + 1) % m_SupportHull.size()];
-            const Vector3 point(a.x, a.y, a.z);
-            Line(lines, point, Vector3(b.x, b.y, b.z), HullColor);
+            const Vector3 point = ToMath(sample.hull[i]);
+            Line(lines, point, ToMath(sample.hull[(i + 1) % sample.hull.size()]), HullColor);
             Point(lines, point, HullColor);
         }
     }
-    if (m_ShowCenterOfMass && m_HasCenterOfMass)
+    if (m_ShowBuffer)
     {
+        const auto& buffer = sample.balance.bufferHull;
+        for (size_t i = 0; i < buffer.size(); ++i)
+            DashedLine(lines, buffer[i], buffer[(i + 1) % buffer.size()]);
+        if (!buffer.empty()) Point(lines, ToMath(sample.balance.center), BufferColor);
+    }
+    if (m_ShowCenterOfMass && sample.hasCenterOfMass)
+    {
+        const Vector3 center = ToMath(sample.centerOfMass);
         Point(lines, center, ComColor, .025f);
         Line(lines, center - Vector3(0, .025f, 0), center + Vector3(0, .025f, 0), ComColor);
-        if (m_HasComProjection)
+        if (sample.hasComProjection)
         {
-            const Vector3 projected(m_ProjectedCenterOfMass.x, m_ProjectedCenterOfMass.y, m_ProjectedCenterOfMass.z);
-            const PxU32 color = m_SupportHull.empty() ? UnknownColor : m_ComInsideHull ? HitColor : OutsideColor;
+            const Vector3 projected = ToMath(sample.projectedCenterOfMass);
+            const PxU32 color = sample.hull.empty() ? UnknownColor : sample.comInsideHull ? HitColor : OutsideColor;
             Line(lines, center, projected, ComColor);
-            ProjectionMarker(lines, projected, color, m_SupportHull.empty() || !m_ComInsideHull);
+            ProjectionMarker(lines, projected, color, sample.hull.empty() || !sample.comInsideHull);
         }
     }
 }
 
 void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
 {
-    if (!ImGui::CollapsingHeader(u8"발바닥 / 지면 투영", ImGuiTreeNodeFlags_DefaultOpen))
-        return;
+    if (!ImGui::CollapsingHeader(u8"발바닥 / 지면 투영", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    auto& support = mesh.GetFootSupport();
+    const auto& sample = support.GetSnapshot();
+    const auto& balance = sample.balance;
+    const char* zone = u8"판정 불가";
+    switch (balance.zone)
+    {
+    case PARS::FootSupportZone::Inside: zone = u8"A 안 / 경계"; break;
+    case PARS::FootSupportZone::Buffer: zone = u8"A와 B 사이"; break;
+    case PARS::FootSupportZone::Outside: zone = u8"B 경계 / 밖"; break;
+    default: break;
+    }
+    ImGui::Text(u8"COM 위치: %s / 계산 계수 w = %.3f", zone, balance.weight);
+    ImGui::ProgressBar(balance.weight, ImVec2(-1, 0));
+    ImGui::TextUnformatted(u8"관측 단계: 계산 계수는 골반 지지에 아직 적용하지 않습니다.");
+    if (balance.hasDirection)
+        ImGui::Text(u8"중심 거리: COM %.1f / A %.1f / B %.1f cm",
+            balance.comDistance * 100, balance.innerDistance * 100, balance.outerDistance * 100);
     ImGui::Checkbox(u8"발바닥 영역 표시", &m_Visible);
     ImGui::SameLine();
     ImGui::Checkbox(u8"레이 표시", &m_ShowRays);
-    ImGui::Checkbox(u8"지지 영역 표시 (Convex Hull)", &m_ShowHull);
+    ImGui::Checkbox(u8"지지 영역 A 표시 (Convex Hull)", &m_ShowHull);
+    ImGui::Checkbox(u8"완충 영역 B 표시 (흰색 점선)", &m_ShowBuffer);
     ImGui::Checkbox(u8"질량중심 / 수직 투영 표시", &m_ShowCenterOfMass);
-    ImGui::TextUnformatted(u8"아래 방향 20cm 이내 히트만 투영 · 초록: 성공 / 빨강: 범위 내 바닥 없음");
-    ImGui::Text(u8"보라: 지지 영역 · 유효 투영점 %zu개 / 헐 꼭짓점 %zu개",
-        m_ProjectedPointCount, m_SupportHull.size());
-    if (m_Visible && m_SupportHull.empty())
-        ImGui::TextUnformatted(u8"지지 영역 없음: 유효한 점이 부족하거나 일직선입니다.");
-    if (m_HasCenterOfMass)
+    ImGui::TextWrapped(u8"아래 방향 20cm 이내 히트만 투영 · 초록: 성공 / 빨강: 범위 내 바닥 없음");
+    ImGui::Text(u8"보라: A · 유효 투영점 %zu개 / 헐 꼭짓점 %zu개", sample.projectedPointCount, sample.hull.size());
+    float scale = support.GetBufferScale();
+    if (ImGui::SliderFloat(u8"B 거리 배율", &scale, 1.1f, 4.0f, "%.2f")) support.SetBufferScale(scale);
+    ImGui::TextWrapped(u8"B는 A의 면적 중심 기준 확장입니다. 거리 2배 = 면적 4배.");
+    ImGui::Text(u8"물리 스냅샷: %llu / 완료 스텝: %llu",
+        static_cast<unsigned long long>(sample.sampleNumber), static_cast<unsigned long long>(sample.completedPhysicsStep));
+    ImGui::TextWrapped(u8"표시를 꺼도 고정 틱에서 계산합니다. 설정 변경은 다음 물리 스텝에 반영됩니다.");
+    if (sample.hull.empty()) ImGui::TextUnformatted(u8"지지 영역 없음: 유효한 점이 부족하거나 일직선입니다.");
+    if (sample.hasCenterOfMass)
     {
-        ImGui::Text(u8"전체 질량 %.2f kg / COM (%.3f, %.3f, %.3f) m", m_TotalMass,
-            m_CenterOfMass.x, m_CenterOfMass.y, m_CenterOfMass.z);
-        ImGui::TextUnformatted(u8"노랑: COM과 수직선 / 투영 원: 초록=영역 안, 굵은 빨강=영역 밖, 굵은 검정=판정 불가");
-        ImGui::Text(u8"COM 판정: %s", !m_HasComProjection ? u8"지면 투영점 없음" :
-            m_SupportHull.empty() ? u8"지지 영역 없음" : m_ComInsideHull ? u8"영역 안 (경계 포함)" : u8"영역 밖");
+        ImGui::Text(u8"전체 질량 %.2f kg / COM (%.3f, %.3f, %.3f) m", sample.totalMass,
+            sample.centerOfMass.x, sample.centerOfMass.y, sample.centerOfMass.z);
+        ImGui::TextWrapped(u8"노랑: COM과 수직선 / 투영 원: 초록=A 안, 굵은 빨강=A 밖, 굵은 검정=판정 불가");
+        if (!sample.hasComProjection) ImGui::TextUnformatted(u8"COM 지면 투영점 없음");
     }
-    if (!Prepare(mesh))
+    if (!sample.message.empty()) ImGui::TextWrapped("%s", sample.message.c_str());
+    if (ImGui::Button(u8"발바닥 기본 영역으로 초기화")) support.ResetSoles();
+    const char* const labels[] = {u8"왼발", u8"오른발"};
+    for (size_t side = 0; side < sample.feet.size(); ++side)
     {
-        ImGui::TextWrapped("%s", m_Message.c_str());
-        return;
-    }
-    if (ImGui::Button(u8"발바닥 기본 영역으로 초기화"))
-    {
-        m_Initialized = false;
-        if (!Prepare(mesh))
-            return;
-    }
-    for (size_t side = 0; side < m_Feet.size(); ++side)
-    {
-        auto& sole = m_Feet[side];
+        auto& settings = support.GetSoleSettings(side);
+        const auto& foot = sample.feet[side];
         ImGui::PushID(static_cast<int>(side));
-        if (sole.bodyIndex >= 0 && ImGui::TreeNodeEx(FootLabels[side], ImGuiTreeNodeFlags_DefaultOpen))
+        if (foot.available && ImGui::TreeNodeEx(labels[side], ImGuiTreeNodeFlags_DefaultOpen))
         {
-            float dimensions[] = {sole.halfWidth * 200, sole.halfLength * 200};
-            if (ImGui::DragFloat2(u8"폭 / 길이", dimensions, .1f, 1, 100, "%.1f cm"))
+            float dimensions[] = {settings.halfWidth * 200, settings.halfLength * 200};
+            if (ImGui::DragFloat2(u8"폭 / 길이", dimensions, .1f, 1, 100, "%.1f cm", ImGuiSliderFlags_AlwaysClamp))
             {
-                sole.halfWidth = dimensions[0] * .005f;
-                sole.halfLength = dimensions[1] * .005f;
+                settings.halfWidth = dimensions[0] * .005f;
+                settings.halfLength = dimensions[1] * .005f;
             }
-            ImGui::DragFloat3(u8"로컬 위치", &sole.offset.x, .001f, -.5f, .5f, "%.3f m");
-            ImGui::DragFloat3(u8"로컬 회전", &sole.rotation.x, .5f, -180, 180, "%.1f deg");
+            ImGui::DragFloat3(u8"로컬 위치", &settings.offset.x, .001f, -.5f, .5f, "%.3f m", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::DragFloat3(u8"로컬 회전", &settings.rotation.x, .5f, -180, 180, "%.1f deg", ImGuiSliderFlags_AlwaysClamp);
             unsigned count = 0;
-            for (bool hit : sole.projected)
-                count += hit ? 1 : 0;
+            for (bool hit : foot.projected) count += hit ? 1 : 0;
             ImGui::Text(u8"투영점 %u / 4", count);
             for (int i = 0; i < 4; ++i)
             {
-                if (sole.projected[i])
-                    ImGui::Text(u8"점 %d: %.1f cm", i + 1, sole.distances[i] * 100);
-                else
-                    ImGui::Text(u8"점 %d: 투영 없음", i + 1);
+                if (foot.projected[i]) ImGui::Text(u8"점 %d: %.1f cm", i + 1, foot.distances[i] * 100);
+                else ImGui::Text(u8"점 %d: 투영 없음", i + 1);
             }
             ImGui::TreePop();
         }
