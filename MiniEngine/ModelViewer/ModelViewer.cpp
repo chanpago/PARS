@@ -1337,6 +1337,17 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         if (ImGui::Begin(u8"캐릭터 애니메이션", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
 #if defined(_M_X64)
+            if (m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
+            {
+                if (ImGui::Button(u8"더미 리셋"))
+                {
+                    m_ImpactTest->Reset();
+                }
+                if (!m_ImpactTest->GetStatusMessage().empty())
+                {
+                    ImGui::TextWrapped("%s", m_ImpactTest->GetStatusMessage().c_str());
+                }
+            }
             if (m_Comparison && ImGui::Button(u8"시뮬레이션 A 시작"))
             {
                 auto character = GetPreviewCharacter();
