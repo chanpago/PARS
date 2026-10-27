@@ -133,7 +133,17 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     }
     ImGui::Text(u8"COM 위치: %s / 계산 계수 w = %.3f", zone, balance.weight);
     ImGui::ProgressBar(balance.weight, ImVec2(-1, 0));
-    ImGui::TextUnformatted(u8"관측 단계: 계산 계수는 골반 지지에 아직 적용하지 않습니다.");
+    if (mesh.UsesAutomaticRootSupport())
+    {
+        const auto released = mesh.GetRootSupportRelease();
+        const char* state = released == PARS::RootSupportRelease::None ? u8"지지 중" :
+            released == PARS::RootSupportRelease::OutsideBuffer ? u8"B 이탈로 해제" :
+            released == PARS::RootSupportRelease::NoSupport ? u8"발 지지 없음으로 해제" : u8"지지 해제";
+        ImGui::Text(u8"적용 w = %.3f / %s", mesh.GetRagdoll().GetRootSupportWeight(), state);
+        if (released != PARS::RootSupportRelease::None)
+            ImGui::TextUnformatted(u8"더미 초기화 전까지 해제 상태를 유지합니다.");
+    }
+    else ImGui::TextWrapped(u8"수동 지지 모드: 계산 계수는 골반 지지에 적용하지 않습니다.");
     if (balance.hasDirection)
         ImGui::Text(u8"중심 거리: COM %.1f / A %.1f / B %.1f cm",
             balance.comDistance * 100, balance.innerDistance * 100, balance.outerDistance * 100);

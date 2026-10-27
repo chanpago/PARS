@@ -100,10 +100,49 @@ namespace PARS
         else m_FootSupport.Reset();
     }
 
+    bool SkeletalMeshComponent::SetAutomaticRootSupport(bool enabled, std::string& error)
+    {
+        if (enabled && !IsActiveRagdoll())
+        {
+            error = "Automatic root support requires active ragdoll mode.";
+            return false;
+        }
+        if (enabled != m_AutomaticRootSupport)
+            m_RootSupportRelease = RootSupportRelease::None;
+        m_AutomaticRootSupport = enabled;
+        if (enabled)
+        {
+            UpdateFootSupport();
+            return UpdateAutomaticRootSupport(error);
+        }
+        error.clear();
+        return true;
+    }
+
+    bool SkeletalMeshComponent::UpdateAutomaticRootSupport(std::string& error)
+    {
+        if (!m_AutomaticRootSupport) return true;
+        const auto& balance = m_FootSupport.GetSnapshot().balance;
+        if (m_RootSupportRelease == RootSupportRelease::None)
+        {
+            if (!IsActiveRagdoll()) m_RootSupportRelease = RootSupportRelease::Inactive;
+            else if (balance.zone == FootSupportZone::Invalid) m_RootSupportRelease = RootSupportRelease::NoSupport;
+            else if (balance.weight <= 0) m_RootSupportRelease = RootSupportRelease::OutsideBuffer;
+        }
+        const float weight = m_RootSupportRelease == RootSupportRelease::None ? balance.weight : 0;
+        if (m_Ragdoll.SetRootSupport(weight, false, error)) return true;
+        m_RootSupportRelease = RootSupportRelease::Error;
+        std::string ignored;
+        m_Ragdoll.SetRootSupported(false, ignored);
+        return false;
+    }
+
     void SkeletalMeshComponent::DestroyPhysicsState()
     {
         m_Ragdoll.Destroy();
         m_FootSupport.Reset();
+        m_AutomaticRootSupport = false;
+        m_RootSupportRelease = RootSupportRelease::None;
         m_PhysicsSkeleton = {};
         m_PhysicsPose.clear();
         m_RagdollSourcePose.clear();

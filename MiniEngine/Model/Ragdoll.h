@@ -50,6 +50,15 @@ namespace PARS
         // 월드 공간의 힘/토크 드라이브로 동적 골반을 지지한다.
         // 인체 관절의 각도 드라이브와 독립적이며, simulate() 전에 갱신한다.
         bool SetRootSupported(bool supported, std::string& error);
+        // Partial support keeps Y/rotation motors, optionally releases X/Z, and never teleports.
+        // A zero weight removes the support joint and its associated compensation.
+        bool SetRootSupport(float weight, bool horizontal, std::string& error);
+        float GetRootSupportWeight() const { return m_RootSupportWeight; }
+        bool IsRootAxisSupported(unsigned axis) const
+        {
+            return IsRootSupported() && axis < 6 && (m_SupportHorizontal || (axis != 0 && axis != 2));
+        }
+        float GetRootTargetHeight() const;
         bool IsRootSupported() const
         {
             return m_SupportBody >= 0;
@@ -105,6 +114,7 @@ namespace PARS
         void UpdateArticulationDrives(float deltaTime = 0);
         void SetArticulationTarget(size_t joint, Math::Quaternion rotation, Math::Vector3 angularVelocity);
         void WakeBodies();
+        void ConfigureRootSupportDrives();
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
@@ -124,6 +134,8 @@ namespace PARS
         int m_SupportBody = -1;
         physx::PxD6Joint* m_SupportJoint = nullptr;
         bool m_HasSupportTarget = false;
+        bool m_SupportHorizontal = true;
+        float m_RootSupportWeight = 0;
         float m_MaxTargetClampAngle = 0;
         std::vector<Math::Quaternion> m_DriveTargets;
         std::vector<Math::Matrix4> m_LastKinematicTargets;

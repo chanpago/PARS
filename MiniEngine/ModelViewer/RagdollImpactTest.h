@@ -15,6 +15,9 @@ public:
     ~RagdollImpactTest();
     bool Initialize(std::shared_ptr<const Model> idle, const PARS::PhysicsAsset& asset);
     bool Reset();
+    bool SetAutomaticSupport(bool enabled);
+    bool UsesAutomaticSupport() const { return m_AutomaticSupport; }
+    bool SetProjectileSettings(float mass, float speed);
     bool FireFrom(const PARS::Character& player);
     bool FireAimed(const PARS::Character& player, Math::Vector3 cameraPosition, Math::Vector3 cameraDirection);
     void ClearProjectiles();
@@ -36,5 +39,6 @@ private:
     std::vector<Shot> m_Shots;
     Math::Vector3 m_HipsReference{Math::kZero};
     float m_Mass = 50, m_Speed = 75, m_MaxHipsDisplacement = 0;
+    bool m_AutomaticSupport = true;
     std::string m_Message;
 };

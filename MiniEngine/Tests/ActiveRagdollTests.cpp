@@ -377,6 +377,146 @@ namespace
         std::puts("PASS: articulated pelvis inertia response and support release");
     }
 
+    void TestWeightedPelvisSupport()
+    {
+        for (bool articulated : {false, true})
+        {
+            float verticalSpeed[3] = {}, angularSpeed[3] = {};
+            for (int trial = 0; trial < 3; ++trial)
+            {
+                PhysicsWorld world;
+                Check(world.Initialize(false), "Initialize weighted support fixture");
+                auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "fixture");
+                PhysicsBody pelvis;
+                pelvis.bone = "pelvis";
+                pelvis.shape = PhysicsShapeType::Box;
+                pelvis.halfExtents = XMFLOAT3(.12f, .24f, .08f);
+                pelvis.mass = 4;
+                PhysicsAsset asset;
+                asset.bodies.push_back(pelvis);
+                std::vector<std::string> names{"pelvis"};
+                std::vector<Matrix4> initial{Pose(Vector3(0, 3, 0))};
+                if (articulated)
+                {
+                    auto child = pelvis; child.bone = "child";
+                    asset.bodies.push_back(child);
+                    names.push_back("child"); initial.push_back(initial[0]);
+                    PhysicsConstraint joint;
+                    joint.parentBone = "pelvis"; joint.childBone = "child";
+                    joint.twist = joint.swingY = joint.swingZ = PhysicsJointMotion::Locked;
+                    asset.constraints.push_back(joint);
+                    ConfigureDefaultDrives(asset);
+                }
+                Ragdoll ragdoll;
+                std::string error;
+                Check(ragdoll.Create(world, asset, names, initial, Vector3(kZero), error), "Create weighted support bodies");
+                ragdoll.SetCollisionEnabled(false);
+                ragdoll.SetDrivesEnabled(true);
+                PxRigidBody* root = nullptr;
+                if (articulated)
+                {
+                    PxArticulationReducedCoordinate* articulation = nullptr;
+                    floor->getScene()->getArticulations(&articulation, 1);
+                    PxArticulationLink* links[2]{};
+                    articulation->getLinks(links, 2);
+                    root = links[0];
+                    for (auto* link : links) link->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+                }
+                else
+                {
+                    PxActor* actor = nullptr;
+                    floor->getScene()->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, &actor, 1);
+                    root = actor->is<PxRigidDynamic>();
+                    root->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+                }
+                const float weight = trial == 0 ? 1.0f : trial == 1 ? .5f : 0.0f;
+                Check(ragdoll.SetRootSupport(weight, false, error), "Configure Y/rotation support weight");
+                Check(!ragdoll.IsRootAxisSupported(0) && !ragdoll.IsRootAxisSupported(2) &&
+                    ragdoll.IsRootAxisSupported(1) == (weight > 0) && ragdoll.GetRootSupportWeight() == weight,
+                    "Horizontal axes remain free at every automatic support weight");
+                std::vector<Matrix4> target(initial.size(), Pose(Vector3(10, 3.3f, -10), Quaternion(Vector3(kXUnitVector), .4f)));
+                Check(ragdoll.UpdateDriveTargets(target, 0, error) &&
+                    (root->getGlobalPose().p - PxVec3(0, 3, 0)).magnitude() < 1e-7f,
+                    "Weighted support does not teleport the root to its target");
+                Check(ragdoll.UpdateDriveTargets(target, 1.0f / 60, error), "Update weighted support target");
+                world.Step();
+                verticalSpeed[trial] = root->getLinearVelocity().y;
+                angularSpeed[trial] = root->getAngularVelocity().magnitude();
+                Check(PxAbs(root->getLinearVelocity().x) < 1e-5f && PxAbs(root->getLinearVelocity().z) < 1e-5f,
+                    "Distant X/Z targets produce no horizontal restoring force");
+                const auto pose = root->getGlobalPose();
+                const auto velocity = root->getLinearVelocity();
+                Check(ragdoll.SetRootSupport(0, false, error) && ragdoll.AreDrivesEnabled() &&
+                    (root->getGlobalPose().p - pose.p).magnitude() < 1e-7f &&
+                    (root->getLinearVelocity() - velocity).magnitude() < 1e-7f,
+                    "Full release preserves physical motion and ordinary joint drive enablement");
+                Check(!ragdoll.SetRootSupport(-.1f, false, error) && !ragdoll.IsRootSupported(),
+                    "Invalid weight cannot silently re-enable support");
+                Check(ragdoll.SetRootSupported(true, error) && ragdoll.IsRootAxisSupported(0) &&
+                    ragdoll.IsRootAxisSupported(2) && ragdoll.GetRootSupportWeight() == 1,
+                    "Explicit manual support restores all root axes");
+                ragdoll.Destroy();
+                Check(world.GetErrorCount() == 0, "Weighted support has no PhysX errors");
+            }
+            Check(verticalSpeed[0] > verticalSpeed[1] && verticalSpeed[1] > .01f && PxAbs(verticalSpeed[2]) < 1e-5f,
+                "Y support gets weaker with weight and vanishes at zero");
+            Check(angularSpeed[0] > angularSpeed[1] && angularSpeed[1] > .01f && angularSpeed[2] < 1e-5f,
+                "Rotation support gets weaker with weight and vanishes at zero");
+        }
+        std::puts("PASS: weighted D6/articulation Y and rotation support, free X/Z and release");
+    }
+
+    void TestSupportFeedForwardHistory()
+    {
+        float forces[2] = {};
+        for (int trial = 0; trial < 2; ++trial)
+        {
+            PhysicsWorld world;
+            Check(world.Initialize(false), "Initialize support history fixture");
+            auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "fixture");
+            PhysicsBody root; root.bone = "root"; root.mass = 4;
+            PhysicsBody child = root; child.bone = "child"; child.mass = 2;
+            PhysicsAsset asset; asset.bodies = {root, child};
+            PhysicsConstraint joint; joint.parentBone = "root"; joint.childBone = "child";
+            joint.twist = joint.swingY = joint.swingZ = PhysicsJointMotion::Free;
+            asset.constraints.push_back(joint);
+            ConfigureDefaultDrives(asset);
+            std::vector<Matrix4> target(2, Pose(Vector3(0, 3, 0)));
+            Ragdoll ragdoll; std::string error;
+            Check(ragdoll.Create(world, asset, {"root", "child"}, target, Vector3(kZero), error), "Create history articulation");
+            PxArticulationReducedCoordinate* articulation = nullptr;
+            floor->getScene()->getArticulations(&articulation, 1);
+            PxArticulationLink* links[2]{};
+            articulation->getLinks(links, 2);
+            for (auto* link : links) link->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+            ragdoll.SetDrivesEnabled(true);
+            Check(ragdoll.SetRootSupport(1, false, error) && ragdoll.UpdateDriveTargets(target, 0, error),
+                "Initialize history without acceleration");
+            target[1] = Pose(Vector3(0, 3, 0), Quaternion(Vector3(kXUnitVector), .01f));
+            Check(ragdoll.UpdateDriveTargets(target, 1.0f / 60, error), "Store first nonzero target velocity");
+            Check(ragdoll.SetRootSupport(trial == 0 ? 1.0f : .5f, false, error), "Edit support strength between targets");
+            target[1] = Pose(Vector3(0, 3, 0), Quaternion(Vector3(kXUnitVector), .03f));
+            Check(ragdoll.UpdateDriveTargets(target, 1.0f / 60, error), "Differentiate the second target velocity");
+            auto* cache = articulation->createCache();
+            articulation->copyInternalStateToCache(*cache, PxArticulationCacheFlag::eFORCE);
+            forces[trial] = cache->jointForce[0];
+            Check(ragdoll.UpdateDriveTargets(target, 0, error) && ragdoll.UpdateDriveTargets(target, 1.0f / 60, error),
+                "Replace a target without elapsed time, then take a real step");
+            articulation->copyInternalStateToCache(*cache, PxArticulationCacheFlag::eFORCE);
+            for (unsigned axis = 0; axis < articulation->getDofs(); ++axis)
+                Check(PxAbs(cache->jointForce[axis]) < 1e-5f, "Target reset does not synthesize a braking acceleration");
+            ragdoll.SetRootSupported(false, error);
+            articulation->copyInternalStateToCache(*cache, PxArticulationCacheFlag::eFORCE);
+            for (unsigned axis = 0; axis < articulation->getDofs(); ++axis)
+                Check(cache->jointForce[axis] == 0, "Full release clears every joint feed-forward force");
+            cache->release();
+            Check(world.GetErrorCount() == 0, "Target history transitions have no PhysX errors");
+        }
+        Check(PxAbs(forces[0]) > .001f && PxAbs(forces[1] - .5f * forces[0]) < 1e-4f,
+            "Weight edits preserve target history and scale acceleration compensation exactly once");
+        std::puts("PASS: support-weight history, single feed-forward scaling and target reset");
+    }
+
     void TestDynamicPelvis()
     {
         PhysicsWorld world;
@@ -473,6 +613,8 @@ namespace
 
 void RunPelvisDriveTests()
 {
+    TestWeightedPelvisSupport();
+    TestSupportFeedForwardHistory();
     TestPelvisInertiaResponse();
     TestDynamicPelvis();
 }

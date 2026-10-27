@@ -156,6 +156,9 @@ namespace PARS
         }
 #if defined(_M_X64)
 
+        // A target replacement/reset has no elapsed time. Unlike a support-weight edit,
+        // it must discard old target velocities so the next step cannot invent acceleration.
+        if (deltaTime == 0) m_PreviousArticulationTargetVelocity.clear();
 
         // [1] 본의 월드 목표 자세 -> PA 물리 바디의 월드 목표 자세
         // m_Bodies는 실제 PhysX 바디들, 아래 bodies는 이번 스텝에 계산할 목표 행렬 배열이다.
@@ -383,9 +386,36 @@ namespace PARS
 
     bool Ragdoll::SetRootSupported(bool supported, std::string& error)
     {
+        return SetRootSupport(supported ? 1.0f : 0.0f, true, error);
+    }
+
+    bool Ragdoll::SetRootSupport(float weight, bool horizontal, std::string& error)
+    {
 #if defined(_M_X64)
-        if (supported == IsRootSupported())
+        if (!std::isfinite(weight) || weight < 0 || weight > 1)
         {
+            error = "Support weight must be finite and in [0, 1].";
+            return false;
+        }
+        const bool supported = weight > 0;
+        if (supported == IsRootSupported() && (!supported ||
+            (weight == m_RootSupportWeight && horizontal == m_SupportHorizontal)))
+        {
+            error.clear();
+            return true;
+        }
+        if (supported && IsRootSupported())
+        {
+            if (horizontal != m_SupportHorizontal)
+            {
+                m_PreviousArticulationTargetVelocity.clear();
+                m_HasSupportTarget = false;
+            }
+            m_RootSupportWeight = weight;
+            m_SupportHorizontal = horizontal;
+            ConfigureRootSupportDrives();
+            UpdateArticulationDrives();
+            WakeBodies();
             error.clear();
             return true;
         }
@@ -428,6 +458,8 @@ namespace PARS
             WakeBodies();
             m_SupportBody = -1;
             m_HasSupportTarget = false;
+            m_RootSupportWeight = 0;
+            m_PreviousArticulationTargetVelocity.clear();
             UpdateArticulationDrives();
             error.clear();
             return true;
@@ -448,47 +480,56 @@ namespace PARS
         }
         drive->setAngularDriveConfig(PxD6AngularDriveConfig::eSLERP);
         drive->setConstraintFlag(PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
-        float mass = 0;
-        for (const auto* part : m_Bodies)
-        {
-            mass += part->getMass();
-        }
-        // 위치 지지는 전체 질량을 기준으로 omega=30, zeta=1에 해당한다. 힘 제한은 축마다 N 단위다.
-        const PxD6JointDrive position(mass * 900.0f, mass * 60.0f, mass * 60.0f, false);
-        for (auto axis : {PxD6Drive::eX, PxD6Drive::eY, PxD6Drive::eZ})
-        {
-            drive->setDrive(axis, position);
-        }
-        if (m_Articulation)
-        {
-            // 가속도 드라이브: Kp=omega^2, Kd=2*zeta*omega. PhysX가 각 제약 축의 관성 응답으로
-            // 토크를 환산한다. 연결된 링크의 응답을 사용하며 골반 질량만 곱하지 않는다.
-            // 질량 기반 토크 상한을 제거하고, SDK의 유한 최댓값을 사용한다.
-            const PxD6JointDrive rotation(PelvisAngularFrequency * PelvisAngularFrequency,
-                2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency, PX_MAX_F32, true);
-            drive->setDrive(PxD6Drive::eSLERP, rotation);
-        }
-        else
-        {
-            // 역동역학 보상이 없는 구형 D6 PA는 기존 지지 설정을 사용한다.
-            drive->setDrive(PxD6Drive::eSLERP, PxD6JointDrive(mass * 200.0f, mass * 10.0f, mass * 20.0f, false));
-        }
         // 다음 애니메이션 목표가 들어올 때까지 현재 포즈를 유지한다. 지지를 다시 켤 때
         // 포즈가 갑자기 바뀌거나 유한차분 속도가 급증하는 것을 방지한다.
         drive->setDrivePosition(body->getGlobalPose());
         drive->setDriveVelocity(PxVec3(0), PxVec3(0));
         m_SupportJoint = drive;
         m_SupportBody = root;
+        m_RootSupportWeight = weight;
+        m_SupportHorizontal = horizontal;
         m_HasSupportTarget = false;
+        m_PreviousArticulationTargetVelocity.clear();
+        ConfigureRootSupportDrives();
         WakeBodies();
         UpdateArticulationDrives();
         error.clear();
         return true;
 #else
-        (void)supported;
+        (void)weight;
+        (void)horizontal;
         error = "Support requires x64 PhysX.";
         return false;
 #endif
+    }
+
+    void Ragdoll::ConfigureRootSupportDrives()
+    {
+#if defined(_M_X64)
+        if (!m_SupportJoint) return;
+        float mass = 0;
+        for (const auto* part : m_Bodies) mass += part->getMass();
+        const float w = m_RootSupportWeight;
+        // Scale gains and force capacity, never the world-space target position.
+        const PxD6JointDrive position(mass * 900.0f * w, mass * 60.0f * w, mass * 60.0f * w, false);
+        m_SupportJoint->setDrive(PxD6Drive::eX, m_SupportHorizontal ? position : PxD6JointDrive());
+        m_SupportJoint->setDrive(PxD6Drive::eY, position);
+        m_SupportJoint->setDrive(PxD6Drive::eZ, m_SupportHorizontal ? position : PxD6JointDrive());
+        // Active articulations use the coupled mass-matrix PD in UpdateArticulationDrives.
+        const PxD6JointDrive rotation = m_Articulation ? (m_DrivesEnabled ? PxD6JointDrive() :
+            PxD6JointDrive(PelvisAngularFrequency * PelvisAngularFrequency * w,
+                2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency * w, PX_MAX_F32 * w, true)) :
+            PxD6JointDrive(mass * 200.0f * w, mass * 10.0f * w, mass * 20.0f * w, false);
+        m_SupportJoint->setDrive(PxD6Drive::eSLERP, rotation);
+#endif
+    }
+
+    float Ragdoll::GetRootTargetHeight() const
+    {
+#if defined(_M_X64)
+        if (m_SupportJoint) return m_SupportJoint->getDrivePosition().p.y;
+#endif
+        return float(GetPosition().GetY());
     }
 
     float Ragdoll::GetRootPositionError() const
@@ -496,7 +537,8 @@ namespace PARS
 #if defined(_M_X64)
         if (m_SupportJoint)
         {
-            return (m_SupportJoint->getDrivePosition().p - m_Bodies[m_SupportBody]->getGlobalPose().p).magnitude();
+            const auto error = m_SupportJoint->getDrivePosition().p - m_Bodies[m_SupportBody]->getGlobalPose().p;
+            return m_SupportHorizontal ? error.magnitude() : PxAbs(error.y);
         }
 #endif
         return 0;

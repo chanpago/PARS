@@ -40,7 +40,7 @@ namespace PARS
     };
 
     // Samples actual bodies before simulate(), independently of rendering/debug visibility.
-    // This stage only measures support: weight is not yet applied to any motor.
+    // Measures geometry only; SkeletalMeshComponent applies the optional support controller.
     class FootSupport
     {
     public:

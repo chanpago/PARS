@@ -216,6 +216,8 @@ namespace PARS
         m_MaxTargetClampAngle = 0;
         m_SupportJoint = nullptr;
         m_HasSupportTarget = false;
+        m_SupportHorizontal = true;
+        m_RootSupportWeight = 0;
         m_DriveTargets.clear();
         m_LastKinematicTargets.clear();
         m_AnimatedLinearVelocity.clear();
@@ -247,6 +249,8 @@ namespace PARS
         std::swap(m_MaxTargetClampAngle, other.m_MaxTargetClampAngle);
         std::swap(m_SupportJoint, other.m_SupportJoint);
         std::swap(m_HasSupportTarget, other.m_HasSupportTarget);
+        std::swap(m_SupportHorizontal, other.m_SupportHorizontal);
+        std::swap(m_RootSupportWeight, other.m_RootSupportWeight);
         m_DriveTargets.swap(other.m_DriveTargets);
         m_LastKinematicTargets.swap(other.m_LastKinematicTargets);
         m_AnimatedLinearVelocity.swap(other.m_AnimatedLinearVelocity);

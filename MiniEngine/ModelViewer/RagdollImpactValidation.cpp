@@ -19,6 +19,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
     };
     try
     {
+        check(test.SetAutomaticSupport(false), "Use manual support for the existing projection and projectile baseline");
         auto* dummy = test.GetDummy();
         check(dummy && dummy != &player && dummy->GetController() == nullptr,
             "Idle dummy is independent of the possessed player");
@@ -161,6 +162,92 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             "Repeated firing caps live projectile bodies at twelve");
         check(test.Reset() && test.GetProjectiles().empty() && world.GetPhysicsWorld()->GetDynamicBodyCount() == bodies,
             "Reset releases projectiles and restores the dynamic dummy without body leaks");
+        check(test.SetAutomaticSupport(true) && dummy->GetMesh().UsesAutomaticRootSupport() &&
+            !player.GetMesh().UsesAutomaticRootSupport(), "Enable COM support on the dummy only");
+        auto& ragdoll = dummy->GetMesh().GetRagdoll();
+        check(!ragdoll.IsRootAxisSupported(0) && ragdoll.IsRootAxisSupported(1) &&
+            !ragdoll.IsRootAxisSupported(2) && ragdoll.IsRootAxisSupported(3),
+            "Automatic support releases X/Z and keeps Y/rotation available");
+
+        // Deterministically exercise both release causes, and re-entry without rearming.
+        world.SetPhysicsPaused(true);
+        const auto singleStep = [&]() { world.RequestPhysicsStep(); tick(); };
+        const auto originalLeft = support.GetSoleSettings(0), originalRight = support.GetSoleSettings(1);
+        support.GetSoleSettings(0).offset.x += 2;
+        support.GetSoleSettings(1).offset.x += 2;
+        singleStep();
+        check(support.GetSnapshot().balance.zone == FootSupportZone::Outside &&
+            dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::OutsideBuffer && !ragdoll.IsRootSupported(),
+            "Reaching B releases support in the same fixed step");
+        support.GetSoleSettings(0) = originalLeft;
+        support.GetSoleSettings(1) = originalRight;
+        singleStep();
+        check(support.GetSnapshot().balance.weight > 0 && ragdoll.GetRootSupportWeight() == 0 &&
+            !ragdoll.IsRootSupported() && ragdoll.AreDrivesEnabled(),
+            "COM re-entry cannot re-enable pelvis support; ordinary joint PD remains enabled");
+        std::string supportError;
+        check(dummy->GetMesh().SetAutomaticRootSupport(true, supportError) && !ragdoll.IsRootSupported(),
+            "Repeating automatic mode enable does not clear the release latch");
+        check(test.Reset() && ragdoll.GetRootSupportWeight() == 1 &&
+            dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::None,
+            "Dummy reset rearms support from its newly sampled grounded pose");
+        support.GetSoleSettings(0).offset.y += 1;
+        support.GetSoleSettings(1).offset.y += 1;
+        singleStep();
+        check(dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::NoSupport && !ragdoll.IsRootSupported(),
+            "Invalid foot support fully releases Y/rotation support");
+        support.GetSoleSettings(0) = originalLeft;
+        support.GetSoleSettings(1) = originalRight;
+        check(test.Reset(), "Restore the automatic impact fixture");
+        world.SetPhysicsPaused(false);
+
+        float idleMinimumWeight = 1;
+        for (int frame = 0; frame < 600; ++frame)
+        {
+            tick();
+            idleMinimumWeight = PxMin(idleMinimumWeight, ragdoll.GetRootSupportWeight());
+        }
+        report << "automatic_idle_min_weight=" << idleMinimumWeight << std::endl;
+        check(idleMinimumWeight > .99f && ragdoll.IsRootSupported(), "Automatic Idle stays supported for ten seconds");
+        const float masses[] = {.1f, 2.0f, 50.0f}, speeds[] = {30.0f, 30.0f, 75.0f};
+        bool sawBand = false, sawFall = false;
+        for (int trial = 0; trial < 3; ++trial)
+        {
+            check(test.Reset() && test.SetProjectileSettings(masses[trial], speeds[trial]), "Prepare a reproducible automatic impact");
+            for (int frame = 0; frame < 120; ++frame) tick();
+            const float initialHeight = float(ragdoll.GetPosition().GetY());
+            check(test.FireFrom(player), "Shoot the automatic support dummy");
+            float minimumWeight = 1, minimumHeight = initialHeight;
+            int bandFrames = 0, releaseFrame = -1;
+            bool matched = true, stayedReleased = true, finiteAndDriven = true;
+            for (int frame = 0; frame < 300; ++frame)
+            {
+                tick();
+                const float raw = support.GetSnapshot().balance.weight, applied = ragdoll.GetRootSupportWeight();
+                minimumWeight = PxMin(minimumWeight, applied);
+                minimumHeight = PxMin(minimumHeight, float(ragdoll.GetPosition().GetY()));
+                if (applied > 0 && applied < 1)
+                {
+                    ++bandFrames;
+                    matched &= std::abs(raw - applied) < 1e-6f;
+                }
+                if (!ragdoll.IsRootSupported() && releaseFrame < 0) releaseFrame = frame;
+                if (releaseFrame >= 0) stayedReleased &= applied == 0;
+                finiteAndDriven &= ragdoll.IsFinite() && ragdoll.AreDrivesEnabled();
+            }
+            report << "automatic_impact mass=" << masses[trial] << " speed=" << speeds[trial]
+                << " min_weight=" << minimumWeight << " band_frames=" << bandFrames << " release_frame=" << releaseFrame
+                << " min_hips_y=" << minimumHeight << " max_displacement=" << test.GetMaxHipsDisplacement() << std::endl;
+            check(matched && stayedReleased && finiteAndDriven,
+                "Impact follows the weight, preserves the release latch and keeps finite driven bodies");
+            if (trial == 0) check(releaseFrame < 0 && minimumWeight > .99f,
+                "A weak physical impact stays inside A without releasing support");
+            sawBand |= bandFrames > 0;
+            sawFall |= releaseFrame >= 0 && minimumHeight < initialHeight - .35f;
+        }
+        check(sawBand && sawFall, "Physical impacts exercise gradual support loss and a subsequent fall");
+        check(test.SetProjectileSettings(50, 75) && test.Reset() && ragdoll.GetRootSupportWeight() == 1,
+            "Restore defaults and clear the fallen state for interactive testing");
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors in the impact test");
         check(test.FireFrom(player), "Leave one sphere visible for the optional GPU capture");
         world.SetPhysicsPaused(true);

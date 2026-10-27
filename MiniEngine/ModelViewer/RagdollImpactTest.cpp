@@ -50,6 +50,7 @@ bool RagdollImpactTest::Reset()
     auto* dummy = GetDummy();
     if (!dummy) return false;
     ClearProjectiles();
+    if (!dummy->GetMesh().SetAutomaticRootSupport(false, m_Message)) return false;
     if (!dummy->StopRagdoll(m_Message)) return false;
     dummy->SetActorLocation(Vector3(3.5f, dummy->GetCapsuleComponent().GetHalfHeight(), -2.5f));
     auto& mesh = dummy->GetMesh();
@@ -61,9 +62,25 @@ bool RagdollImpactTest::Reset()
     if (!dummy->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_Message) ||
         !mesh.GetRagdoll().SetRootSupported(true, m_Message))
         return false;
+    if (!mesh.SetAutomaticRootSupport(m_AutomaticSupport, m_Message)) return false;
     m_HipsReference = mesh.GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
     m_Message.clear();
+    return true;
+}
+
+bool RagdollImpactTest::SetAutomaticSupport(bool enabled)
+{
+    m_AutomaticSupport = enabled;
+    return Reset();
+}
+
+bool RagdollImpactTest::SetProjectileSettings(float mass, float speed)
+{
+    if (!std::isfinite(mass) || !std::isfinite(speed) || mass < .1f || mass > 100 || speed < 1 || speed > 100)
+        return false;
+    m_Mass = mass;
+    m_Speed = speed;
     return true;
 }
 
@@ -178,7 +195,7 @@ void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)
 void RagdollImpactTest::DrawUI(Character* player)
 {
     ImGui::SetNextWindowPos(ImVec2(450, 70), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(420, 570), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(440, 760), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(u8"PARS - 더미 충격 테스트"))
     {
         ImGui::TextWrapped("%s", u8"우클릭 유지: 조준 / 조준 중 좌클릭 또는 R: 발사");
@@ -197,13 +214,22 @@ void RagdollImpactTest::DrawUI(Character* player)
         if (auto* dummy = GetDummy())
         {
             auto& ragdoll = dummy->GetMesh().GetRagdoll();
+            bool automatic = m_AutomaticSupport;
+            if (ImGui::Checkbox(u8"COM 자동 골반 지지", &automatic)) SetAutomaticSupport(automatic);
+            ImGui::TextUnformatted(u8"모드 변경 시 더미를 초기화합니다.");
             bool supported = ragdoll.IsRootSupported();
+            ImGui::BeginDisabled(m_AutomaticSupport);
             if (ImGui::Checkbox(u8"더미 골반 지지", &supported)) ragdoll.SetRootSupported(supported, m_Message);
+            ImGui::EndDisabled();
+            ImGui::Text(u8"지지 축: X %s / Y %s / Z %s / 회전 %s",
+                ragdoll.IsRootAxisSupported(0) ? "ON" : "OFF", ragdoll.IsRootAxisSupported(1) ? "ON" : "OFF",
+                ragdoll.IsRootAxisSupported(2) ? "ON" : "OFF", ragdoll.IsRootAxisSupported(3) ? "ON" : "OFF");
             const auto hips = ragdoll.GetPosition();
             ImGui::Text(u8"실제 Hips: (%.3f, %.3f, %.3f) m", float(hips.GetX()), float(hips.GetY()), float(hips.GetZ()));
             ImGui::Text(u8"기준 대비 골반 이동: %.2f cm / 최대 %.2f cm",
                 float(Length(hips - m_HipsReference)) * 100, m_MaxHipsDisplacement * 100);
-            if (supported) ImGui::Text(u8"골반 목표 위치 오차: %.2f cm", ragdoll.GetRootPositionError() * 100);
+            if (supported) ImGui::Text(u8"목표 Y %.3f m / 지지 위치 오차 %.2f cm",
+                ragdoll.GetRootTargetHeight(), ragdoll.GetRootPositionError() * 100);
             ImGui::TextUnformatted(u8"기준은 초기화 또는 마지막 발사 시점입니다.");
             ImGui::PushID("ImpactDummy");
             m_FootSoles.DrawUI(dummy->GetMesh());
