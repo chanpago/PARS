@@ -89,15 +89,20 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             {
                 check(test.FireFrom(player), "Fire through the same command used by the R key");
                 const auto shots = test.GetProjectiles();
-                check(shots.size() == 1 && std::abs(shots[0]->getMass() - 50) < 1e-5f &&
-                    std::abs(shots[0]->getLinearVelocity().magnitude() - 75) < 1e-4f,
-                    "Projectile has the configured 50 kg mass and 75 m/s initial speed");
+                check(shots.size() == 1 && std::abs(shots[0]->getMass() - .5f) < 1e-5f &&
+                    std::abs(shots[0]->getLinearVelocity().magnitude() - 7.5f) < 1e-4f,
+                    "Projectile has the configured 0.5 kg mass and 7.5 m/s initial speed");
                 PxShape* shape = nullptr;
                 check(shots[0]->getShapes(&shape, 1) == 1 && shape->getGeometry().getType() == PxGeometryType::eSPHERE &&
                     std::abs(static_cast<const PxSphereGeometry&>(shape->getGeometry()).radius - .15f) < 1e-5f,
                     "Projectile collision radius is 15 cm");
                 check(shots[0]->getRigidBodyFlags().isSet(PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD),
                     "Fast projectile uses speculative collision detection");
+                // A weak interactive default need not exceed the supported Idle sway.
+                // Keep this collision-response regression at its original, explicit strength.
+                test.ClearProjectiles();
+                check(test.SetProjectileSettings(50, 75) && test.FireFrom(player),
+                    "Use a fixed 50 kg / 75 m/s collision-response fixture after checking the defaults");
             }
             for (int frame = 0; frame < 180; ++frame)
             {
@@ -111,7 +116,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             dummy->GetMesh().GetAnimInstance().GetCurrentAnimationIndex() == 0,
             "Dummy keeps the Idle animation after being hit");
 
-        check(test.Reset(), "Reset before camera aiming checks");
+        check(test.SetProjectileSettings(.5f, 7.5f) && test.Reset(), "Restore defaults before camera aiming checks");
         auto* physics = world.GetPhysicsWorld();
         const auto toPx = [](Vector3 v) { return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ())); };
         const Vector3 shotOrigin = player.GetActorLocation() + Vector3(0, .15f, 0);
@@ -133,7 +138,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check((toTarget - direction * toTarget.dot(direction)).magnitude() < .35f && toTarget.dot(direction) > 0,
             "Shot converges on the crosshair target and ignores the player's own body");
         check((start - toPx(shotOrigin)).magnitude() < 1.0f &&
-            std::abs(aimedShot->getLinearVelocity().magnitude() - 75) < 1e-4f,
+            std::abs(aimedShot->getLinearVelocity().magnitude() - 7.5f) < 1e-4f,
             "Aimed shot starts in front of the player at the configured speed");
         test.ClearProjectiles();
         ownBody.reset();
@@ -246,7 +251,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             sawFall |= releaseFrame >= 0 && minimumHeight < initialHeight - .35f;
         }
         check(sawBand && sawFall, "Physical impacts exercise gradual support loss and a subsequent fall");
-        check(test.SetProjectileSettings(50, 75) && test.Reset() && ragdoll.GetRootSupportWeight() == 1,
+        check(test.SetProjectileSettings(.5f, 7.5f) && test.Reset() && ragdoll.GetRootSupportWeight() == 1,
             "Restore defaults and clear the fallen state for interactive testing");
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors in the impact test");
         check(test.FireFrom(player), "Leave one sphere visible for the optional GPU capture");
