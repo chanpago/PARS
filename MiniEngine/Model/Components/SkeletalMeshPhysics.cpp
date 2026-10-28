@@ -172,7 +172,7 @@ namespace PARS
             }
         }
         const float weight = m_RootSupportRelease == RootSupportRelease::None ? balance.weight : 0;
-        if (m_Ragdoll.SetRootSupport(weight, false, error))
+        if (m_Ragdoll.SetRootSupport(weight, true, error))
         {
             return true;
         }
