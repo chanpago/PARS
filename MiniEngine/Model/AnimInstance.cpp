@@ -59,6 +59,7 @@ namespace PARS
         m_Time = 0.0f;
         m_Pose.clear();
         m_BlendSource.clear();
+        m_AdvanceBlendSource = false;
         EvaluatePose();
     }
 
@@ -78,29 +79,33 @@ namespace PARS
         return true;
     }
 
-    bool AnimInstance::PlayAnimation(uint32_t index, bool loop)
+    bool AnimInstance::PlayAnimation(uint32_t index, bool loop, float startTime)
     {
-        if (index >= m_Clips.size())
+        if (index >= m_Clips.size() || !std::isfinite(startTime) || startTime < 0.0f)
         {
             return false;
         }
         m_CurrentClip = index;
         m_Loop = loop;
         m_Playing = true;
-        Reset();
+        m_Time = loop ? std::fmod(startTime, GetAnimationDuration(index)) : Math::Min(startTime, GetAnimationDuration(index));
+        m_BlendSource.clear();
+        m_AdvanceBlendSource = false;
+        EvaluatePose();
         return true;
     }
 
     void AnimInstance::Reset()
     {
         m_BlendSource.clear();
+        m_AdvanceBlendSource = false;
         m_Time = 0.0f;
         EvaluatePose();
     }
 
-    bool AnimInstance::TransitionToAnimation(uint32_t index, float duration, bool loop)
+    bool AnimInstance::TransitionToAnimation(uint32_t index, float duration, bool loop, float startTime)
     {
-        if (index >= m_Clips.size() || !std::isfinite(duration))
+        if (index >= m_Clips.size() || !std::isfinite(duration) || !std::isfinite(startTime) || startTime < 0.0f)
         {
             return false;
         }
@@ -110,15 +115,19 @@ namespace PARS
         }
         if (duration <= 0.0f || m_Pose.empty())
         {
-            return PlayAnimation(index, loop);
+            return PlayAnimation(index, loop, startTime);
         }
-        // 블렌딩 도중 중단된 상태까지 포함해 현재 표시 중인 포즈를 저장한다.
-        // 따라서 새 전환을 시작해도 이전 클립의 포즈로 갑자기 돌아가지 않는다.
+        // 일반 전환은 이전 클립도 계속 재생한다. 전환 도중 재전환할 때는 현재 혼합 포즈를
+        // 시작점으로 보존해, 아직 덜 섞인 이전 목표 클립으로 자세가 튀지 않게 한다.
+        m_AdvanceBlendSource = m_Playing && !IsBlending();
+        m_BlendSourceClip = m_CurrentClip;
+        m_BlendSourceTime = m_Time;
+        m_BlendSourceLoop = m_Loop;
         m_BlendSource = m_Pose;
         m_BlendElapsed = 0.0f;
         m_BlendDuration = duration;
         m_CurrentClip = index;
-        m_Time = 0.0f;
+        m_Time = loop ? std::fmod(startTime, GetAnimationDuration(index)) : Math::Min(startTime, GetAnimationDuration(index));
         m_Loop = loop;
         m_Playing = true;
         EvaluatePose();
@@ -164,10 +173,18 @@ namespace PARS
         if (m_Playing && !m_Clips.empty())
         {
             m_Time += deltaTime;
+            if (IsBlending() && m_AdvanceBlendSource)
+            {
+                const float sourceDuration = GetAnimationDuration(m_BlendSourceClip);
+                m_BlendSourceTime += deltaTime;
+                m_BlendSourceTime = m_BlendSourceLoop ? std::fmod(m_BlendSourceTime, sourceDuration)
+                    : Math::Min(m_BlendSourceTime, sourceDuration);
+            }
             m_BlendElapsed += deltaTime;
             if (m_BlendElapsed >= m_BlendDuration)
             {
                 m_BlendSource.clear();
+                m_AdvanceBlendSource = false;
             }
             const float duration = GetAnimationDuration(m_CurrentClip);
             if (m_Loop)
@@ -186,31 +203,41 @@ namespace PARS
         EvaluatePose();
     }
 
-    void AnimInstance::EvaluatePose()
+    void AnimInstance::EvaluateClipPose(uint32_t index, float time, std::vector<GraphNode>& pose) const
     {
         if (!m_Skeleton)
         {
             return;
         }
 
-        // m_Skeleton은 기준 스켈레톤 정보를 가진 model
-        // m_Pose 는 vector<GraphNode>
-        // clip에서 키프레임 데이터와 시간 간격 정보를 읽어와서 두 프레임 사이의 비율을 계산하고 m_pose에 저장
-        m_Pose.resize(m_Skeleton->m_NumNodes);
-        std::memcpy(m_Pose.data(), m_Skeleton->m_SceneGraph.get(), m_Pose.size() * sizeof(GraphNode));
-        if (!m_Clips.empty())
+        // 각 클립을 독립된 기준 포즈에서 샘플링해 직전 프레임의 혼합 결과가 누적되지 않게 한다.
+        pose.resize(m_Skeleton->m_NumNodes);
+        std::memcpy(pose.data(), m_Skeleton->m_SceneGraph.get(), pose.size() * sizeof(GraphNode));
+        if (index < m_Clips.size())
         {
-            // 현재 시간에 해당하는 자세를 계산해서 덮어씀
-            const auto& clip = m_Clips[m_CurrentClip];
+            const auto& clip = m_Clips[index];
             EvaluateAnimationPose(
                 clip.source->m_Animations[clip.animationIndex], // 사용할 애니메이션
                 clip.source->m_CurveData.get(),                 // 어느 노드의 어떤 값을 바꿀지
                 clip.source->m_KeyFrameData.get(),              // 저장된 키프레임 값
-                m_Pose.data(),                                  // 결과를 기록할 포즈 배열의 포인터. m_pose에는 보간된 본 자세가 저장
-                static_cast<uint32_t>(m_Pose.size()), m_Time);  // 샘플링할 재생 시간
+                pose.data(),                                    // 해당 클립만 샘플링한 로컬 포즈
+                static_cast<uint32_t>(pose.size()), time);       // 샘플링할 재생 시간
         }
+    }
+
+    void AnimInstance::EvaluatePose()
+    {
+        if (!m_Skeleton)
+        {
+            return;
+        }
+        EvaluateClipPose(m_CurrentClip, m_Time, m_Pose);
         if (IsBlending())
         {
+            if (m_AdvanceBlendSource)
+            {
+                EvaluateClipPose(m_BlendSourceClip, m_BlendSourceTime, m_BlendSource);
+            }
             BlendAnimationPoses(m_BlendSource.data(), m_Pose.data(), static_cast<uint32_t>(m_Pose.size()), GetBlendAlpha());
         }
     }
