@@ -167,6 +167,55 @@ namespace
         std::puts("PASS: A/B centroid, expansion, radial weight, boundaries, transforms and invalid input");
     }
 
+    void TestFootSupportCandidates()
+    {
+        using namespace PARS;
+        std::array<std::vector<PxVec3>, 2> feet{{
+            {{-.2f, 0, -.1f}, {-.1f, 0, -.1f}, {-.1f, 0, .1f}, {-.2f, 0, .1f}},
+            {{.1f, 0, -.1f}, {.2f, 0, -.1f}, {.2f, 0, .1f}, {.1f, 0, .1f}}}};
+        std::vector<PxVec3> points = feet[0];
+        points.insert(points.end(), feet[1].begin(), feet[1].end());
+        const auto hull = BuildFootSupportHull(points);
+        const auto left = EvaluateFootSupportCandidates(hull, PxVec3(-.12f, 3, 0), feet);
+        const auto right = EvaluateFootSupportCandidates(hull, PxVec3(.12f, -3, 0), feet);
+        Check(left.support == 0 && left.step == 1 && right.support == 1 && right.step == 0,
+            "Candidate uses horizontal COM distance and assigns opposite feet");
+        Check(EvaluateFootSupportCandidates(hull, PxVec3(0), feet).support == 0 &&
+                EvaluateFootSupportCandidates(hull, PxVec3(0), feet, 1).support == 1,
+            "Initial tie is deterministic and an existing candidate survives a tie");
+        Check(EvaluateFootSupportCandidates(hull, PxVec3(.003f, 0, 0), feet, 0).support == 0 &&
+                EvaluateFootSupportCandidates(hull, PxVec3(.02f, 0, 0), feet, 0).support == 1,
+            "Small COM noise retains the candidate; clear transfer switches it");
+        Check(EvaluateFootSupportCandidates(hull, PxVec3(.25f, 0, 0), feet, 0).support == -1 &&
+                EvaluateFootSupportCandidates(hull, PxVec3(std::numeric_limits<float>::quiet_NaN()), feet).step == -1,
+            "A exterior and invalid COM clear both candidates");
+        auto missing = feet;
+        missing[0].resize(2);
+        Check(EvaluateFootSupportCandidates(hull, PxVec3(0), missing).support == -1,
+            "Two valid foot polygons are required; a missing foot has no candidate pair");
+        const auto transform = [](PxVec3 point)
+        {
+            return PxVec3(10 - point.z, point.y + 4, -7 + point.x);
+        };
+        auto moved = feet;
+        for (auto& foot : moved)
+        {
+            for (auto& point : foot)
+            {
+                point = transform(point);
+            }
+        }
+        auto movedHull = hull;
+        for (auto& point : movedHull)
+        {
+            point = transform(point);
+        }
+        const auto relocated = EvaluateFootSupportCandidates(movedHull, transform(PxVec3(-.12f, 0, 0)), moved);
+        Check(relocated.support == left.support && std::abs(relocated.distances[0] - left.distances[0]) < 1e-5f,
+            "World translation and yaw preserve foot identity and COM distance");
+        std::puts("PASS: COM foot candidates, switching hysteresis, validity and world transforms");
+    }
+
     float SimulateAtRate(int fps, double seconds)
     {
         PhysicsWorld world;
@@ -196,9 +245,15 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--foot-candidates-only") == 0)
+    {
+        TestFootSupportCandidates();
+        return 0;
+    }
     TestFootProjectionRaycast();
     TestFootSupportHull();
     TestFootSupportBalance();
+    TestFootSupportCandidates();
     const float reference = SimulateAtRate(60, 0.5);
     Check(std::abs(SimulateAtRate(30, 0.5) - reference) < 1e-5f, "30/60 FPS agree in flight");
     Check(std::abs(SimulateAtRate(144, 0.5) - reference) < 1e-5f, "144/60 FPS agree in flight");

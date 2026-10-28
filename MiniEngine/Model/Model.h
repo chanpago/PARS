@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -84,7 +84,11 @@ struct Joint
 {
     Math::Matrix4 posXform;
     Math::Matrix3 nrmXform;
+    // 인스턴스별 디버그 색이다. 알파 0이면 원래 재질을 사용한다.
+    DirectX::XMFLOAT4 debugColor{0, 0, 0, 0};
 };
+
+static_assert(sizeof(Joint) == 128, "Joint must match the skinning shader layout.");
 
 class Model
 {
@@ -137,6 +141,8 @@ public:
 
     void Update(GraphicsContext& gfxContext, float deltaTime);
     bool UpdatePose(GraphicsContext& gfxContext, const std::vector<GraphNode>& pose);
+    void ClearJointDebugColors();
+    void SetNodeDebugColor(uint32_t node, const DirectX::XMFLOAT4& color);
     // Cached scene-node transform, valid after Update/UpdatePose. Skin roots
     // use skin space; multiply by the owning mesh transform for rendered bones.
     bool GetNodeTransform(uint32_t nodeIndex, Math::Matrix4& transform) const;

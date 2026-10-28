@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -163,6 +163,41 @@ ModelInstance& ModelInstance::operator=( std::shared_ptr<const Model> sourceMode
         }
     }
     return *this;
+}
+
+void ModelInstance::ClearJointDebugColors()
+{
+    if (!m_Model || !m_Skeleton)
+    {
+        return;
+    }
+    for (uint32_t joint = 0; joint < m_Model->m_NumJoints; ++joint)
+    {
+        m_Skeleton[joint].debugColor = DirectX::XMFLOAT4(0, 0, 0, 0);
+    }
+}
+
+void ModelInstance::SetNodeDebugColor(uint32_t node, const DirectX::XMFLOAT4& color)
+{
+    if (!m_Model || !m_Skeleton || node >= m_Model->m_NodeParents.size())
+    {
+        return;
+    }
+    // 발가락처럼 선택한 본의 자손도 같은 색으로 표시한다. 공유 에셋의 재질은 변경하지 않는다.
+    for (uint32_t joint = 0; joint < m_Model->m_NumJoints; ++joint)
+    {
+        int ancestor = m_Model->m_JointIndices[joint];
+        for (uint32_t depth = 0; depth < m_Model->m_NumNodes && ancestor >= 0 &&
+            size_t(ancestor) < m_Model->m_NodeParents.size(); ++depth)
+        {
+            if (uint32_t(ancestor) == node)
+            {
+                m_Skeleton[joint].debugColor = color;
+                break;
+            }
+            ancestor = m_Model->m_NodeParents[ancestor];
+        }
+    }
 }
 
 void ModelInstance::Update(GraphicsContext& gfxContext, float deltaTime)

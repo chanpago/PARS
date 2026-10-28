@@ -106,6 +106,28 @@ namespace PARS
         }
     }
 
+    void SkeletalMeshComponent::UpdateFootCandidateDebugColors()
+    {
+        m_ModelInstance.ClearJointDebugColors();
+        if (!m_FootCandidateDebugVisible)
+        {
+            return;
+        }
+        const auto& sample = m_FootSupport.GetSnapshot();
+        const auto& candidates = sample.candidates;
+        if (candidates.support < 0 || candidates.step < 0)
+        {
+            return;
+        }
+        const int supportNode = sample.feet[candidates.support].boneNode;
+        const int stepNode = sample.feet[candidates.step].boneNode;
+        if (supportNode >= 0 && stepNode >= 0)
+        {
+            m_ModelInstance.SetNodeDebugColor(uint32_t(supportNode), DirectX::XMFLOAT4(1, 0, 0, 1));
+            m_ModelInstance.SetNodeDebugColor(uint32_t(stepNode), DirectX::XMFLOAT4(0, 0, 1, 1));
+        }
+    }
+
     bool SkeletalMeshComponent::SetAutomaticRootSupport(bool enabled, std::string& error)
     {
         if (enabled && !IsActiveRagdoll())

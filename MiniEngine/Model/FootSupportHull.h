@@ -1,7 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include <foundation/PxVec3.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -111,6 +112,48 @@ namespace PARS
         bool hasDirection = false;
         FootSupportZone zone = FootSupportZone::Invalid;
     };
+
+    struct FootSupportCandidates
+    {
+        int support = -1, step = -1;
+        std::array<physx::PxVec3, 2> centers{physx::PxVec3(0), physx::PxVec3(0)};
+        std::array<float, 2> distances{};
+    };
+
+    // 양발의 유효한 투영 영역과 A 내부 COM이 있을 때만 후보를 계산한다.
+    // 접촉 하중이 아니라 수평 거리로 정하는 관측용 후보이며, 실제 발 지지는 바꾸지 않는다.
+    inline FootSupportCandidates EvaluateFootSupportCandidates(const std::vector<physx::PxVec3>& hull,
+        const physx::PxVec3& com, const std::array<std::vector<physx::PxVec3>, 2>& feet, int previous = -1)
+    {
+        FootSupportCandidates result;
+        if (!com.isFinite() || !IsInsideFootSupportHull(hull, com))
+        {
+            return result;
+        }
+        for (size_t side = 0; side < feet.size(); ++side)
+        {
+            if (BuildFootSupportHull(feet[side]).size() < 3)
+            {
+                return {};
+            }
+            for (const auto& point : feet[side])
+            {
+                result.centers[side] += point;
+            }
+            result.centers[side] /= float(feet[side].size());
+            const auto delta = com - result.centers[side];
+            result.distances[side] = std::sqrt(delta.x * delta.x + delta.z * delta.z);
+        }
+        result.support = result.distances[0] <= result.distances[1] ? 0 : 1;
+        // 거리 차이가 1cm 이내면 이전 후보를 유지한다. 처음 동률이면 왼발을 선택한다.
+        if (previous >= 0 && previous < 2 &&
+            result.distances[previous] <= result.distances[1 - previous] + .01f)
+        {
+            result.support = previous;
+        }
+        result.step = 1 - result.support;
+        return result;
+    }
 
     // A is a CCW convex hull from BuildFootSupportHull. B scales XZ distances
     // about its AREA centroid; a scale of 2 gives four times the area.

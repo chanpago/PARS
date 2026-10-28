@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -33,6 +33,7 @@ struct Joint
 {
     float4x4 PosMatrix;
     float4x3 NrmMatrix; // Inverse-transpose of PosMatrix
+    float4 DebugColor;
 };
 
 StructuredBuffer<Joint> Joints : register(t20);

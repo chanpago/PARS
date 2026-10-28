@@ -166,6 +166,7 @@ bool PARS::FootSupport::SetBufferScale(float scale)
 void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& physics)
 {
     const auto sampleNumber = m_Snapshot.sampleNumber + 1;
+    const int previousCandidate = m_Snapshot.candidates.support;
     m_Snapshot = {};
     auto& sample = m_Snapshot;
     sample.sampleNumber = sampleNumber;
@@ -186,6 +187,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
 
     // 양발 아래 지지영역 A를 만들고, COM의 위치를 비교해서 골반 지지계수 w를 계산하는부분
     std::vector<PxVec3> supportPoints;
+    std::array<std::vector<PxVec3>, 2> footPoints;
     supportPoints.reserve(8);
     double supportHeight = 0;
     const PxVec3 down(0, -RayLength, 0);
@@ -199,6 +201,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         const auto& settings = m_Settings[side];
         auto& foot = sample.feet[side];
         foot.available = true;
+        foot.boneNode = ragdoll.GetBoneNodes()[sole.bodyIndex];
         const Matrix4 bodyWorld = ragdoll.GetBoneWorld(sole.bodyIndex) * sole.source.GetLocalTransform();
         const Quaternion rotation = Quaternion(Vector3(kZUnitVector), XMConvertToRadians(settings.rotation.z)) *
             Quaternion(Vector3(kYUnitVector), XMConvertToRadians(settings.rotation.y)) *
@@ -220,6 +223,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
             if (foot.projected[i])
             {
                 supportPoints.push_back(hit.position);
+                footPoints[side].push_back(hit.position);
                 supportHeight += hit.position.y;
             }
         }
@@ -244,4 +248,9 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     // 여기서 저장한 weight를 다음 updateautomaticrootsupport에서 읽어서 골반 지지 강도에 적용
     sample.balance = EvaluateFootSupportBalance(sample.hull, sample.hasComProjection
         ? sample.projectedCenterOfMass : PxVec3(std::numeric_limits<float>::quiet_NaN()), m_BufferScale);
+    if (sample.hasComProjection)
+    {
+        sample.candidates = EvaluateFootSupportCandidates(sample.hull,
+            sample.projectedCenterOfMass, footPoints, previousCandidate);
+    }
 }

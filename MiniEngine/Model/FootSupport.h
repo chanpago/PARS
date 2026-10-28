@@ -21,6 +21,7 @@ namespace PARS
     struct FootSoleSample
     {
         bool available = false;
+        int boneNode = -1;
         std::array<physx::PxVec3, 4> corners{}, projections{};
         std::array<bool, 4> projected{};
         std::array<float, 4> distances{};
@@ -31,6 +32,7 @@ namespace PARS
         std::array<FootSoleSample, 2> feet;
         std::vector<physx::PxVec3> hull;
         FootSupportBalance balance;
+        FootSupportCandidates candidates;
         physx::PxVec3 centerOfMass{0}, projectedCenterOfMass{0};
         float totalMass = 0;
         size_t projectedPointCount = 0;

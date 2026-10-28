@@ -189,6 +189,7 @@ public:
 private:
     void LoadAnimationPreview(bool forceRebuild);
     void SelectPreview(uint32_t index);
+    void SetFootCandidateDebugVisible(bool visible);
     void ResetPreviewCamera();
     void UpdateCharacterInput(float deltaTime);
     void UpdateFollowCamera(float deltaTime = 0);
@@ -225,6 +226,7 @@ private:
     std::string m_PreviewError;
     std::string m_RagdollMessage;
     bool m_ActiveSupport = true;
+    bool m_FootCandidateDebugVisible = false;
     std::string m_CharacterPAPath = "Mixamo.physics.json";
     std::string m_DefaultPAPath;
     bool m_RagdollTestDone = false;
@@ -653,6 +655,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
 #endif
+    SetFootCandidateDebugVisible(m_FootCandidateDebugVisible);
     auto& context = GraphicsContext::Begin(L"Initialize Character Pose");
     // 현재 포즈의 스키닝 행렬 등 렌더 데이터를 준비하고, GPU 명령 완료를 기다린다.
     Renderer::UpdateWorldRenderData(m_World, context);
@@ -687,6 +690,24 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         {
             m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
                 mesh.GetPhysicsAsset());
+        }
+    }
+#endif
+}
+
+void ModelViewer::SetFootCandidateDebugVisible(bool visible)
+{
+    m_FootCandidateDebugVisible = visible;
+    if (auto* player = GetPreviewCharacter())
+    {
+        player->GetMesh().SetFootCandidateDebugVisible(visible);
+    }
+#if defined(_M_X64)
+    if (m_ImpactTest)
+    {
+        if (auto* dummy = m_ImpactTest->GetDummy())
+        {
+            dummy->GetMesh().SetFootCandidateDebugVisible(visible);
         }
     }
 #endif
@@ -1337,13 +1358,48 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         if (ImGui::Begin(u8"캐릭터 애니메이션", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
 #if defined(_M_X64)
-            if (m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
+            if (!(m_Comparison && m_Comparison->IsShowingScene()))
             {
-                if (ImGui::Button(u8"더미 리셋"))
+                if (m_ImpactTest)
                 {
-                    m_ImpactTest->Reset();
+                    if (ImGui::Button(u8"더미 리셋"))
+                    {
+                        m_ImpactTest->Reset();
+                    }
+                    ImGui::SameLine();
                 }
-                if (!m_ImpactTest->GetStatusMessage().empty())
+                if (ImGui::Button(m_FootCandidateDebugVisible ? u8"발 후보 표시 끄기" : u8"발 후보 표시"))
+                {
+                    SetFootCandidateDebugVisible(!m_FootCandidateDebugVisible);
+                }
+                if (m_FootCandidateDebugVisible)
+                {
+                    const auto drawCandidates = [](PARS::Character* character, const char* label)
+                    {
+                        if (!character)
+                        {
+                            return;
+                        }
+                        const auto& candidates = character->GetMesh().GetFootSupport().GetSnapshot().candidates;
+                        ImGui::TextUnformatted(label);
+                        if (candidates.support >= 0)
+                        {
+                            const char* const feet[] = {u8"왼발", u8"오른발"};
+                            ImGui::TextColored(ImVec4(1, .15f, .15f, 1), u8"지지 후보: %s", feet[candidates.support]);
+                            ImGui::SameLine();
+                            ImGui::TextColored(ImVec4(.2f, .45f, 1, 1), u8"디딜 후보: %s", feet[candidates.step]);
+                            ImGui::Text(u8"COM 거리: 왼발 %.1f / 오른발 %.1f cm",
+                                candidates.distances[0] * 100, candidates.distances[1] * 100);
+                        }
+                        else
+                        {
+                            ImGui::TextUnformatted(u8"후보 없음: COM이 A 안에 있고 양발 투영이 유효해야 합니다.");
+                        }
+                    };
+                    drawCandidates(GetPreviewCharacter(), u8"플레이어 발 후보");
+                    drawCandidates(m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr, u8"더미 발 후보");
+                }
+                if (m_ImpactTest && !m_ImpactTest->GetStatusMessage().empty())
                 {
                     ImGui::TextWrapped("%s", m_ImpactTest->GetStatusMessage().c_str());
                 }

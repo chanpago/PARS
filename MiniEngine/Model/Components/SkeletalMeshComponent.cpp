@@ -181,6 +181,7 @@ namespace PARS
         {
             return false;
         }
+        UpdateFootCandidateDebugColors();
         m_ModelInstance.SetTransform(GetComponentTransform());
         return m_ModelInstance.UpdatePose(context, IsRagdoll() ? m_PhysicsPose : poseOverride ? *poseOverride
                                                                                               : m_AnimInstance->GetPose());

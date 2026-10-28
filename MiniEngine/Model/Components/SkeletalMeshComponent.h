@@ -75,6 +75,14 @@ namespace PARS
         {
             return m_FootSupport;
         }
+        void SetFootCandidateDebugVisible(bool visible)
+        {
+            m_FootCandidateDebugVisible = visible;
+        }
+        bool IsFootCandidateDebugVisible() const
+        {
+            return m_FootCandidateDebugVisible;
+        }
         // Explicit mode changes rearm the controller. The dummy changes mode only through Reset().
         bool SetAutomaticRootSupport(bool enabled, std::string& error);
         bool UsesAutomaticRootSupport() const
@@ -122,9 +130,11 @@ namespace PARS
         void UpdateKinematicPose(bool teleport);
         void UpdatePhysicsPose();
         void UpdateFootSupport();
+        void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
         Ragdoll m_Ragdoll;
         FootSupport m_FootSupport;
+        bool m_FootCandidateDebugVisible = false;
         bool m_AutomaticRootSupport = false;
         RootSupportRelease m_RootSupportRelease = RootSupportRelease::None;
         PhysicsSkeleton m_PhysicsSkeleton;

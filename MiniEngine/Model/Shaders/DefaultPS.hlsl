@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -64,6 +64,7 @@ struct VSOutput
 #endif
     float3 worldPos : TEXCOORD2;
     float3 sunShadowCoord : TEXCOORD3;
+    float4 debugColor : COLOR0;
 };
 
 // Numeric constants
@@ -291,5 +292,8 @@ float4 main(VSOutput vsOutput) : SV_Target0
 
     // TODO: Shade each light using Forward+ tiles
 
-    return float4(colorAccum, baseColor.a);
+    // 조명이나 텍스처에 가려지지 않는 후보 색을 사용하고, 발목 경계만 부드럽게 잇는다.
+    float debugWeight = smoothstep(0.25, 0.65, vsOutput.debugColor.a);
+    float3 debugColor = vsOutput.debugColor.rgb / max(vsOutput.debugColor.a, 1e-5);
+    return float4(lerp(colorAccum, debugColor, debugWeight), baseColor.a);
 }

@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -37,6 +37,7 @@ struct Joint
 {
     float4x4 PosMatrix;
     float4x3 NrmMatrix; // Inverse-transpose of PosMatrix
+    float4 DebugColor;
 };
 
 StructuredBuffer<Joint> Joints : register(t20);
@@ -72,12 +73,14 @@ struct VSOutput
 #endif
     float3 worldPos : TEXCOORD2;
     float3 sunShadowCoord : TEXCOORD3;
+    float4 debugColor : COLOR0;
 };
 
 [RootSignature(Renderer_RootSig)]
 VSOutput main(VSInput vsInput)
 {
     VSOutput vsOutput;
+    vsOutput.debugColor = 0;
 
     float4 position = float4(vsInput.position, 1.0);
     float3 normal = vsInput.normal * 2 - 1;
@@ -88,6 +91,13 @@ VSOutput main(VSInput vsInput)
 #ifdef ENABLE_SKINNING
     // I don't like this hack.  The weights should be normalized already, but something is fishy.
     float4 weights = vsInput.jointWeights / dot(vsInput.jointWeights, 1);
+
+    // 실제 스키닝 가중치로 발과 발가락에만 디버그 색을 전달한다.
+    vsOutput.debugColor =
+        Joints[vsInput.jointIndices.x].DebugColor * weights.x +
+        Joints[vsInput.jointIndices.y].DebugColor * weights.y +
+        Joints[vsInput.jointIndices.z].DebugColor * weights.z +
+        Joints[vsInput.jointIndices.w].DebugColor * weights.w;
 
     float4x4 skinPosMat =
         Joints[vsInput.jointIndices.x].PosMatrix * weights.x +
