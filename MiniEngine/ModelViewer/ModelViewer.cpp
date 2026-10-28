@@ -630,6 +630,9 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     if (characterControl)
     {
         m_SpringArm = &character->CreateDefaultSubobject<PARS::SpringArmComponent>("SpringArmComponent");
+        auto cameraSettings = m_SpringArm->GetSettings();
+        cameraSettings.collisionTest = false;
+        m_SpringArm->SetSettings(cameraSettings);
         m_SpringArm->AttachToComponent(character->GetCapsuleComponent());
         m_SpringArm->SetRelativeLocation(Vector3(0, .55f, 0));
         // 래그돌의 최종 위치와 렌더 프레임 시간을 사용하도록 World::Tick 뒤에 갱신한다.
@@ -1515,9 +1518,8 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     {
                         m_SpringArm->SetSettings(settings);
                     }
-                    ImGui::TextWrapped(u8"속도 0: 즉시 반영. 충돌 시에는 즉시 거리를 줄입니다.");
-                    ImGui::Text(u8"현재 거리: %.2f m | 장애물: %s", m_SpringArm->GetCurrentArmLength(),
-                        m_SpringArm->IsCollisionFixApplied() ? u8"감지" : u8"없음");
+                    ImGui::TextWrapped(u8"속도 0: 즉시 반영. 카메라는 충돌체에 막히지 않습니다.");
+                    ImGui::Text(u8"현재 거리: %.2f m", m_SpringArm->GetCurrentArmLength());
                 }
 #if defined(_M_X64)
                 if (m_PhysicsDemo)
