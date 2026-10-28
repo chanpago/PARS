@@ -191,8 +191,6 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         ImGui::Text(u8"중심 거리: COM %.1f / A %.1f / B %.1f cm",
             balance.comDistance * 100, balance.innerDistance * 100, balance.outerDistance * 100);
     }
-    ImGui::Checkbox(u8"발바닥 영역 표시", &m_Visible);
-    ImGui::SameLine();
     ImGui::Checkbox(u8"레이 표시", &m_ShowRays);
     ImGui::Checkbox(u8"지지 영역 A 표시 (Convex Hull)", &m_ShowHull);
     ImGui::Checkbox(u8"완충 영역 B 표시 (흰색 점선)", &m_ShowBuffer);

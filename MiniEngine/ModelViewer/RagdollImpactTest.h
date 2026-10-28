@@ -15,8 +15,8 @@ class RagdollImpactTest
 {
 public:
     static constexpr float SphereRadius = .15f;
-    explicit RagdollImpactTest(PARS::World& world)
-        : m_World(world)
+    RagdollImpactTest(PARS::World& world, FootSoleDebug& footSoles)
+        : m_World(world), m_FootSoles(footSoles)
     {
     }
     ~RagdollImpactTest();
@@ -55,7 +55,7 @@ private:
     PARS::World& m_World;
     PARS::ActorHandle m_Dummy;
     PARS::PhysicsAsset m_Asset;
-    FootSoleDebug m_FootSoles;
+    FootSoleDebug& m_FootSoles;
     std::vector<Shot> m_Shots;
     Math::Vector3 m_HipsReference{Math::kZero};
     float m_Mass = .5f, m_Speed = 7.5f, m_MaxHipsDisplacement = 0;

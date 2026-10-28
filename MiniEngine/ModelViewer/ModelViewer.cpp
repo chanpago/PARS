@@ -647,7 +647,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 #if defined(_M_X64)
     if (m_PhysicsDemo && mesh.GetPhysicsAsset())
     {
-        m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World);
+        m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_FootSoles);
         if (!m_ImpactTest->Initialize(models[0], *mesh.GetPhysicsAsset()))
         {
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
@@ -1371,6 +1371,11 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 if (ImGui::Button(m_FootCandidateDebugVisible ? u8"발 후보 표시 끄기" : u8"발 후보 표시"))
                 {
                     SetFootCandidateDebugVisible(!m_FootCandidateDebugVisible);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button(m_FootSoles.IsVisible() ? u8"발 디버그 끄기" : u8"발 디버그 켜기"))
+                {
+                    m_FootSoles.SetVisible(!m_FootSoles.IsVisible());
                 }
                 if (m_FootCandidateDebugVisible)
                 {

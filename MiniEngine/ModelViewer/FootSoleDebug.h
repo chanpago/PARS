@@ -17,6 +17,10 @@ public:
     {
         m_Visible = visible;
     }
+    bool IsVisible() const
+    {
+        return m_Visible;
+    }
 
 private:
     bool m_Visible = true, m_ShowRays = true, m_ShowHull = true;
