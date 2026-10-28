@@ -95,6 +95,9 @@ namespace PARS
         // 실제 바디의 월드 질량중심을 질량으로 가중 평균한다. 바디가 없으면 false다.
         bool GetCenterOfMass(Math::Vector3& center, float& totalMass) const;
         void AddVelocity(Math::Vector3 velocity);
+        // 위치 오차를 사용하지 않고 전체 질량중심의 XZ 속도만 추종한다. 공통 속도 변화로 관절의 상대 운동을 유지한다.
+        // 최대 가속도 단위는 m/s^2이며, 고정 스텝의 simulate() 전에 호출한다.
+        void DriveHorizontalVelocity(Math::Vector3 targetVelocity, float maxAcceleration, float deltaTime);
         // PxActor::userData로 소유자를 식별해 이동 쿼리에서 자기 자신을 제외한다.
         void SetQueryOwner(void* owner);
         // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.

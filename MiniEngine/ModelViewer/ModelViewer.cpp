@@ -205,6 +205,7 @@ private:
     PreviewAnimInstance* GetPreviewAnimation() const;
     void RenderModels(Renderer::MeshSorter& sorter);
     void DrawRagdollPanel(PARS::Character& character);
+    bool ApplyPlayerRootSupport(PARS::Character& character, bool enabled);
     void ApplyPendingPhysicsAssetSave();
 
     Camera m_Camera;
@@ -225,7 +226,7 @@ private:
     bool m_PreviewReady = false;
     std::string m_PreviewError;
     std::string m_RagdollMessage;
-    bool m_ActiveSupport = true;
+    bool m_PlayerAutomaticSupport = true;
     bool m_FootCandidateDebugVisible = false;
     std::string m_CharacterPAPath = "Mixamo.physics.json";
     std::string m_DefaultPAPath;
@@ -1168,6 +1169,21 @@ void ModelViewer::ApplyPendingPhysicsAssetSave()
     m_MeshViewer->CompletePhysicsSave(saved, m_RagdollMessage);
 }
 
+bool ModelViewer::ApplyPlayerRootSupport(PARS::Character& character, bool enabled)
+{
+    auto& mesh = character.GetMesh();
+    // 명시적인 모드 변경과 재시작에서만 자동 해제 상태를 재설정한다.
+    if (!mesh.SetAutomaticRootSupport(false, m_RagdollMessage))
+    {
+        return false;
+    }
+    if (enabled)
+    {
+        return mesh.SetAutomaticRootSupport(true, m_RagdollMessage);
+    }
+    return mesh.GetRagdoll().SetRootSupported(false, m_RagdollMessage);
+}
+
 void ModelViewer::DrawRagdollPanel(PARS::Character& character)
 {
     if (!ImGui::CollapsingHeader(u8"래그돌 / 물리 에셋", ImGuiTreeNodeFlags_DefaultOpen))
@@ -1239,14 +1255,13 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     ImGui::BeginDisabled(mesh.IsActiveRagdoll() || mesh.HasPendingDriveSettings());
     if (ImGui::Button(u8"액티브 래그돌"))
     {
-        const bool entering = !character.IsRagdoll();
         if (character.SetPhysicsMode(PARS::PhysicsAnimationMode::ActiveRagdoll, m_RagdollMessage))
         {
             if (auto* animation = GetPreviewAnimation())
             {
                 animation->SetAutoCycleEnabled(false);
             }
-            if (!entering || mesh.GetRagdoll().SetRootSupported(m_ActiveSupport, m_RagdollMessage))
+            if (ApplyPlayerRootSupport(character, m_PlayerAutomaticSupport))
             {
                 m_RagdollMessage = u8"액티브 래그돌: 애니메이션 목표에 맞춰 물리 관절을 구동합니다.";
             }
@@ -1254,22 +1269,26 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
-    bool supported = character.IsRagdoll() ? runtime.IsRootSupported() : m_ActiveSupport;
+    bool automaticSupport = m_PlayerAutomaticSupport;
     ImGui::BeginDisabled(mesh.GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll);
-    if (ImGui::Checkbox(u8"골반 힘 / 토크 지지", &supported))
+    if (ImGui::Checkbox(u8"COM 자동 골반 지지", &automaticSupport))
     {
-        if (!character.IsRagdoll() || mesh.GetRagdoll().SetRootSupported(supported, m_RagdollMessage))
+        if (!character.IsRagdoll() || ApplyPlayerRootSupport(character, automaticSupport))
         {
-            m_ActiveSupport = supported;
+            m_PlayerAutomaticSupport = automaticSupport;
         }
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     {
-        ImGui::SetTooltip(u8"동적 골반은 제한된 힘과 토크로 애니메이션의 위치와 회전을 따라갑니다. 접촉과 충격으로 목표에서 벗어날 수 있습니다. 패시브 모드에서는 지지를 해제합니다.");
+        ImGui::SetTooltip(u8"더미와 동일하게 X/Z 위치는 보정하지 않고, COM 가중치로 높이와 회전을 지지합니다. 발 지지를 잃거나 COM이 버퍼 밖으로 나가면 해제됩니다. 다시 시작하면 지지를 재설정하며, 체크를 끄면 골반 지지를 해제합니다.");
     }
     if (mesh.IsActiveRagdoll())
     {
+        ImGui::Text(u8"지지 축: X %s / Y %s / Z %s / 회전 %s | 적용 w %.3f",
+            runtime.IsRootAxisSupported(0) ? "ON" : "OFF", runtime.IsRootAxisSupported(1) ? "ON" : "OFF",
+            runtime.IsRootAxisSupported(2) ? "ON" : "OFF", runtime.IsRootAxisSupported(3) ? "ON" : "OFF",
+            runtime.GetRootSupportWeight());
         bool drives = runtime.AreDrivesEnabled();
         if (ImGui::Checkbox(u8"회전 드라이브", &drives))
         {
@@ -1315,11 +1334,10 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
         if (ImGui::Button(u8"래그돌 다시 시작"))
         {
             const auto mode = mesh.GetPhysicsMode();
-            const bool support = runtime.IsRootSupported();
             if (character.StopRagdoll(m_RagdollMessage) && character.SetPhysicsMode(mode, m_RagdollMessage) &&
                 mode == PARS::PhysicsAnimationMode::ActiveRagdoll)
             {
-                mesh.GetRagdoll().SetRootSupported(support, m_RagdollMessage);
+                ApplyPlayerRootSupport(character, m_PlayerAutomaticSupport);
             }
         }
         if (character.IsRagdoll())

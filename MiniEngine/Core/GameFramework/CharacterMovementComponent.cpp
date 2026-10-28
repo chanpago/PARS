@@ -15,6 +15,11 @@ namespace PARS
         return float(Length(m_LocomotionVelocity));
     }
 
+    float CharacterMovementComponent::GetHorizontalAccelerationLimit() const
+    {
+        return float(LengthSquare(m_Input)) > 0.0001f ? 10.0f : 14.0f;
+    }
+
     void CharacterMovementComponent::StopMovementImmediately()
     {
         m_Input = m_Velocity = m_LocomotionVelocity = Vector3(kZero);
@@ -51,7 +56,7 @@ namespace PARS
             return;
         }
         const Vector3 desired = m_Input * (pawn->IsRunRequested() ? RunSpeed : WalkSpeed);
-        const float acceleration = float(LengthSquare(m_Input)) > 0.0001f ? 10.0f : 14.0f;
+        const float acceleration = GetHorizontalAccelerationLimit();
         const auto accelerate = [&](Vector3 velocity)
         {
             const Vector3 difference = desired - velocity;

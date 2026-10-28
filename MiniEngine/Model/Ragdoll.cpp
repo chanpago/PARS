@@ -670,6 +670,62 @@ namespace PARS
         (void)velocity;
 #endif
     }
+    void Ragdoll::DriveHorizontalVelocity(Vector3 targetVelocity, float maxAcceleration, float deltaTime)
+    {
+        if (!IsSimulating() || !std::isfinite(maxAcceleration) || maxAcceleration <= 0 ||
+            !std::isfinite(deltaTime) || deltaTime <= 0)
+        {
+            return;
+        }
+#if defined(_M_X64)
+        const PxVec3 target(float(targetVelocity.GetX()), 0, float(targetVelocity.GetZ()));
+        const float maxDeltaSpeed = maxAcceleration * deltaTime;
+        if (!target.isFinite() || !std::isfinite(maxDeltaSpeed))
+        {
+            return;
+        }
+
+        // 골반 자체의 흔들림을 이동 속도로 오인하지 않도록 모든 동적 바디를 질량으로 가중 평균한다.
+        double totalMass = 0, momentumX = 0, momentumZ = 0;
+        for (const auto* body : m_Bodies)
+        {
+            if (body->getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC))
+            {
+                continue;
+            }
+            const float mass = body->getMass();
+            const PxVec3 velocity = body->getLinearVelocity();
+            if (!std::isfinite(mass) || mass <= 0 || !velocity.isFinite())
+            {
+                return;
+            }
+            totalMass += mass;
+            momentumX += double(mass) * velocity.x;
+            momentumZ += double(mass) * velocity.z;
+        }
+        if (totalMass <= 0)
+        {
+            return;
+        }
+
+        PxVec3 delta(target.x - float(momentumX / totalMass), 0, target.z - float(momentumZ / totalMass));
+        const float deltaSpeed = delta.magnitude();
+        if (!std::isfinite(deltaSpeed) || deltaSpeed <= 1e-6f)
+        {
+            return;
+        }
+        if (deltaSpeed > maxDeltaSpeed)
+        {
+            delta *= maxDeltaSpeed / deltaSpeed;
+        }
+        // 아티큘레이션은 루트 선속도에 공통 이동분을 더해 관절 속도와 각속도를 유지한 채 모든 링크에 전달한다.
+        // Y 속도는 바꾸지 않으며, 목표 속도가 0일 때도 같은 한도 안에서 제동한다.
+        AddVelocity(Vector3(delta.x, 0, delta.z));
+#else
+        (void)targetVelocity;
+#endif
+    }
+
     void Ragdoll::SetQueryOwner(void* owner)
     {
         m_QueryOwner = owner;

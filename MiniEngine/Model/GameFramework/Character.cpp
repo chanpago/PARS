@@ -69,6 +69,17 @@ namespace PARS
         Pawn::FixedTick(deltaTime); // 이동을 먼저 처리한 다음 애니메이션과 드라이브 목표를 갱신한다.
         // 목표 계산 중 같은 서브스텝 안에서 Passive 모드로 전환될 수 있다.
         SyncRagdollMovement();
+
+        auto& ragdoll = m_Mesh->GetRagdoll();
+        if (HasBegunPlay() && !IsPendingDestroy() && m_Mesh->IsActiveRagdoll() &&
+            CanControlMovement() && m_Movement->IsTickEnabled() &&
+            !ragdoll.IsRootAxisSupported(0) && !ragdoll.IsRootAxisSupported(2))
+        {
+            // 이번 스텝의 지지 해제 여부를 확인한 뒤, 충돌로 제한된 캡슐의 실제 수평 속도를 전달한다.
+            // 골반 XZ 위치 드라이브를 켜지 않고 몸 전체의 공통 이동 속도만 제어한다.
+            ragdoll.DriveHorizontalVelocity(m_Movement->GetVelocity(),
+                m_Movement->GetHorizontalAccelerationLimit(), deltaTime);
+        }
     }
 
     bool Character::StopRagdoll(std::string& error)

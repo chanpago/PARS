@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "PawnMovementComponent.h"
 #include <functional>
 
@@ -20,6 +20,8 @@ namespace PARS
         }
         float GetGroundSpeed() const;
         float GetLocomotionSpeed() const;
+        // 캡슐과 물리 몸체가 같은 입력 가속 및 제동 한도를 사용한다.
+        float GetHorizontalAccelerationLimit() const;
         void StopMovementImmediately();
         void SetHorizontalMoveConstraint(std::function<Math::Vector3(Math::Vector3)> constraint)
         {
