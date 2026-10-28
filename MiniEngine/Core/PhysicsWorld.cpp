@@ -831,6 +831,16 @@ bool PhysicsWorld::AddArticulation(PxArticulationReducedCoordinate& articulation
     return articulation.getScene() == m_Scene;
 }
 
+bool PhysicsWorld::AddRigidBody(PxRigidDynamic& body)
+{
+    if (!m_Scene || body.getScene())
+    {
+        return false;
+    }
+    m_Scene->addActor(body);
+    return body.getScene() == m_Scene;
+}
+
 PxD6Joint* PhysicsWorld::CreateJoint(PxRigidActor& parent, const PxTransform& parentFrame,
     PxRigidActor& child, const PxTransform& childFrame)
 {

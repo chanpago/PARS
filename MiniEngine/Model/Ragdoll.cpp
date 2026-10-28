@@ -171,6 +171,7 @@ namespace PARS
     }
     void Ragdoll::Destroy()
     {
+        m_Standby.reset();
 #if defined(_M_X64)
         if (m_SupportJoint)
         {
@@ -226,6 +227,12 @@ namespace PARS
 
     void Ragdoll::Swap(Ragdoll& other) noexcept
     {
+        SwapConfiguration(other);
+        m_Standby.swap(other.m_Standby);
+    }
+
+    void Ragdoll::SwapConfiguration(Ragdoll& other) noexcept
+    {
         // 벡터 저장 공간을 교환해 PhysX/PVD가 보관 중인 이름 포인터를 유지한다.
         m_Asset.bodies.swap(other.m_Asset.bodies);
         m_Asset.constraints.swap(other.m_Asset.constraints);
@@ -258,6 +265,21 @@ namespace PARS
     }
 
     bool Ragdoll::Create(PhysicsWorld& world, const PhysicsAsset& asset, const std::vector<std::string>& names,
+        const std::vector<Matrix4>& boneWorld, Vector3 velocity, std::string& error, bool simulate)
+    {
+        if (!CreateConfiguration(world, asset, names, boneWorld, velocity, error, simulate))
+        {
+            return false;
+        }
+        if (!PrepareStandby(error))
+        {
+            Destroy();
+            return false;
+        }
+        return true;
+    }
+
+    bool Ragdoll::CreateConfiguration(PhysicsWorld& world, const PhysicsAsset& asset, const std::vector<std::string>& names,
         const std::vector<Matrix4>& boneWorld, Vector3 velocity, std::string& error, bool simulate)
     {
         if (IsActive())

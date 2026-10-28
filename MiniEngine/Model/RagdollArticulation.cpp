@@ -1,5 +1,6 @@
 ﻿#include "Ragdoll.h"
 #include <algorithm>
+#include "PhysicsPose.h"
 #include <cmath>
 #if defined(_M_X64)
 #include "PhysicsWorld.h"
@@ -286,6 +287,151 @@ namespace PARS
 #endif
     }
 
+    bool Ragdoll::PrepareStandby(std::string& error)
+    {
+        if (!m_Asset.UsesArticulation())
+        {
+            m_Standby.reset();
+            return true;
+        }
+        if (m_Standby)
+        {
+            // 이름 문자열과 PhysX 객체는 유지하고 드라이브 설정만 전달한다.
+            for (size_t i = 0; i < m_Asset.constraints.size(); ++i)
+            {
+                m_Standby->m_Asset.constraints[i].useSlerpDrive = m_Asset.constraints[i].useSlerpDrive;
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    m_Standby->m_Asset.constraints[i].drives[axis] = m_Asset.constraints[i].drives[axis];
+                }
+            }
+            return true;
+        }
+        std::vector<Matrix4> pose(m_BoneNames.size(), Matrix4(kIdentity));
+        for (size_t i = 0; i < m_Bodies.size(); ++i)
+        {
+            pose[m_BoneNodes[i]] = GetBoneWorld(i);
+        }
+        auto prepared = std::make_unique<Ragdoll>();
+        if (!prepared->CreateConfiguration(*m_World, m_Asset, m_BoneNames, pose, Vector3(kZero), error, !IsSimulating()))
+        {
+            return false;
+        }
+        // 캐시는 씬에 등록한 뒤 생성해야 한다. 준비가 끝나면 simulate 전에 즉시 분리한다.
+        if (!prepared->SetSceneActive(false, error))
+        {
+            return false;
+        }
+        m_Standby = std::move(prepared);
+        return true;
+    }
+
+    bool Ragdoll::SetSceneActive(bool active, std::string& error)
+    {
+#if defined(_M_X64)
+        if (m_Articulation)
+        {
+            if (active && !m_Articulation->getScene() && !m_World->AddArticulation(*m_Articulation))
+            {
+                error = "Could not reactivate the prepared articulation.";
+                return false;
+            }
+            if (!active && m_Articulation->getScene())
+            {
+                m_Articulation->getScene()->removeArticulation(*m_Articulation, false);
+            }
+        }
+        else
+        {
+            for (auto* body : m_Bodies)
+            {
+                if (active && !body->getScene() && !m_World->AddRigidBody(*body->is<PxRigidDynamic>()))
+                {
+                    std::string ignored;
+                    SetSceneActive(false, ignored);
+                    error = "Could not reactivate the prepared kinematic bodies.";
+                    return false;
+                }
+                if (!active && body->getScene())
+                {
+                    body->getScene()->removeActor(*body, false);
+                }
+            }
+        }
+        error.clear();
+        return true;
+#else
+        (void)active;
+        error = "Ragdoll requires an x64 PhysX build.";
+        return false;
+#endif
+    }
+
+    bool Ragdoll::ResetSimulationPose(const std::vector<Matrix4>& boneWorld,
+        const std::vector<Vector3>& linear, const std::vector<Vector3>& angular, std::string& error)
+    {
+#if defined(_M_X64)
+        std::vector<PxTransform> poses;
+        poses.reserve(m_Bodies.size());
+        for (size_t i = 0; i < m_Bodies.size(); ++i)
+        {
+            const auto pose = ToPx(PhysicsBoneFrame(boneWorld[m_BoneNodes[i]]) * m_Asset.bodies[i].GetLocalTransform());
+            if (!pose.isValid() || !ToPx(linear[i]).isFinite() || !ToPx(angular[i]).isFinite())
+            {
+                error = "Prepared ragdoll received an invalid pose or velocity.";
+                return false;
+            }
+            poses.push_back(pose);
+        }
+        m_HasDriveTargets = m_HasSupportTarget = false;
+        m_DriveTargets.clear();
+        m_PreviousArticulationTargetVelocity.clear();
+        m_LastKinematicTargets.clear();
+        m_AnimatedLinearVelocity.clear();
+        m_AnimatedAngularVelocity.clear();
+        m_MaxTargetClampAngle = 0;
+        if (m_Articulation)
+        {
+            // 트리가 바뀌지 않은 재등록에서는 캐시를 재사용하고 이전 힘만 지운다.
+            m_Articulation->zeroCache(*m_ArticulationCache);
+            m_Articulation->applyCache(*m_ArticulationCache, PxArticulationCacheFlag::eFORCE, false);
+            m_Articulation->setRootGlobalPose(poses[m_ArticulationRoot], false);
+            for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
+            {
+                const auto& data = m_Asset.constraints[i];
+                const auto parent = poses[m_Asset.FindBody(data.parentBone)] * ToPx(data.parentFrame.GetTransform());
+                const auto child = poses[m_Asset.FindBody(data.childBone)] * ToPx(data.childFrame.GetTransform());
+                const auto position = RotationVector(parent.q.getConjugate() * child.q);
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    m_ArticulationJoints[i]->setJointPosition(AngularAxes[axis], position[axis]);
+                    m_ArticulationJoints[i]->setDriveTarget(AngularAxes[axis], position[axis], false);
+                    m_ArticulationJoints[i]->setDriveVelocity(AngularAxes[axis], 0, false);
+                }
+            }
+            m_Articulation->updateKinematic(PxArticulationKinematicFlag::ePOSITION);
+            SetArticulationVelocities(linear, angular);
+            for (auto* body : m_Bodies)
+            {
+                body->clearForce();
+                body->clearTorque();
+            }
+        }
+        else if (!UpdateKinematicPose(boneWorld, true, error))
+        {
+            return false;
+        }
+        error.clear();
+        return true;
+#else
+        (void)boneWorld;
+        (void)linear;
+        (void)angular;
+        error = "Ragdoll requires an x64 PhysX build.";
+        return false;
+#endif
+    }
+
     bool Ragdoll::RebuildSimulation(bool simulate, Vector3 velocity, std::string& error, bool inheritAnimationVelocity)
     {
 #if defined(_M_X64)
@@ -312,6 +458,38 @@ namespace PARS
                 angular[i] = m_AnimatedAngularVelocity[i];
             }
         }
+        if (m_Asset.UsesArticulation() && m_Standby && m_Standby->IsSimulating() == simulate &&
+            m_Standby->UsesArticulation() == (simulate && m_Asset.UsesArticulation()))
+        {
+            if (!PrepareStandby(error) || !m_Standby->SetSceneActive(true, error))
+            {
+                return false;
+            }
+            if (!m_Standby->ResetSimulationPose(pose, linear, angular, error))
+            {
+                std::string ignored;
+                m_Standby->SetSceneActive(false, ignored);
+                return false;
+            }
+            m_Standby->SetQueryOwner(m_QueryOwner);
+            m_Standby->SetCollisionEnabled(m_CollisionEnabled);
+            m_Standby->SetDrivesEnabled(simulate && m_DrivesEnabled);
+            if (simulate && IsRootSupported() &&
+                !m_Standby->SetRootSupport(m_RootSupportWeight, m_SupportHorizontal, error))
+            {
+                std::string ignored;
+                m_Standby->SetSceneActive(false, ignored);
+                return false;
+            }
+            // 대기 구성은 골반 지지와 모터 이력을 남기지 않고 씬 밖에 보관한다.
+            SetRootSupported(false, error);
+            SetDrivesEnabled(false);
+            SetSceneActive(false, error);
+            SwapConfiguration(*m_Standby);
+            error.clear();
+            return true;
+        }
+        // PA의 드라이브 백엔드가 바뀐 경우에만 새 구성을 만든다.
         Ragdoll candidate;
         if (!candidate.Create(*m_World, m_Asset, m_BoneNames, pose, velocity, error, simulate))
         {

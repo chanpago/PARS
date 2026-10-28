@@ -83,6 +83,8 @@ public:
         const physx::PxGeometry& geometry, float mass, const char* name,
         const PARS::PhysicsMaterialSettings& material = {});
     bool AddArticulation(physx::PxArticulationReducedCoordinate& articulation);
+    // 씬 밖에 보관했던 바디를 다시 등록한다. 바디와 형상은 재생성하지 않는다.
+    bool AddRigidBody(physx::PxRigidDynamic& body);
     physx::PxD6Joint* CreateJoint(physx::PxRigidActor& parent, const physx::PxTransform& parentFrame,
         physx::PxRigidActor& child, const physx::PxTransform& childFrame);
 

@@ -158,12 +158,19 @@ void RunPhysicsAssetTests();
 void RunRagdollTests();
 void RunAnatomicalLimitTests();
 void RunActiveRagdollTests();
+void RunRagdollReuseTests(bool verifyReuse);
 void RunPelvisDriveTests();
 void RunRagdollComparisonTests();
 void RunSpringArmTests();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && (std::strcmp(argv[1], "--ragdoll-reuse-only") == 0 ||
+        std::strcmp(argv[1], "--ragdoll-reuse-benchmark") == 0))
+    {
+        RunRagdollReuseTests(std::strcmp(argv[1], "--ragdoll-reuse-only") == 0);
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--movement-only") == 0)
     {
         RunCharacterMovementTests();
@@ -174,6 +181,7 @@ int main(int argc, char** argv)
     {
         RunPhysicsAssetTests();
         RunRagdollTests();
+        RunRagdollReuseTests(true);
         RunAnatomicalLimitTests();
         return 0;
     }
@@ -190,6 +198,7 @@ int main(int argc, char** argv)
     RunSpringArmTests();
     RunPhysicsAssetTests();
     RunRagdollTests();
+    RunRagdollReuseTests(true);
     RunAnatomicalLimitTests();
     RunActiveRagdollTests();
     RunRagdollComparisonTests();

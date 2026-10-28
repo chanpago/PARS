@@ -139,6 +139,18 @@ namespace PARS
                 return false;
             }
         }
+        if (!PrepareStandby(error))
+        {
+            for (size_t i = 0; i < previous.constraints.size(); ++i)
+            {
+                m_Asset.constraints[i].useSlerpDrive = previous.constraints[i].useSlerpDrive;
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    m_Asset.constraints[i].drives[axis] = previous.constraints[i].drives[axis];
+                }
+            }
+            return false;
+        }
         SetDrivesEnabled(m_DrivesEnabled);
         error.clear();
         return true;

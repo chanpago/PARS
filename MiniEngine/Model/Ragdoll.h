@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "PhysicsAsset.h"
+#include <memory>
 
 class PhysicsWorld;
 namespace physx
@@ -113,6 +114,14 @@ namespace PARS
         static constexpr float PelvisAngularFrequency = 16.0f;
         static constexpr float PelvisAngularDampingRatio = 1.0f;
 
+        // 활성 구성과 대기 구성은 각각 PhysX 객체를 소유하며, 하나만 씬에 등록한다.
+        bool CreateConfiguration(PhysicsWorld& world, const PhysicsAsset& asset, const std::vector<std::string>& names,
+            const std::vector<Math::Matrix4>& boneWorld, Math::Vector3 velocity, std::string& error, bool simulate);
+        bool PrepareStandby(std::string& error);
+        bool SetSceneActive(bool active, std::string& error);
+        bool ResetSimulationPose(const std::vector<Math::Matrix4>& boneWorld,
+            const std::vector<Math::Vector3>& linear, const std::vector<Math::Vector3>& angular, std::string& error);
+        void SwapConfiguration(Ragdoll& other) noexcept;
         bool CreateArticulation(PhysicsWorld& world, const std::vector<Math::Matrix4>& boneWorld, std::string& error);
         bool RebuildSimulation(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity);
         void SetArticulationVelocities(const std::vector<Math::Vector3>& linear, const std::vector<Math::Vector3>& angular);
@@ -145,5 +154,6 @@ namespace PARS
         std::vector<Math::Quaternion> m_DriveTargets;
         std::vector<Math::Matrix4> m_LastKinematicTargets;
         std::vector<Math::Vector3> m_AnimatedLinearVelocity, m_AnimatedAngularVelocity;
+        std::unique_ptr<Ragdoll> m_Standby;
     };
 }
