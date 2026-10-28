@@ -35,7 +35,8 @@ namespace PARS
             return *m_AnimInstance;
         }
         // 검증된 복사본을 보관한다. 실행 중인 물리 월드에서는 키네마틱 바디를 즉시 등록한다.
-        bool SetPhysicsAsset(const PhysicsAsset& asset, std::string& error);
+        // 재생성을 허용하면 현재 본 자세와 물리 모드를 유지한다. 물리 스텝 밖에서 호출한다.
+        bool SetPhysicsAsset(const PhysicsAsset& asset, std::string& error, bool restartSimulation = false);
         const PhysicsAsset* GetPhysicsAsset() const
         {
             return m_PhysicsAsset.get();

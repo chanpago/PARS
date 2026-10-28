@@ -205,7 +205,7 @@ private:
     PreviewAnimInstance* GetPreviewAnimation() const;
     void RenderModels(Renderer::MeshSorter& sorter);
     void DrawRagdollPanel(PARS::Character& character);
-    void SaveDefaultPhysicsAsset();
+    void ApplyPendingPhysicsAssetSave();
 
     Camera m_Camera;
     unique_ptr<CameraController> m_CameraController;
@@ -229,6 +229,8 @@ private:
     bool m_FootCandidateDebugVisible = false;
     std::string m_CharacterPAPath = "Mixamo.physics.json";
     std::string m_DefaultPAPath;
+    std::unique_ptr<PARS::PhysicsAsset> m_PendingSavedPA;
+    std::string m_PendingPASavePath;
     bool m_RagdollTestDone = false;
     unique_ptr<SkeletalMeshViewer> m_MeshViewer;
     ShadowCamera m_SunShadowCamera;
@@ -872,6 +874,8 @@ void ModelViewer::UpdateFollowCamera(float deltaTime)
 
 void ModelViewer::Cleanup(void)
 {
+    m_PendingSavedPA.reset();
+    m_PendingPASavePath.clear();
     // GameCore는 Cleanup 전에 GPU 작업 완료를 기다린다. 컴포넌트가 렌더러와 물리 서비스를
     // 아직 사용할 수 있는 동안 Actor의 수명을 종료한다.
     m_MeshViewer.reset();
@@ -913,6 +917,11 @@ void ModelViewer::Update(float deltaT)
 {
     // deltaT는 이번 프레임의 경과 시간(초)이다. 이 Update 구간의 실행 시간을 프로파일러에 기록한다.
     ScopedTimer _prof(L"Update State");
+    if (m_PendingSavedPA)
+    {
+        Graphics::g_CommandManager.IdleGPU();
+        ApplyPendingPhysicsAssetSave();
+    }
 #if defined(_M_X64)
     // [1. 비교 실험 갱신] 비교용 월드는 아래의 플레이어 월드(m_World)와 별도로 진행한다.
     if (m_Comparison)
@@ -1092,29 +1101,69 @@ void ModelViewer::Update(float deltaT)
     m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
 }
 
-void ModelViewer::SaveDefaultPhysicsAsset()
+void ModelViewer::ApplyPendingPhysicsAssetSave()
 {
+    auto pending = std::move(m_PendingSavedPA);
     auto* character = GetPreviewCharacter();
-    if (!character || !m_MeshViewer || m_DefaultPAPath.empty())
+    if (!character || !m_MeshViewer || !pending)
     {
         return;
     }
-    const auto& asset = m_MeshViewer->GetPhysicsAsset();
+    const auto& asset = *pending;
+    std::vector<PARS::SkeletalMeshComponent*> meshes{&character->GetMesh()};
+#if defined(_M_X64)
+    if (m_ImpactTest && m_ImpactTest->GetDummy())
+    {
+        meshes.push_back(&m_ImpactTest->GetDummy()->GetMesh());
+    }
+#endif
+    std::vector<PARS::PhysicsAsset> previous;
+    for (auto* mesh : meshes)
+    {
+        if (!mesh->GetPhysicsAsset())
+        {
+            m_MeshViewer->CompletePhysicsSave(false, u8"적용할 캐릭터에 기존 PA가 없습니다.");
+            return;
+        }
+        previous.push_back(*mesh->GetPhysicsAsset());
+    }
     bool saved = false;
     std::string error;
     // 기존 캐릭터에서 실제 물리 상태를 생성할 수 있는지 확인한 뒤 파일을 교체한다.
-    if (!character->GetMesh().SetPhysicsAsset(asset, error))
+    size_t applied = 0;
+    for (auto* mesh : meshes)
     {
-        m_RagdollMessage = u8"PA 적용에 실패했습니다. 기본 파일은 유지됩니다: " + error;
+        if (!mesh->SetPhysicsAsset(asset, error, true))
+        {
+            break;
+        }
+        ++applied;
     }
-    else if (!asset.Save(m_DefaultPAPath, error))
+    if (applied == meshes.size())
     {
-        m_RagdollMessage = u8"현재 캐릭터에는 적용했지만 저장하지 못했습니다. 다시 저장하세요: " + error;
+        saved = asset.Save(m_PendingPASavePath, error);
+    }
+    if (saved)
+    {
+#if defined(_M_X64)
+        if (m_ImpactTest)
+        {
+            m_ImpactTest->RememberPhysicsAsset(asset);
+        }
+#endif
+        m_RagdollMessage = u8"PA를 저장하고 플레이어와 더미에 적용했습니다. 위치·애니메이션·물리 모드를 유지하고 바디를 재생성했습니다.";
     }
     else
     {
-        saved = true;
-        m_RagdollMessage = u8"현재 캐릭터에 적용하고 기본 PA로 저장했습니다. 다음 실행 때 자동 적용됩니다.";
+        m_RagdollMessage = u8"PA 저장·적용 실패: " + error;
+        for (size_t i = 0; i < applied; ++i)
+        {
+            std::string rollbackError;
+            if (!meshes[i]->SetPhysicsAsset(previous[i], rollbackError, true))
+            {
+                m_RagdollMessage += u8"\n기존 PA 복원 실패: " + rollbackError;
+            }
+        }
     }
     m_MeshViewer->CompletePhysicsSave(saved, m_RagdollMessage);
 }
@@ -1551,7 +1600,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         if (m_MeshViewer)
         {
             const auto* character = GetPreviewCharacter();
-            const bool physicsSaveAvailable = character && !character->IsRagdoll();
+            const bool physicsSaveAvailable = character && !m_PendingSavedPA;
 #if defined(_M_X64)
             m_MeshViewer->RenderUI(context, m_Comparison != nullptr, physicsSaveAvailable);
             const auto comparison = m_MeshViewer->ConsumeComparisonRequest();
@@ -1564,9 +1613,11 @@ void ModelViewer::RenderUI(GraphicsContext& context)
 #else
             m_MeshViewer->RenderUI(context, false, physicsSaveAvailable);
 #endif
-            if (m_MeshViewer->ConsumePhysicsSaveRequest())
+            std::string savePath;
+            if (m_MeshViewer->ConsumePhysicsSaveRequest(savePath))
             {
-                SaveDefaultPhysicsAsset();
+                m_PendingSavedPA = std::make_unique<PARS::PhysicsAsset>(m_MeshViewer->GetPhysicsAsset());
+                m_PendingPASavePath = std::move(savePath);
             }
         }
 #if defined(_M_X64)

@@ -63,7 +63,7 @@ public:
     }
     bool SetPhysicsAsset(const PARS::PhysicsAsset& asset, std::string& error);
     void SetDefaultPhysicsAssetPath(const std::string& path);
-    bool ConsumePhysicsSaveRequest();
+    bool ConsumePhysicsSaveRequest(std::string& path);
     void CompletePhysicsSave(bool saved, const std::string& message);
 
 private:
@@ -166,5 +166,6 @@ private:
     std::string m_PhysicsPath = "Mixamo.physics.json";
     std::string m_DefaultPhysicsPath;
     bool m_PhysicsSaveAvailable = false, m_PhysicsSaveRequested = false;
+    std::string m_RequestedPhysicsSavePath;
     std::string m_PhysicsMessage;
 };

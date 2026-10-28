@@ -25,9 +25,9 @@ namespace PARS
         return true;
     }
 
-    bool SkeletalMeshComponent::SetPhysicsAsset(const PhysicsAsset& asset, std::string& error)
+    bool SkeletalMeshComponent::SetPhysicsAsset(const PhysicsAsset& asset, std::string& error, bool restartSimulation)
     {
-        if (IsRagdoll())
+        if (IsRagdoll() && !restartSimulation)
         {
             error = "Stop the ragdoll before replacing its PA.";
             return false;
@@ -58,10 +58,48 @@ namespace PARS
         {
             return false;
         }
+        std::vector<Math::Matrix4> stretch;
+        if (IsRagdoll())
+        {
+            bool hasDrive = false;
+            for (const auto& joint : asset.constraints)
+            {
+                hasDrive |= HasEnabledAngularDrive(joint);
+            }
+            if (asset.bodies.empty() || (IsActiveRagdoll() && !hasDrive))
+            {
+                error = "A simulated PA needs bodies and active ragdolls need enabled drives.";
+                return false;
+            }
+            std::vector<Math::Matrix4> pose, physicalPose;
+            if (!EvaluatePhysicsPose(skeleton, GetFinalPose(), Math::Matrix4(GetComponentTransform()), physicalPose, error) ||
+                !candidate.UpdateKinematicPose(physicalPose, true, error) ||
+                !EvaluateAnimationPhysicsPose(skeleton, pose, error) ||
+                (IsActiveRagdoll() && !candidate.UpdateDriveTargets(pose, 0, error)) ||
+                !candidate.SetSimulating(true, Math::Vector3(Math::kZero), error))
+            {
+                return false;
+            }
+            candidate.SetDrivesEnabled(IsActiveRagdoll());
+            if (!candidate.SetRootSupport(m_Ragdoll.GetRootSupportWeight(), m_Ragdoll.IsRootAxisSupported(0), error))
+            {
+                return false;
+            }
+            for (int node : candidate.GetBoneNodes())
+            {
+                stretch.push_back(Invert(PhysicsBoneFrame(pose[node])) * pose[node]);
+            }
+        }
         m_Ragdoll.Swap(candidate);
         m_PhysicsSkeleton = std::move(skeleton);
         m_PhysicsAsset = std::make_unique<const PhysicsAsset>(asset);
         m_PendingDriveSettings.reset();
+        if (IsRagdoll())
+        {
+            m_BoneStretch = std::move(stretch);
+            m_RagdollSourcePose = m_AnimInstance->GetPose();
+            UpdatePhysicsPose();
+        }
         UpdateFootSupport();
         m_PhysicsError.clear();
         error.clear();

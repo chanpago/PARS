@@ -107,6 +107,7 @@ void SkeletalMeshViewer::Cleanup()
     m_DefaultPhysicsPath.clear();
     m_PhysicsSaveAvailable = false;
     m_PhysicsSaveRequested = false;
+    m_RequestedPhysicsSavePath.clear();
     m_Color.Destroy();
     m_Display.Destroy();
     m_Depth.Destroy();

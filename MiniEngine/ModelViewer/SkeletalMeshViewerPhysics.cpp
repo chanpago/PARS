@@ -14,9 +14,10 @@ void SkeletalMeshViewer::SetDefaultPhysicsAssetPath(const std::string& path)
     m_PhysicsPath = path;
 }
 
-bool SkeletalMeshViewer::ConsumePhysicsSaveRequest()
+bool SkeletalMeshViewer::ConsumePhysicsSaveRequest(std::string& path)
 {
     const bool requested = m_PhysicsSaveRequested;
+    path = m_RequestedPhysicsSavePath;
     m_PhysicsSaveRequested = false;
     return requested;
 }
@@ -203,11 +204,12 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     {
         CancelInteraction();
         m_PhysicsSaveRequested = true;
+        m_RequestedPhysicsSavePath = m_DefaultPhysicsPath;
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     {
-        ImGui::SetTooltip(u8"현재 캐릭터에 적용하고 다음 실행 때 자동으로 불러옵니다.\n래그돌 실행 중에는 먼저 애니메이션으로 복귀하세요.\n저장 위치: %s",
+        ImGui::SetTooltip(u8"저장한 PA를 플레이어와 더미에 적용합니다.\n현재 위치와 모드는 유지하고 물리 바디를 재생성합니다.\n저장 위치: %s",
             m_DefaultPhysicsPath.c_str());
     }
     ImGui::TextWrapped(u8"다시 실행해도 유지하려면 위 버튼으로 저장하세요.");
@@ -215,15 +217,20 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     ImGui::InputText("##PhysicsAssetPath", &m_PhysicsPath);
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip(u8"아래 파일 저장/불러오기에 사용할 JSON 경로입니다. 기본 PA 적용 버튼은 캐릭터 에셋 폴더에 저장합니다.");
+        ImGui::SetTooltip(u8"아래 파일 저장/불러오기에 사용할 JSON 경로입니다. 파일 저장 시 플레이어와 더미에도 적용합니다. 기본 PA 적용 버튼은 캐릭터 에셋 폴더에 저장합니다.");
     }
     if (ImGui::Button(u8"PA 파일 저장"))
     {
         CancelInteraction();
-        if (m_PhysicsAsset.Save(m_PhysicsPath, m_PhysicsMessage))
+        if (m_PhysicsSaveAvailable)
+        {
+            m_PhysicsSaveRequested = true;
+            m_RequestedPhysicsSavePath = m_PhysicsPath;
+        }
+        else if (m_PhysicsAsset.Save(m_PhysicsPath, m_PhysicsMessage))
         {
             m_PhysicsDirty = false;
-            m_PhysicsMessage = u8"파일을 저장했습니다. 현재 캐릭터에도 반영하려면 기본 PA 적용 버튼을 누르세요.";
+            m_PhysicsMessage = u8"PA 파일을 저장했습니다.";
         }
     }
     ImGui::SameLine();

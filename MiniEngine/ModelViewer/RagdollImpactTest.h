@@ -22,6 +22,10 @@ public:
     ~RagdollImpactTest();
     bool Initialize(std::shared_ptr<const Model> idle, const PARS::PhysicsAsset& asset);
     bool Reset();
+    void RememberPhysicsAsset(const PARS::PhysicsAsset& asset)
+    {
+        m_Asset = asset;
+    }
     bool SetAutomaticSupport(bool enabled);
     bool UsesAutomaticSupport() const
     {
