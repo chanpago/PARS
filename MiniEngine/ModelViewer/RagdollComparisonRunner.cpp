@@ -101,7 +101,7 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
         return false;
     }
     if (!m_World.GetPhysicsWorld()->CreateStaticBox(physx::PxTransform(physx::PxVec3(0, -.5f, 0)),
-            physx::PxVec3(250, .5f, 250), "Comparison floor"))
+            physx::PxVec3(250, .5f, 250), "Comparison floor", {.9f, .7f, 0.0f}))
     {
         Fail(u8"비교용 바닥을 생성하지 못했습니다.");
         return false;

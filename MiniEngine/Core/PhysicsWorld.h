@@ -40,7 +40,8 @@ public:
     void ResetClock();
 
     physx::PxRigidStatic* CreateStaticBox(const physx::PxTransform& pose,
-        const physx::PxVec3& halfExtents, const char* name);
+        const physx::PxVec3& halfExtents, const char* name,
+        const PARS::PhysicsMaterialSettings& material = {});
     physx::PxRigidDynamic* CreateDynamicBox(const physx::PxTransform& pose,
         const physx::PxVec3& halfExtents, float density, const char* name);
     PhysicsQueryCapsule* CreateQueryCapsule(const physx::PxVec3& centre,

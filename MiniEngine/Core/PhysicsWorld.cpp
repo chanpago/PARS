@@ -302,13 +302,19 @@ uint32_t PhysicsWorld::Update(double elapsedSeconds, const BeforeStep& beforeSte
 }
 
 PxRigidStatic* PhysicsWorld::CreateStaticBox(const PxTransform& pose,
-    const PxVec3& halfExtents, const char* name)
+    const PxVec3& halfExtents, const char* name, const PARS::PhysicsMaterialSettings& settings)
 {
     if (!m_Scene)
     {
         return nullptr;
     }
-    PxRigidStatic* actor = PxCreateStatic(*m_Physics, pose, PxBoxGeometry(halfExtents), *m_Material);
+    auto* material = CreateBodyMaterial(settings);
+    if (!material)
+    {
+        return nullptr;
+    }
+    PxRigidStatic* actor = PxCreateStatic(*m_Physics, pose, PxBoxGeometry(halfExtents), *material);
+    material->release();
     if (actor)
     {
         actor->setName(name); // PhysX가 이 포인터를 보관하므로 이름 문자열은 Actor보다 오래 유지되어야 한다.

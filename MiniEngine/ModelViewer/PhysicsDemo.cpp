@@ -174,7 +174,8 @@ bool PhysicsDemo::Startup()
     {
         return false;
     }
-    m_Floor = m_World.CreateStaticBox(PxTransform(PxVec3(0, -0.25f, 0)), FloorHalfExtents, "Ground");
+    m_Floor = m_World.CreateStaticBox(PxTransform(PxVec3(0, -0.25f, 0)), FloorHalfExtents, "Ground",
+        {.9f, .7f, 0.0f});
     ResetBox();
     for (size_t i = 0; i < _countof(m_Walls); ++i)
     {
