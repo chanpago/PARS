@@ -1834,7 +1834,7 @@
           0.994516909122467
         ]
       },
-      "driveMode": "slerp",
+      "driveMode": "swingTwist",
       "drives": [
         {
           "dampingRatio": 2.0,
@@ -1873,11 +1873,11 @@
           -0.6654755473136902
         ]
       },
-      "swingY": "limited",
+      "swingY": "locked",
       "swingYLimit": 0.0872664600610733,
-      "swingZ": "limited",
+      "swingZ": "locked",
       "swingZLimit": 0.0872664600610733,
-      "twist": "limited",
+      "twist": "locked",
       "twistMax": 1.2217304706573486,
       "twistMin": -0.3490658402442932
     },
@@ -1896,7 +1896,7 @@
           0.9978708624839783
         ]
       },
-      "driveMode": "slerp",
+      "driveMode": "swingTwist",
       "drives": [
         {
           "dampingRatio": 2.0,
@@ -1935,11 +1935,11 @@
           0.7296475768089294
         ]
       },
-      "swingY": "limited",
+      "swingY": "locked",
       "swingYLimit": 0.0872664600610733,
-      "swingZ": "limited",
+      "swingZ": "locked",
       "swingZLimit": 0.0872664600610733,
-      "twist": "limited",
+      "twist": "locked",
       "twistMax": 1.2217304706573486,
       "twistMin": -0.3490658402442932
     }
