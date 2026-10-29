@@ -17,7 +17,7 @@ namespace PARS
                                                                                                                 : 1;
         if (next != current)
         {
-            TransitionToAnimation(next);
+            TransitionToAnimation(next, 0.1f);
         }
     }
 }
