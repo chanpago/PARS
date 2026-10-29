@@ -20,6 +20,9 @@ namespace
     constexpr SequenceStage Sequence[] = {{2, 0}, {6, 1.6}, {10, 3}};
     constexpr size_t SequenceCount = sizeof(Sequence) / sizeof(Sequence[0]);
     constexpr float BlendDuration = .2f;
+    // A의 6초 전환: Walking 4초 재생 후 오른발 지지·왼발 전진 상태에 맞는 SlowRun 표본이다.
+    // 60Hz 원본의 0 기반 39번 표본부터 시작해, 양쪽 클립의 다음 루프 경계도 같은 시점에 지난다.
+    constexpr float SimulationARunStartTime = 39.0f / 60.0f;
 }
 
 RagdollComparisonRunner::RagdollComparisonRunner(PhysicsWorld& owner,
@@ -224,12 +227,13 @@ bool RagdollComparisonRunner::Step()
         return false;
     }
     const int clip = GetTargetClip();
+    const float startTime = m_Settings.simulation == Simulation::A && clip == 2 ? SimulationARunStartTime : 0.0f;
     const auto path = GetPathTransform((m_Steps + 1) * PhysicsWorld::FixedDeltaTime);
     for (int side = 0; side < 2; ++side)
     {
         auto& animation = m_Meshes[side]->GetAnimInstance();
         if (animation.GetCurrentAnimationIndex() != uint32_t(clip) &&
-            !animation.TransitionToAnimation(clip, BlendDuration))
+            !animation.TransitionToAnimation(clip, BlendDuration, true, startTime))
         {
             Fail(u8"다음 동작으로 블렌딩하지 못했습니다.");
             return false;
@@ -460,6 +464,7 @@ std::string RagdollComparisonRunner::GetDescription(bool korean) const
         {
             text << u8"시뮬레이션 A | 연속 재생: 대기 0–2초 → 걷기 2–6초 → 달리기 (Slow Run) 6–10초"
                  << u8" | 전환 블렌딩: " << BlendDuration << u8"초 (각 구간 시간에 포함)"
+                 << u8" | 두 클립 동시 재생, 달리기 시작 시점: " << SimulationARunStartTime << u8"초"
                  << u8" | +Z 이동 속도: 0 → 1.6 → 3 m/s (블렌딩 중 선형 변경)";
         }
         else if (m_Settings.simulation == Simulation::B)
@@ -485,6 +490,7 @@ std::string RagdollComparisonRunner::GetDescription(bool korean) const
     {
         text << "Simulation A | Sequence: Idle 0-2 s -> Walking 2-6 s -> Slow Run 6-10 s"
              << " | blend: " << BlendDuration << " s (included in each stage)"
+             << " | both clips advance; Slow Run starts at " << SimulationARunStartTime << " s"
              << " | +Z speed: 0 -> 1.6 -> 3 m/s (linear during blends)";
     }
     else if (m_Settings.simulation == Simulation::B)

@@ -29,8 +29,9 @@ namespace PARS
         }
         void Initialize(std::shared_ptr<const Model> skeleton);
         bool AddAnimation(const std::string& name, std::shared_ptr<const Model> source, uint32_t animationIndex = 0);
-        bool PlayAnimation(uint32_t index, bool loop = true);
-        bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true);
+        bool PlayAnimation(uint32_t index, bool loop = true, float startTime = 0.0f);
+        // 시작 시점을 지정해 발 디딤 위상을 맞출 수 있다. 일반 전환에서는 두 클립의 시간을 함께 진행한다.
+        bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true, float startTime = 0.0f);
         bool IsBlending() const
         {
             return !m_BlendSource.empty();
@@ -83,12 +84,17 @@ namespace PARS
             std::shared_ptr<const Model> source;
             uint32_t animationIndex;
         };
+        void EvaluateClipPose(uint32_t index, float time, std::vector<GraphNode>& pose) const;
         void EvaluatePose();
         SkeletalMeshComponent& m_Owner;
         std::shared_ptr<const Model> m_Skeleton;
         std::vector<Clip> m_Clips;
         std::vector<GraphNode> m_Pose;
         std::vector<GraphNode> m_BlendSource;
+        uint32_t m_BlendSourceClip = 0;
+        float m_BlendSourceTime = 0.0f;
+        bool m_BlendSourceLoop = true;
+        bool m_AdvanceBlendSource = false;
         float m_BlendElapsed = 0.0f;
         float m_BlendDuration = 0.2f;
         uint32_t m_CurrentClip = 0;
