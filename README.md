@@ -18,6 +18,8 @@ An overview of the project's goals, technical approach, and planned implementati
 
 [2주차 발표 자료](https://canva.link/yow5q7gh7rrlmi0)
 
+[추가 발표 자료 (Canva)](https://canva.link/fzt4crcfri8y5z5)
+
 1. Install Visual Studio 2022 17.14 or later with **Desktop development with C++**,
    the **MSVC v143** tools, **C++ CMake tools for Windows** (CMake 3.25+), and a
    Windows SDK. Install Git if it is not already available.
