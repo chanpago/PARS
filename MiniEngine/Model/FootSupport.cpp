@@ -330,6 +330,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.grounded = foot.contact.grounded;
         target.position = ToPx(Vector3(foot.soleWorld.GetW()));
         target.normal = foot.contact.normal;
+        target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
         const PxVec3 offset = referenceFeet[side] - midpoint;
         target.stanceOffset = input.supportRight * offset.x + forward * offset.z;
     }

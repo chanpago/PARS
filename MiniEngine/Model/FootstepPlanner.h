@@ -11,6 +11,7 @@ namespace PARS
         float stanceScale = .8f, maximumStepLength = 2.0f;
         bool preventCrossing = false;
         float crossingOffset = .1f;
+        float liftHeightScale = .25f;
     };
 
     enum class FootstepPhase
@@ -33,6 +34,8 @@ namespace PARS
         InvalidCom,
         NoSupportArea,
         NoReference,
+        NoCalfLength,
+        NoStepDistance,
         NoContactSample,
         PredictedInside,
         NoBlueFoot,
@@ -49,6 +52,7 @@ namespace PARS
     {
         bool available = false, hasContactSample = false, grounded = false;
         physx::PxVec3 position{0}, normal{0}, stanceOffset{0};
+        float calfLength = 0;
     };
 
     struct FootstepInput
@@ -73,6 +77,16 @@ namespace PARS
         float travelDistance = 0, stanceDistance = 0;
     };
 
+    struct FootstepMotion
+    {
+        // valid일 때만 다음 단계의 IK 목표로 사용할 수 있다. 착지 목표와 별개인 발바닥 월드 목표다.
+        bool valid = false, hasLandingError = false;
+        physx::PxVec3 position{0};
+        float initialHeight = 0, heightLimit = 0, height = 0;
+        float measuredProgress = 0, progress = 0, remainingDistance = 0;
+        float landingError = 0;
+    };
+
     struct FootstepSnapshot
     {
         FootstepPhase phase = FootstepPhase::Idle;
@@ -83,6 +97,7 @@ namespace PARS
         physx::PxVec3 predictedCom{0}, target{0}, targetNormal{0};
         physx::PxVec3 startPosition{0}, initialTarget{0};
         float initialDistance = 0;
+        FootstepMotion motion;
         std::array<FootstepTarget, 2> candidates;
         uint64_t completedStep = 0, revision = 0, startedStep = 0;
         uint64_t startCount = 0, landingCount = 0, abortCount = 0;
@@ -108,6 +123,8 @@ namespace PARS
         FootstepSnapshot m_Snapshot;
         bool m_HasSample = false;
         void Abort(FootstepReason reason);
+        bool UpdateMotionProgress(const FootstepFootInput& foot);
+        void UpdateMotionTarget(const FootstepFootInput& foot);
     };
 
     const char* FootstepPhaseLabel(FootstepPhase phase);

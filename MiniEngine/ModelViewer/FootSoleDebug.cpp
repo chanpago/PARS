@@ -13,6 +13,7 @@ namespace
     constexpr PxU32 HullColor = 0xffee66ff, BufferColor = 0xffffffff;
     constexpr PxU32 ComColor = 0xffffdd44, OutsideColor = 0xffff0000, UnknownColor = 0xff000000;
     constexpr PxU32 PredictionColor = 0xff00ffff, TargetColor = 0xffff8800, RawTargetColor = 0xffaaaaaa;
+    constexpr PxU32 MotionTargetColor = 0xffff66cc;
 
     const char* FootLabel(int foot)
     {
@@ -181,6 +182,16 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
             ProjectionMarker(lines, ToMath(step.target), TargetColor, true);
             Point(lines, foot, TargetColor, .03f);
         }
+        if (step.motion.valid && step.stepFoot >= 0 && step.stepFoot < 2)
+        {
+            const Vector3 goal = ToMath(step.motion.position);
+            const Vector3 foot(sample.feet[step.stepFoot].soleWorld.GetW());
+            Point(lines, goal, MotionTargetColor, .035f);
+            Line(lines, goal - Vector3(0, .025f, 0), goal + Vector3(0, .025f, 0), MotionTargetColor);
+            // 지면 착지점과 높이를 더한 목표를 분리해 표시한다. 실제 발 궤적을 그리는 선은 아니다.
+            Line(lines, ToMath(step.target), goal, MotionTargetColor);
+            Line(lines, foot, goal, MotionTargetColor);
+        }
     }
 }
 
@@ -304,8 +315,32 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         {
             ImGui::Text(u8"시작 시 이동 거리 %.2fm / 목표 출력 %s", step.initialDistance, step.hasTarget ? "ON" : "OFF");
         }
+        if (step.IsInProgress() || step.phase == PARS::FootstepPhase::Landed)
+        {
+            const auto& motion = step.motion;
+            ImGui::Text(u8"초기 들기 높이 %.1fcm / 시작 시 종아리 상한 %.1fcm",
+                motion.initialHeight * 100, motion.heightLimit * 100);
+            ImGui::Text(u8"이동 진행도 %.1f%% (현재 측정 %.1f%%) / 남은 수평 거리 %.1fcm",
+                motion.progress * 100, motion.measuredProgress * 100, motion.remainingDistance * 100);
+            ImGui::ProgressBar(motion.progress, ImVec2(-1, 0));
+            if (motion.valid)
+            {
+                ImGui::Text(u8"추가 높이 %.1fcm / 발 이동 목표 (%.3f, %.3f, %.3f) m", motion.height * 100,
+                    motion.position.x, motion.position.y, motion.position.z);
+            }
+            else
+            {
+                ImGui::TextUnformatted(u8"발 이동 목표 출력 OFF");
+            }
+            if (motion.hasLandingError)
+            {
+                ImGui::Text(u8"재접촉 시 수평 목표 오차 %.1fcm (목표 도달 여부와 접촉 종료는 별개)", motion.landingError * 100);
+            }
+        }
+        ImGui::Text(u8"초기 높이 = min(시작 수평 거리 x %.2f, 기준 종아리 길이)", settings.liftHeightScale);
+        ImGui::TextWrapped(u8"이륙 전에는 초기 높이를 유지합니다. 이륙 후 실제 수평 진행에 따라 낮추며, 100%가 되어도 실제 접촉 전에는 종료하지 않습니다.");
         ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
-        ImGui::TextWrapped(u8"현재 단계는 판단·목표 계산입니다. 발 이동과 IK는 아직 연결하지 않았으며, 연결선은 이동 궤적이 아닙니다.");
+        ImGui::TextWrapped(u8"분홍 십자: 수평 착지점에 높이를 더한 발 이동 목표. 다음 IK 단계에서 사용할 값이며, 아직 바디 구동에는 연결하지 않았습니다. 연결선은 실제 이동 궤적이 아닙니다.");
         ImGui::TreePop();
     }
     if (!sample.message.empty())
