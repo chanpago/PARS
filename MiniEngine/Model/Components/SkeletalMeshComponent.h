@@ -6,6 +6,7 @@
 #include "../PhysicsPose.h"
 #include "../Ragdoll.h"
 #include "../FootSupport.h"
+#include "../FootstepIK.h"
 
 namespace PARS
 {
@@ -76,6 +77,10 @@ namespace PARS
         {
             return m_FootSupport;
         }
+        const FootstepIKSnapshot& GetFootstepIKSnapshot() const
+        {
+            return m_FootstepIK.GetSnapshot();
+        }
         void SetFootCandidateDebugVisible(bool visible)
         {
             m_FootCandidateDebugVisible = visible;
@@ -131,10 +136,12 @@ namespace PARS
         void UpdateKinematicPose(bool teleport);
         void UpdatePhysicsPose();
         void UpdateFootSupport();
+        void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target);
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
         Ragdoll m_Ragdoll;
         FootSupport m_FootSupport;
+        FootstepIK m_FootstepIK;
         bool m_FootCandidateDebugVisible = false;
         bool m_AutomaticRootSupport = false;
         RootSupportRelease m_RootSupportRelease = RootSupportRelease::None;

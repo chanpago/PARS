@@ -197,10 +197,16 @@ namespace PARS
             //      - 골반보정
             //      - 타겟을 목표로 유효관성을 계산하고 중력보상, 코리올리-원심력 보상을 토크값에 더함
             //      - 각 관절의 각 축에 얼마만큼의 PD를 적용시킬지 계산
-            if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError) || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
+            const bool evaluated = EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError);
+            if (evaluated)
+            {
+                ApplyFootstepIKTargets(target);
+            }
+            if (!evaluated || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {
                 // 목표 갱신에 실패하면 전신 패시브 물리 시뮬레이션으로 전환한다.
                 // 골반의 힘/토크 지지를 제거하면서 목표 갱신 오류 메시지는 보존한다.
+                m_FootstepIK.Reset();
                 m_Ragdoll.SetDrivesEnabled(false);
                 std::string supportError;
                 m_Ragdoll.SetRootSupported(false, supportError);

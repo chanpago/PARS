@@ -1,6 +1,7 @@
 ﻿#include "SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
+#include <algorithm>
 #include <cmath>
 
 using namespace Math;
@@ -104,6 +105,124 @@ namespace PARS
         {
             m_FootSupport.Reset();
         }
+        const auto& sample = m_FootSupport.GetSnapshot();
+        if (!IsActiveRagdoll() || !sample.footstep.motion.valid ||
+            sample.contactRevision != m_FootstepIK.GetSnapshot().revision)
+        {
+            m_FootstepIK.Reset();
+        }
+    }
+
+    void SkeletalMeshComponent::ApplyFootstepIKTargets(std::vector<Matrix4>& target)
+    {
+        const auto& sample = m_FootSupport.GetSnapshot();
+        const auto& step = sample.footstep;
+        const bool idle = !m_AnimInstance->IsBlending() &&
+            m_AnimInstance->GetAnimationName(m_AnimInstance->GetCurrentAnimationIndex()) == "Idle";
+        if (!IsActiveRagdoll() || !m_AutomaticRootSupport || m_RootSupportRelease != RootSupportRelease::None ||
+            !idle || !step.IsInProgress() || !step.motion.valid || step.stepFoot < 0 || step.stepFoot > 1 ||
+            !sample.feet[1 - step.stepFoot].contact.hasSample || !sample.feet[1 - step.stepFoot].contact.grounded)
+        {
+            m_FootstepIK.Reset();
+            return;
+        }
+        const auto toPx = [](const Matrix4& matrix)
+        {
+            const auto frame = PhysicsJointFrame::FromTransform(PhysicsBoneFrame(matrix));
+            return physx::PxTransform(physx::PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
+                physx::PxQuat(frame.rotation.x, frame.rotation.y, frame.rotation.z, frame.rotation.w));
+        };
+        std::vector<physx::PxTransform> rigidTargets;
+        rigidTargets.reserve(target.size());
+        for (const auto& matrix : target)
+        {
+            rigidTargets.push_back(toPx(matrix));
+        }
+        FootstepIKInput input;
+        input.enabled = true;
+        input.stepFoot = step.stepFoot;
+        input.revision = sample.contactRevision;
+        const auto& nodes = m_Ragdoll.GetBoneNodes();
+        for (size_t side = 0; side < input.legs.size(); ++side)
+        {
+            const auto& foot = sample.feet[side];
+            const auto& setup = foot.leg;
+            auto& leg = input.legs[side];
+            leg.hipNode = setup.hipNode;
+            leg.kneeNode = setup.kneeNode;
+            leg.ankleNode = setup.ankleNode;
+            leg.thighLength = setup.thighLength;
+            leg.calfLength = setup.calfLength;
+            leg.referenceBendInHip = setup.referenceBendInHip;
+            if (!setup.available || !foot.available || setup.hipNode < 0 ||
+                setup.kneeNode < 0 || setup.ankleNode < 0 ||
+                size_t(setup.hipNode) >= target.size() || size_t(setup.kneeNode) >= target.size() ||
+                size_t(setup.ankleNode) >= target.size() || m_PhysicsSkeleton.parents.size() != target.size())
+            {
+                continue;
+            }
+            // 세 본의 실제 바디와 연결된 가장 가까운 물리 부모가 있어야 관절 PD로 구동할 수 있다.
+            if (std::find(nodes.begin(), nodes.end(), setup.hipNode) == nodes.end() ||
+                std::find(nodes.begin(), nodes.end(), setup.kneeNode) == nodes.end() ||
+                std::find(nodes.begin(), nodes.end(), setup.ankleNode) == nodes.end())
+            {
+                continue;
+            }
+            for (int parent = m_PhysicsSkeleton.parents[setup.hipNode]; parent >= 0; parent = m_PhysicsSkeleton.parents[parent])
+            {
+                const auto body = std::find(nodes.begin(), nodes.end(), parent);
+                if (body != nodes.end())
+                {
+                    leg.anchorNode = parent;
+                    leg.actualAnchor = toPx(m_Ragdoll.GetBoneWorld(size_t(body - nodes.begin())));
+                    break;
+                }
+            }
+            if (leg.anchorNode < 0 || !m_PhysicsAsset)
+            {
+                continue;
+            }
+            const auto linked = [&](int parent, int child)
+            {
+                return std::any_of(m_PhysicsAsset->constraints.begin(), m_PhysicsAsset->constraints.end(),
+                    [&](const PhysicsConstraint& joint)
+                    {
+                        return joint.parentBone == m_PhysicsSkeleton.names[parent] &&
+                            joint.childBone == m_PhysicsSkeleton.names[child];
+                    });
+            };
+            if (!linked(leg.anchorNode, setup.hipNode) || !linked(setup.hipNode, setup.kneeNode) ||
+                !linked(setup.kneeNode, setup.ankleNode))
+            {
+                continue;
+            }
+            leg.soleInBone = toPx(foot.soleInBone);
+            if (int(side) == step.stepFoot)
+            {
+                leg.available = MakeFootSoleTarget(step.motion.position, step.targetNormal,
+                    rigidTargets[setup.ankleNode] * leg.soleInBone, leg.targetSole);
+            }
+            else
+            {
+                // 지지발은 현재 접촉한 발바닥 자세를 목표로 삼는다. 바디를 월드에 고정하지 않는다.
+                leg.targetSole = toPx(foot.soleWorld);
+                leg.available = leg.targetSole.isSane();
+            }
+        }
+        if (!m_FootstepIK.Apply(input, m_PhysicsSkeleton.parents, rigidTargets))
+        {
+            // IK 입력이 부족하면 기본 애니메이션 목표를 유지하고 실패 사유를 디버그에 남긴다.
+            return;
+        }
+        for (int node : m_FootstepIK.GetSnapshot().correctedNodes)
+        {
+            const auto& frame = rigidTargets[node];
+            const Matrix4 corrected(OrthogonalTransform(
+                Quaternion(DirectX::XMVectorSet(frame.q.x, frame.q.y, frame.q.z, frame.q.w)),
+                Vector3(frame.p.x, frame.p.y, frame.p.z)));
+            // 원래 본의 스케일·전단은 보존하고 강체 목표 프레임만 교체한다.
+            target[node] = corrected * Invert(PhysicsBoneFrame(target[node])) * target[node];
+        }
     }
 
     void SkeletalMeshComponent::UpdateFootCandidateDebugColors()
@@ -139,6 +258,7 @@ namespace PARS
         {
             m_RootSupportRelease = RootSupportRelease::None;
             m_FootSupport.ResetFootstep();
+            m_FootstepIK.Reset();
         }
         m_AutomaticRootSupport = enabled;
         if (enabled)
@@ -187,6 +307,7 @@ namespace PARS
     {
         m_Ragdoll.Destroy();
         m_FootSupport.Reset();
+        m_FootstepIK.Reset();
         m_AutomaticRootSupport = false;
         m_RootSupportRelease = RootSupportRelease::None;
         m_PhysicsSkeleton = {};

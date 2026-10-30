@@ -14,6 +14,7 @@ namespace
     constexpr PxU32 ComColor = 0xffffdd44, OutsideColor = 0xffff0000, UnknownColor = 0xff000000;
     constexpr PxU32 PredictionColor = 0xff00ffff, TargetColor = 0xffff8800, RawTargetColor = 0xffaaaaaa;
     constexpr PxU32 MotionTargetColor = 0xffff66cc;
+    constexpr PxU32 IKStepColor = 0xffffff33, IKSupportColor = 0xff44dd88, KneeHintColor = 0xffcc88ff;
 
     const char* FootLabel(int foot)
     {
@@ -192,6 +193,22 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
             Line(lines, ToMath(step.target), goal, MotionTargetColor);
             Line(lines, foot, goal, MotionTargetColor);
         }
+        const auto& ik = mesh.GetFootstepIKSnapshot();
+        if (ik.status == PARS::FootstepIKStatus::Applied)
+        {
+            for (size_t side = 0; side < ik.legs.size(); ++side)
+            {
+                const auto& leg = ik.legs[side];
+                const PxU32 color = int(side) == ik.stepFoot ? IKStepColor : IKSupportColor;
+                Line(lines, ToMath(leg.hip.p), ToMath(leg.knee.p), color);
+                Line(lines, ToMath(leg.knee.p), ToMath(leg.ankle.p), color);
+                Point(lines, ToMath(leg.knee.p), color, .025f);
+                Point(lines, ToMath(leg.solvedSole.p), color, .02f);
+                Line(lines, ToMath(leg.requestedSole.p), ToMath(leg.solvedSole.p), color);
+                Line(lines, ToMath(leg.solvedSole.p), ToMath(leg.solvedSole.transform(PxVec3(0, 0, .12f))), color);
+                Line(lines, ToMath(leg.hip.p), ToMath(leg.hip.p + leg.bendDirection * .18f), KneeHintColor);
+            }
+        }
     }
 }
 
@@ -340,7 +357,24 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         ImGui::Text(u8"초기 높이 = min(시작 수평 거리 x %.2f, 기준 종아리 길이)", settings.liftHeightScale);
         ImGui::TextWrapped(u8"이륙 전에는 초기 높이를 유지합니다. 이륙 후 실제 수평 진행에 따라 낮추며, 100%가 되어도 실제 접촉 전에는 종료하지 않습니다.");
         ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
-        ImGui::TextWrapped(u8"분홍 십자: 수평 착지점에 높이를 더한 발 이동 목표. 다음 IK 단계에서 사용할 값이며, 아직 바디 구동에는 연결하지 않았습니다. 연결선은 실제 이동 궤적이 아닙니다.");
+        ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동/지지 다리의 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
+        const auto& ik = mesh.GetFootstepIKSnapshot();
+        ImGui::Text(u8"IK → 관절 PD: %s", PARS::FootstepIKStatusLabel(ik.status));
+        if (ik.status == PARS::FootstepIKStatus::Applied)
+        {
+            for (size_t side = 0; side < ik.legs.size(); ++side)
+            {
+                const auto& leg = ik.legs[side];
+                const float actualError = (ToPx(Vector3(sample.feet[side].soleWorld.GetW())) - leg.requestedSole.p).magnitude();
+                ImGui::Text(u8"%s (%s): IK 도달 오차 %.2fcm / 실제 발 목표 오차 %.2fcm%s", FootLabel(int(side)),
+                    int(side) == ik.stepFoot ? u8"이동" : u8"지지", leg.reachError * 100, actualError * 100,
+                    leg.reachLimited ? u8" / 다리 길이 제한" : "");
+                ImGui::Text(u8"  무릎 Hint: %s / 발목 목표 (%.3f, %.3f, %.3f) m",
+                    PARS::KneeHintSourceLabel(leg.hintSource), leg.requestedAnkle.x, leg.requestedAnkle.y, leg.requestedAnkle.z);
+            }
+            ImGui::Text(u8"기존 관절 제한의 최대 목표 수정각 (전신): %.2f도", XMConvertToDegrees(mesh.GetRagdoll().GetMaxTargetClampAngle()));
+            ImGui::TextWrapped(u8"IK 도달 오차는 다리 길이로 제한한 결과입니다. 이후 PA 관절 제한과 실제 물리 추종 오차는 별도이며, IK 표시만으로 착지나 회복 성공을 뜻하지 않습니다.");
+        }
         ImGui::TreePop();
     }
     if (!sample.message.empty())

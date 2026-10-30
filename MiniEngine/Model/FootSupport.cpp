@@ -162,6 +162,24 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         forward = float(LengthSquare(forward)) > 1e-8f ? Normalize(forward) : Vector3(kZUnitVector);
         const Vector3 right = Normalize(Cross(up, forward));
 
+        if (leg.available)
+        {
+            const Vector3 hip(referenceWorld[leg.hipNode].GetW());
+            const Vector3 toKnee = Vector3(referenceWorld[leg.kneeNode].GetW()) - hip;
+            const Vector3 toAnkle = Vector3(referenceWorld[node].GetW()) - hip;
+            const Vector3 axis = Normalize(float(LengthSquare(toAnkle)) > 1e-12f ? toAnkle : toKnee);
+            Vector3 bend = toKnee - axis * Dot(axis, toKnee);
+            if (float(LengthSquare(bend)) < 1e-6f * (leg.thighLength + leg.calfLength) * (leg.thighLength + leg.calfLength))
+            {
+                // 기준 다리가 펴져 있으면 발가락의 앞 방향을 무릎 굽힘 기준으로 저장한다.
+                bend = forward - axis * Dot(axis, forward);
+            }
+            if (float(LengthSquare(bend)) > 1e-8f)
+            {
+                leg.referenceBendInHip = ToPx(Vector3(Invert(PhysicsBoneFrame(referenceWorld[leg.hipNode])) * (hip + Normalize(bend))));
+            }
+        }
+
         // 기준 자세에서 발바닥 방향과 높이를 정한다. 이후에는 실제 발의 기울기까지 따라간다.
         const Vector3 center = Vector3(body.GetW()) - up * Extent(sole.source, body, up);
         sole.soleInBody = Invert(body) * Matrix4(right, up, forward, center);

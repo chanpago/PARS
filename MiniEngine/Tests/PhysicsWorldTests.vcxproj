@@ -46,6 +46,8 @@
     <ClCompile Include="PhysicsWorldTests.cpp" />
     <ClCompile Include="FootstepPlannerTests.cpp" />
     <ClCompile Include="..\Model\FootstepPlanner.cpp" />
+    <ClCompile Include="FootstepIKTests.cpp" />
+    <ClCompile Include="..\Model\FootstepIK.cpp" />
     <ClCompile Include="..\Core\PhysicsWorld.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

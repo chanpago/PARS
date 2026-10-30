@@ -26,6 +26,7 @@ namespace PARS
         int hipNode = -1, kneeNode = -1, ankleNode = -1;
         // 기준 자세의 실제 구간 길이(m). 현재 자세의 수직 투영 길이가 아니다.
         float thighLength = 0, calfLength = 0;
+        physx::PxVec3 referenceBendInHip{0};
     };
 
     struct FootContactSample
