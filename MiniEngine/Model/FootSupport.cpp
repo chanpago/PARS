@@ -67,6 +67,8 @@ namespace
 
 }
 
+// 발 지지 계산과 다리 IK에 사용할 바디·본 연결, 기준 길이, 발바닥 로컬 좌표계를 준비한다.
+// 모델과 발 형상이 같으면 저장한 정보를 재사용하고, 현재 물리 자세는 Update()에서 반영한다.
 bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
 {
     const auto* asset = mesh.GetPhysicsAsset();
@@ -78,6 +80,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         return false;
     }
 
+    // 좌우 발 본에 연결된 PA 바디를 찾는다. 바디 인덱스와 스켈레톤의 본 인덱스는 서로 다르다.
     std::array<int, 2> indices{-1, -1};
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
@@ -89,6 +92,8 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
             }
         }
     }
+    // 모델, 발 바디 인덱스, 형상과 로컬 배치가 같으면 기준 정보를 다시 계산하지 않는다.
+    // 실제 발이 움직였다는 이유만으로 다리 길이나 발바닥 기본 크기를 바꾸지는 않는다.
     bool unchanged = m_Initialized && m_Model == model;
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
@@ -101,6 +106,8 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         return true;
     }
 
+    // 본 계층과 모델에 저장된 기준 자세를 사용한다. 현재 애니메이션 프레임이나 물리 자세는 사용하지 않는다.
+    // 컴포넌트 변환을 단위행렬로 두어 캐릭터의 월드 위치·방향을 제외한 기준 본 변환을 구한다.
     PARS::PhysicsSkeleton skeleton;
     if (!mesh.BuildPhysicsSkeleton(skeleton, m_Snapshot.message))
     {
@@ -113,6 +120,8 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         return false;
     }
 
+    // 모델이나 발 형상이 바뀌었으므로 발바닥 설정을 새 기본값으로 만든다.
+    // 다음 접촉 갱신에서도 이전 구성의 이력이 이어지지 않도록 한다.
     m_Feet = {};
     m_Settings = {};
     m_ContactWorld = nullptr;
@@ -125,6 +134,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         {
             continue;
         }
+        // PA 바디 인덱스를 실제 스켈레톤의 발목 본 인덱스로 변환한다.
         const int node = ragdoll.GetBoneNodes()[index];
         if (node < 0 || size_t(node) >= referenceWorld.size())
         {
@@ -134,6 +144,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         auto& sole = m_Feet[side];
         sole.bodyIndex = index;
         sole.source = asset->bodies[index];
+        // 발목에서 부모 계층을 따라 무릎·고관절을 찾아 두 뼈 IK의 연결 정보를 저장한다.
         auto& leg = sole.leg;
         leg.ankleNode = node;
         leg.kneeNode = FindAncestor(skeleton, node, KneeNames[side]);
@@ -144,12 +155,15 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
             const Vector3 hip(referenceWorld[leg.hipNode].GetW());
             const Vector3 knee(referenceWorld[leg.kneeNode].GetW());
             const Vector3 ankle(referenceWorld[node].GetW());
+            // 기준 자세의 두 점 사이 거리(m)다. 종아리 길이는 발 들기 높이의 상한에도 사용한다.
             leg.thighLength = float(Length(knee - hip));
             leg.calfLength = float(Length(ankle - knee));
             leg.available = std::isfinite(leg.thighLength) && std::isfinite(leg.calfLength) &&
                 leg.thighLength > 1e-5f && leg.calfLength > 1e-5f;
         }
+        // 본의 스케일·전단을 제거한 프레임에 PA의 로컬 오프셋·회전을 적용해 기준 바디 자세를 구한다.
         const Matrix4 body = PARS::PhysicsBoneFrame(referenceWorld[node]) * sole.source.GetLocalTransform();
+        // 발목에서 발가락 본으로 향하는 방향을 발의 앞쪽으로 사용한다. 본이 없으면 바디 X축을 사용한다.
         Vector3 forward(body.GetX());
         for (size_t toe = 0; toe < skeleton.names.size(); ++toe)
         {
@@ -158,6 +172,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
                 forward = Vector3(referenceWorld[toe].GetW()) - Vector3(referenceWorld[node].GetW());
             }
         }
+        // 기준 발바닥은 수평으로 잡는다. 앞 방향이 퇴화하면 +Z를 사용하고, +Y와 외적해 오른쪽을 구한다.
         forward.SetY(0);
         forward = float(LengthSquare(forward)) > 1e-8f ? Normalize(forward) : Vector3(kZUnitVector);
         const Vector3 right = Normalize(Cross(up, forward));
@@ -168,6 +183,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
             const Vector3 toKnee = Vector3(referenceWorld[leg.kneeNode].GetW()) - hip;
             const Vector3 toAnkle = Vector3(referenceWorld[node].GetW()) - hip;
             const Vector3 axis = Normalize(float(LengthSquare(toAnkle)) > 1e-12f ? toAnkle : toKnee);
+            // 고관절~발목 축에 평행한 성분을 빼면 무릎이 그 축에서 어느 쪽으로 굽었는지 남는다.
             Vector3 bend = toKnee - axis * Dot(axis, toKnee);
             if (float(LengthSquare(bend)) < 1e-6f * (leg.thighLength + leg.calfLength) * (leg.thighLength + leg.calfLength))
             {
@@ -176,17 +192,24 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
             }
             if (float(LengthSquare(bend)) > 1e-8f)
             {
+                // 고관절에서 굽힘 방향으로 한 단위 떨어진 점을 고관절 로컬로 변환한다.
+                // 고관절 위치가 원점으로 상쇄되어 로컬 방향만 남으며, IK의 대체 무릎 방향으로 사용한다.
                 leg.referenceBendInHip = ToPx(Vector3(Invert(PhysicsBoneFrame(referenceWorld[leg.hipNode])) * (hip + Normalize(bend))));
             }
         }
 
         // 기준 자세에서 발바닥 방향과 높이를 정한다. 이후에는 실제 발의 기울기까지 따라간다.
+        // 바디 형상의 수직 반범위만큼 내려 기준 발바닥 중심을 잡는다. 실제 접촉점은 별도로 수집한다.
         const Vector3 center = Vector3(body.GetW()) - up * Extent(sole.source, body, up);
+        // 바디의 역변환을 곱해 발바닥 좌표계를 바디 로컬로 저장한다.
+        // 이후 실제 바디 월드 변환 * soleInBody로 현재 발바닥 월드 변환을 얻는다.
         sole.soleInBody = Invert(body) * Matrix4(right, up, forward, center);
+        // PA 형상의 좌우·앞뒤 반범위로 레이 투영용 사각형의 기본 크기를 정한다.
         m_Settings[side].halfWidth = Max(.005f, Extent(sole.source, body, right));
         m_Settings[side].halfLength = Max(.005f, Extent(sole.source, body, forward));
         found = true;
     }
+    // 한쪽이라도 발바닥 정보를 준비했으면 성공이다. 각 다리의 본 연결·길이 유효성은 leg.available로 따로 구분한다.
     m_Model = model;
     m_Initialized = found;
     m_Snapshot.message = found ? "" : u8"LeftFoot / RightFoot 물리 바디를 찾을 수 없습니다.";
