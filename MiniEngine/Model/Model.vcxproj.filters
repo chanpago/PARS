@@ -148,6 +148,8 @@
     <ClInclude Include="FootSupport.h" />
     <ClInclude Include="FootSupportHull.h" />
     <ClCompile Include="FootSupport.cpp" />
+    <ClInclude Include="FootstepPlanner.h" />
+    <ClCompile Include="FootstepPlanner.cpp" />
     <ClCompile Include="Ragdoll.cpp" />
     <ClCompile Include="RagdollDrive.cpp" />
     <ClCompile Include="RagdollArticulation.cpp" />

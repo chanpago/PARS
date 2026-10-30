@@ -9,6 +9,8 @@
 
 using namespace physx;
 
+void TestFootstepPlanner();
+
 namespace
 {
     void Check(bool condition, const char* message)
@@ -245,6 +247,11 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--footstep-only") == 0)
+    {
+        TestFootstepPlanner();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--foot-candidates-only") == 0)
     {
         TestFootSupportCandidates();
@@ -254,6 +261,7 @@ int main(int argc, char** argv)
     TestFootSupportHull();
     TestFootSupportBalance();
     TestFootSupportCandidates();
+    TestFootstepPlanner();
     const float reference = SimulateAtRate(60, 0.5);
     Check(std::abs(SimulateAtRate(30, 0.5) - reference) < 1e-5f, "30/60 FPS agree in flight");
     Check(std::abs(SimulateAtRate(144, 0.5) - reference) < 1e-5f, "144/60 FPS agree in flight");

@@ -138,6 +138,7 @@ namespace PARS
         if (enabled != m_AutomaticRootSupport)
         {
             m_RootSupportRelease = RootSupportRelease::None;
+            m_FootSupport.ResetFootstep();
         }
         m_AutomaticRootSupport = enabled;
         if (enabled)

@@ -184,6 +184,14 @@ void PARS::FootSupport::Reset()
     m_Initialized = false;
     m_Contacts = {};
     m_ContactWorld = nullptr;
+    ResetFootstep();
+}
+
+void PARS::FootSupport::ResetFootstep()
+{
+    m_FootstepPlanner.Reset();
+    m_HasIdleReference = false;
+    m_Snapshot.footstep = {};
 }
 
 void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorld& physics)
@@ -246,6 +254,89 @@ bool PARS::FootSupport::SetBufferScale(float scale)
     return true;
 }
 
+void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
+{
+    const auto& animation = mesh.GetAnimInstance();
+    const bool idle = !animation.IsBlending() &&
+        animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle";
+    if (m_IdleReferenceRevision != m_Snapshot.contactRevision || !idle)
+    {
+        m_HasIdleReference = false;
+        m_IdleReferenceRevision = m_Snapshot.contactRevision;
+    }
+    if (idle && !m_HasIdleReference && m_Snapshot.feet[0].available && m_Snapshot.feet[1].available)
+    {
+        PhysicsSkeleton skeleton;
+        std::vector<Matrix4> reference;
+        std::string error;
+        if (mesh.BuildPhysicsSkeleton(skeleton, error) &&
+            EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(kIdentity), reference, error))
+        {
+            m_HasIdleReference = true;
+            for (size_t side = 0; side < m_Feet.size(); ++side)
+            {
+                const int node = m_Snapshot.feet[side].boneNode;
+                if (node < 0 || size_t(node) >= reference.size())
+                {
+                    m_HasIdleReference = false;
+                    break;
+                }
+                // 충격으로 변한 실제 발 간격 대신 최초 유효한 Idle 목표 자세를 저장한다.
+                m_IdleFootBones[side] = PhysicsBoneFrame(reference[node]);
+            }
+        }
+    }
+
+    FootstepInput input;
+    input.active = mesh.IsActiveRagdoll();
+    input.automaticSupport = mesh.UsesAutomaticRootSupport();
+    input.idleAnimation = idle;
+    input.rootReleased = mesh.GetRootSupportRelease() != RootSupportRelease::None;
+    input.outsideBufferReleased = mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer;
+    input.hasCom = m_Snapshot.hasCenterOfMass;
+    input.hasVelocity = m_Snapshot.hasCenterOfMassVelocity;
+    input.com = m_Snapshot.centerOfMass;
+    input.velocity = m_Snapshot.centerOfMassVelocity;
+    input.hull = m_Snapshot.hull;
+    input.zone = m_Snapshot.balance.zone;
+    input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
+    input.blueFoot = m_Snapshot.candidates.step;
+    input.completedStep = m_Snapshot.completedPhysicsStep;
+    input.revision = m_Snapshot.contactRevision;
+
+    // 캐릭터의 의도된 수평 방향을 사용한다. 충격에 의한 골반의 순간 회전은 기준 방향에 섞지 않는다.
+    const Matrix4 component(mesh.GetComponentTransform());
+    PxVec3 forward = ToPx(Vector3(component.GetZ()));
+    forward.y = 0;
+    input.hasReference = m_HasIdleReference && forward.isFinite() && forward.normalize() > 1e-6f;
+    input.supportRight = PxVec3(forward.z, 0, -forward.x);
+    std::array<PxVec3, 2> referenceFeet{PxVec3(0), PxVec3(0)};
+    if (input.hasReference)
+    {
+        for (size_t side = 0; side < m_Feet.size(); ++side)
+        {
+            const Matrix4 sole = m_IdleFootBones[side] * m_Snapshot.feet[side].soleInBone;
+            referenceFeet[side] = ToPx(Vector3(sole.GetW()));
+            input.hasReference = input.hasReference && referenceFeet[side].isFinite();
+        }
+    }
+    const PxVec3 midpoint = (referenceFeet[0] + referenceFeet[1]) * .5f;
+    for (size_t side = 0; side < m_Feet.size(); ++side)
+    {
+        const auto& foot = m_Snapshot.feet[side];
+        auto& target = input.feet[side];
+        target.available = foot.available;
+        target.hasContactSample = foot.contact.hasSample;
+        target.grounded = foot.contact.grounded;
+        target.position = ToPx(Vector3(foot.soleWorld.GetW()));
+        target.normal = foot.contact.normal;
+        const PxVec3 offset = referenceFeet[side] - midpoint;
+        target.stanceOffset = input.supportRight * offset.x + forward * offset.z;
+    }
+    m_FootstepPlanner.Update(input, m_FootstepSettings);
+    m_Snapshot.footstep = m_FootstepPlanner.GetSnapshot();
+}
+
 void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& physics)
 {
     const auto sampleNumber = m_Snapshot.sampleNumber + 1;
@@ -273,6 +364,8 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     {
         m_ContactWorld = nullptr;
         m_Contacts = {};
+        m_FootstepPlanner.Reset();
+        m_HasIdleReference = false;
         return;
     }
     UpdateContacts(ragdoll, physics);
@@ -351,4 +444,5 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         sample.candidates = EvaluateFootSupportCandidates(sample.hull,
             sample.projectedCenterOfMass, footPoints, previousCandidate);
     }
+    UpdateFootstep(mesh);
 }

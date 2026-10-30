@@ -2,6 +2,7 @@
 
 #include "PhysicsAsset.h"
 #include "FootSupportHull.h"
+#include "FootstepPlanner.h"
 #include <array>
 #include <cstdint>
 
@@ -57,6 +58,7 @@ namespace PARS
         std::vector<physx::PxVec3> hull;
         FootSupportBalance balance;
         FootSupportCandidates candidates;
+        FootstepSnapshot footstep;
         physx::PxVec3 centerOfMass{0}, projectedCenterOfMass{0};
         physx::PxVec3 centerOfMassVelocity{0};
         float totalMass = 0;
@@ -76,6 +78,8 @@ namespace PARS
         static constexpr float RayLength = .2f;
         void Update(SkeletalMeshComponent& mesh, const PhysicsWorld& physics);
         void Reset();
+        // 명시적으로 자동 지지를 재설정할 때 기존 해제 래치와 발 판단을 함께 초기화한다.
+        void ResetFootstep();
         void ResetSoles()
         {
             m_Initialized = false;
@@ -93,10 +97,15 @@ namespace PARS
             return m_BufferScale;
         }
         bool SetBufferScale(float scale);
+        FootstepSettings& GetFootstepSettings()
+        {
+            return m_FootstepSettings;
+        }
 
     private:
         bool Prepare(SkeletalMeshComponent& mesh);
         void UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorld& physics);
+        void UpdateFootstep(SkeletalMeshComponent& mesh);
         struct Sole
         {
             int bodyIndex = -1;
@@ -107,6 +116,11 @@ namespace PARS
         std::array<Sole, 2> m_Feet;
         std::array<FootSoleSettings, 2> m_Settings;
         FootSupportSnapshot m_Snapshot;
+        FootstepPlanner m_FootstepPlanner;
+        FootstepSettings m_FootstepSettings;
+        std::array<Math::Matrix4, 2> m_IdleFootBones{Math::Matrix4(Math::kIdentity), Math::Matrix4(Math::kIdentity)};
+        bool m_HasIdleReference = false;
+        uint64_t m_IdleReferenceRevision = 0;
         std::array<FootContactSample, 2> m_Contacts;
         const PhysicsWorld* m_ContactWorld = nullptr;
         uint64_t m_ClockRevision = 0, m_RagdollRevision = 0, m_ContactStep = 0, m_ContactRevision = 0;

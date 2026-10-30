@@ -12,6 +12,12 @@ namespace
     constexpr PxU32 HitColor = 0xff55ff77, MissColor = 0xffcc5566;
     constexpr PxU32 HullColor = 0xffee66ff, BufferColor = 0xffffffff;
     constexpr PxU32 ComColor = 0xffffdd44, OutsideColor = 0xffff0000, UnknownColor = 0xff000000;
+    constexpr PxU32 PredictionColor = 0xff00ffff, TargetColor = 0xffff8800, RawTargetColor = 0xffaaaaaa;
+
+    const char* FootLabel(int foot)
+    {
+        return foot == 0 ? u8"왼발" : foot == 1 ? u8"오른발" : u8"없음";
+    }
 
     Vector3 ToMath(const PxVec3& point)
     {
@@ -142,6 +148,40 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
             ProjectionMarker(lines, projected, color, sample.hull.empty() || !sample.comInsideHull);
         }
     }
+    if (m_ShowFootstep)
+    {
+        const auto& step = sample.footstep;
+        if (step.hasPrediction)
+        {
+            Line(lines, ToMath(sample.projectedCenterOfMass), ToMath(step.predictedCom), PredictionColor);
+            ProjectionMarker(lines, ToMath(step.predictedCom), PredictionColor, false);
+        }
+        for (size_t side = 0; side < sample.feet.size(); ++side)
+        {
+            const auto& contact = sample.feet[side].contact;
+            if (contact.grounded)
+            {
+                Point(lines, ToMath(contact.position), HitColor, .015f);
+                Line(lines, ToMath(contact.position), ToMath(contact.position + contact.normal * .12f), HitColor);
+            }
+            const auto& target = step.candidates[side];
+            if (!target.valid)
+            {
+                continue;
+            }
+            Point(lines, ToMath(target.raw), RawTargetColor, .012f);
+            Point(lines, ToMath(target.position), TargetColor, .025f);
+            Line(lines, ToMath(target.position), ToMath(target.position + target.normal * .08f), TargetColor);
+        }
+        if (step.hasTarget && step.stepFoot >= 0 && step.stepFoot < 2)
+        {
+            const Vector3 foot(sample.feet[step.stepFoot].soleWorld.GetW());
+            // 연결선은 목표의 대응 관계다. 실제 발 이동 궤적을 뜻하지 않는다.
+            Line(lines, foot, ToMath(step.target), TargetColor);
+            ProjectionMarker(lines, ToMath(step.target), TargetColor, true);
+            Point(lines, foot, TargetColor, .03f);
+        }
+    }
 }
 
 void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
@@ -224,6 +264,49 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     {
         const auto& velocity = sample.centerOfMassVelocity;
         ImGui::Text(u8"실제 COM 속도 (%.3f, %.3f, %.3f) m/s", velocity.x, velocity.y, velocity.z);
+    }
+    if (ImGui::TreeNodeEx(u8"발딛기 판단 / 착지 목표", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        const auto& step = sample.footstep;
+        auto& settings = support.GetFootstepSettings();
+        ImGui::Checkbox(u8"발딛기 판단·목표 3D 표시", &m_ShowFootstep);
+        ImGui::Text(u8"상태: %s", PARS::FootstepPhaseLabel(step.phase));
+        ImGui::TextWrapped(u8"사유: %s", PARS::FootstepReasonLabel(step.reason));
+        ImGui::Text(u8"원시 파란 후보: %s / 저장한 발: %s", FootLabel(step.rawBlueFoot), FootLabel(step.stepFoot));
+        ImGui::Text(u8"시작 %llu / 착지 %llu / 중단 %llu",
+            static_cast<unsigned long long>(step.startCount), static_cast<unsigned long long>(step.landingCount),
+            static_cast<unsigned long long>(step.abortCount));
+        ImGui::Text(u8"예측: 시작 %.2fs / 착지 %.2fs · 발 간격 %.2f · 최대 보폭 %.1fm",
+            settings.startPredictionTime, settings.landingPredictionTime, settings.stanceScale, settings.maximumStepLength);
+        ImGui::Checkbox(u8"발 교차 억제 (경계 0.1m)", &settings.preventCrossing);
+        if (step.hasPrediction)
+        {
+            ImGui::Text(u8"예측 COM (%.3f, %.3f, %.3f) m / A %s", step.predictedCom.x,
+                step.predictedCom.y, step.predictedCom.z, step.needsStep ? u8"밖" : u8"안");
+        }
+        for (size_t side = 0; side < step.candidates.size(); ++side)
+        {
+            const auto& target = step.candidates[side];
+            if (target.valid)
+            {
+                ImGui::Text(u8"%s 목표 (%.3f, %.3f, %.3f) m", FootLabel(static_cast<int>(side)),
+                    target.position.x, target.position.y, target.position.z);
+                ImGui::Text(u8"  발 이동 %.2fm / 지지발 거리 %.2fm · 보폭 제한 %s / 교차 제한 %s",
+                    target.travelDistance, target.stanceDistance, target.lengthLimited ? "ON" : "OFF",
+                    target.crossingLimited ? "ON" : "OFF");
+            }
+            else
+            {
+                ImGui::Text(u8"%s 후보: %s", FootLabel(static_cast<int>(side)), PARS::FootstepReasonLabel(target.reason));
+            }
+        }
+        if (step.IsInProgress())
+        {
+            ImGui::Text(u8"시작 시 이동 거리 %.2fm / 목표 출력 %s", step.initialDistance, step.hasTarget ? "ON" : "OFF");
+        }
+        ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
+        ImGui::TextWrapped(u8"현재 단계는 판단·목표 계산입니다. 발 이동과 IK는 아직 연결하지 않았으며, 연결선은 이동 궤적이 아닙니다.");
+        ImGui::TreePop();
     }
     if (!sample.message.empty())
     {
