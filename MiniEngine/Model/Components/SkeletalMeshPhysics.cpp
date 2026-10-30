@@ -106,10 +106,9 @@ namespace PARS
             m_FootSupport.Reset();
         }
         const auto& sample = m_FootSupport.GetSnapshot();
-        if (!IsActiveRagdoll() || !sample.footstep.motion.valid ||
-            sample.contactRevision != m_FootstepIK.GetSnapshot().revision)
+        if (!IsActiveRagdoll() || sample.contactRevision != m_Recovery.GetSnapshot().revision)
         {
-            m_FootstepIK.Reset();
+            ResetRecovery();
         }
     }
 
@@ -117,11 +116,8 @@ namespace PARS
     {
         const auto& sample = m_FootSupport.GetSnapshot();
         const auto& step = sample.footstep;
-        const bool idle = !m_AnimInstance->IsBlending() &&
-            m_AnimInstance->GetAnimationName(m_AnimInstance->GetCurrentAnimationIndex()) == "Idle";
         if (!IsActiveRagdoll() || !m_AutomaticRootSupport || m_RootSupportRelease != RootSupportRelease::None ||
-            !idle || !step.IsInProgress() || !step.motion.valid || step.stepFoot < 0 || step.stepFoot > 1 ||
-            !sample.feet[1 - step.stepFoot].contact.hasSample || !sample.feet[1 - step.stepFoot].contact.grounded)
+            m_Recovery.GetSnapshot().state != RecoveryState::Recovery || !m_HasRecoverySoles)
         {
             m_FootstepIK.Reset();
             return;
@@ -140,7 +136,7 @@ namespace PARS
         }
         FootstepIKInput input;
         input.enabled = true;
-        input.stepFoot = step.stepFoot;
+        input.stepFoot = step.IsInProgress() ? step.stepFoot : -1;
         input.revision = sample.contactRevision;
         const auto& nodes = m_Ragdoll.GetBoneNodes();
         for (size_t side = 0; side < input.legs.size(); ++side)
@@ -197,21 +193,15 @@ namespace PARS
                 continue;
             }
             leg.soleInBone = toPx(foot.soleInBone);
-            if (int(side) == step.stepFoot)
-            {
-                leg.available = MakeFootSoleTarget(step.motion.position, step.targetNormal,
-                    rigidTargets[setup.ankleNode] * leg.soleInBone, leg.targetSole);
-            }
-            else
-            {
-                // 지지발은 현재 접촉한 발바닥 자세를 목표로 삼는다. 바디를 월드에 고정하지 않는다.
-                leg.targetSole = toPx(foot.soleWorld);
-                leg.available = leg.targetSole.isSane();
-            }
+            // 지지발은 현재 접촉한 발바닥 자세를 목표로 삼는다. 바디를 월드에 고정하지 않는다.
+            // Recovery 진입/착지 시 저장한 유효 자세를 접촉이 잠시 끊겨도 유지한다.
+            leg.targetSole = m_RecoverySoles[side];
+            leg.available = leg.targetSole.isSane();
         }
         if (!m_FootstepIK.Apply(input, m_PhysicsSkeleton.parents, rigidTargets))
         {
             // IK 입력이 부족하면 기본 애니메이션 목표를 유지하고 실패 사유를 디버그에 남긴다.
+            // Recovery 호출자는 이 실패를 감지해 패시브 물리로 전환하므로 Idle 목표를 구동하지 않는다.
             return;
         }
         for (int node : m_FootstepIK.GetSnapshot().correctedNodes)
@@ -258,7 +248,7 @@ namespace PARS
         {
             m_RootSupportRelease = RootSupportRelease::None;
             m_FootSupport.ResetFootstep();
-            m_FootstepIK.Reset();
+            ResetRecovery();
         }
         m_AutomaticRootSupport = enabled;
         if (enabled)
@@ -307,7 +297,7 @@ namespace PARS
     {
         m_Ragdoll.Destroy();
         m_FootSupport.Reset();
-        m_FootstepIK.Reset();
+        ResetRecovery();
         m_AutomaticRootSupport = false;
         m_RootSupportRelease = RootSupportRelease::None;
         m_PhysicsSkeleton = {};

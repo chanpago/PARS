@@ -156,6 +156,13 @@ namespace PARS
         return true;
     }
 
+    void Ragdoll::ResetDriveTargetHistory()
+    {
+        m_HasDriveTargets = false;
+        m_HasSupportTarget = false;
+        m_PreviousArticulationTargetVelocity.clear();
+    }
+
     bool Ragdoll::UpdateDriveTargets(const std::vector<Matrix4>& boneWorld, float deltaTime, std::string& error)
     {
         // 애니메이션 본의 월드 목표 자세를 PA 바디와 관절의 목표로 변환해 PhysX에 전달한다.

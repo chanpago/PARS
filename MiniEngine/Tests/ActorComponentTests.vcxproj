@@ -40,6 +40,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ActorComponentTests.cpp" />
+    <ClCompile Include="RagdollRecoveryTests.cpp" />
+    <ClCompile Include="..\Model\RagdollRecovery.cpp" />
+    <ClCompile Include="..\Model\RagdollRecoveryPose.cpp" />
     <ClCompile Include="PhysicsAssetTests.cpp" />
     <ClCompile Include="..\Model\PhysicsAsset.cpp" />
     <ClCompile Include="..\Model\PhysicsPose.cpp" />

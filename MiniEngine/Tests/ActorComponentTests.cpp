@@ -162,9 +162,15 @@ void RunRagdollReuseTests(bool verifyReuse);
 void RunPelvisDriveTests();
 void RunRagdollComparisonTests();
 void RunSpringArmTests();
+void RunRagdollRecoveryTests();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--recovery-only") == 0)
+    {
+        RunRagdollRecoveryTests();
+        return 0;
+    }
     if (argc == 2 && (std::strcmp(argv[1], "--ragdoll-reuse-only") == 0 ||
         std::strcmp(argv[1], "--ragdoll-reuse-benchmark") == 0))
     {
@@ -193,6 +199,7 @@ int main(int argc, char** argv)
     TestHierarchy();
     TestLifecycle();
     TestPoseSampling();
+    RunRagdollRecoveryTests();
     RunWorldTests();
     RunCharacterMovementTests();
     RunSpringArmTests();

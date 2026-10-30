@@ -152,6 +152,11 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     }
     if (m_ShowFootstep)
     {
+        const auto& referenceHull = mesh.GetRecoveryReferenceHull();
+        for (size_t i = 0; i < referenceHull.size(); ++i)
+        {
+            Line(lines, ToMath(referenceHull[i]), ToMath(referenceHull[(i + 1) % referenceHull.size()]), 0xff88bbff);
+        }
         const auto& step = sample.footstep;
         if (step.hasPrediction)
         {
@@ -297,6 +302,20 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     {
         const auto& step = sample.footstep;
         auto& settings = support.GetFootstepSettings();
+        const auto& recovery = mesh.GetRecoverySnapshot();
+        const auto& recoverySettings = mesh.GetRecoverySettings();
+        ImGui::Text(u8"제어 상태: %s%s", recovery.state == PARS::RecoveryState::Recovery ? "Recovery" : "Animation",
+            recovery.blending ? u8" (복귀 블렌드)" : "");
+        ImGui::TextWrapped(u8"전환 판단: %s", PARS::RecoveryReasonLabel(recovery.reason));
+        ImGui::Text(u8"외부 충격 / 질량 %.3f m/s (진입 %.2f) · COM 수평 속도 %.3f m/s (복귀 %.2f)",
+            recovery.impactVelocity, recoverySettings.impactVelocity, recovery.horizontalSpeed, recoverySettings.maximumReturnSpeed);
+        ImGui::Text(u8"기준 발 영역: %s · 현재 COM %s / 예측 COM %s · 양발 접촉 %s",
+            recovery.hasReference ? "OK" : "--", recovery.insideReference ? "IN" : "OUT",
+            recovery.predictionInsideReference ? "IN" : "OUT", recovery.bothGrounded ? "ON" : "OFF");
+        ImGui::Text(u8"안정 유지 %.2f / %.2fs · 복귀 %.0f%% / %.2fs · 회복 %llu / 복귀 %llu",
+            recovery.stableTime, recoverySettings.stableDuration, recovery.blendAlpha * 100, recoverySettings.blendDuration,
+            static_cast<unsigned long long>(recovery.recoveryCount), static_cast<unsigned long long>(recovery.returnCount));
+        ImGui::TextWrapped(u8"Recovery에서는 접촉이 잠시 끊겨도 양발 목표를 유지합니다. 연한 파랑 영역은 현재 양발 중심에 맞춘 애니메이션 기준 발 영역입니다.");
         ImGui::Checkbox(u8"발딛기 판단·목표 3D 표시", &m_ShowFootstep);
         ImGui::Text(u8"상태: %s", PARS::FootstepPhaseLabel(step.phase));
         ImGui::TextWrapped(u8"사유: %s", PARS::FootstepReasonLabel(step.reason));
@@ -347,7 +366,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
             }
             else
             {
-                ImGui::TextUnformatted(u8"발 이동 목표 출력 OFF");
+                ImGui::TextUnformatted(u8"새 발 이동 목표 없음 / Recovery는 저장한 목표 유지");
             }
             if (motion.hasLandingError)
             {

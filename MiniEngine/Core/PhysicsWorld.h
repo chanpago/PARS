@@ -68,6 +68,8 @@ public:
         physx::PxRaycastHit& hit, const void* ignoredOwner = nullptr) const;
     bool GetGroundContact(const physx::PxRigidActor& body, PhysicsGroundContact& contact,
         const void* ignoredOwner = nullptr) const;
+    // 마지막 완료 스텝의 외부 충격량 합(N s). 자기 충돌과 위쪽 지면 지지 접촉은 제외한다.
+    float GetExternalImpactImpulse(const physx::PxRigidActor& body, const void* ignoredOwner = nullptr) const;
     // 순간이동하거나 씬에서 분리하기 전에 이전 접촉을 무효화한다.
     void InvalidateContacts(const physx::PxRigidActor& body);
     uint64_t GetClockRevision() const
@@ -142,6 +144,7 @@ private:
         const physx::PxActor* actors[2]{};
         const physx::PxShape* shapes[2]{};
         std::vector<physx::PxContactPairPoint> points;
+        uint64_t completedStep = 0, clockRevision = 0;
     };
     std::vector<ContactPair> m_Contacts;
     bool m_ListeningForDeletion = false;

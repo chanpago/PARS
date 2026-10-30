@@ -99,6 +99,9 @@ namespace PARS
         // 바디 질량중심의 실제 선속도를 질량으로 가중 평균한다. 단위는 m/s다.
         bool GetCenterOfMassVelocity(Math::Vector3& velocity) const;
         bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
+        float GetExternalImpactImpulse() const;
+        // 목표 생성 주체가 바뀔 때 불연속을 목표 속도/가속도로 미분하지 않는다. 실제 바디 속도는 유지한다.
+        void ResetDriveTargetHistory();
         uint64_t GetContactRevision() const
         {
             return m_ContactRevision;

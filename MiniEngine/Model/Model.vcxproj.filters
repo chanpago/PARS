@@ -152,6 +152,10 @@
     <ClCompile Include="FootstepPlanner.cpp" />
     <ClInclude Include="FootstepIK.h" />
     <ClCompile Include="FootstepIK.cpp" />
+    <ClInclude Include="RagdollRecovery.h" />
+    <ClCompile Include="RagdollRecovery.cpp" />
+    <ClCompile Include="RagdollRecoveryPose.cpp" />
+    <ClCompile Include="Components\SkeletalMeshRecovery.cpp" />
     <ClCompile Include="Ragdoll.cpp" />
     <ClCompile Include="RagdollDrive.cpp" />
     <ClCompile Include="RagdollArticulation.cpp" />

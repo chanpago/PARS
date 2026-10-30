@@ -7,6 +7,7 @@
 #include "../Ragdoll.h"
 #include "../FootSupport.h"
 #include "../FootstepIK.h"
+#include "../RagdollRecovery.h"
 
 namespace PARS
 {
@@ -81,6 +82,18 @@ namespace PARS
         {
             return m_FootstepIK.GetSnapshot();
         }
+        const RecoverySnapshot& GetRecoverySnapshot() const
+        {
+            return m_Recovery.GetSnapshot();
+        }
+        const RecoverySettings& GetRecoverySettings() const
+        {
+            return m_RecoverySettings;
+        }
+        const std::vector<physx::PxVec3>& GetRecoveryReferenceHull() const
+        {
+            return m_RecoveryReferenceHull;
+        }
         void SetFootCandidateDebugVisible(bool visible)
         {
             m_FootCandidateDebugVisible = visible;
@@ -137,11 +150,21 @@ namespace PARS
         void UpdatePhysicsPose();
         void UpdateFootSupport();
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target);
+        bool ApplyRecoveryTargets(std::vector<Math::Matrix4>& target, float deltaTime);
+        void ResetRecovery();
+        bool CaptureRecoveryBlendSource();
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
         Ragdoll m_Ragdoll;
         FootSupport m_FootSupport;
         FootstepIK m_FootstepIK;
+        RagdollRecovery m_Recovery;
+        RecoverySettings m_RecoverySettings;
+        std::array<physx::PxTransform, 2> m_RecoverySoles{
+            physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};
+        bool m_HasRecoverySoles = false;
+        std::vector<physx::PxVec3> m_RecoveryReferenceHull;
+        std::vector<GraphNode> m_RecoveryBlendSource;
         bool m_FootCandidateDebugVisible = false;
         bool m_AutomaticRootSupport = false;
         RootSupportRelease m_RootSupportRelease = RootSupportRelease::None;

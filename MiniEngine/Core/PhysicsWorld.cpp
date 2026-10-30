@@ -71,6 +71,8 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         cached->points.resize(pair.contactCount);
         const PxU32 extracted = pair.extractContacts(cached->points.data(), pair.contactCount);
         cached->points.resize(extracted);
+        cached->completedStep = m_StepCount + 1;
+        cached->clockRevision = m_ClockRevision;
     }
     // 잠든 바디에는 PERSISTS가 오지 않으므로 LOST 또는 명시적인 무효화 전까지 보존한다.
 }
@@ -141,6 +143,43 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
     contact.position /= float(contact.pointCount);
     contact.normal.normalize();
     return true;
+}
+
+float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const void* ignoredOwner) const
+{
+    float impulse = 0;
+    if (!m_Scene || body.getScene() != m_Scene)
+    {
+        return impulse;
+    }
+    for (const auto& pair : m_Contacts)
+    {
+        const int side = pair.actors[0] == &body ? 0 : pair.actors[1] == &body ? 1 : -1;
+        // 잠든 접촉의 과거 충격량을 매 프레임 새 충격처럼 재사용하지 않는다.
+        if (side < 0 || pair.completedStep != m_StepCount || pair.clockRevision != m_ClockRevision)
+        {
+            continue;
+        }
+        const auto* other = pair.actors[1 - side];
+        const auto* link = body.is<PxArticulationLink>();
+        const auto* otherLink = other->is<PxArticulationLink>();
+        if (other->getScene() != m_Scene || (ignoredOwner && other->userData == ignoredOwner) ||
+            (link && otherLink && &link->getArticulation() == &otherLink->getArticulation()) ||
+            !pair.shapes[0]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) ||
+            !pair.shapes[1]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE))
+        {
+            continue;
+        }
+        for (const auto& point : pair.points)
+        {
+            const PxVec3 normal = side == 0 ? point.normal : -point.normal;
+            if (normal.isFinite() && normal.y < .70710678f && point.impulse.isFinite())
+            {
+                impulse += point.impulse.magnitude();
+            }
+        }
+    }
+    return impulse;
 }
 
 void PhysicsWorld::onConstraintBreak(PxConstraintInfo*, PxU32)

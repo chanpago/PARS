@@ -222,7 +222,7 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         }
     }
     m_Snapshot.status = FootstepIKStatus::InvalidLeg;
-    if (input.stepFoot < 0 || input.stepFoot > 1)
+    if (input.stepFoot < -1 || input.stepFoot > 1)
     {
         return false;
     }

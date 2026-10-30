@@ -707,6 +707,21 @@ namespace PARS
 #endif
     }
 
+    float Ragdoll::GetExternalImpactImpulse() const
+    {
+        float impulse = 0;
+#if defined(_M_X64)
+        if (m_World && m_CollisionEnabled)
+        {
+            for (const auto* body : m_Bodies)
+            {
+                impulse += m_World->GetExternalImpactImpulse(*body, m_QueryOwner);
+            }
+        }
+#endif
+        return impulse;
+    }
+
     void Ragdoll::InvalidateContactState()
     {
         ++m_ContactRevision;

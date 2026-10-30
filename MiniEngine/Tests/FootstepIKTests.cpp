@@ -246,7 +246,7 @@ namespace
         fixture.input.enabled = false;
         Check(!ik.Apply(fixture.input, fixture.parents, fixture.pose) && ik.GetSnapshot().correctedNodes.empty() &&
             ik.GetSnapshot().status == FootstepIKStatus::Inactive && Near(fixture.pose[7], original[7]),
-            "Disabling after landing, B exit or contact loss leaves the original animation pose");
+            "Explicitly disabling IK leaves the original animation pose");
         fixture.input.enabled = true;
         fixture.input.legs[1].available = false;
         Check(!ik.Apply(fixture.input, fixture.parents, fixture.pose) &&
@@ -284,6 +284,31 @@ namespace
             ik.GetSnapshot().legs[1].hintSource == KneeHintSource::Reference,
             "PA and physics revision changes discard the previous knee hint");
     }
+
+    void TestRecoverySupportTargets()
+    {
+        PoseFixture fixture;
+        FootstepIK ik;
+        fixture.input.stepFoot = -1;
+        const auto animated = fixture.pose;
+        for (int frame = 0; frame < 20; ++frame)
+        {
+            fixture.pose = animated;
+            for (auto& leg : fixture.input.legs)
+            {
+                leg.actualAnchor.p.x += .001f;
+            }
+            Check(ik.Apply(fixture.input, fixture.parents, fixture.pose),
+                "Recovery keeps both sole goals while no new footstep is active");
+            for (const auto& leg : fixture.input.legs)
+            {
+                const auto actualSole = leg.actualAnchor * fixture.pose[leg.anchorNode].getInverse() *
+                    fixture.pose[leg.ankleNode] * leg.soleInBone;
+                Check(Near(actualSole, leg.targetSole), "Stored recovery soles stay in world space as the pelvis moves");
+            }
+        }
+        Check(ik.GetSnapshot().stepFoot == -1, "Recovery support does not display a fictional moving foot");
+    }
 }
 
 void TestFootstepIK()
@@ -293,5 +318,6 @@ void TestFootstepIK()
     TestSoleOrientation();
     TestPoseAndPhysicalAnchor();
     TestHintHistoryReset();
+    TestRecoverySupportTargets();
     std::printf("PASS: %u footstep IK checks (no PhysX simulation)\n", checks);
 }

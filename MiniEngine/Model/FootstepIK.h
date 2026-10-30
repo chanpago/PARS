@@ -52,6 +52,7 @@ namespace PARS
     struct FootstepIKInput
     {
         bool enabled = false;
+        // -1은 새 발딛기 없이 회복 중 양발 목표를 유지하는 경우다.
         int stepFoot = -1;
         uint64_t revision = 0;
         std::array<FootIKLegInput, 2> legs;
