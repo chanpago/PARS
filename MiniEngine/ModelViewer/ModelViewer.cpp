@@ -205,6 +205,7 @@ private:
     PreviewAnimInstance* GetPreviewAnimation() const;
     void RenderModels(Renderer::MeshSorter& sorter);
     void DrawRagdollPanel(PARS::Character& character);
+    void EnableActiveRagdoll(PARS::Character& character);
     void ApplyPendingPhysicsAssetSave();
 
     Camera m_Camera;
@@ -652,6 +653,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 #if defined(_M_X64)
     if (m_PhysicsDemo && mesh.GetPhysicsAsset())
     {
+        // 초기화 직후에도 ImGui 버튼과 같은 절차로 액티브 래그돌을 시작한다.
+        EnableActiveRagdoll(*character);
         m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_FootSoles);
         if (!m_ImpactTest->Initialize(models[0], *mesh.GetPhysicsAsset()))
         {
@@ -1168,6 +1171,23 @@ void ModelViewer::ApplyPendingPhysicsAssetSave()
     m_MeshViewer->CompletePhysicsSave(saved, m_RagdollMessage);
 }
 
+void ModelViewer::EnableActiveRagdoll(PARS::Character& character)
+{
+    const bool entering = !character.IsRagdoll();
+    if (!character.SetPhysicsMode(PARS::PhysicsAnimationMode::ActiveRagdoll, m_RagdollMessage))
+    {
+        return;
+    }
+    if (auto* animation = GetPreviewAnimation())
+    {
+        animation->SetAutoCycleEnabled(false);
+    }
+    if (!entering || character.GetMesh().GetRagdoll().SetRootSupported(m_ActiveSupport, m_RagdollMessage))
+    {
+        m_RagdollMessage = u8"액티브 래그돌: 애니메이션 목표에 맞춰 물리 관절을 구동합니다.";
+    }
+}
+
 void ModelViewer::DrawRagdollPanel(PARS::Character& character)
 {
     if (!ImGui::CollapsingHeader(u8"래그돌 / 물리 에셋", ImGuiTreeNodeFlags_DefaultOpen))
@@ -1239,18 +1259,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     ImGui::BeginDisabled(mesh.IsActiveRagdoll() || mesh.HasPendingDriveSettings());
     if (ImGui::Button(u8"액티브 래그돌"))
     {
-        const bool entering = !character.IsRagdoll();
-        if (character.SetPhysicsMode(PARS::PhysicsAnimationMode::ActiveRagdoll, m_RagdollMessage))
-        {
-            if (auto* animation = GetPreviewAnimation())
-            {
-                animation->SetAutoCycleEnabled(false);
-            }
-            if (!entering || mesh.GetRagdoll().SetRootSupported(m_ActiveSupport, m_RagdollMessage))
-            {
-                m_RagdollMessage = u8"액티브 래그돌: 애니메이션 목표에 맞춰 물리 관절을 구동합니다.";
-            }
-        }
+        EnableActiveRagdoll(character);
     }
     ImGui::EndDisabled();
     ImGui::EndDisabled();
