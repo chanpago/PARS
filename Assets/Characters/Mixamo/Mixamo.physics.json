@@ -475,10 +475,10 @@
       "halfLength": 0.05000000074505806,
       "mass": 0.850100040435791,
       "material": {
-        "dynamicFriction": 0.4000000059604645,
+        "dynamicFriction": 0.6000000238418579,
         "frictionCombine": "minimum",
         "restitution": 0.0,
-        "staticFriction": 0.4000000059604645
+        "staticFriction": 0.6000000238418579
       },
       "offset": [
         -0.0031107389368116856,
@@ -562,10 +562,10 @@
       "halfLength": 0.05000000074505806,
       "mass": 0.850100040435791,
       "material": {
-        "dynamicFriction": 0.4000000059604645,
+        "dynamicFriction": 0.6000000238418579,
         "frictionCombine": "minimum",
         "restitution": 0.0,
-        "staticFriction": 0.4000000059604645
+        "staticFriction": 0.6000000238418579
       },
       "offset": [
         0.008707244880497456,
