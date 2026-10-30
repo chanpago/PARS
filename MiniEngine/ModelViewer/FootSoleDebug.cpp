@@ -220,6 +220,11 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
             ImGui::TextUnformatted(u8"COM 지면 투영점 없음");
         }
     }
+    if (sample.hasCenterOfMassVelocity)
+    {
+        const auto& velocity = sample.centerOfMassVelocity;
+        ImGui::Text(u8"실제 COM 속도 (%.3f, %.3f, %.3f) m/s", velocity.x, velocity.y, velocity.z);
+    }
     if (!sample.message.empty())
     {
         ImGui::TextWrapped("%s", sample.message.c_str());
@@ -236,6 +241,27 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         ImGui::PushID(static_cast<int>(side));
         if (foot.available && ImGui::TreeNodeEx(labels[side], ImGuiTreeNodeFlags_DefaultOpen))
         {
+            const auto& contact = foot.contact;
+            ImGui::Text(u8"실제 접촉: %s / 지면 접촉점 %u개", !contact.hasSample ? u8"물리 스텝 대기" :
+                contact.grounded ? u8"지지 중" : u8"접촉 없음", contact.pointCount);
+            ImGui::Text(u8"접촉 이력: 이륙 %llu회 / 착지 %llu회",
+                static_cast<unsigned long long>(contact.takeoffCount), static_cast<unsigned long long>(contact.landingCount));
+            if (contact.grounded)
+            {
+                ImGui::Text(u8"접촉점 (%.3f, %.3f, %.3f) m", contact.position.x, contact.position.y, contact.position.z);
+                ImGui::Text(u8"지면 법선 (%.3f, %.3f, %.3f)", contact.normal.x, contact.normal.y, contact.normal.z);
+            }
+            if (foot.leg.available)
+            {
+                ImGui::Text(u8"다리 본: 고관절 %d / 무릎 %d / 발목 %d",
+                    foot.leg.hipNode, foot.leg.kneeNode, foot.leg.ankleNode);
+                ImGui::Text(u8"기준 길이: 허벅지 %.1f / 종아리 %.1f cm",
+                    foot.leg.thighLength * 100, foot.leg.calfLength * 100);
+            }
+            else
+            {
+                ImGui::TextUnformatted(u8"다리 본 연결 또는 기준 길이를 찾을 수 없습니다.");
+            }
             float dimensions[] = {settings.halfWidth * 200, settings.halfLength * 200};
             if (ImGui::DragFloat2(u8"폭 / 길이", dimensions, .1f, 1, 100, "%.1f cm", ImGuiSliderFlags_AlwaysClamp))
             {

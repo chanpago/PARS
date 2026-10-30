@@ -329,6 +329,10 @@ namespace PARS
     bool Ragdoll::SetSceneActive(bool active, std::string& error)
     {
 #if defined(_M_X64)
+        if (!active)
+        {
+            InvalidateContactState();
+        }
         if (m_Articulation)
         {
             if (active && !m_Articulation->getScene() && !m_World->AddArticulation(*m_Articulation))
@@ -383,6 +387,7 @@ namespace PARS
             }
             poses.push_back(pose);
         }
+        InvalidateContactState();
         m_HasDriveTargets = m_HasSupportTarget = false;
         m_DriveTargets.clear();
         m_PreviousArticulationTargetVelocity.clear();

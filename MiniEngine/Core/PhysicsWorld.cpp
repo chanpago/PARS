@@ -29,10 +29,138 @@ namespace
             attributes1, data1, pairFlags, constantBlock, constantBlockSize);
         if (!PxFilterObjectIsTrigger(attributes0) && !PxFilterObjectIsTrigger(attributes1))
         {
-            pairFlags |= PxPairFlag::eNOTIFY_CONTACT_POINTS;
+            pairFlags |= PxPairFlag::eNOTIFY_CONTACT_POINTS | PxPairFlag::eNOTIFY_TOUCH_FOUND |
+                PxPairFlag::eNOTIFY_TOUCH_PERSISTS | PxPairFlag::eNOTIFY_TOUCH_LOST;
         }
         return flags;
     }
+}
+
+void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactPair* pairs, PxU32 count)
+{
+    for (PxU32 i = 0; i < count; ++i)
+    {
+        const auto& pair = pairs[i];
+        auto cached = std::find_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& contact)
+        {
+            return contact.actors[0] == header.actors[0] && contact.actors[1] == header.actors[1] &&
+                contact.shapes[0] == pair.shapes[0] && contact.shapes[1] == pair.shapes[1];
+        });
+        const bool removed = header.flags.isSet(PxContactPairHeaderFlag::eREMOVED_ACTOR_0) ||
+            header.flags.isSet(PxContactPairHeaderFlag::eREMOVED_ACTOR_1) ||
+            pair.flags.isSet(PxContactPairFlag::eREMOVED_SHAPE_0) ||
+            pair.flags.isSet(PxContactPairFlag::eREMOVED_SHAPE_1);
+        if (removed || pair.events.isSet(PxPairFlag::eNOTIFY_TOUCH_LOST))
+        {
+            if (cached != m_Contacts.end())
+            {
+                m_Contacts.erase(cached);
+            }
+            continue;
+        }
+        if (cached == m_Contacts.end())
+        {
+            m_Contacts.emplace_back();
+            cached = m_Contacts.end() - 1;
+            for (int side = 0; side < 2; ++side)
+            {
+                cached->actors[side] = header.actors[side];
+                cached->shapes[side] = pair.shapes[side];
+            }
+        }
+        cached->points.resize(pair.contactCount);
+        const PxU32 extracted = pair.extractContacts(cached->points.data(), pair.contactCount);
+        cached->points.resize(extracted);
+    }
+    // 잠든 바디에는 PERSISTS가 오지 않으므로 LOST 또는 명시적인 무효화 전까지 보존한다.
+}
+
+void PhysicsWorld::InvalidateContacts(const PxRigidActor& body)
+{
+    m_Contacts.erase(std::remove_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& pair)
+    {
+        return pair.actors[0] == &body || pair.actors[1] == &body;
+    }), m_Contacts.end());
+}
+
+void PhysicsWorld::onRelease(const PxBase* object, void*, PxDeletionEventFlag::Enum)
+{
+    // 해제된 객체를 역참조하지 않는다. PA 재생성 시 같은 주소가 재사용돼도 접촉이 남지 않는다.
+    m_Contacts.erase(std::remove_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& pair)
+    {
+        return pair.actors[0] == object || pair.actors[1] == object ||
+            pair.shapes[0] == object || pair.shapes[1] == object;
+    }), m_Contacts.end());
+}
+
+bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundContact& contact,
+    const void* ignoredOwner) const
+{
+    contact = {};
+    if (!m_Scene || body.getScene() != m_Scene)
+    {
+        return false;
+    }
+    for (const auto& pair : m_Contacts)
+    {
+        const int side = pair.actors[0] == &body ? 0 : pair.actors[1] == &body ? 1 : -1;
+        if (side < 0)
+        {
+            continue;
+        }
+        const auto* other = pair.actors[1 - side];
+        if (other->getScene() != m_Scene || (ignoredOwner && other->userData == ignoredOwner) ||
+            !pair.shapes[0]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) ||
+            !pair.shapes[1]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE))
+        {
+            continue;
+        }
+        const auto* link = body.is<PxArticulationLink>();
+        const auto* otherLink = other->is<PxArticulationLink>();
+        if (link && otherLink && &link->getArticulation() == &otherLink->getArticulation())
+        {
+            continue;
+        }
+        for (const auto& point : pair.points)
+        {
+            const PxVec3 normal = side == 0 ? point.normal : -point.normal;
+            // 이동 캡슐과 같은 45도 기준으로 벽을 제외한다. 접촉 오프셋 안의 근접만으로는 지지가 아니다.
+            if (point.position.isFinite() && normal.isFinite() && normal.y >= .70710678f &&
+                (point.separation <= 0 || point.impulse.dot(point.normal) > 0))
+            {
+                contact.position += point.position;
+                contact.normal += normal;
+                ++contact.pointCount;
+            }
+        }
+    }
+    if (contact.pointCount == 0)
+    {
+        return false;
+    }
+    contact.position /= float(contact.pointCount);
+    contact.normal.normalize();
+    return true;
+}
+
+void PhysicsWorld::onConstraintBreak(PxConstraintInfo*, PxU32)
+{
+}
+
+void PhysicsWorld::onWake(PxActor**, PxU32)
+{
+}
+
+void PhysicsWorld::onSleep(PxActor**, PxU32)
+{
+}
+
+void PhysicsWorld::onTrigger(PxTriggerPair*, PxU32)
+{
+}
+
+void PhysicsWorld::onAdvance(const PxRigidBody* const*, const PxTransform*, PxU32)
+{
 }
 
 void PhysicsWorld::ErrorCallback::reportError(PxErrorCode::Enum code, const char* message,
@@ -140,12 +268,15 @@ bool PhysicsWorld::CreateScene()
     desc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
     desc.cpuDispatcher = m_Dispatcher;
     desc.filterShader = ContactFilter;
+    desc.simulationEventCallback = this;
     m_Scene = m_Physics->createScene(desc);
     if (!m_Scene)
     {
         Shutdown();
         return false;
     }
+    m_Physics->registerDeletionListener(*this, PxDeletionEventFlag::eUSER_RELEASE | PxDeletionEventFlag::eMEMORY_RELEASE);
+    m_ListeningForDeletion = true;
     if (PxPvdSceneClient* client = m_Scene->getScenePvdClient())
     {
         client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
@@ -160,6 +291,12 @@ bool PhysicsWorld::CreateScene()
 void PhysicsWorld::Shutdown()
 {
     m_QueryCapsules.clear();
+    if (m_ListeningForDeletion)
+    {
+        m_Physics->unregisterDeletionListener(*this);
+        m_ListeningForDeletion = false;
+    }
+    m_Contacts.clear();
     Release(m_Scene); // Actor와 각 Actor가 독점 소유하는 형상도 함께 해제한다.
     if (m_ServiceOwner)
     {
@@ -214,6 +351,7 @@ bool PhysicsWorld::IsPvdConnected() const
 
 void PhysicsWorld::ResetClock()
 {
+    ++m_ClockRevision;
     m_Accumulator = 0.0;
     m_DroppedTime = 0.0;
     m_StepCount = 0;

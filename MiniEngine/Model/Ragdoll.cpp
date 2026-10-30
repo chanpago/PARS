@@ -11,6 +11,10 @@ namespace PARS
 {
     void Ragdoll::SetCollisionEnabled(bool enabled)
     {
+        if (m_CollisionEnabled != enabled)
+        {
+            InvalidateContactState();
+        }
         m_CollisionEnabled = enabled;
 #if defined(_M_X64)
         for (auto* body : m_Bodies)
@@ -171,6 +175,7 @@ namespace PARS
     }
     void Ragdoll::Destroy()
     {
+        InvalidateContactState();
         m_Standby.reset();
 #if defined(_M_X64)
         if (m_SupportJoint)
@@ -233,6 +238,9 @@ namespace PARS
 
     void Ragdoll::SwapConfiguration(Ragdoll& other) noexcept
     {
+        // 이 객체를 읽던 발 접촉 이력은 바디 구성이 바뀔 때 이어받지 않는다.
+        InvalidateContactState();
+        other.InvalidateContactState();
         // 벡터 저장 공간을 교환해 PhysX/PVD가 보관 중인 이름 포인터를 유지한다.
         m_Asset.bodies.swap(other.m_Asset.bodies);
         m_Asset.constraints.swap(other.m_Asset.constraints);
@@ -439,6 +447,10 @@ namespace PARS
             error = "Invalid initial velocity.";
             return false;
         }
+        if (m_Simulating != simulate)
+        {
+            InvalidateContactState();
+        }
         if (!simulate)
         {
             SetDrivesEnabled(false);
@@ -506,6 +518,18 @@ namespace PARS
                 return false;
             }
             poses.push_back(pose);
+        }
+        if (teleport)
+        {
+            for (size_t i = 0; i < poses.size(); ++i)
+            {
+                const PxTransform current = m_Bodies[i]->getGlobalPose();
+                if ((poses[i].p - current.p).magnitudeSquared() > 1e-8f || PxAbs(poses[i].q.dot(current.q)) < .999999f)
+                {
+                    InvalidateContactState();
+                    break;
+                }
+            }
         }
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
@@ -639,6 +663,61 @@ namespace PARS
         return true;
 #else
         return false;
+#endif
+    }
+
+    bool Ragdoll::GetCenterOfMassVelocity(Vector3& velocity) const
+    {
+        velocity = Vector3(kZero);
+#if defined(_M_X64)
+        double massSum = 0, x = 0, y = 0, z = 0;
+        for (const auto* body : m_Bodies)
+        {
+            const float mass = body->getMass();
+            const PxVec3 linear = body->getLinearVelocity();
+            if (!body->getScene() || !std::isfinite(mass) || mass <= 0 || !linear.isFinite())
+            {
+                return false;
+            }
+            // PhysX의 선속도는 바디 원점이 아니라 질량중심의 속도다.
+            massSum += mass;
+            x += double(mass) * linear.x;
+            y += double(mass) * linear.y;
+            z += double(mass) * linear.z;
+        }
+        if (massSum > 0 && std::isfinite(massSum))
+        {
+            velocity = Vector3(float(x / massSum), float(y / massSum), float(z / massSum));
+            return true;
+        }
+#endif
+        return false;
+    }
+
+    bool Ragdoll::GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const
+    {
+#if defined(_M_X64)
+        contact = {};
+        return m_World && m_CollisionEnabled && body < m_Bodies.size() &&
+            m_World->GetGroundContact(*m_Bodies[body], contact, m_QueryOwner);
+#else
+        (void)body;
+        (void)contact;
+        return false;
+#endif
+    }
+
+    void Ragdoll::InvalidateContactState()
+    {
+        ++m_ContactRevision;
+#if defined(_M_X64)
+        if (m_World)
+        {
+            for (const auto* body : m_Bodies)
+            {
+                m_World->InvalidateContacts(*body);
+            }
+        }
 #endif
     }
 

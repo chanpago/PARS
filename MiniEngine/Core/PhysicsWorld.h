@@ -16,10 +16,17 @@ struct PhysicsQueryCapsule
     const void* owner = nullptr; // 이동 쿼리에서는 이 소유자로 표시된 강체 Actor만 제외한다.
 };
 
+// 마지막으로 완료한 물리 스텝의 실제 지면 접촉이다. 레이 히트와 구분한다.
+struct PhysicsGroundContact
+{
+    physx::PxVec3 position{0}, normal{0};
+    uint32_t pointCount = 0;
+};
+
 // 미터, 킬로그램, 초 단위의 CPU 물리이며 +Y가 위쪽이다. 게임 스레드에서 사용한다.
 // Create*가 반환한 Actor는 명시적으로 해제하거나 Shutdown()을 호출할 때까지 씬이 소유한다.
 // Update()/Step()을 호출하기 전에 모든 읽기와 쓰기를 끝내야 한다.
-class PhysicsWorld
+class PhysicsWorld : private physx::PxSimulationEventCallback, private physx::PxDeletionListener
 {
 public:
     static constexpr double FixedDeltaTime = 1.0 / 60.0;
@@ -59,6 +66,14 @@ public:
     // 변위 길이 안의 가장 가까운 표면. 자기 Actor와 트리거는 제외한다.
     bool Raycast(const physx::PxVec3& origin, const physx::PxVec3& displacement,
         physx::PxRaycastHit& hit, const void* ignoredOwner = nullptr) const;
+    bool GetGroundContact(const physx::PxRigidActor& body, PhysicsGroundContact& contact,
+        const void* ignoredOwner = nullptr) const;
+    // 순간이동하거나 씬에서 분리하기 전에 이전 접촉을 무효화한다.
+    void InvalidateContacts(const physx::PxRigidActor& body);
+    uint64_t GetClockRevision() const
+    {
+        return m_ClockRevision;
+    }
     uint32_t GetQueryCapsuleCount() const
     {
         return static_cast<uint32_t>(m_QueryCapsules.size());
@@ -114,6 +129,23 @@ public:
     }
 
 private:
+    void onContact(const physx::PxContactPairHeader& header, const physx::PxContactPair* pairs,
+        physx::PxU32 count) override;
+    void onRelease(const physx::PxBase* object, void* userData, physx::PxDeletionEventFlag::Enum event) override;
+    void onConstraintBreak(physx::PxConstraintInfo*, physx::PxU32) override;
+    void onWake(physx::PxActor**, physx::PxU32) override;
+    void onSleep(physx::PxActor**, physx::PxU32) override;
+    void onTrigger(physx::PxTriggerPair*, physx::PxU32) override;
+    void onAdvance(const physx::PxRigidBody* const*, const physx::PxTransform*, physx::PxU32) override;
+    struct ContactPair
+    {
+        const physx::PxActor* actors[2]{};
+        const physx::PxShape* shapes[2]{};
+        std::vector<physx::PxContactPairPoint> points;
+    };
+    std::vector<ContactPair> m_Contacts;
+    bool m_ListeningForDeletion = false;
+    uint64_t m_ClockRevision = 0;
     bool CreateScene();
     physx::PxMaterial* CreateBodyMaterial(const PARS::PhysicsMaterialSettings& settings);
     PhysicsWorld* m_ServiceOwner = nullptr;

@@ -14,6 +14,8 @@ namespace
 {
     const char* const FootNames[] = {"LeftFoot", "RightFoot"};
     const char* const ToeNames[] = {"LeftToeBase", "RightToeBase"};
+    const char* const HipNames[] = {"LeftUpLeg", "RightUpLeg"};
+    const char* const KneeNames[] = {"LeftLeg", "RightLeg"};
     bool Matches(const std::string& name, const char* leaf)
     {
         const auto separator = name.find_last_of(':');
@@ -27,6 +29,19 @@ namespace
             std::memcmp(&a.offset, &b.offset, sizeof(a.offset)) == 0 &&
             std::memcmp(&a.rotation, &b.rotation, sizeof(a.rotation)) == 0 &&
             std::memcmp(&a.halfExtents, &b.halfExtents, sizeof(a.halfExtents)) == 0;
+    }
+
+    int FindAncestor(const PARS::PhysicsSkeleton& skeleton, int node, const char* name)
+    {
+        for (size_t depth = 0; node >= 0 && size_t(node) < skeleton.parents.size() && depth < skeleton.parents.size(); ++depth)
+        {
+            node = skeleton.parents[node];
+            if (node >= 0 && size_t(node) < skeleton.names.size() && Matches(skeleton.names[node], name))
+            {
+                return node;
+            }
+        }
+        return -1;
     }
 
     float Extent(const PARS::PhysicsBody& body, const Matrix4& world, Vector3 direction)
@@ -100,6 +115,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
 
     m_Feet = {};
     m_Settings = {};
+    m_ContactWorld = nullptr;
     const Vector3 up(kYUnitVector);
     bool found = false;
     for (size_t side = 0; side < m_Feet.size(); ++side)
@@ -118,6 +134,21 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         auto& sole = m_Feet[side];
         sole.bodyIndex = index;
         sole.source = asset->bodies[index];
+        auto& leg = sole.leg;
+        leg.ankleNode = node;
+        leg.kneeNode = FindAncestor(skeleton, node, KneeNames[side]);
+        leg.hipNode = FindAncestor(skeleton, leg.kneeNode, HipNames[side]);
+        if (leg.hipNode >= 0 && leg.kneeNode >= 0 &&
+            size_t(leg.hipNode) < referenceWorld.size() && size_t(leg.kneeNode) < referenceWorld.size())
+        {
+            const Vector3 hip(referenceWorld[leg.hipNode].GetW());
+            const Vector3 knee(referenceWorld[leg.kneeNode].GetW());
+            const Vector3 ankle(referenceWorld[node].GetW());
+            leg.thighLength = float(Length(knee - hip));
+            leg.calfLength = float(Length(ankle - knee));
+            leg.available = std::isfinite(leg.thighLength) && std::isfinite(leg.calfLength) &&
+                leg.thighLength > 1e-5f && leg.calfLength > 1e-5f;
+        }
         const Matrix4 body = PARS::PhysicsBoneFrame(referenceWorld[node]) * sole.source.GetLocalTransform();
         Vector3 forward(body.GetX());
         for (size_t toe = 0; toe < skeleton.names.size(); ++toe)
@@ -151,6 +182,58 @@ void PARS::FootSupport::Reset()
     m_Snapshot = {};
     m_Model = nullptr;
     m_Initialized = false;
+    m_Contacts = {};
+    m_ContactWorld = nullptr;
+}
+
+void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorld& physics)
+{
+    const uint64_t step = physics.GetStepCount();
+    if (m_ContactWorld != &physics || m_ClockRevision != physics.GetClockRevision() ||
+        m_RagdollRevision != ragdoll.GetContactRevision())
+    {
+        m_Contacts = {};
+        m_ContactWorld = &physics;
+        m_ClockRevision = physics.GetClockRevision();
+        m_RagdollRevision = ragdoll.GetContactRevision();
+        m_ContactStep = step;
+        ++m_ContactRevision;
+        // 생성/순간이동/모드 전환 직후의 이전 스텝 접촉은 사용하지 않는다.
+        return;
+    }
+    if (step == m_ContactStep)
+    {
+        return;
+    }
+    m_ContactStep = step;
+    for (size_t side = 0; side < m_Feet.size(); ++side)
+    {
+        auto& current = m_Contacts[side];
+        const auto previous = current;
+        current.leftGround = current.landed = false;
+        const int index = m_Feet[side].bodyIndex;
+        current.hasSample = index >= 0 && size_t(index) < ragdoll.GetBodyCount();
+        PhysicsGroundContact ground;
+        current.grounded = current.hasSample && ragdoll.GetBodyGroundContact(size_t(index), ground);
+        current.position = ground.position;
+        current.normal = ground.normal;
+        current.pointCount = ground.pointCount;
+        if (previous.hasSample && current.hasSample)
+        {
+            current.leftGround = previous.grounded && !current.grounded;
+            current.landed = !previous.grounded && current.grounded;
+            if (current.leftGround)
+            {
+                ++current.takeoffCount;
+                current.lastTakeoffStep = step;
+            }
+            if (current.landed)
+            {
+                ++current.landingCount;
+                current.lastLandingStep = step;
+            }
+        }
+    }
 }
 
 bool PARS::FootSupport::SetBufferScale(float scale)
@@ -180,10 +263,20 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     {
         sample.centerOfMass = ToPx(center);
     }
+    Vector3 velocity(kZero);
+    sample.hasCenterOfMassVelocity = ragdoll.GetCenterOfMassVelocity(velocity);
+    if (sample.hasCenterOfMassVelocity)
+    {
+        sample.centerOfMassVelocity = ToPx(velocity);
+    }
     if (!Prepare(mesh))
     {
+        m_ContactWorld = nullptr;
+        m_Contacts = {};
         return;
     }
+    UpdateContacts(ragdoll, physics);
+    sample.contactRevision = m_ContactRevision;
 
     // 양발 아래 지지영역 A를 만들고, COM의 위치를 비교해서 골반 지지계수 w를 계산하는부분
     std::vector<PxVec3> supportPoints;
@@ -202,6 +295,8 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         auto& foot = sample.feet[side];
         foot.available = true;
         foot.boneNode = ragdoll.GetBoneNodes()[sole.bodyIndex];
+        foot.leg = sole.leg;
+        foot.contact = m_Contacts[side];
         const Matrix4 bodyWorld = ragdoll.GetBoneWorld(sole.bodyIndex) * sole.source.GetLocalTransform();
         const Quaternion rotation = Quaternion(Vector3(kZUnitVector), XMConvertToRadians(settings.rotation.z)) *
             Quaternion(Vector3(kYUnitVector), XMConvertToRadians(settings.rotation.y)) *
@@ -209,6 +304,9 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
 
         // 실제 발 위치에 맞춰 사각형을 배치
         const Matrix4 world = bodyWorld * sole.soleInBody * Matrix4(OrthogonalTransform(rotation, Vector3(settings.offset)));
+        foot.soleInBody = sole.soleInBody * Matrix4(OrthogonalTransform(rotation, Vector3(settings.offset)));
+        foot.soleInBone = sole.source.GetLocalTransform() * foot.soleInBody;
+        foot.soleWorld = world;
         const float w = settings.halfWidth, l = settings.halfLength;
         const Vector3 local[] = {Vector3(-w, 0, -l), Vector3(w, 0, -l), Vector3(w, 0, l), Vector3(-w, 0, l)};
         for (size_t i = 0; i < foot.corners.size(); ++i)

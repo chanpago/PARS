@@ -1,8 +1,10 @@
 ﻿#pragma once
 #include "PhysicsAsset.h"
+#include <cstdint>
 #include <memory>
 
 class PhysicsWorld;
+struct PhysicsGroundContact;
 namespace physx
 {
     class PxRigidBody;
@@ -94,6 +96,13 @@ namespace PARS
         Math::Vector3 GetPosition() const;
         // 실제 바디의 월드 질량중심을 질량으로 가중 평균한다. 바디가 없으면 false다.
         bool GetCenterOfMass(Math::Vector3& center, float& totalMass) const;
+        // 바디 질량중심의 실제 선속도를 질량으로 가중 평균한다. 단위는 m/s다.
+        bool GetCenterOfMassVelocity(Math::Vector3& velocity) const;
+        bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
+        uint64_t GetContactRevision() const
+        {
+            return m_ContactRevision;
+        }
         void AddVelocity(Math::Vector3 velocity);
         // PxActor::userData로 소유자를 식별해 이동 쿼리에서 자기 자신을 제외한다.
         void SetQueryOwner(void* owner);
@@ -129,6 +138,8 @@ namespace PARS
         void SetArticulationTarget(size_t joint, Math::Quaternion rotation, Math::Vector3 angularVelocity);
         void WakeBodies();
         void ConfigureRootSupportDrives();
+        void InvalidateContactState();
+        uint64_t m_ContactRevision = 0;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
