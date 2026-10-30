@@ -55,7 +55,7 @@ namespace
     void TestStartConditions()
     {
         FootstepPlanner planner;
-        FootstepSettings settings;
+        FootstepSettings settings{.3f, .3f};
         auto input = Standing();
         input.velocity = PxVec3(0);
         planner.Update(input, settings);
@@ -121,7 +121,7 @@ namespace
     void TestStepLifecycle()
     {
         FootstepPlanner planner;
-        const FootstepSettings settings;
+        const FootstepSettings settings{.3f, .3f};
         auto input = Standing();
         planner.Update(input, settings);
         const auto start = planner.GetSnapshot();
@@ -177,7 +177,7 @@ namespace
     void TestAbortAndInvalidInputs()
     {
         FootstepPlanner planner;
-        const FootstepSettings settings;
+        const FootstepSettings settings{.3f, .3f};
         auto input = Standing();
         planner.Update(input, settings);
         input.feet[1].grounded = false;
@@ -228,7 +228,7 @@ namespace
     void TestTargetGeometry()
     {
         FootstepPlanner planner;
-        FootstepSettings settings;
+        FootstepSettings settings{.3f, .3f};
         auto input = Standing();
         input.velocity = PxVec3(100, 100, 0);
         input.feet[1].position.x = 10;
@@ -266,7 +266,7 @@ namespace
 
         planner.Reset();
         input = Standing();
-        settings = {};
+        settings = {.3f, .3f};
         // 기준 방향을 90도 돌려도 발 간격 보정이 월드 X축에 고정되지 않아야 한다.
         input.supportRight = PxVec3(0, 0, 1);
         input.feet[0].stanceOffset = PxVec3(0, 0, -.12f);
@@ -284,7 +284,7 @@ namespace
     void TestMotionHeightAndProgress()
     {
         FootstepPlanner planner;
-        FootstepSettings settings;
+        FootstepSettings settings{.3f, .3f};
         auto input = Standing();
         planner.Update(input, settings);
         const auto start = planner.GetSnapshot();
@@ -379,7 +379,7 @@ namespace
     void TestMotionLimitsAndRetargeting()
     {
         FootstepPlanner planner;
-        FootstepSettings settings;
+        FootstepSettings settings{.3f, .3f};
         auto input = Standing();
         input.velocity.z = 100;
         input.feet[1].calfLength = .18f;

@@ -7,7 +7,7 @@ namespace PARS
 {
     struct FootstepSettings
     {
-        float startPredictionTime = .3f, landingPredictionTime = .3f;
+        float startPredictionTime = 2.0f, landingPredictionTime = .3f;
         float stanceScale = .8f, maximumStepLength = 2.0f;
         bool preventCrossing = false;
         float crossingOffset = .1f;
