@@ -227,7 +227,7 @@ private:
     std::string m_PreviewError;
     std::string m_RagdollMessage;
     bool m_ActiveSupport = true;
-    bool m_FootCandidateDebugVisible = false;
+    bool m_FootCandidateDebugVisible = true;
     std::string m_CharacterPAPath = "Mixamo.physics.json";
     std::string m_DefaultPAPath;
     std::unique_ptr<PARS::PhysicsAsset> m_PendingSavedPA;
