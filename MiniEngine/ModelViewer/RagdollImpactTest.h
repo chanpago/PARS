@@ -62,7 +62,7 @@ private:
     FootSoleDebug& m_FootSoles;
     std::vector<Shot> m_Shots;
     Math::Vector3 m_HipsReference{Math::kZero};
-    float m_Mass = .5f, m_Speed = 7.5f, m_MaxHipsDisplacement = 0;
+    float m_Mass = 2.0f, m_Speed = 7.5f, m_MaxHipsDisplacement = 0;
     bool m_AutomaticSupport = true;
     std::string m_Message;
 };
