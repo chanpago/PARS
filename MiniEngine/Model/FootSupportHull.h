@@ -120,13 +120,17 @@ namespace PARS
         std::array<float, 2> distances{};
     };
 
-    // 양발의 유효한 투영 영역과 A 내부 COM이 있을 때만 후보를 계산한다.
-    // 접촉 하중이 아니라 수평 거리로 정하는 관측용 후보이며, 실제 발 지지는 바꾸지 않는다.
+    // 현재 COM이 A 내부 또는 A~B 사이에 있으면 지지발·움직일 발 후보를 고른다.
+    // zone은 호출자가 같은 COM과 현재 B 크기로 계산한 판정이다. B 경계·바깥과 무효 영역은 제외한다.
+    // 후보는 COM과 발 중심의 수평 거리로 정한다. 실제 접촉과 착지 가능 여부는 플래너가 별도로 검사한다.
     inline FootSupportCandidates EvaluateFootSupportCandidates(const std::vector<physx::PxVec3>& hull,
-        const physx::PxVec3& com, const std::array<std::vector<physx::PxVec3>, 2>& feet, int previous = -1)
+        const physx::PxVec3& com, const std::array<std::vector<physx::PxVec3>, 2>& feet,
+        FootSupportZone zone, int previous = -1)
     {
         FootSupportCandidates result;
-        if (!com.isFinite() || !IsInsideFootSupportHull(hull, com))
+        // A를 벗어났다는 이유만으로 회복 발딛기 후보를 없애지 않는다.
+        if (!com.isFinite() || hull.size() < 3 ||
+            (zone != FootSupportZone::Inside && zone != FootSupportZone::Buffer))
         {
             return result;
         }
@@ -136,14 +140,15 @@ namespace PARS
             {
                 return {};
             }
-            for (const auto& point : feet[side])
+            for (const physx::PxVec3& point : feet[side])
             {
                 result.centers[side] += point;
             }
             result.centers[side] /= float(feet[side].size());
-            const auto delta = com - result.centers[side];
+            const physx::PxVec3 delta = com - result.centers[side];
             result.distances[side] = std::sqrt(delta.x * delta.x + delta.z * delta.z);
         }
+        // COM에 가까운 발을 지지발 후보로, 반대 발을 움직일 발 후보로 정한다.
         result.support = result.distances[0] <= result.distances[1] ? 0 : 1;
         // 거리 차이가 1cm 이내면 이전 후보를 유지한다. 처음 동률이면 왼발을 선택한다.
         if (previous >= 0 && previous < 2 &&

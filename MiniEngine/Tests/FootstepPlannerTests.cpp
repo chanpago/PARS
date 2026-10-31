@@ -118,6 +118,64 @@ namespace
             "A blue foot already airborne may start when the opposite foot has actual contact");
     }
 
+    void TestBufferStartCandidates()
+    {
+        const FootstepSettings settings;
+        for (const float direction : {-1.0f, 1.0f})
+        {
+            FootstepInput input = Standing();
+            std::array<std::vector<PxVec3>, 2> feet;
+            std::vector<PxVec3> points;
+            for (size_t side = 0; side < feet.size(); ++side)
+            {
+                const PxVec3 center = input.feet[side].position;
+                feet[side] = {center + PxVec3(-.05f, 0, -.15f), center + PxVec3(.05f, 0, -.15f),
+                    center + PxVec3(.05f, 0, .15f), center + PxVec3(-.05f, 0, .15f)};
+                points.insert(points.end(), feet[side].begin(), feet[side].end());
+            }
+            input.hull = BuildFootSupportHull(points);
+            input.com.x = .25f * direction;
+            input.velocity = PxVec3(direction, 0, 0);
+            input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+            // 후보 번호를 직접 지정하지 않고 실제 영역 판정과 후보 선택을 플래너에 연결한다.
+            input.blueFoot = EvaluateFootSupportCandidates(input.hull, input.com, feet, input.zone).step;
+            Check(input.zone == FootSupportZone::Buffer && !IsInsideFootSupportHull(input.hull, input.com),
+                "Buffer-start fixture places actual COM outside A but inside B");
+            FootstepPlanner planner;
+            planner.Update(input, settings);
+            const FootstepSnapshot& started = planner.GetSnapshot();
+            Check(started.needsStep && started.justStarted && started.startCount == 1 &&
+                    started.stepFoot == (direction < 0 ? 1 : 0) && started.hasTarget && started.motion.valid,
+                "Actual COM in the buffer starts a fresh step through the real candidate selector");
+
+            // 후보가 생겨도 반대 발의 실제 지면 접촉 조건은 계속 필요하다.
+            const int supportFoot = 1 - input.blueFoot;
+            input.feet[supportFoot].grounded = false;
+            planner.Reset();
+            planner.Update(input, settings);
+            Check(planner.GetSnapshot().startCount == 0 && !planner.GetSnapshot().hasTarget &&
+                    planner.GetSnapshot().reason == FootstepReason::NoStanceContact,
+                "Buffer start still requires actual contact on the opposite foot");
+            input.feet[supportFoot].grounded = true;
+
+            input.com.x = .5f * direction;
+            input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+            input.blueFoot = EvaluateFootSupportCandidates(input.hull, input.com, feet, input.zone).step;
+            planner.Reset();
+            planner.Update(input, settings);
+            Check(input.zone == FootSupportZone::Outside && input.blueFoot == -1 &&
+                    planner.GetSnapshot().phase == FootstepPhase::Aborted && planner.GetSnapshot().startCount == 0,
+                "Actual COM beyond B still aborts without starting a step");
+            input.com.x = .25f * direction;
+            input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+            input.blueFoot = EvaluateFootSupportCandidates(input.hull, input.com, feet, input.zone).step;
+            ++input.completedStep;
+            planner.Update(input, settings);
+            Check(planner.GetSnapshot().phase == FootstepPhase::Aborted && planner.GetSnapshot().startCount == 0,
+                "Returning to the buffer does not bypass the existing abort latch");
+        }
+    }
+
     void TestStepLifecycle()
     {
         FootstepPlanner planner;
@@ -480,6 +538,7 @@ namespace
 void TestFootstepPlanner()
 {
     TestStartConditions();
+    TestBufferStartCandidates();
     TestStepLifecycle();
     TestAbortAndInvalidInputs();
     TestTargetGeometry();

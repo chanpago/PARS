@@ -209,8 +209,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     {
         return;
     }
+
+    // 이번 입력 번호를 저장하고, 이번 계산에서 새로 만들 결과를 비움 
     m_HasSample = true;
-    auto& state = m_Snapshot;
+    FootstepSnapshot& state = m_Snapshot;
     state.completedStep = input.completedStep;
     state.revision = input.revision;
     state.rawBlueFoot = input.blueFoot;
@@ -222,21 +224,26 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.candidates = {};
 
     // 실제 COM의 B 이탈 및 기존 해제 래치를 착지 처리보다 먼저 검사한다.
-    if (input.active && input.automaticSupport &&
-        (input.zone == FootSupportZone::Outside || input.outsideBufferReleased))
+    // 액티브 래그돌·자동 지지 상태에서 현재 COM이 B 밖이거나, 이미 B 이탈로 지지가 해제됐다면 중단
+    if (input.active && input.automaticSupport && (input.zone == FootSupportZone::Outside || input.outsideBufferReleased))
     {
         Abort(FootstepReason::OutsideBuffer);
         return;
     }
+
+
     if (state.phase == FootstepPhase::Aborted)
     {
         return;
     }
+
     if (input.active && input.automaticSupport && input.rootReleased)
     {
         Abort(FootstepReason::RootSupportReleased);
         return;
     }
+
+    // 발딛기 기능을 사용할 실행 조건인지 확인
     if (!input.active || !input.automaticSupport || !input.idleAnimation)
     {
         state.phase = FootstepPhase::Idle;
@@ -246,19 +253,26 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             ? FootstepReason::AutomaticSupportRequired : FootstepReason::IdleRequired;
         return;
     }
+
+    // 이미 발딛기 중이면 이륙, 착지를 먼저 확인
     if (state.IsInProgress())
     {
-        const auto& foot = input.feet[state.stepFoot];
+        // 이미 선택한 발의 상태를읽음 
+        const FootstepFootInput& foot = input.feet[state.stepFoot];
+
         if (!foot.available || !foot.hasContactSample)
         {
             state.reason = FootstepReason::NoContactSample;
             return;
         }
+
         // 목표 계산 입력이 잠시 사라져도 실제 이륙/재접촉 이력은 놓치지 않는다.
         if (!foot.grounded)
         {
             state.phase = FootstepPhase::Airborne;
         }
+
+        // 발이 바닥에 닿아 있지않으면 공중 상태로 바꿈
         else if (state.phase == FootstepPhase::Airborne)
         {
             UpdateMotionProgress(foot);
@@ -273,6 +287,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             return;
         }
     }
+
+    // 예측 계산에 필요한 설정과 입력이 유효한지 확인
     if (!ValidSettings(settings))
     {
         state.reason = FootstepReason::InvalidSettings;
@@ -288,20 +304,32 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.reason = FootstepReason::NoSupportArea;
         return;
     }
+
+    // 미래 COM을 계산하고 발딛기 필요 여부를 판단
+    // 예측 위치 = 현재 COM 위치 + 현재 COM 속도 × 예측 시간
     state.predictedCom = PxVec3(input.com.x + input.velocity.x * settings.startPredictionTime,
         input.projectionHeight, input.com.z + input.velocity.z * settings.startPredictionTime);
     state.hasPrediction = state.predictedCom.isFinite();
+
     if (!state.hasPrediction)
     {
         state.reason = FootstepReason::InvalidCom;
         return;
     }
+
+    // 예측점이 A 밖이면 needsStep = true, 안이면 false
     state.needsStep = !IsInsideFootSupportHull(input.hull, state.predictedCom);
+
+    // 왼발·오른발 각각의 착지 후보를 계산
     for (size_t side = 0; side < state.candidates.size(); ++side)
     {
+        // MakeTarget()은 반대 발이 실제로 지지 중인지 확인하고, COM 위치·속도와 Idle 발 간격을 이용해 후보를 만듦
+        // 이후 지지발의 위치·접촉 법선으로 만든 평면에 맞추고 보폭 제한 등을 적용
+        // 발딛기 필요 판정은 기본 2초 예측, 착지 후보 위치는 기본 0.3초 예측을 사용하는 구조
         state.candidates[side] = MakeTarget(input, settings, side);
     }
 
+    // 진행 중인 발딛기가 없을 때만 새 발딛기의 시작 조건을 검사
     if (!state.IsInProgress())
     {
         state.phase = FootstepPhase::Idle;
@@ -316,13 +344,13 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             state.reason = FootstepReason::NoBlueFoot;
             return;
         }
-        const auto& candidate = state.candidates[input.blueFoot];
+        const FootstepTarget& candidate = state.candidates[input.blueFoot];
         if (!candidate.valid)
         {
             state.reason = candidate.reason;
             return;
         }
-        const auto& foot = input.feet[input.blueFoot];
+        const FootstepFootInput& foot = input.feet[input.blueFoot];
         if (!foot.hasContactSample)
         {
             state.reason = FootstepReason::NoContactSample;
@@ -338,12 +366,16 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             state.reason = FootstepReason::NoStepDistance;
             return;
         }
+
+        // 검사를 통과하면 움직일 발과 시작 정보를 확정
         state.stepFoot = input.blueFoot;
         state.supportFoot = 1 - input.blueFoot;
         state.phase = foot.grounded ? FootstepPhase::AwaitingTakeoff : FootstepPhase::Airborne;
         state.startPosition = foot.position;
         state.initialTarget = candidate.position;
         state.initialDistance = candidate.travelDistance;
+
+        // 발을 들어 올릴 초기 목표 높이를 계산하고 시작을 기록
         state.motion = {};
         state.motion.heightLimit = foot.calfLength;
         state.motion.initialHeight = (std::min)(state.initialDistance * settings.liftHeightScale, foot.calfLength);
@@ -352,7 +384,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         ++state.startCount;
     }
 
-    const auto& candidate = state.candidates[state.stepFoot];
+    // 선택한 발의 최신 착지 목표를 갱신
+    const FootstepTarget& candidate = state.candidates[state.stepFoot];
     if (!candidate.valid)
     {
         // 지면 입력을 잃어도 발을 다시 고르지 않는다. 유효해질 때까지 목표 출력을 보류한다.
@@ -363,6 +396,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.targetNormal = candidate.normal;
     state.hasTarget = true;
     state.reason = state.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;
+
+    // 현재 발 이동 목표를 만듦
+    // 실제 발이 시작점에서 최신 착지 목표 방향으로 얼마나 이동했는지 계산해서 진행률을 구함
+    // 공중 상태에서는 진행률이 이전 값보다 커질 때만 반영하고, 그 값으로 추가 높이를 줄임
     UpdateMotionTarget(input.feet[state.stepFoot]);
 }
 

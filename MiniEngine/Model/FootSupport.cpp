@@ -309,13 +309,17 @@ bool PARS::FootSupport::SetBufferScale(float scale)
 void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
 {
     const AnimInstance& animation = mesh.GetAnimInstance();
-    const bool idle = !animation.IsBlending() &&
-        animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle";
+
+    // 애니메이션 전환 중이 아니고 현재 클립이름이 idle일때만 true
+    const bool idle = !animation.IsBlending() && animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle";
+
     if (m_IdleReferenceRevision != m_Snapshot.contactRevision || !idle)
     {
         m_HasIdleReference = false;
         m_IdleReferenceRevision = m_Snapshot.contactRevision;
     }
+
+    // 필요할 때 idle 자세의 양발 본 변환을 저장
     if (idle && !m_HasIdleReference && m_Snapshot.feet[0].available && m_Snapshot.feet[1].available)
     {
         PhysicsSkeleton skeleton;
@@ -339,6 +343,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         }
     }
 
+    // 플래너에 넘길 현재 상태를 FootstepInput에 모음
+    // mesh에서 정보를 가져온다.
     FootstepInput input;
     input.active = mesh.IsActiveRagdoll();
     input.automaticSupport = mesh.UsesAutomaticRootSupport();
@@ -363,6 +369,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.hasReference = m_HasIdleReference && forward.isFinite() && forward.normalize() > 1e-6f;
     input.supportRight = PxVec3(forward.z, 0, -forward.x);
     std::array<PxVec3, 2> referenceFeet{PxVec3(0), PxVec3(0)};
+
+    // idle자세의 발 간격을 현재 캐릭터 방향에 맞춰 준비함
     if (input.hasReference)
     {
         for (size_t side = 0; side < m_Feet.size(); ++side)
@@ -372,7 +380,11 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
             input.hasReference = input.hasReference && referenceFeet[side].isFinite();
         }
     }
+
+    // 양발의 중점을 계산
     const PxVec3 midpoint = (referenceFeet[0] + referenceFeet[1]) * .5f;
+
+    // 각 발에서 중점을 빼면 원래 그 발이 중앙에서 얼마나 옆이나 앞뒤로 떨어져 있었는지 알 수 있음
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
         const FootSoleSample& foot = m_Snapshot.feet[side];
@@ -386,6 +398,14 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         const PxVec3 offset = referenceFeet[side] - midpoint;
         target.stanceOffset = input.supportRight * offset.x + forward * offset.z;
     }
+
+    // 균형을 회복하기위해 발을 어디에 딛을지 결정하고 발딛기의 진행 상태를 관리
+    /*
+    1. 현재 COM과 속도로 미래 COM을 예측
+    2. 예측 COM이 A 밖이면 발딛기가 필요하다고 판단
+    3. 전달받은 움직일 발 후보와 각 발의 착지 후보가 유효하면, 움직일 발과 착지 목표를 정함
+    4. 이후 실제 발의 이동·접촉을 확인하면서 목표와 이륙·공중·착지 상태를 갱신
+    */
     m_FootstepPlanner.Update(input, m_FootstepSettings);
     m_Snapshot.footstep = m_FootstepPlanner.GetSnapshot();
 }
@@ -506,8 +526,10 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         ? m_Snapshot.projectedCenterOfMass : PxVec3(std::numeric_limits<float>::quiet_NaN()), m_BufferScale);
     if (m_Snapshot.hasComProjection)
     {
+        // 위에서 계산한 A/B 판정을 전달해 A~B에서도 움직일 발 후보를 만들 수 있게 한다.
+        // 발딛기 필요 여부와 반대 발의 실제 지지 여부는 이후 플래너에서 판단한다.
         m_Snapshot.candidates = EvaluateFootSupportCandidates(m_Snapshot.hull,
-            m_Snapshot.projectedCenterOfMass, footPoints, previousCandidate);
+            m_Snapshot.projectedCenterOfMass, footPoints, m_Snapshot.balance.zone, previousCandidate);
     }
 
     // COM 예측과 발 접촉 정보를 바탕으로 발딛기 필요 여부, 움직일 발과 착지 목표를 판단한다.
