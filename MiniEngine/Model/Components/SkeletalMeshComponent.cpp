@@ -93,6 +93,7 @@ namespace PARS
         m_Ragdoll.Swap(candidate);
         m_PhysicsSkeleton = std::move(skeleton);
         m_PhysicsAsset = std::make_unique<const PhysicsAsset>(asset);
+        m_FootSupport.OnPhysicsAssetChanged(*m_PhysicsAsset);
         m_PendingDriveSettings.reset();
         if (IsRagdoll())
         {

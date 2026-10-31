@@ -99,6 +99,12 @@ namespace PARS
         auto* physics = world ? world->GetPhysicsWorld() : nullptr;
         if (physics)
         {
+            /*
+                - COM 정보: 현재 질량중심, 전체 질량, COM 속도.
+                - 발 정보: 실제 접촉 상태, 발바닥 위치, 레이로 얻은 지면 투영점.
+                - 균형 판단: A 영역, COM의 지면 투영과 A 내부 여부, A/B 기준 골반 지지계수 weight.
+                - 발딛기 판단: 지지발·움직일 발 후보, 예측 COM, 발딛기 필요 여부, 착지 목표와 발딛기 진행 상태.
+            */
             m_FootSupport.Update(*this, *physics);
         }
         else

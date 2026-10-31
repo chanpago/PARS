@@ -81,6 +81,9 @@ namespace PARS
         void Reset();
         // 명시적으로 자동 지지를 재설정할 때 기존 해제 래치와 발 판단을 함께 초기화한다.
         void ResetFootstep();
+        // PA 적용 시에만 저장한 발 바디의 연결·형상 변경 여부를 확인한다.
+        void OnPhysicsAssetChanged(const PhysicsAsset& asset);
+        // 발바닥 설정 초기화 후 다음 갱신에서 기준 정보를 다시 준비한다.
         void ResetSoles()
         {
             m_Initialized = false;
@@ -125,7 +128,6 @@ namespace PARS
         std::array<FootContactSample, 2> m_Contacts;
         const PhysicsWorld* m_ContactWorld = nullptr;
         uint64_t m_ClockRevision = 0, m_RagdollRevision = 0, m_ContactStep = 0, m_ContactRevision = 0;
-        const Model* m_Model = nullptr;
         bool m_Initialized = false;
         float m_BufferScale = 2.0f;
     };
