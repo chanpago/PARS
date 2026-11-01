@@ -358,6 +358,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.hull = m_Snapshot.hull;
     input.zone = m_Snapshot.balance.zone;
     input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
+    input.fixedDeltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
     input.blueFoot = m_Snapshot.candidates.step;
     input.completedStep = m_Snapshot.completedPhysicsStep;
     input.revision = m_Snapshot.contactRevision;

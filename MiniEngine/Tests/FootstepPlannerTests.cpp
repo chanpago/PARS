@@ -36,12 +36,13 @@ namespace
             {.25f, .4f, .15f}, {-.25f, .4f, .15f}});
         input.zone = FootSupportZone::Inside;
         input.projectionHeight = .4f;
+        input.fixedDeltaTime = 1.0f / 60;
         input.blueFoot = 1;
         input.completedStep = 10;
         input.revision = 1;
         for (size_t side = 0; side < input.feet.size(); ++side)
         {
-            auto& foot = input.feet[side];
+            FootstepFootInput& foot = input.feet[side];
             foot.available = foot.hasContactSample = foot.grounded = true;
             const float x = side == 0 ? -.12f : .12f;
             foot.position = PxVec3(x, .4f, 0);
@@ -218,7 +219,7 @@ namespace
         Check(planner.GetSnapshot().hasTarget && planner.GetSnapshot().startCount == 1,
             "Regained stance contact resumes the existing target without another start");
         input.feet[1].grounded = true;
-        ++input.completedStep;
+        input.completedStep = start.startedStep + 18;
         planner.Update(input, settings);
         Check(planner.GetSnapshot().justLanded && planner.GetSnapshot().landingCount == 1 &&
             !planner.GetSnapshot().hasTarget && !planner.GetSnapshot().motion.valid && planner.GetSnapshot().startCount == 1,
@@ -342,175 +343,136 @@ namespace
     void TestMotionHeightAndProgress()
     {
         FootstepPlanner planner;
-        FootstepSettings settings{.3f, .3f};
-        auto input = Standing();
+        const FootstepSettings settings{.3f, .3f};
+        FootstepInput input = Standing();
         planner.Update(input, settings);
-        const auto start = planner.GetSnapshot();
-        const PxVec3 initialDelta = start.target - start.startPosition;
-        const float height = start.initialDistance * .25f;
-        Check(start.motion.valid && Near(start.motion.initialHeight, height) &&
-            Near(start.motion.heightLimit, input.feet[1].calfLength),
-            "Initial lift height is one quarter of the moving foot's initial XZ distance");
-        Check(Near(start.motion.position.x, start.target.x) && Near(start.motion.position.z, start.target.z) &&
-            Near(start.motion.position.y, start.target.y + height) && Near(start.motion.progress, 0),
-            "The movement target combines landing XZ with landing Y plus the full initial height");
+        const FootstepSnapshot start = planner.GetSnapshot();
+        Check(start.motion.valid && (start.motion.position - start.startPosition).magnitude() < 1e-6f &&
+            Near(start.motion.height, 0) && Near(start.motion.elapsedTime, 0),
+            "Movement begins at the actual foot instead of jumping to the landing target");
+        Check(Near(start.motion.duration, .3f) && start.motion.initialHeight >= .08f,
+            "Movement has its own duration and minimum peak clearance");
+        planner.Update(input, settings);
+        Check(Near(planner.GetSnapshot().motion.elapsedTime, 0),
+            "Duplicate physics samples cannot advance movement time");
 
-        auto& foot = input.feet[1];
-        foot.position = start.startPosition + initialDelta * .5f;
+        // ?? ?? ???? ??? ?? ??? ?? ??? ????.
+        input.feet[1].grounded = false;
+        input.completedStep = start.startedStep + 9;
+        planner.Update(input, settings);
+        const FootstepSnapshot middle = planner.GetSnapshot();
+        const PxVec3 midpoint = (start.startPosition + middle.target) * .5f;
+        Check(Near(middle.motion.progress, .5f) && Near(middle.motion.measuredProgress, 0) &&
+            Near(middle.motion.height, start.motion.initialHeight) &&
+            Near(middle.motion.position.x, midpoint.x) && Near(middle.motion.position.z, midpoint.z),
+            "Half the duration reaches the path midpoint and peak without relying on actual foot progress");
+        input.feet[1].position = middle.target + PxVec3(0, .2f, 0);
         ++input.completedStep;
         planner.Update(input, settings);
-        Check(Near(planner.GetSnapshot().motion.measuredProgress, .5f) && Near(planner.GetSnapshot().motion.progress, 0) &&
-            Near(planner.GetSnapshot().motion.height, height),
-            "Sliding while still grounded does not remove the lift before takeoff");
-        foot.grounded = false;
-        foot.position = start.startPosition + PxVec3(0, .2f, 0);
-        ++input.completedStep;
+        Check(Near(planner.GetSnapshot().motion.measuredProgress, 1) &&
+            planner.GetSnapshot().motion.progress < 1 && planner.GetSnapshot().motion.height > 0,
+            "Early actual arrival does not skip the timed lift");
+        input.completedStep = start.startedStep + 18;
         planner.Update(input, settings);
-        Check(planner.GetSnapshot().phase == FootstepPhase::Airborne &&
-            Near(planner.GetSnapshot().motion.progress, 0) && Near(planner.GetSnapshot().motion.height, height),
-            "Vertical lift alone does not advance horizontal movement progress");
-        foot.position = start.startPosition + PxVec3(initialDelta.z, .2f, -initialDelta.x);
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(Near(planner.GetSnapshot().motion.progress, 0),
-            "Motion perpendicular to the landing direction does not lower the target");
-        foot.position = start.startPosition + initialDelta * .5f + PxVec3(0, .2f, 0);
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(Near(planner.GetSnapshot().motion.progress, .5f) && Near(planner.GetSnapshot().motion.height, height * .5f),
-            "Halfway actual horizontal movement halves the additional target height once");
-
-        input.velocity.z = 2;
-        foot.calfLength = .01f;
-        settings.liftHeightScale = .5f;
-        ++input.completedStep;
-        planner.Update(input, settings);
-        const auto extended = planner.GetSnapshot();
-        Check(Near(extended.motion.initialHeight, height) && Near(extended.motion.heightLimit, .45f) &&
-            Near(extended.initialDistance, start.initialDistance),
-            "Retargeting and changed live settings do not recompute the initial height, distance or calf cap");
-        Check(Near(extended.target.z, .6f) && Near(extended.motion.progress, .5f) && Near(extended.motion.height, height * .5f),
-            "A farther live landing target updates XZ without raising an already lowered target");
-        input.completedStep += 600;
-        planner.Update(input, settings);
-        Check(Near(planner.GetSnapshot().motion.height, extended.motion.height) &&
-            planner.GetSnapshot().phase == FootstepPhase::Airborne,
-            "Elapsed physics steps without actual movement do not lower or complete the step");
-
-        input.velocity.z = -1;
-        ++input.completedStep;
-        planner.Update(input, settings);
-        const auto turned = planner.GetSnapshot();
-        foot.position = start.startPosition + (turned.target - start.startPosition) * .75f + PxVec3(0, .1f, 0);
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(Near(planner.GetSnapshot().motion.progress, .75f) && Near(planner.GetSnapshot().motion.height, height * .25f),
-            "Actual progress follows a changed landing direction using the original start position");
-        foot.position = start.startPosition + (turned.target - start.startPosition) * .25f + PxVec3(0, .1f, 0);
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(Near(planner.GetSnapshot().motion.measuredProgress, .25f) && Near(planner.GetSnapshot().motion.progress, .75f),
-            "Backward displacement records its raw progress without restarting the lift");
-        foot.position = planner.GetSnapshot().target + PxVec3(0, .1f, 0);
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(planner.GetSnapshot().motion.valid && Near(planner.GetSnapshot().motion.progress, 1) &&
-            Near(planner.GetSnapshot().motion.height, 0) && planner.GetSnapshot().phase == FootstepPhase::Airborne &&
-            planner.GetSnapshot().landingCount == 0,
-            "Reaching the landing XZ lowers to the ground but does not finish without actual contact");
-        foot.position.y = planner.GetSnapshot().target.y;
-        foot.grounded = true;
+        Check(Near(planner.GetSnapshot().motion.progress, 1) && Near(planner.GetSnapshot().motion.height, 0) &&
+            (planner.GetSnapshot().motion.position - planner.GetSnapshot().target).magnitude() < 1e-6f &&
+            planner.GetSnapshot().phase == FootstepPhase::Airborne && planner.GetSnapshot().landingCount == 0,
+            "The duration ends at the target but still requires actual contact");
+        input.feet[1].position = planner.GetSnapshot().target;
+        input.feet[1].grounded = true;
         ++input.completedStep;
         planner.Update(input, settings);
         Check(planner.GetSnapshot().justLanded && !planner.GetSnapshot().motion.valid &&
-            planner.GetSnapshot().motion.hasLandingError && Near(planner.GetSnapshot().motion.landingError, 0),
-            "Actual recontact ends movement output and records the landing position error");
+            Near(planner.GetSnapshot().motion.landingError, 0),
+            "Contact after the duration finishes the step and records landing error");
         input.blueFoot = 0;
-        settings.liftHeightScale = .25f;
         ++input.completedStep;
         planner.Update(input, settings);
-        Check(planner.GetSnapshot().justStarted && planner.GetSnapshot().motion.valid &&
-            Near(planner.GetSnapshot().motion.progress, 0) && !planner.GetSnapshot().motion.hasLandingError,
-            "The following step creates fresh lift progress and landing diagnostics");
+        Check(planner.GetSnapshot().justStarted && Near(planner.GetSnapshot().motion.elapsedTime, 0),
+            "A subsequent step starts a fresh clock");
+
+        // ?? ?? ??? ??? ?? ?? ??? ??? ??? ??.
+        for (const float dt : {1.0f / 60, 1.0f / 120})
+        {
+            planner.Reset();
+            input = Standing();
+            input.fixedDeltaTime = dt;
+            planner.Update(input, settings);
+            input.feet[1].grounded = false;
+            input.completedStep += static_cast<uint64_t>(std::lround(.15f / dt));
+            planner.Update(input, settings);
+            Check((planner.GetSnapshot().motion.position - middle.motion.position).magnitude() < 1e-5f,
+                "Equal elapsed physics time produces the same path target at 60 and 120 Hz");
+        }
     }
 
     void TestMotionLimitsAndRetargeting()
     {
         FootstepPlanner planner;
         FootstepSettings settings{.3f, .3f};
-        auto input = Standing();
+        FootstepInput input = Standing();
         input.velocity.z = 100;
         input.feet[1].calfLength = .18f;
         planner.Update(input, settings);
-        Check(planner.GetSnapshot().initialDistance * .25f > .18f &&
-            Near(planner.GetSnapshot().motion.initialHeight, .18f),
-            "Long movement caps the initial vertical height at the reference calf length");
-        for (float length : {0.0f, -1.0f, std::numeric_limits<float>::quiet_NaN()})
+        Check(Near(planner.GetSnapshot().motion.initialHeight, .18f),
+            "Long movement caps the peak at the reference calf length");
+        for (const float length : {.04f, .45f})
+        {
+            planner.Reset();
+            input = Standing();
+            input.feet[1].position = PxVec3(.096f, .4f, .29f);
+            input.feet[1].calfLength = length;
+            planner.Update(input, settings);
+            Check(Near(planner.GetSnapshot().motion.initialHeight, (std::min)(.08f, length)),
+                "Short steps get minimum clearance without exceeding the calf cap");
+        }
+        for (const float length : {0.0f, -1.0f, std::numeric_limits<float>::quiet_NaN()})
         {
             planner.Reset();
             input = Standing();
             input.feet[1].calfLength = length;
             planner.Update(input, settings);
             Check(planner.GetSnapshot().reason == FootstepReason::NoCalfLength &&
-                planner.GetSnapshot().startCount == 0 && !planner.GetSnapshot().motion.valid,
-                "Absent or invalid reference calf length cannot create an uncapped movement target");
+                !planner.GetSnapshot().motion.valid, "Invalid calf length rejects the trajectory");
         }
         planner.Reset();
         input = Standing();
         input.feet[1].position = PxVec3(.096f, .4f, .3f);
         planner.Update(input, settings);
-        Check(planner.GetSnapshot().reason == FootstepReason::NoStepDistance &&
-            planner.GetSnapshot().startCount == 0 && !planner.GetSnapshot().motion.valid,
-            "A zero horizontal displacement does not start a step or divide by zero");
+        Check(planner.GetSnapshot().reason == FootstepReason::NoStepDistance,
+            "A zero-distance target still does not start a step");
 
         planner.Reset();
         input = Standing();
         input.feet[0].normal = PxVec3(0, .8f, .6f);
         planner.Update(input, settings);
-        const auto sloped = planner.GetSnapshot();
-        Check(sloped.motion.valid && Near(sloped.motion.position.x, sloped.target.x) &&
-            Near(sloped.motion.position.z, sloped.target.z) &&
-            Near(sloped.motion.position.y - sloped.target.y, sloped.motion.initialHeight),
-            "Vertical lift preserves landing XZ even when the landing plane slopes");
+        const FootstepSnapshot slopeStart = planner.GetSnapshot();
+        input.feet[1].grounded = false;
+        input.completedStep += 9;
+        planner.Update(input, settings);
+        const FootstepSnapshot slopeMiddle = planner.GetSnapshot();
+        Check(Near(slopeMiddle.motion.position.y,
+            (slopeStart.startPosition.y + slopeMiddle.target.y) * .5f + slopeMiddle.motion.initialHeight),
+            "Sloped endpoints interpolate their height before adding vertical clearance");
 
         planner.Reset();
         input = Standing();
         planner.Update(input, settings);
-        const auto start = planner.GetSnapshot();
+        const FootstepSnapshot start = planner.GetSnapshot();
         input.feet[1].grounded = false;
-        input.feet[1].position = start.startPosition + (start.target - start.startPosition) * .25f + PxVec3(0, .1f, 0);
-        ++input.completedStep;
+        input.velocity.z = 2;
+        settings.stepDuration = .8f;
+        settings.minimumLiftHeight = .2f;
+        input.completedStep += 9;
         planner.Update(input, settings);
-        input.velocity.z = .5f;
-        ++input.completedStep;
-        planner.Update(input, settings);
-        const auto shortened = planner.GetSnapshot();
-        input.feet[1].position = shortened.target + PxVec3(0, .1f, 0);
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(Near(planner.GetSnapshot().motion.progress, 1) && Near(planner.GetSnapshot().motion.height, 0) &&
+        Check(Near(planner.GetSnapshot().target.z, .6f) && Near(planner.GetSnapshot().motion.progress, .5f) &&
+            Near(planner.GetSnapshot().motion.duration, .3f) &&
             Near(planner.GetSnapshot().motion.initialHeight, start.motion.initialHeight),
-            "A shortened target can reach full progress without changing the initial lift height");
+            "Live candidates update while movement duration and peak height stay latched");
 
+        // ?? ??? ?? ?? ????? ??? ??? ???.
         planner.Reset();
-        input = Standing();
-        planner.Update(input, settings);
-        input.feet[1].grounded = false;
-        input.com.x = .024f;
-        input.velocity = PxVec3(0);
-        input.feet[1].position.z = .1f;
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(planner.GetSnapshot().motion.valid && Near(planner.GetSnapshot().motion.progress, 0),
-            "A target returning to the start remains finite while the actual foot is still away");
-        input.feet[1].position = planner.GetSnapshot().startPosition + PxVec3(0, .1f, 0);
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(planner.GetSnapshot().motion.valid && Near(planner.GetSnapshot().motion.height, 0) &&
-            planner.GetSnapshot().phase == FootstepPhase::Airborne,
-            "Returning above a coincident start and target lowers to ground but still waits for contact");
-
-        planner.Reset();
+        settings = {.3f, .3f};
         input = Standing();
         planner.Update(input, settings);
         input.feet[1].grounded = false;
@@ -519,20 +481,53 @@ namespace
         input.feet[1].grounded = true;
         ++input.completedStep;
         planner.Update(input, settings);
-        Check(planner.GetSnapshot().justLanded && planner.GetSnapshot().motion.landingError > .29f &&
-            Near(planner.GetSnapshot().motion.progress, 0) && !planner.GetSnapshot().motion.valid,
-            "Early recontact stops output while retaining the error instead of claiming target arrival");
+        Check(!planner.GetSnapshot().justLanded && planner.GetSnapshot().motion.valid &&
+            planner.GetSnapshot().motion.height > 0, "Early recontact does not cut off the lift");
+        input.completedStep += 16;
+        planner.Update(input, settings);
+        Check(planner.GetSnapshot().justLanded && planner.GetSnapshot().motion.landingError > .29f,
+            "End-of-duration contact finishes while retaining an undershot landing error");
         ++input.revision;
         planner.Update(input, settings);
-        Check(planner.GetSnapshot().motion.valid && !planner.GetSnapshot().motion.hasLandingError &&
-            Near(planner.GetSnapshot().motion.progress, 0),
-            "A PA or physics reset clears previous movement and landing history");
+        Check(planner.GetSnapshot().motion.valid && Near(planner.GetSnapshot().motion.elapsedTime, 0),
+            "A physics reset clears elapsed time and landing history");
         input.feet[1].grounded = false;
         input.feet[1].position.x = std::numeric_limits<float>::quiet_NaN();
         ++input.completedStep;
         planner.Update(input, settings);
-        Check(!planner.GetSnapshot().motion.valid, "Nonfinite actual foot position invalidates movement output");
+        Check(!planner.GetSnapshot().motion.valid, "Nonfinite actual foot position invalidates output");
+
+        for (int invalid = 0; invalid < 3; ++invalid)
+        {
+            planner.Reset();
+            input = Standing();
+            settings = {.3f, .3f};
+            if (invalid == 0)
+            {
+                settings.stepDuration = 0;
+            }
+            else if (invalid == 1)
+            {
+                settings.minimumLiftHeight = std::numeric_limits<float>::quiet_NaN();
+            }
+            else
+            {
+                input.fixedDeltaTime = 0;
+            }
+            planner.Update(input, settings);
+            Check(planner.GetSnapshot().reason == FootstepReason::InvalidSettings &&
+                !planner.GetSnapshot().motion.valid, "Invalid movement parameters reject the trajectory");
+        }
+        planner.Reset();
+        input = Standing();
+        settings = {.3f, .3f};
+        planner.Update(input, settings);
+        input.completedStep += 18;
+        planner.Update(input, settings);
+        Check(planner.GetSnapshot().justLanded && planner.GetSnapshot().motion.landingError > .29f,
+            "A foot that never lifted cannot stay stuck after the trajectory duration");
     }
+
 }
 
 void TestFootstepPlanner()

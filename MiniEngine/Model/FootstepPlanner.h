@@ -7,11 +7,13 @@ namespace PARS
 {
     struct FootstepSettings
     {
-        float startPredictionTime = 2.0f, landingPredictionTime = .3f;
+        float startPredictionTime = 2.0f, landingPredictionTime = .6f;
         float stanceScale = .8f, maximumStepLength = 2.0f;
         bool preventCrossing = false;
         float crossingOffset = .1f;
-        float liftHeightScale = .25f;
+        // 착지 예측 시간과 별개인 발 이동 시간(s)과 궤적의 최소 최고 높이(m)다.
+        float liftHeightScale = .35f;
+        float stepDuration = .3f, minimumLiftHeight = .08f;
     };
 
     enum class FootstepPhase
@@ -65,6 +67,7 @@ namespace PARS
         std::vector<physx::PxVec3> hull;
         FootSupportZone zone = FootSupportZone::Invalid;
         float projectionHeight = 0;
+        float fixedDeltaTime = 0;
         int blueFoot = -1;
         uint64_t completedStep = 0, revision = 0;
     };
@@ -83,6 +86,8 @@ namespace PARS
         bool valid = false, hasLandingError = false;
         physx::PxVec3 position{0};
         float initialHeight = 0, heightLimit = 0, height = 0;
+        // progress는 시간 진행률이고, measuredProgress는 실제 발 위치의 진행률이다.
+        float elapsedTime = 0, duration = 0;
         float measuredProgress = 0, progress = 0, remainingDistance = 0;
         float landingError = 0;
     };

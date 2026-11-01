@@ -16,7 +16,9 @@ namespace
             std::isfinite(settings.maximumStepLength) && settings.maximumStepLength > 0 &&
             std::isfinite(settings.crossingOffset) && settings.crossingOffset >= 0 &&
             settings.crossingOffset <= settings.maximumStepLength &&
-            std::isfinite(settings.liftHeightScale) && settings.liftHeightScale > 0;
+            std::isfinite(settings.liftHeightScale) && settings.liftHeightScale > 0 &&
+            std::isfinite(settings.stepDuration) && settings.stepDuration > 0 &&
+            std::isfinite(settings.minimumLiftHeight) && settings.minimumLiftHeight > 0;
     }
 
     float HorizontalDistance(const PxVec3& a, const PxVec3& b)
@@ -147,8 +149,8 @@ void FootstepPlanner::Abort(FootstepReason reason)
 
 bool FootstepPlanner::UpdateMotionProgress(const FootstepFootInput& foot)
 {
-    auto& state = m_Snapshot;
-    auto& motion = state.motion;
+    FootstepSnapshot& state = m_Snapshot;
+    FootstepMotion& motion = state.motion;
     if (!foot.position.isFinite() || !state.target.isFinite())
     {
         return false;
@@ -175,26 +177,26 @@ bool FootstepPlanner::UpdateMotionProgress(const FootstepFootInput& foot)
         // 갱신된 목표가 시작점으로 돌아온 경우에도 0으로 나누지 않는다.
         motion.measuredProgress = motion.remainingDistance <= MinimumStepDistance ? 1.0f : 0.0f;
     }
-    if (state.phase == FootstepPhase::Airborne)
-    {
-        // 이륙 전 미끄러짐만으로 높이가 사라지지 않게 한다.
-        // 후퇴하거나 목표가 멀어져도 이미 진행한 내려놓기를 되돌리지 않는다.
-        motion.progress = (std::max)(motion.progress, motion.measuredProgress);
-    }
+    // 실제 위치는 진단에만 사용한다. 목표의 이동 시간은 발의 미끄러짐과 별개로 진행한다.
     return true;
 }
 
 void FootstepPlanner::UpdateMotionTarget(const FootstepFootInput& foot)
 {
-    auto& state = m_Snapshot;
-    auto& motion = state.motion;
+    FootstepSnapshot& state = m_Snapshot;
+    FootstepMotion& motion = state.motion;
     if (!state.hasTarget || !state.IsInProgress() || !UpdateMotionProgress(foot))
     {
         return;
     }
-    motion.height = motion.initialHeight * (1.0f - motion.progress);
-    // XZ는 최신 착지 후보, Y는 그 지면 높이와 추가 높이를 합한다. 시간으로 진행시키지 않는다.
-    motion.position = state.target + PxVec3(0, motion.height, 0);
+    const float t = motion.progress;
+    const float blend = t * t * (3.0f - 2.0f * t);
+    const float arc = t * (1.0f - t);
+    // 출발/도착 시 변화율이 0인 보간으로 이동하고, 중간에 최고 높이에 도달한다.
+    // 발이 이미 공중에 있었다면 실제 시작 높이에서 착지면 높이로 함께 보간한다.
+    motion.height = motion.initialHeight * 16.0f * arc * arc;
+    motion.position = state.startPosition + (state.target - state.startPosition) * blend +
+        PxVec3(0, motion.height, 0);
     motion.valid = motion.position.isFinite() && std::isfinite(motion.height);
 }
 
@@ -254,7 +256,23 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         return;
     }
 
-    // 이미 발딛기 중이면 이륙, 착지를 먼저 확인
+    if (!std::isfinite(input.fixedDeltaTime) || input.fixedDeltaTime <= 0)
+    {
+        state.reason = FootstepReason::InvalidSettings;
+        return;
+    }
+
+    // 같은 물리 스텝의 재조회는 위에서 제외된다. 렌더 프레임 수와 무관한 물리 시간이다.
+    if (state.IsInProgress())
+    {
+        const uint64_t elapsedSteps = input.completedStep >= state.startedStep
+            ? input.completedStep - state.startedStep : 0;
+        state.motion.elapsedTime = static_cast<float>((std::min)(
+            double(elapsedSteps) * input.fixedDeltaTime, double(state.motion.duration)));
+        state.motion.progress = (std::min)(state.motion.elapsedTime / state.motion.duration, 1.0f);
+    }
+
+    // 이미 발딛기 중이면 실제 이륙/접촉을 확인한다.
     if (state.IsInProgress())
     {
         // 이미 선택한 발의 상태를읽음 
@@ -272,8 +290,9 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             state.phase = FootstepPhase::Airborne;
         }
 
-        // 발이 바닥에 닿아 있지않으면 공중 상태로 바꿈
-        else if (state.phase == FootstepPhase::Airborne)
+        // 들어 올리는 도중의 재접촉으로 끝내지 않는다. 계획 시간이 끝나도 실제 접촉이 필요하다.
+        // 끝까지 이륙하지 못한 경우도 접촉 상태에서 종료하며, 목표 미도달은 오차로 남긴다.
+        else if (state.motion.elapsedTime + 1e-6f >= state.motion.duration)
         {
             UpdateMotionProgress(foot);
             state.phase = FootstepPhase::Landed;
@@ -325,7 +344,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     {
         // MakeTarget()은 반대 발이 실제로 지지 중인지 확인하고, COM 위치·속도와 Idle 발 간격을 이용해 후보를 만듦
         // 이후 지지발의 위치·접촉 법선으로 만든 평면에 맞추고 보폭 제한 등을 적용
-        // 발딛기 필요 판정은 기본 2초 예측, 착지 후보 위치는 기본 0.3초 예측을 사용하는 구조
+        // 시작 판단과 착지 후보의 예측 시간은 발 이동 시간과 별개다.
         state.candidates[side] = MakeTarget(input, settings, side);
     }
 
@@ -378,7 +397,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         // 발을 들어 올릴 초기 목표 높이를 계산하고 시작을 기록
         state.motion = {};
         state.motion.heightLimit = foot.calfLength;
-        state.motion.initialHeight = (std::min)(state.initialDistance * settings.liftHeightScale, foot.calfLength);
+        state.motion.initialHeight = (std::min)((std::max)(
+            state.initialDistance * settings.liftHeightScale, settings.minimumLiftHeight), foot.calfLength);
+        // 도중에 설정을 바꿔도 현재 스텝의 시간과 최고 높이는 유지한다.
+        state.motion.duration = settings.stepDuration;
         state.startedStep = input.completedStep;
         state.justStarted = true;
         ++state.startCount;
@@ -397,9 +419,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.hasTarget = true;
     state.reason = state.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;
 
-    // 현재 발 이동 목표를 만듦
-    // 실제 발이 시작점에서 최신 착지 목표 방향으로 얼마나 이동했는지 계산해서 진행률을 구함
-    // 공중 상태에서는 진행률이 이전 값보다 커질 때만 반영하고, 그 값으로 추가 높이를 줄임
+    // 물리 시간으로 이동 목표를 만들고, 실제 발의 수평 진행률은 별도로 기록한다.
     UpdateMotionTarget(input.feet[state.stepFoot]);
 }
 

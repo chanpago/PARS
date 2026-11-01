@@ -301,7 +301,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     if (ImGui::TreeNodeEx(u8"발딛기 판단 / 착지 목표", ImGuiTreeNodeFlags_DefaultOpen))
     {
         const auto& step = sample.footstep;
-        auto& settings = support.GetFootstepSettings();
+        PARS::FootstepSettings& settings = support.GetFootstepSettings();
         const auto& recovery = mesh.GetRecoverySnapshot();
         const auto& recoverySettings = mesh.GetRecoverySettings();
         ImGui::Text(u8"제어 상태: %s%s", recovery.state == PARS::RecoveryState::Recovery ? "Recovery" : "Animation",
@@ -325,6 +325,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
             static_cast<unsigned long long>(step.abortCount));
         ImGui::Text(u8"예측: 시작 %.2fs / 착지 %.2fs · 발 간격 %.2f · 최대 보폭 %.1fm",
             settings.startPredictionTime, settings.landingPredictionTime, settings.stanceScale, settings.maximumStepLength);
+        ImGui::DragFloat(u8"발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
+        ImGui::DragFloat(u8"최소 들기 높이 (m)", &settings.minimumLiftHeight, .005f, .01f, .3f, "%.3f");
         ImGui::Checkbox(u8"발 교차 억제 (경계 0.1m)", &settings.preventCrossing);
         if (step.hasPrediction)
         {
@@ -353,11 +355,12 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         }
         if (step.IsInProgress() || step.phase == PARS::FootstepPhase::Landed)
         {
-            const auto& motion = step.motion;
-            ImGui::Text(u8"초기 들기 높이 %.1fcm / 시작 시 종아리 상한 %.1fcm",
+            const PARS::FootstepMotion& motion = step.motion;
+            ImGui::Text(u8"계획 최고 높이 %.1fcm / 시작 시 종아리 상한 %.1fcm",
                 motion.initialHeight * 100, motion.heightLimit * 100);
-            ImGui::Text(u8"이동 진행도 %.1f%% (현재 측정 %.1f%%) / 남은 수평 거리 %.1fcm",
-                motion.progress * 100, motion.measuredProgress * 100, motion.remainingDistance * 100);
+            ImGui::Text(u8"이동 시간 %.2f / %.2fs · 시간 진행 %.1f%% / 실제 수평 진행 %.1f%% / 남은 거리 %.1fcm",
+                motion.elapsedTime, motion.duration, motion.progress * 100,
+                motion.measuredProgress * 100, motion.remainingDistance * 100);
             ImGui::ProgressBar(motion.progress, ImVec2(-1, 0));
             if (motion.valid)
             {
@@ -373,8 +376,9 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
                 ImGui::Text(u8"재접촉 시 수평 목표 오차 %.1fcm (목표 도달 여부와 접촉 종료는 별개)", motion.landingError * 100);
             }
         }
-        ImGui::Text(u8"초기 높이 = min(시작 수평 거리 x %.2f, 기준 종아리 길이)", settings.liftHeightScale);
-        ImGui::TextWrapped(u8"이륙 전에는 초기 높이를 유지합니다. 이륙 후 실제 수평 진행에 따라 낮추며, 100%가 되어도 실제 접촉 전에는 종료하지 않습니다.");
+        ImGui::Text(u8"최고 높이 = min(max(시작 거리 x %.2f, %.2fm), 기준 종아리 길이)",
+            settings.liftHeightScale, settings.minimumLiftHeight);
+        ImGui::TextWrapped(u8"설정은 다음 발딛기부터 적용됩니다. 출발점에서 부드럽게 이동하며 중간에 가장 높게 듭니다. 계획 시간이 끝난 뒤 실제 접촉을 확인해 종료합니다.");
         ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
         ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동/지지 다리의 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
         const auto& ik = mesh.GetFootstepIKSnapshot();
