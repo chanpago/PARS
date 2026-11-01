@@ -92,6 +92,9 @@ bool RagdollImpactTest::Reset()
     }
     m_HipsReference = mesh.GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
+    // 눈금 0은 바닥 Y=0이다. 더미가 밀려도 눈금자는 초기 위치 옆에 고정한다.
+    const Vector3 dummyPosition = dummy->GetActorLocation();
+    m_RulerOrigin = Vector3(float(dummyPosition.GetX()) - .75f, 0, float(dummyPosition.GetZ()));
     m_Message.clear();
     return true;
 }
@@ -256,6 +259,8 @@ void RagdollImpactTest::DrawUI(Character* player)
         ImGui::TextWrapped("%s", u8"우클릭 유지: 조준 / 조준 중 좌클릭 또는 R: 발사");
         ImGui::TextWrapped("%s", u8"조준하지 않을 때 R: 더미 골반으로 발사");
         ImGui::TextUnformatted(u8"반지름 15cm / 중력과 실제 충돌 적용");
+        ImGui::Checkbox(u8"2m 눈금자 표시", &m_RulerVisible);
+        ImGui::TextUnformatted(u8"눈금자: 1cm 눈금 / 10cm 숫자 / 주황색 8cm 표시");
         ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
         ImGui::BeginDisabled(!player);

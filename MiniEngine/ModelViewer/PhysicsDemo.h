@@ -3,6 +3,7 @@
 #include "PhysicsWorld.h"
 #include "RootSignature.h"
 #include "PipelineState.h"
+#include "GpuBuffer.h"
 #include <string>
 
 namespace Math
@@ -33,6 +34,8 @@ public:
     void RenderDebugLines(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
         const std::vector<physx::PxDebugLine>& lines, bool throughGeometry = false);
+    void RenderRuler(GraphicsContext& context, const Math::Camera& camera,
+        const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor, Math::Vector3 origin);
 
 private:
     void ResetBox();
@@ -50,6 +53,7 @@ private:
     GraphicsPSO m_PSO;
     GraphicsPSO m_LinePSO;
     GraphicsPSO m_OverlayLinePSO;
+    ByteAddressBuffer m_RulerMesh;
     physx::PxRigidStatic* m_Walls[5] = {};
     bool m_DropReady = true;
     static constexpr int HistoryCapacity = 240;

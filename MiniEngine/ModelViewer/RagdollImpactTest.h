@@ -39,6 +39,14 @@ public:
     void DrawUI(PARS::Character* player);
     void BuildLines(std::vector<physx::PxDebugLine>& lines);
     PARS::Character* GetDummy() const;
+    bool IsRulerVisible() const
+    {
+        return m_RulerVisible;
+    }
+    Math::Vector3 GetRulerOrigin() const
+    {
+        return m_RulerOrigin;
+    }
     std::vector<physx::PxRigidDynamic*> GetProjectiles() const;
     float GetMaxHipsDisplacement() const
     {
@@ -62,7 +70,9 @@ private:
     FootSoleDebug& m_FootSoles;
     std::vector<Shot> m_Shots;
     Math::Vector3 m_HipsReference{Math::kZero};
+    Math::Vector3 m_RulerOrigin{Math::kZero};
     float m_Mass = 2.0f, m_Speed = 7.5f, m_MaxHipsDisplacement = 0;
     bool m_AutomaticSupport = true;
+    bool m_RulerVisible = true;
     std::string m_Message;
 };
