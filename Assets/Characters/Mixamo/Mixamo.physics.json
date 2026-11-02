@@ -1568,7 +1568,7 @@
       "swingZ": "limited",
       "swingZLimit": 0.27925267815589905,
       "twist": "limited",
-      "twistMax": 2.403318405151367,
+      "twistMax": 3.1398472785949707,
       "twistMin": -0.01745329238474369
     },
     {
@@ -1754,7 +1754,7 @@
       "swingZ": "limited",
       "swingZLimit": 0.27925267815589905,
       "twist": "limited",
-      "twistMax": 2.403318405151367,
+      "twistMax": 3.1398472785949707,
       "twistMin": -0.01745329238474369
     },
     {
