@@ -44,6 +44,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="PhysicsWorldTests.cpp" />
+    <ClCompile Include="FramePerformanceTests.cpp" />
     <ClCompile Include="FootstepPlannerTests.cpp" />
     <ClCompile Include="..\Model\FootstepPlanner.cpp" />
     <ClCompile Include="FootstepIKTests.cpp" />

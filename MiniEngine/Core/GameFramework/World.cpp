@@ -1,4 +1,5 @@
 #include "World.h"
+#include "../FramePerformance.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -165,6 +166,7 @@ namespace PARS
 
     void World::Tick(float deltaTime)
     {
+        FramePerformance::Scope worldTiming(FramePerformance::Category::ParsOther);
         if (!m_Playing || m_IterationDepth != 0 || !std::isfinite(deltaTime) || deltaTime < 0.0f)
         {
             return;

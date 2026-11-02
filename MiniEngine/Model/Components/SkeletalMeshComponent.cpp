@@ -1,4 +1,5 @@
 #include "SkeletalMeshComponent.h"
+#include "FramePerformance.h"
 
 namespace PARS
 {
@@ -126,6 +127,7 @@ namespace PARS
 
     void SkeletalMeshComponent::TickComponent(float deltaTime)
     {
+        FramePerformance::Scope poseTiming(FramePerformance::Category::ParsPose);
         if (IsRagdoll())
         {
             UpdatePhysicsPose();
@@ -145,6 +147,7 @@ namespace PARS
     */
     void SkeletalMeshComponent::FixedTickComponent(float deltaTime)
     {
+        FramePerformance::Scope controlTiming(FramePerformance::Category::ParsControl);
         if (!m_Ragdoll.IsActive())
         {
             return;
@@ -223,6 +226,7 @@ namespace PARS
 
     bool SkeletalMeshComponent::UpdateRenderData(GraphicsContext& context, const std::vector<GraphNode>* poseOverride)
     {
+        FramePerformance::Scope renderTiming(FramePerformance::Category::RenderPreparation);
         if (!m_SkeletalMesh)
         {
             return false;

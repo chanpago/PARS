@@ -1,4 +1,5 @@
 ﻿#include "PhysicsWorld.h"
+#include "FramePerformance.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -428,10 +429,13 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
     }
 
     // 이 부분에서 PhsyX를 생성할때 할당 처리한 워커스레드를 이용해서 물리 시뮬레이션을 진행한다. FixedDeltaTime은 1/60초로 고정되어 있다.
-    m_Scene->simulate(static_cast<float>(FixedDeltaTime));
+    {
+        FramePerformance::Scope physicsTiming(FramePerformance::Category::PhysXStep);
+        m_Scene->simulate(static_cast<float>(FixedDeltaTime));
 
-    // PhysX는 시뮬레이션이 끝나면 fetchResults()를 호출해야 한다. fetchResults()가 끝나야 Actor의 pose를 읽을 수 있다. true파라미터는 simulate의 결과를 다 받고 진행하겠다는 뜻.
-    m_Scene->fetchResults(true);
+        // PhysX는 시뮬레이션이 끝나면 fetchResults()를 호출해야 한다. fetchResults()가 끝나야 Actor의 pose를 읽을 수 있다. true파라미터는 simulate의 결과를 다 받고 진행하겠다는 뜻.
+        m_Scene->fetchResults(true);
+    }
     ++m_StepCount;
     m_LastSubsteps = 1;
 }

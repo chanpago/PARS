@@ -15,6 +15,7 @@
 #include "GameCore.h"
 #include "GraphicsCore.h"
 #include "SystemTime.h"
+#include "FramePerformance.h"
 #include "GameInput.h"
 #include "BufferManager.h"
 #include "CommandContext.h"
@@ -68,8 +69,10 @@ namespace GameCore
         GameInput::Update(DeltaTime);
         EngineTuning::Update(DeltaTime);
         
+        FramePerformance::BeginFrame();
         game.Update(DeltaTime);
         game.RenderScene();
+        FramePerformance::EndFrame();
 
         PostEffects::Render();
 

@@ -13,6 +13,7 @@
 
 #include "pch.h"
 #include "SystemTime.h"
+#include "FramePerformance.h"
 #include "Display.h"
 #include "TextRenderer.h"
 #include "GraphRenderer.h"
@@ -423,6 +424,7 @@ namespace EngineProfiling
 {
     BoolVar DrawFrameRate("Display Frame Rate", true);
     BoolVar DrawProfiler("Display Profiler", false);
+    BoolVar DrawParsTimings("Display PARS Timings", false);
     //BoolVar DrawPerfGraph("Display Performance Graph", false);
     const bool DrawPerfGraph = false;
     
@@ -451,10 +453,25 @@ namespace EngineProfiling
         return Paused;
     }
 
+    void DisplayTimingRow(TextContext& text, const char* label, FramePerformance::Category category)
+    {
+        const FramePerformance::Statistics statistics = FramePerformance::GetState().recorder.GetStatistics(category);
+        text.SetCursorX(10.0f);
+        text.DrawString(label);
+        text.SetCursorX(290.0f);
+        text.DrawFormattedString("%8.3f", statistics.last);
+        text.SetCursorX(410.0f);
+        text.DrawFormattedString("%8.3f", statistics.average);
+        text.SetCursorX(530.0f);
+        text.DrawFormattedString("%8.3f\n", statistics.maximum);
+    }
+
     void DisplayFrameRate( TextContext& Text )
     {
         if (!DrawFrameRate)
+        {
             return;
+        }
         
         float cpuTime = NestedTimingTree::GetTotalCpuTime();
         float gpuTime = NestedTimingTree::GetTotalGpuTime();
@@ -462,6 +479,37 @@ namespace EngineProfiling
 
         Text.DrawFormattedString( "CPU %7.3f ms, GPU %7.3f ms, %3u Hz\n",
             cpuTime, gpuTime, (uint32_t)(frameRate + 0.5f));
+
+        if (!DrawParsTimings && !GameInput::IsPressed(GameInput::kMouse1))
+        {
+            return;
+        }
+
+        Text.ResetCursor(10.0f, Text.GetCursorY() + 8.0f);
+        Text.SetTextSize(18.0f);
+        Text.SetColor(Color(0.5f, 1.0f, 1.0f));
+        Text.DrawString("CPU elapsed time (ms/frame)");
+        Text.SetCursorX(290.0f);
+        Text.DrawString("    Last");
+        Text.SetCursorX(410.0f);
+        Text.DrawString("     Avg");
+        Text.SetCursorX(530.0f);
+        Text.DrawString("     Max\n");
+        Text.SetColor(Color(1.0f, 1.0f, 1.0f));
+        DisplayTimingRow(Text, "PhysX step + wait", FramePerformance::Category::PhysXStep);
+        DisplayTimingRow(Text, "PARS CPU total", FramePerformance::Category::ParsTotal);
+        DisplayTimingRow(Text, "  Control / targets", FramePerformance::Category::ParsControl);
+        DisplayTimingRow(Text, "  Pose / animation", FramePerformance::Category::ParsPose);
+        DisplayTimingRow(Text, "  Other world work", FramePerformance::Category::ParsOther);
+        DisplayTimingRow(Text, "Mesh render prep CPU", FramePerformance::Category::RenderPreparation);
+        const FramePerformance::Statistics physics =
+            FramePerformance::GetState().recorder.GetStatistics(FramePerformance::Category::PhysXStep);
+        Text.SetCursorX(10.0f);
+        Text.DrawFormattedString("PhysX steps: %u | Avg/Max: last %u frames | all worlds\n",
+            physics.calls, static_cast<uint32_t>(FramePerformance::GetState().recorder.GetFrameCount()));
+        Text.SetCursorX(10.0f);
+        Text.DrawString("PARS excludes PhysX step; queries/API helpers stay in caller.\n");
+        Text.SetTextSize(24.0f);
     }
 
     void DisplayPerfGraph( GraphicsContext& Context )

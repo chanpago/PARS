@@ -567,6 +567,7 @@
     <ClInclude Include="DescriptorHeap.h" />
     <ClInclude Include="GpuBuffer.h" />
     <ClInclude Include="EngineProfiling.h" />
+    <ClInclude Include="FramePerformance.h" />
     <ClInclude Include="EsramAllocator.h" />
     <ClInclude Include="FileUtility.h" />
     <ClInclude Include="FXAA.h" />

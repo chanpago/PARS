@@ -275,6 +275,8 @@ namespace
     }
 }
 
+void TestFramePerformance();
+
 int main(int argc, char** argv)
 {
     if (argc == 2 && std::strcmp(argv[1], "--footstep-only") == 0)
@@ -287,6 +289,11 @@ int main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--foot-candidates-only") == 0)
     {
         TestFootSupportCandidates();
+        return 0;
+    }
+    TestFramePerformance();
+    if (argc == 2 && std::strcmp(argv[1], "--frame-performance-only") == 0)
+    {
         return 0;
     }
     TestFootProjectionRaycast();
