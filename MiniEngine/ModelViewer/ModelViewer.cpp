@@ -1447,7 +1447,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                             return;
                         }
                         const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
-                        const PARS::FootstepRoles roles = sample.footstep.GetRoles();
+                        const PARS::FootstepRoles roles = sample.GetDisplayRoles();
                         ImGui::TextUnformatted(label);
                         if (roles.IsValid())
                         {
@@ -1460,6 +1460,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                             {
                                 ImGui::TextUnformatted(u8"발딛기 역할 유지: 착지 처리까지 고정");
                             }
+                        }
+                        else if (sample.footstep.GetRoles().IsValid())
+                        {
+                            ImGui::TextUnformatted(u8"발 역할 표시 없음: 지지발 접촉 무효");
                         }
                         else
                         {

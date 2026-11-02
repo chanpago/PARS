@@ -353,6 +353,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     {
         const PARS::FootstepSnapshot& step = sample.footstep;
         const PARS::FootstepRoles roles = step.GetRoles();
+        const PARS::FootstepRoles displayRoles = sample.GetDisplayRoles();
         PARS::FootstepSettings& settings = support.GetFootstepSettings();
         const auto& recovery = mesh.GetRecoverySnapshot();
         const auto& recoverySettings = mesh.GetRecoverySettings();
@@ -373,7 +374,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         ImGui::TextWrapped(u8"밝은 파랑 윤곽: 최종 착지 발바닥 위치·크기 / 화살표: 발끝 방향. 새 목표 계산이 잠시 멈춰도 마지막 착지 목표를 유지합니다.");
         ImGui::Text(u8"상태: %s", PARS::FootstepPhaseLabel(step.phase));
         ImGui::TextWrapped(u8"사유: %s", PARS::FootstepReasonLabel(step.reason));
-        ImGui::Text(u8"빨강 지지발: %s / 파랑 이동 가능 발: %s", FootLabel(roles.supportFoot), FootLabel(roles.movableFoot));
+        ImGui::Text(u8"빨강 지지발: %s / 파랑 이동 가능 발: %s",
+            FootLabel(displayRoles.supportFoot), FootLabel(displayRoles.movableFoot));
         ImGui::Text(u8"발딛기 역할 고정: %s / 거리 기준 이동 후보: %s", roles.locked ? "ON" : "OFF", FootLabel(step.rawBlueFoot));
         ImGui::Text(u8"시작 %llu / 착지 %llu / 중단 %llu",
             static_cast<unsigned long long>(step.startCount), static_cast<unsigned long long>(step.landingCount),

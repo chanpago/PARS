@@ -229,7 +229,7 @@ namespace PARS
             return;
         }
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
-        const FootstepRoles roles = sample.footstep.GetRoles();
+        const FootstepRoles roles = sample.GetDisplayRoles();
         if (!roles.IsValid())
         {
             return;

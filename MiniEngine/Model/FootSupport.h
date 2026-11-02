@@ -69,6 +69,24 @@ namespace PARS
         uint64_t sampleNumber = 0, completedPhysicsStep = 0;
         uint64_t contactRevision = 0;
         std::string message;
+
+        FootstepRoles GetDisplayRoles() const
+        {
+            const FootstepRoles roles = footstep.GetRoles();
+            if (!roles.IsValid())
+            {
+                return {};
+            }
+            const FootSoleSample& support = feet[roles.supportFoot];
+            physx::PxVec3 normal = support.contact.normal;
+            if (!support.available || !support.contact.hasSample || !support.contact.grounded ||
+                !normal.isFinite() || normal.normalize() < 1e-6f || normal.y < .70710678f)
+            {
+                // 진행 중에도 지지 접촉이 무효면 색상 표시만 숨긴다. 확정한 제어 역할은 유지한다.
+                return {};
+            }
+            return roles;
+        }
     };
 
     // Samples actual bodies before simulate(), independently of rendering/debug visibility.
