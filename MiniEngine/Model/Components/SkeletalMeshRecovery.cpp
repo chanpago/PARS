@@ -10,9 +10,45 @@ namespace PARS
     {
         PxTransform ToRecoveryFrame(const Matrix4& matrix)
         {
-            const auto frame = PhysicsJointFrame::FromTransform(PhysicsBoneFrame(matrix));
+            const PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(PhysicsBoneFrame(matrix));
             return PxTransform(PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
                 PxQuat(frame.rotation.x, frame.rotation.y, frame.rotation.z, frame.rotation.w));
+        }
+
+        PxTransform CaptureSupportSole(const FootSoleSample& foot)
+        {
+            const PxTransform actual = ToRecoveryFrame(foot.soleWorld);
+            PxVec3 points[3];
+            unsigned count = 0;
+            for (size_t corner = 0; corner < foot.projected.size() && count < 3; ++corner)
+            {
+                if (foot.projected[corner])
+                {
+                    points[count++] = foot.projections[corner];
+                }
+            }
+            if (count < 3)
+            {
+                return actual;
+            }
+            PxVec3 normal = (points[1] - points[0]).cross(points[2] - points[0]);
+            if (normal.normalize() < 1e-6f)
+            {
+                return actual;
+            }
+            if (normal.y < 0)
+            {
+                normal = -normal;
+            }
+            if (normal.y < .70710678f)
+            {
+                return actual;
+            }
+            // 초기 공중 위치를 영구 고정점으로 저장하지 않는다. 실제 레이로 얻은 바닥에 발 목표를 둔다.
+            // 목표만 바꾸며 물리 접촉 판정이나 실제 바디 위치는 수정하지 않는다.
+            const PxVec3 position = actual.p - normal * normal.dot(actual.p - points[0]);
+            PxTransform planted(PxIdentity);
+            return MakeFootSoleTarget(position, normal, actual, planted) ? planted : actual;
         }
     }
 
@@ -23,12 +59,14 @@ namespace PARS
         m_RecoveryReferenceHull.clear();
         m_RecoveryBlendSource.clear();
         m_FootstepIK.Reset();
+        m_StandingSupport.Reset();
+        m_Ragdoll.SetSupportContacts({});
     }
 
     bool SkeletalMeshComponent::CaptureRecoveryBlendSource()
     {
         std::vector<Matrix4> bodies;
-        const auto& nodes = m_Ragdoll.GetBoneNodes();
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
         if (m_BoneStretch.size() != nodes.size())
         {
             return false;
@@ -44,8 +82,8 @@ namespace PARS
 
     bool SkeletalMeshComponent::ApplyRecoveryTargets(std::vector<Matrix4>& target, float deltaTime)
     {
-        const auto& sample = m_FootSupport.GetSnapshot();
-        const auto& step = sample.footstep;
+        const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
+        const FootstepSnapshot& step = sample.footstep;
         const bool idle = !m_AnimInstance->IsBlending() &&
             m_AnimInstance->GetAnimationName(m_AnimInstance->GetCurrentAnimationIndex()) == "Idle";
         RecoveryInput input;
@@ -72,7 +110,7 @@ namespace PARS
         }
         if (sample.hasCenterOfMassVelocity)
         {
-            const auto& v = sample.centerOfMassVelocity;
+            const PxVec3& v = sample.centerOfMassVelocity;
             input.horizontalSpeed = std::sqrt(v.x * v.x + v.z * v.z);
         }
 
@@ -83,7 +121,7 @@ namespace PARS
         std::vector<PxVec3> corners;
         for (size_t side = 0; side < sample.feet.size(); ++side)
         {
-            const auto& foot = sample.feet[side];
+            const FootSoleSample& foot = sample.feet[side];
             if (!foot.available || foot.boneNode < 0 || size_t(foot.boneNode) >= target.size())
             {
                 referenceValid = false;
@@ -92,9 +130,9 @@ namespace PARS
             animatedSoles[side] = ToRecoveryFrame(target[foot.boneNode]) * ToRecoveryFrame(foot.soleInBone);
             actualMidpoint += ToRecoveryFrame(foot.soleWorld).p * .5f;
             animationMidpoint += animatedSoles[side].p * .5f;
-            const auto& sole = m_FootSupport.GetSoleSettings(side);
+            const FootSoleSettings& sole = m_FootSupport.GetSoleSettings(side);
             const float w = sole.halfWidth, l = sole.halfLength;
-            for (const auto& corner : {PxVec3(-w, 0, -l), PxVec3(w, 0, -l), PxVec3(w, 0, l), PxVec3(-w, 0, l)})
+            for (const PxVec3& corner : {PxVec3(-w, 0, -l), PxVec3(w, 0, -l), PxVec3(w, 0, l), PxVec3(-w, 0, l)})
             {
                 corners.push_back(animatedSoles[side].transform(corner));
             }
@@ -103,7 +141,7 @@ namespace PARS
         {
             // 밀리기 전 월드 위치로 돌아가라고 요구하지 않는다. 기준 발 영역을 현재 양발 중심에 맞춘다.
             const PxVec3 shift = actualMidpoint - animationMidpoint;
-            for (auto& corner : corners)
+            for (PxVec3& corner : corners)
             {
                 corner += shift;
                 corner.y = sample.projectedCenterOfMass.y;
@@ -116,26 +154,60 @@ namespace PARS
         }
 
         m_Recovery.Update(input, m_RecoverySettings);
-        const auto& recovery = m_Recovery.GetSnapshot();
+        const RecoverySnapshot& recovery = m_Recovery.GetSnapshot();
         if (input.fallen)
         {
             m_HasRecoverySoles = false;
             m_RecoveryBlendSource.clear();
             m_FootstepIK.Reset();
+            m_StandingSupport.Reset();
+            m_Ragdoll.SetSupportContacts({});
             return true;
         }
         if (recovery.enteredRecovery)
         {
             m_Ragdoll.ResetDriveTargetHistory();
             m_RecoveryBlendSource.clear();
+        }
+        if ((m_Ragdoll.UsesFootDrivenSupport() && !m_HasRecoverySoles) ||
+            (recovery.enteredRecovery && !m_Ragdoll.UsesFootDrivenSupport()))
+        {
             m_HasRecoverySoles = sample.feet[0].available && sample.feet[1].available;
             for (size_t side = 0; side < sample.feet.size(); ++side)
             {
-                m_RecoverySoles[side] = ToRecoveryFrame(sample.feet[side].soleWorld);
+                m_RecoverySoles[side] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[side]) :
+                    ToRecoveryFrame(sample.feet[side].soleWorld);
                 m_HasRecoverySoles = m_HasRecoverySoles && m_RecoverySoles[side].isSane();
             }
         }
-        if (recovery.state == RecoveryState::Recovery)
+        if (recovery.state == RecoveryState::Animation && recovery.startedBlend)
+        {
+            if (!CaptureRecoveryBlendSource())
+            {
+                m_PhysicsError = "Cannot capture the current physical pose for animation recovery.";
+                return false;
+            }
+            m_Ragdoll.ResetDriveTargetHistory();
+        }
+        if (recovery.state == RecoveryState::Animation && recovery.blending)
+        {
+            std::vector<GraphNode> pose = m_AnimInstance->GetPose();
+            if (m_RecoveryBlendSource.size() != pose.size() ||
+                !BlendRecoveryPose(m_RecoveryBlendSource, pose, recovery.blendAlpha))
+            {
+                m_PhysicsError = "Invalid physical pose in animation recovery.";
+                return false;
+            }
+            if (!EvaluatePhysicsPose(m_PhysicsSkeleton, pose, Matrix4(GetComponentTransform()), target, m_PhysicsError))
+            {
+                return false;
+            }
+        }
+        else if (recovery.state == RecoveryState::Animation)
+        {
+            m_RecoveryBlendSource.clear();
+        }
+        if (recovery.state == RecoveryState::Recovery || m_Ragdoll.UsesFootDrivenSupport())
         {
             if (!m_HasRecoverySoles)
             {
@@ -144,12 +216,14 @@ namespace PARS
             }
             if (step.justStarted && step.supportFoot >= 0 && step.supportFoot < 2)
             {
-                m_RecoverySoles[step.supportFoot] = ToRecoveryFrame(sample.feet[step.supportFoot].soleWorld);
+                m_RecoverySoles[step.supportFoot] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[step.supportFoot]) :
+                    ToRecoveryFrame(sample.feet[step.supportFoot].soleWorld);
             }
             if (step.justLanded && step.stepFoot >= 0 && step.stepFoot < 2)
             {
                 // 착지는 회복의 종료가 아니다. 착지한 발을 유지하며 COM 안정 조건을 계속 확인한다.
-                m_RecoverySoles[step.stepFoot] = ToRecoveryFrame(sample.feet[step.stepFoot].soleWorld);
+                m_RecoverySoles[step.stepFoot] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[step.stepFoot]) :
+                    ToRecoveryFrame(sample.feet[step.stepFoot].soleWorld);
             }
             else if (step.motion.valid && step.stepFoot >= 0 && step.stepFoot < 2)
             {
@@ -159,8 +233,15 @@ namespace PARS
                     m_RecoverySoles[step.stepFoot] = sole;
                 }
             }
+            if (m_Ragdoll.UsesFootDrivenSupport() && (step.justStarted || step.justLanded))
+            {
+                // 이륙/착지 때 실제 발로 기준을 다시 잡는 차이를 목표 속도·가속도로 오인하지 않는다.
+                // 현재 물리 속도는 유지하므로 관절 PD의 제동은 계속 작동한다.
+                m_Ragdoll.ResetDriveTargetHistory();
+            }
             // 접촉/후보가 잠시 사라져도 마지막 유효한 양발 목표로 IK를 계속 푼다.
-            ApplyFootstepIKTargets(target);
+            // 발딛기 목표 출력이 잠시 멈춰도 지지 다리의 높이 복구는 계속 계산한다.
+            ApplyFootstepIKTargets(target, deltaTime);
             if (m_FootstepIK.GetSnapshot().status != FootstepIKStatus::Applied)
             {
                 m_PhysicsError = "Recovery leg IK could not produce valid drive targets.";
@@ -170,32 +251,6 @@ namespace PARS
         }
 
         m_FootstepIK.Reset();
-        if (recovery.startedBlend)
-        {
-            if (!CaptureRecoveryBlendSource())
-            {
-                m_PhysicsError = "Cannot capture the current physical pose for animation recovery.";
-                return false;
-            }
-            m_Ragdoll.ResetDriveTargetHistory();
-        }
-        if (recovery.blending)
-        {
-            auto pose = m_AnimInstance->GetPose();
-            if (m_RecoveryBlendSource.size() != pose.size())
-            {
-                m_PhysicsError = "Recovery blend source does not match the skeleton.";
-                return false;
-            }
-            // 애니메이션 시간은 계속 진행한다. 로컬 본 자세를 섞어 길이와 본 계층을 보존한다.
-            if (!BlendRecoveryPose(m_RecoveryBlendSource, pose, recovery.blendAlpha))
-            {
-                m_PhysicsError = "Invalid physical pose in the recovery blend.";
-                return false;
-            }
-            return EvaluatePhysicsPose(m_PhysicsSkeleton, pose, Matrix4(GetComponentTransform()), target, m_PhysicsError);
-        }
-        m_RecoveryBlendSource.clear();
         m_HasRecoverySoles = false;
         return true;
     }

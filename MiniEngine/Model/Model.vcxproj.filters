@@ -158,6 +158,9 @@
     <ClCompile Include="Components\SkeletalMeshRecovery.cpp" />
     <ClCompile Include="Ragdoll.cpp" />
     <ClCompile Include="RagdollDrive.cpp" />
+    <ClCompile Include="RagdollSupport.cpp" />
+    <ClInclude Include="StandingSupport.h" />
+    <ClCompile Include="StandingSupport.cpp" />
     <ClCompile Include="RagdollArticulation.cpp" />
     <ClCompile Include="RagdollComparison.cpp" />
     <ClCompile Include="RagdollComparisonReport.cpp" />

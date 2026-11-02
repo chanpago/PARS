@@ -461,6 +461,25 @@ namespace
                 Check(ragdoll.SetRootSupported(true, error) && ragdoll.IsRootAxisSupported(0) &&
                         ragdoll.IsRootAxisSupported(2) && ragdoll.GetRootSupportWeight() == 1,
                     "Explicit manual support restores all root axes");
+                if (articulated)
+                {
+                    Check(ragdoll.SetRootSupport(1, false, error), "Configure automatic support before leg mode");
+                    const PxTransform beforeLegMode = root->getGlobalPose();
+                    ragdoll.SetFootDrivenSupport(true);
+                    Check(ragdoll.UsesFootDrivenSupport() && !ragdoll.IsRootAxisSupported(1) &&
+                        ragdoll.IsRootAxisSupported(3) &&
+                        (beforeLegMode.p - root->getGlobalPose().p).magnitude() < 1e-7f,
+                        "Leg support disables external Y drive, preserves rotation support and does not teleport");
+                    ragdoll.SetSupportContacts({});
+                    Check(ragdoll.UpdateDriveTargets(target, 0, error) &&
+                        ragdoll.UpdateDriveTargets(target, 1.0f / 60, error), "Update foot-driven support targets");
+                    world.Step();
+                    Check(PxAbs(float(ragdoll.GetRootSupportForce().GetY())) < 1e-5f &&
+                        ragdoll.GetSupportLoads().forces[0].isZero() && ragdoll.GetSupportLoads().forces[1].isZero(),
+                        "No external Y force or invented foot load exists without support contacts");
+                    ragdoll.SetFootDrivenSupport(false);
+                    Check(ragdoll.IsRootAxisSupported(1), "Leaving leg mode restores the existing Y drive");
+                }
                 ragdoll.Destroy();
                 Check(world.GetErrorCount() == 0, "Weighted support has no PhysX errors");
             }

@@ -278,6 +278,7 @@ void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorl
         current.position = ground.position;
         current.normal = ground.normal;
         current.pointCount = ground.pointCount;
+        current.normalImpulse = ground.normalImpulse;
         if (previous.hasSample && current.hasSample)
         {
             current.leftGround = previous.grounded && !current.grounded;

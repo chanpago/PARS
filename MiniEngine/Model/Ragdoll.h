@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include "PhysicsAsset.h"
+#include <foundation/PxVec3.h>
+#include <array>
 #include <cstdint>
 #include <memory>
 
@@ -16,6 +18,20 @@ namespace physx
 
 namespace PARS
 {
+    struct RagdollSupportContact
+    {
+        int body = -1;
+        bool supporting = false;
+        physx::PxVec3 position{0};
+        physx::PxVec3 normal{0, 1, 0};
+    };
+
+    struct RagdollSupportLoads
+    {
+        std::array<float, 2> fractions{};
+        std::array<physx::PxVec3, 2> forces{physx::PxVec3(0), physx::PxVec3(0)};
+    };
+
     // 실행 중인 PhysX 객체를 소유한다. 소속 PhysicsWorld가 종료되기 전에 파괴해야 한다.
     // 에셋 복사본은 PhysX/PVD가 참조하는 이름 문자열도 소유한다.
     class Ragdoll
@@ -53,16 +69,28 @@ namespace PARS
         // 월드 공간의 힘/토크 드라이브로 동적 골반을 지지한다.
         // 인체 관절의 각도 드라이브와 독립적이며, simulate() 전에 갱신한다.
         bool SetRootSupported(bool supported, std::string& error);
-        // Partial support keeps Y/rotation motors, optionally releases X/Z, and never teleports.
-        // A zero weight removes the support joint and its associated compensation.
+        // 부분 지지는 회전과 선택한 위치 모터의 강도를 조절한다. 발 지지 모드의 Y 모터는 항상 꺼진다.
+        // 가중치 0은 골반 보조 조인트를 제거하며 바디 위치를 순간 이동시키지 않는다.
         bool SetRootSupport(float weight, bool horizontal, std::string& error);
+        // 발 지지에서는 골반 Y 모터를 끄고 지면 하중을 관절 보상 토크에 반영한다.
+        void SetFootDrivenSupport(bool enabled);
+        void SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts);
+        bool UsesFootDrivenSupport() const
+        {
+            return m_FootDrivenSupport;
+        }
+        const RagdollSupportLoads& GetSupportLoads() const
+        {
+            return m_SupportLoads;
+        }
         float GetRootSupportWeight() const
         {
             return m_RootSupportWeight;
         }
         bool IsRootAxisSupported(unsigned axis) const
         {
-            return IsRootSupported() && axis < 6 && (m_SupportHorizontal || (axis != 0 && axis != 2));
+            return IsRootSupported() && axis < 6 && !(axis == 1 && m_FootDrivenSupport) &&
+                (m_SupportHorizontal || (axis != 0 && axis != 2));
         }
         float GetRootTargetHeight() const;
         bool IsRootSupported() const
@@ -70,6 +98,7 @@ namespace PARS
             return m_SupportBody >= 0;
         }
         float GetRootPositionError() const;
+        Math::Vector3 GetRootSupportForce() const;
         float GetRootRotationError() const;
         size_t GetDrivenJointCount() const;
         float GetMaxDriveError(size_t* worstJoint = nullptr) const;
@@ -141,6 +170,7 @@ namespace PARS
         void SetArticulationTarget(size_t joint, Math::Quaternion rotation, Math::Vector3 angularVelocity);
         void WakeBodies();
         void ConfigureRootSupportDrives();
+        std::vector<float> ComputeSupportGeneralizedForce();
         void InvalidateContactState();
         uint64_t m_ContactRevision = 0;
         PhysicsAsset m_Asset;
@@ -164,6 +194,9 @@ namespace PARS
         bool m_HasSupportTarget = false;
         bool m_SupportHorizontal = true;
         float m_RootSupportWeight = 0;
+        bool m_FootDrivenSupport = false;
+        std::array<RagdollSupportContact, 2> m_SupportContacts;
+        RagdollSupportLoads m_SupportLoads;
         float m_MaxTargetClampAngle = 0;
         std::vector<Math::Quaternion> m_DriveTargets;
         std::vector<Math::Matrix4> m_LastKinematicTargets;

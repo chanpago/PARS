@@ -224,6 +224,9 @@ namespace PARS
         m_HasSupportTarget = false;
         m_SupportHorizontal = true;
         m_RootSupportWeight = 0;
+        m_FootDrivenSupport = false;
+        m_SupportContacts = {};
+        m_SupportLoads = {};
         m_DriveTargets.clear();
         m_LastKinematicTargets.clear();
         m_AnimatedLinearVelocity.clear();
@@ -266,6 +269,9 @@ namespace PARS
         std::swap(m_HasSupportTarget, other.m_HasSupportTarget);
         std::swap(m_SupportHorizontal, other.m_SupportHorizontal);
         std::swap(m_RootSupportWeight, other.m_RootSupportWeight);
+        std::swap(m_FootDrivenSupport, other.m_FootDrivenSupport);
+        std::swap(m_SupportContacts, other.m_SupportContacts);
+        std::swap(m_SupportLoads, other.m_SupportLoads);
         m_DriveTargets.swap(other.m_DriveTargets);
         m_LastKinematicTargets.swap(other.m_LastKinematicTargets);
         m_AnimatedLinearVelocity.swap(other.m_AnimatedLinearVelocity);

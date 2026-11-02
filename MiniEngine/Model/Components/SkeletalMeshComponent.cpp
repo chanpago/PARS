@@ -81,6 +81,7 @@ namespace PARS
                 return false;
             }
             candidate.SetDrivesEnabled(IsActiveRagdoll());
+            candidate.SetFootDrivenSupport(m_Ragdoll.UsesFootDrivenSupport());
             if (!candidate.SetRootSupport(m_Ragdoll.GetRootSupportWeight(), m_Ragdoll.IsRootAxisSupported(0), error))
             {
                 return false;

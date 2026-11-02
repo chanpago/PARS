@@ -8,6 +8,7 @@
 #include "../FootSupport.h"
 #include "../FootstepIK.h"
 #include "../RagdollRecovery.h"
+#include "../StandingSupport.h"
 
 namespace PARS
 {
@@ -90,6 +91,10 @@ namespace PARS
         {
             return m_RecoverySettings;
         }
+        const StandingSupportSnapshot& GetStandingSupportSnapshot() const
+        {
+            return m_StandingSupport.GetSnapshot();
+        }
         const std::vector<physx::PxVec3>& GetRecoveryReferenceHull() const
         {
             return m_RecoveryReferenceHull;
@@ -149,7 +154,7 @@ namespace PARS
         void UpdateKinematicPose(bool teleport);
         void UpdatePhysicsPose();
         void UpdateFootSupport();
-        void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target);
+        void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         bool ApplyRecoveryTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void ResetRecovery();
         bool CaptureRecoveryBlendSource();
@@ -160,6 +165,8 @@ namespace PARS
         FootstepIK m_FootstepIK;
         RagdollRecovery m_Recovery;
         RecoverySettings m_RecoverySettings;
+        StandingSupport m_StandingSupport;
+        StandingSupportSettings m_StandingSupportSettings;
         std::array<physx::PxTransform, 2> m_RecoverySoles{
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};
         bool m_HasRecoverySoles = false;

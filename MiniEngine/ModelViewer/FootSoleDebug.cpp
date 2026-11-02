@@ -1,5 +1,6 @@
 ﻿#include "FootSoleDebug.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "PhysicsWorld.h"
 #include "imgui.h"
 #include <cmath>
 
@@ -369,6 +370,22 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
             recovery.stableTime, recoverySettings.stableDuration, recovery.blendAlpha * 100, recoverySettings.blendDuration,
             static_cast<unsigned long long>(recovery.recoveryCount), static_cast<unsigned long long>(recovery.returnCount));
         ImGui::TextWrapped(u8"Recovery에서는 접촉이 잠시 끊겨도 양발 목표를 유지합니다. 연한 파랑 영역은 현재 양발 중심에 맞춘 애니메이션 기준 발 영역입니다.");
+        const PARS::StandingSupportSnapshot& standing = mesh.GetStandingSupportSnapshot();
+        if (mesh.GetRagdoll().UsesFootDrivenSupport() && standing.valid)
+        {
+            const PARS::RagdollSupportLoads& loads = mesh.GetRagdoll().GetSupportLoads();
+            ImGui::Text(u8"다리로 골반 높이 지지: 실제 %.3fm / 목표 %.3fm / 기준 %.3fm",
+                standing.actualHeight, standing.targetHeight, standing.nominalHeight);
+            ImGui::Text(u8"낮추기 요청: 발딛기 %.1fcm / 접촉 상실 %.1fcm / 다리 도달 %.1fcm",
+                standing.stepLowering * 100, standing.contactLowering * 100, standing.reachLowering * 100);
+            ImGui::Text(u8"적용 높이 차이 %.1fcm / 수평 자세 보정 %.1fcm / 도달 불가 %s",
+                standing.lowering * 100, standing.horizontalCorrection.magnitude() * 100, standing.reachLimited ? "ON" : "OFF");
+            ImGui::Text(u8"예상 지지 하중: 왼발 %.0fN / 오른발 %.0fN", loads.forces[0].y, loads.forces[1].y);
+            ImGui::Text(u8"측정 접촉 반력: 왼발 %.0fN / 오른발 %.0fN",
+                sample.feet[0].contact.normalImpulse / float(PhysicsWorld::FixedDeltaTime),
+                sample.feet[1].contact.normalImpulse / float(PhysicsWorld::FixedDeltaTime));
+            ImGui::TextWrapped(u8"골반을 직접 들어 올리는 힘 없이 지지 다리의 자세와 관절 토크로 높이를 조절합니다. 지지발 IK 목표에는 골반 오차 보정이 포함되므로 실제 발바닥 고정점과 다를 수 있습니다.");
+        }
         ImGui::Checkbox(u8"발딛기 판단·목표 3D 표시", &m_ShowFootstep);
         ImGui::Checkbox(u8"파란 발 착지 윤곽 표시", &m_ShowLandingFoot);
         ImGui::TextWrapped(u8"밝은 파랑 윤곽: 최종 착지 발바닥 위치·크기 / 화살표: 발끝 방향. 새 목표 계산이 잠시 멈춰도 마지막 착지 목표를 유지합니다.");

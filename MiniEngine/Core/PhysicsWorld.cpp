@@ -133,6 +133,7 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
                 contact.position += point.position;
                 contact.normal += normal;
                 ++contact.pointCount;
+                contact.normalImpulse += physx::PxMax(0.0f, point.impulse.dot(point.normal));
             }
         }
     }

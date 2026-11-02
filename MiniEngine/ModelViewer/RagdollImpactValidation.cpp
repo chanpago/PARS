@@ -106,9 +106,9 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             {
                 check(test.FireFrom(player), "Fire through the same command used by the R key");
                 const auto shots = test.GetProjectiles();
-                check(shots.size() == 1 && std::abs(shots[0]->getMass() - .5f) < 1e-5f &&
+                check(shots.size() == 1 && std::abs(shots[0]->getMass() - 2.0f) < 1e-5f &&
                         std::abs(shots[0]->getLinearVelocity().magnitude() - 7.5f) < 1e-4f,
-                    "Projectile has the configured 0.5 kg mass and 7.5 m/s initial speed");
+                    "Projectile has the configured 2 kg mass and 7.5 m/s initial speed");
                 PxShape* shape = nullptr;
                 check(shots[0]->getShapes(&shape, 1) == 1 && shape->getGeometry().getType() == PxGeometryType::eSPHERE &&
                         std::abs(static_cast<const PxSphereGeometry&>(shape->getGeometry()).radius - .15f) < 1e-5f,
@@ -133,7 +133,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 dummy->GetMesh().GetAnimInstance().GetCurrentAnimationIndex() == 0,
             "Dummy keeps the Idle animation after being hit");
 
-        check(test.SetProjectileSettings(.5f, 7.5f) && test.Reset(), "Restore defaults before camera aiming checks");
+        check(test.SetProjectileSettings(.5f, 7.5f) && test.Reset(), "Use the existing 0.5 kg fixture for camera aiming checks");
         auto* physics = world.GetPhysicsWorld();
         const auto toPx = [](Vector3 v)
         {
@@ -199,10 +199,10 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(test.SetAutomaticSupport(true) && dummy->GetMesh().UsesAutomaticRootSupport() &&
                 !player.GetMesh().UsesAutomaticRootSupport(),
             "Enable COM support on the dummy only");
-        auto& ragdoll = dummy->GetMesh().GetRagdoll();
-        check(!ragdoll.IsRootAxisSupported(0) && ragdoll.IsRootAxisSupported(1) &&
+        Ragdoll& ragdoll = dummy->GetMesh().GetRagdoll();
+        check(ragdoll.UsesFootDrivenSupport() && !ragdoll.IsRootAxisSupported(0) && !ragdoll.IsRootAxisSupported(1) &&
                 !ragdoll.IsRootAxisSupported(2) && ragdoll.IsRootAxisSupported(3),
-            "Automatic support releases X/Z and keeps Y/rotation available");
+            "Automatic Idle uses leg support, frees root translation and keeps rotation assistance");
 
         // Deterministically exercise both release causes, and re-entry without rearming.
         world.SetPhysicsPaused(true);
@@ -241,13 +241,26 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         world.SetPhysicsPaused(false);
 
         float idleMinimumWeight = 1;
+        float idleFootForce = 0;
         for (int frame = 0; frame < 600; ++frame)
         {
             tick();
             idleMinimumWeight = PxMin(idleMinimumWeight, ragdoll.GetRootSupportWeight());
+            if (frame >= 480)
+            {
+                const FootSupportSnapshot& feet = support.GetSnapshot();
+                idleFootForce += (feet.feet[0].contact.normalImpulse + feet.feet[1].contact.normalImpulse) * 60.0f / 120.0f;
+                check(PxAbs(float(ragdoll.GetRootSupportForce().GetY())) < 1e-5f,
+                    "Automatic leg support supplies no external pelvis Y force");
+            }
         }
         report << "automatic_idle_min_weight=" << idleMinimumWeight << std::endl;
+        report << "automatic_idle_mean_foot_force=" << idleFootForce << std::endl;
         check(idleMinimumWeight > .99f && ragdoll.IsRootSupported(), "Automatic Idle stays supported for ten seconds");
+        const FootSupportSnapshot& idleSupport = support.GetSnapshot();
+        check(dummy->GetMesh().GetStandingSupportSnapshot().valid && idleSupport.feet[0].contact.grounded &&
+            idleSupport.feet[1].contact.grounded && std::abs(idleFootForce - idleSupport.totalMass * 9.81f) < idleSupport.totalMass,
+            "Both feet support body weight through floor contact in automatic Idle");
         const float masses[] = {.1f, 2.0f, 50.0f}, speeds[] = {30.0f, 30.0f, 75.0f};
         bool sawBand = false, sawFall = false;
         for (int trial = 0; trial < 3; ++trial)
@@ -298,7 +311,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         }
         check(sawBand && sawFall, "Physical impacts exercise gradual support loss and a subsequent fall");
         check(test.SetProjectileSettings(.5f, 7.5f) && test.Reset() && ragdoll.GetRootSupportWeight() == 1,
-            "Restore defaults and clear the fallen state for interactive testing");
+            "Restore the 0.5 kg capture fixture and clear the fallen state");
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors in the impact test");
         check(test.FireFrom(player), "Leave one sphere visible for the optional GPU capture");
         world.SetPhysicsPaused(true);

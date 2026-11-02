@@ -406,6 +406,25 @@ namespace PARS
 #endif
     }
 
+    void Ragdoll::SetFootDrivenSupport(bool enabled)
+    {
+        enabled = enabled && UsesArticulation();
+        if (m_FootDrivenSupport == enabled)
+        {
+            return;
+        }
+        m_FootDrivenSupport = enabled;
+        m_SupportContacts = {};
+        m_SupportLoads = {};
+        ResetDriveTargetHistory();
+        ConfigureRootSupportDrives();
+    }
+
+    void Ragdoll::SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts)
+    {
+        m_SupportContacts = contacts;
+    }
+
     bool Ragdoll::SetRootSupported(bool supported, std::string& error)
     {
         return SetRootSupport(supported ? 1.0f : 0.0f, true, error);
@@ -539,10 +558,11 @@ namespace PARS
         }
         const float w = m_RootSupportWeight;
         // Scale gains and force capacity, never the world-space target position.
-        const PxD6JointDrive position(mass * PelvisLinearFrequency * PelvisLinearFrequency * w,
+        PxD6JointDrive position(mass * PelvisLinearFrequency * PelvisLinearFrequency * w,
             2.0f * mass * PelvisLinearDampingRatio * PelvisLinearFrequency * w, mass * 60.0f * w, false);
+        position.flags |= PxD6JointDriveFlag::eOUTPUT_FORCE;
         m_SupportJoint->setDrive(PxD6Drive::eX, m_SupportHorizontal ? position : PxD6JointDrive());
-        m_SupportJoint->setDrive(PxD6Drive::eY, position);
+        m_SupportJoint->setDrive(PxD6Drive::eY, m_FootDrivenSupport ? PxD6JointDrive() : position);
         m_SupportJoint->setDrive(PxD6Drive::eZ, m_SupportHorizontal ? position : PxD6JointDrive());
         // Active articulations use the coupled mass-matrix PD in UpdateArticulationDrives.
         const PxD6JointDrive rotation = m_Articulation ? (m_DrivesEnabled ? PxD6JointDrive() :
@@ -574,6 +594,19 @@ namespace PARS
         }
 #endif
         return 0;
+    }
+
+    Vector3 Ragdoll::GetRootSupportForce() const
+    {
+#if defined(_M_X64)
+        if (m_SupportJoint)
+        {
+            PxVec3 force(0), torque(0);
+            m_SupportJoint->getConstraint()->getForce(force, torque);
+            return Vector3(force.x, force.y, force.z);
+        }
+#endif
+        return Vector3(kZero);
     }
 
     float Ragdoll::GetRootRotationError() const

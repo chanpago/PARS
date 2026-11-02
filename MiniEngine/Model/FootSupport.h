@@ -36,6 +36,7 @@ namespace PARS
         bool leftGround = false, landed = false;
         physx::PxVec3 position{0}, normal{0};
         uint32_t pointCount = 0;
+        float normalImpulse = 0;
         uint64_t takeoffCount = 0, landingCount = 0;
         uint64_t lastTakeoffStep = 0, lastLandingStep = 0;
     };

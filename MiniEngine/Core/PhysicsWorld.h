@@ -21,6 +21,8 @@ struct PhysicsGroundContact
 {
     physx::PxVec3 position{0}, normal{0};
     uint32_t pointCount = 0;
+    // 완료한 물리 스텝의 법선 충격량 합이며 접촉 판정 기준은 바꾸지 않는다.
+    float normalImpulse = 0;
 };
 
 // 미터, 킬로그램, 초 단위의 CPU 물리이며 +Y가 위쪽이다. 게임 스레드에서 사용한다.

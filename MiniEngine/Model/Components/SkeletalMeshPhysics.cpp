@@ -3,8 +3,10 @@
 #include "GameFramework/World.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 using namespace Math;
+using namespace physx;
 namespace PARS
 {
     bool SkeletalMeshComponent::ClearPhysicsAsset()
@@ -118,25 +120,26 @@ namespace PARS
         }
     }
 
-    void SkeletalMeshComponent::ApplyFootstepIKTargets(std::vector<Matrix4>& target)
+    void SkeletalMeshComponent::ApplyFootstepIKTargets(std::vector<Matrix4>& target, float deltaTime)
     {
-        const auto& sample = m_FootSupport.GetSnapshot();
-        const auto& step = sample.footstep;
+        const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
+        const FootstepSnapshot& step = sample.footstep;
         if (!IsActiveRagdoll() || !m_AutomaticRootSupport || m_RootSupportRelease != RootSupportRelease::None ||
-            m_Recovery.GetSnapshot().state != RecoveryState::Recovery || !m_HasRecoverySoles)
+            (!m_Ragdoll.UsesFootDrivenSupport() && m_Recovery.GetSnapshot().state != RecoveryState::Recovery) ||
+            !m_HasRecoverySoles)
         {
             m_FootstepIK.Reset();
             return;
         }
-        const auto toPx = [](const Matrix4& matrix)
+        const std::function<PxTransform(const Matrix4&)> toPx = [](const Matrix4& matrix) -> PxTransform
         {
-            const auto frame = PhysicsJointFrame::FromTransform(PhysicsBoneFrame(matrix));
+            const PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(PhysicsBoneFrame(matrix));
             return physx::PxTransform(physx::PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
                 physx::PxQuat(frame.rotation.x, frame.rotation.y, frame.rotation.z, frame.rotation.w));
         };
         std::vector<physx::PxTransform> rigidTargets;
         rigidTargets.reserve(target.size());
-        for (const auto& matrix : target)
+        for (const Matrix4& matrix : target)
         {
             rigidTargets.push_back(toPx(matrix));
         }
@@ -144,12 +147,21 @@ namespace PARS
         input.enabled = true;
         input.stepFoot = step.IsInProgress() ? step.stepFoot : -1;
         input.revision = sample.contactRevision;
-        const auto& nodes = m_Ragdoll.GetBoneNodes();
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        StandingSupportInput standing;
+        standing.enabled = m_Ragdoll.UsesFootDrivenSupport();
+        standing.stepping = step.IsInProgress();
+        standing.stepDistance = step.initialDistance;
+        standing.deltaTime = deltaTime;
+        standing.revision = sample.contactRevision;
+        standing.completedStep = sample.completedPhysicsStep;
+        standing.velocity = sample.hasCenterOfMassVelocity ? sample.centerOfMassVelocity : PxVec3(0);
+        std::array<RagdollSupportContact, 2> contacts;
         for (size_t side = 0; side < input.legs.size(); ++side)
         {
-            const auto& foot = sample.feet[side];
-            const auto& setup = foot.leg;
-            auto& leg = input.legs[side];
+            const FootSoleSample& foot = sample.feet[side];
+            const FootLegSetup& setup = foot.leg;
+            FootIKLegInput& leg = input.legs[side];
             leg.hipNode = setup.hipNode;
             leg.kneeNode = setup.kneeNode;
             leg.ankleNode = setup.ankleNode;
@@ -172,7 +184,7 @@ namespace PARS
             }
             for (int parent = m_PhysicsSkeleton.parents[setup.hipNode]; parent >= 0; parent = m_PhysicsSkeleton.parents[parent])
             {
-                const auto body = std::find(nodes.begin(), nodes.end(), parent);
+                const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), parent);
                 if (body != nodes.end())
                 {
                     leg.anchorNode = parent;
@@ -184,10 +196,10 @@ namespace PARS
             {
                 continue;
             }
-            const auto linked = [&](int parent, int child)
+            const std::function<bool(int, int)> linked = [&](int parent, int child) -> bool
             {
                 return std::any_of(m_PhysicsAsset->constraints.begin(), m_PhysicsAsset->constraints.end(),
-                    [&](const PhysicsConstraint& joint)
+                    [&](const PhysicsConstraint& joint) -> bool
                     {
                         return joint.parentBone == m_PhysicsSkeleton.names[parent] &&
                             joint.childBone == m_PhysicsSkeleton.names[child];
@@ -203,6 +215,37 @@ namespace PARS
             // Recovery 진입/착지 시 저장한 유효 자세를 접촉이 잠시 끊겨도 유지한다.
             leg.targetSole = m_RecoverySoles[side];
             leg.available = leg.targetSole.isSane();
+            StandingSupportFoot& support = standing.feet[side];
+            support.available = leg.available;
+            support.supporting = input.stepFoot != static_cast<int>(side);
+            support.grounded = foot.contact.hasSample && foot.contact.grounded;
+            support.sole = leg.targetSole;
+            support.soleInBone = leg.soleInBone;
+            support.animatedSole = rigidTargets[leg.ankleNode] * leg.soleInBone;
+            const PxTransform toPhysical = leg.actualAnchor * rigidTargets[leg.anchorNode].getInverse();
+            support.hipOffset = (toPhysical * rigidTargets[leg.hipNode]).p - leg.actualAnchor.p;
+            support.length = leg.thighLength + leg.calfLength;
+            standing.pelvis = leg.actualAnchor;
+            standing.animatedPelvis = rigidTargets[leg.anchorNode];
+            const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), foot.boneNode);
+            contacts[side].body = body != nodes.end() ? static_cast<int>(body - nodes.begin()) : -1;
+            contacts[side].supporting = support.supporting && support.grounded;
+            contacts[side].position = foot.contact.position;
+            contacts[side].normal = foot.contact.normal;
+        }
+        m_Ragdoll.SetSupportContacts(contacts);
+        if (standing.enabled)
+        {
+            if (!m_StandingSupport.Update(standing, m_StandingSupportSettings))
+            {
+                m_FootstepIK.Reset();
+                return;
+            }
+            const StandingSupportSnapshot& support = m_StandingSupport.GetSnapshot();
+            for (size_t side = 0; side < input.legs.size(); ++side)
+            {
+                input.legs[side].targetSole = support.soleTargets[side];
+            }
         }
         if (!m_FootstepIK.Apply(input, m_PhysicsSkeleton.parents, rigidTargets))
         {
@@ -212,7 +255,7 @@ namespace PARS
         }
         for (int node : m_FootstepIK.GetSnapshot().correctedNodes)
         {
-            const auto& frame = rigidTargets[node];
+            const PxTransform& frame = rigidTargets[node];
             const Matrix4 corrected(OrthogonalTransform(
                 Quaternion(DirectX::XMVectorSet(frame.q.x, frame.q.y, frame.q.z, frame.q.w)),
                 Vector3(frame.p.x, frame.p.y, frame.p.z)));
@@ -257,6 +300,10 @@ namespace PARS
             ResetRecovery();
         }
         m_AutomaticRootSupport = enabled;
+        if (!enabled)
+        {
+            m_Ragdoll.SetFootDrivenSupport(false);
+        }
         if (enabled)
         {
             UpdateFootSupport();
@@ -272,7 +319,7 @@ namespace PARS
         {
             return true;
         }
-        const auto& balance = m_FootSupport.GetSnapshot().balance;
+        const FootSupportBalance& balance = m_FootSupport.GetSnapshot().balance;
         if (m_RootSupportRelease == RootSupportRelease::None)
         {
             if (!IsActiveRagdoll())
@@ -289,6 +336,9 @@ namespace PARS
             }
         }
         const float weight = m_RootSupportRelease == RootSupportRelease::None ? balance.weight : 0;
+        const bool idle = !m_AnimInstance->IsBlending() &&
+            m_AnimInstance->GetAnimationName(m_AnimInstance->GetCurrentAnimationIndex()) == "Idle";
+        m_Ragdoll.SetFootDrivenSupport(IsActiveRagdoll() && idle && m_RootSupportRelease == RootSupportRelease::None);
         if (m_Ragdoll.SetRootSupport(weight, false, error))
         {
             return true;

@@ -85,14 +85,14 @@ namespace PARS
             return result;
         }
 
-        // Solve M_FF*a_F = -w*(G+C)_F - M_FD*a_D. The computed feed-forward
-        // must request zero force on free axes, rather than pretending they are held still.
-        // Contacts and ordinary joint PD still contribute separately in the PhysX solve.
+        // M_FF*a_F = (J^T F)_F - w*(G+C)_F - M_FD*a_D를 풀어 자유축의 구동력을 0으로 둔다.
+        // 지면 하중은 예상 외력이며 실제 접촉과 관절 PD는 PhysX 솔버가 별도로 처리한다.
         void ResolveFreeAcceleration(const PxArticulationCache& cache, unsigned count,
-            const std::vector<unsigned>& freeAxes, float weight, std::vector<float>& acceleration)
+            const std::vector<unsigned>& freeAxes, float weight, const std::vector<float>& contactForce,
+            std::vector<float>& acceleration)
         {
             const size_t n = freeAxes.size();
-            const auto lower = FactorFreeMass(cache.massMatrix, count, freeAxes);
+            const std::vector<double> lower = FactorFreeMass(cache.massMatrix, count, freeAxes);
             for (unsigned axis : freeAxes)
             {
                 acceleration[axis] = 0;
@@ -101,7 +101,7 @@ namespace PARS
             for (size_t i = 0; i < n; ++i)
             {
                 const unsigned row = freeAxes[i];
-                double value = -weight * (cache.gravityCompensationForce[row] + cache.coriolisForce[row]);
+                double value = contactForce[row] - weight * (cache.gravityCompensationForce[row] + cache.coriolisForce[row]);
                 for (unsigned j = 0; j < count; ++j)
                 {
                     value -= cache.massMatrix[row * count + j] * double(acceleration[j]);
@@ -479,6 +479,7 @@ namespace PARS
             m_Standby->SetQueryOwner(m_QueryOwner);
             m_Standby->SetCollisionEnabled(m_CollisionEnabled);
             m_Standby->SetDrivesEnabled(simulate && m_DrivesEnabled);
+            m_Standby->SetFootDrivenSupport(simulate && m_FootDrivenSupport);
             if (simulate && IsRootSupported() &&
                 !m_Standby->SetRootSupport(m_RootSupportWeight, m_SupportHorizontal, error))
             {
@@ -506,6 +507,7 @@ namespace PARS
         {
             candidate.SetArticulationVelocities(linear, angular);
             candidate.SetDrivesEnabled(m_DrivesEnabled);
+            candidate.SetFootDrivenSupport(m_FootDrivenSupport);
             if (IsRootSupported() && !candidate.SetRootSupport(m_RootSupportWeight, m_SupportHorizontal, error))
             {
                 return false;
@@ -615,18 +617,25 @@ namespace PARS
         {
             return;
         }
-        auto& cache = *m_ArticulationCache;
-        const bool compensate = m_DrivesEnabled && IsRootSupported();
+        PxArticulationCache& cache = *m_ArticulationCache;
+        const bool compensate = m_DrivesEnabled && (IsRootSupported() || m_FootDrivenSupport);
         const float supportWeight = m_RootSupportWeight;
+        const float gravityWeight = m_FootDrivenSupport ? 1.0f : supportWeight;
         const unsigned count = 6 + m_Articulation->getDofs();
         std::vector<float> targetVelocity(count, 0), targetAcceleration(count, 0);
+        std::vector<float> contactForce(count, 0);
+        m_SupportLoads = {};
 
-        // 드라이브와 골반 지지가 모두 켜져 있을 때 발동
+        // 관절 드라이브와 골반 보조 또는 발 지지 제어가 켜져 있을 때 보상을 계산한다.
         if (compensate)
         {
             // 골반 지지 드라이브에 등록된 목표 선속도, 각속도를 읽는다
             PxVec3 linear, angular;
-            m_SupportJoint->getDriveVelocity(linear, angular);
+            linear = angular = PxVec3(0);
+            if (m_SupportJoint)
+            {
+                m_SupportJoint->getDriveVelocity(linear, angular);
+            }
 
             // 이 부분에서 6개의 항목에 관해서 값을 채운다. 3개의 목표 선속도 값, 3개의 각속도 보정 값
             for (int axis = 0; axis < 3; ++axis)
@@ -676,7 +685,7 @@ namespace PARS
         // 여기서는 골반의 pd보정으로 골반의 회전만 처리한다
         if (compensate && deltaTime > 0 && m_HasSupportTarget)
         {
-            const auto* root = m_Bodies[m_ArticulationRoot];
+            const PxRigidBody* root = m_Bodies[m_ArticulationRoot];
             const PxVec3 error = RotationVector(m_SupportJoint->getDrivePosition().q * root->getGlobalPose().q.getConjugate());
             const PxVec3 velocity = root->getAngularVelocity();
             const float stiffness = PelvisAngularFrequency * PelvisAngularFrequency * supportWeight;
@@ -726,11 +735,11 @@ namespace PARS
             */   
             for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
             {
-                const auto& data = m_Asset.constraints[i];
+                const PhysicsConstraint& data = m_Asset.constraints[i];
                 const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
                 for (int axis = 0; axis < 3; ++axis)
                 {
-                    const auto& drive = data.drives[data.useSlerpDrive ? 0 : axis];
+                    const PhysicsAngularDrive& drive = data.drives[data.useSlerpDrive ? 0 : axis];
                     const bool driven = drive.enabled && drive.maxTorque > 0 && (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
                     if (motions[axis] != PhysicsJointMotion::Locked && !driven)
                     {
@@ -741,7 +750,7 @@ namespace PARS
             inertias = ControlInertias(cache.massMatrix, 6 + m_Articulation->getDofs(), freeAxes);
             if (IsRootSupported() && supportWeight < 1)
             {
-                auto releasedAxes = freeAxes;
+                std::vector<unsigned> releasedAxes = freeAxes;
                 for (unsigned axis = 0; axis < 6; ++axis)
                 {
                     if (IsRootAxisSupported(axis))
@@ -749,7 +758,7 @@ namespace PARS
                         releasedAxes.push_back(axis);
                     }
                 }
-                const auto released = ControlInertias(cache.massMatrix, count, releasedAxes);
+                const std::vector<float> released = ControlInertias(cache.massMatrix, count, releasedAxes);
                 // Continuous gain approximation between supported and freely responding bases.
                 // Avoid a sudden joint-PD gain change on the frame that support reaches zero.
                 for (unsigned axis = 6; axis < count; ++axis)
@@ -764,23 +773,25 @@ namespace PARS
             // 계산은 physX가 해줌. 그리고 아직 값을 적용시키는건아니고 cache에 저장만함
             m_Articulation->computeGravityCompensation(cache);
             m_Articulation->computeCoriolisCompensation(cache);
-            ResolveFreeAcceleration(cache, count, freeAxes, supportWeight, targetAcceleration);
+            contactForce = ComputeSupportGeneralizedForce();
+            ResolveFreeAcceleration(cache, count, freeAxes, gravityWeight, contactForce, targetAcceleration);
 
             // 이 부분에서 아티큘레이션의 루트 즉, 골반만 먼저 중력보상, 코리올리 원심력보상을 addTorque()로 적용한다.
             // 골반만 따로하는 이유는 골반은 부모 관절이 없으므로, 골반 자체의 월드 회전을 제어하려면 외부 토크를 가해야하기 때문이다.
             // 따라서 골반 토크를 별도로 적용하고, 뒤에서 관절 토크들을 적용하는 구조다.
             if (deltaTime > 0 && m_HasSupportTarget)
             {
-                // w*(G+C) + M*a의 골반 회전 행(3~5)을 월드 공간 토크로 적용한다.
+                // w*(G+C) + M*a - J^T F의 골반 회전 행(3~5)을 월드 공간 토크로 적용한다.
                 // a에는 위에서 구한 골반 PD 보정이 포함된다. 같은 a를 아래 관절 행에도 사용하므로
-                // 골반 보정에 필요한 팔다리의 반작용까지 계산된다. 위치 지지는 D6가 담당한다.
+                // 골반 보정에 필요한 팔다리의 반작용까지 계산된다. 발 지지 모드에서는 위치 D6를 쓰지 않는다.
                 PxVec3 rootTorque(0);
                 for (unsigned axis = 0; axis < 3; ++axis)
                 {
                     const unsigned row = 3 + axis;
                     // a already contains weighted feed-forward and weighted pelvis PD.
                     // Scale only the bias here; multiplying the final torque again would give w^2.
-                    rootTorque[axis] = supportWeight * (cache.gravityCompensationForce[row] + cache.coriolisForce[row]);
+                    rootTorque[axis] = gravityWeight * (cache.gravityCompensationForce[row] + cache.coriolisForce[row]) -
+                        contactForce[row];
                     for (unsigned column = 0; column < count; ++column)
                     {
                         rootTorque[axis] += cache.massMatrix[row * count + column] * targetAcceleration[column];
@@ -794,18 +805,19 @@ namespace PARS
         // 각 관절 축에 필요한 보상 토크를 계산해 적용한다.
         for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
         {
-            const auto& data = m_Asset.constraints[i];
+            const PhysicsConstraint& data = m_Asset.constraints[i];
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             for (int axis = 0; axis < 3; ++axis)
             {
-                const auto& drive = data.drives[data.useSlerpDrive ? 0 : axis];
+                const PhysicsAngularDrive& drive = data.drives[data.useSlerpDrive ? 0 : axis];
                 const bool enabled = m_DrivesEnabled && drive.enabled && drive.maxTorque > 0 && motions[axis] != PhysicsJointMotion::Locked;
                 const unsigned dof = m_ArticulationDofOffsets[i] + axis;
                 float feedForward = 0;
                 if (enabled && compensate)
                 {
-                    // 중력보상 + 코리올리 보상
-                    feedForward = supportWeight * (cache.gravityCompensationForce[6 + dof] + cache.coriolisForce[6 + dof]);
+                    // 중력과 코리올리 보상에서 예상 지면 하중의 관절 기여분을 뺀다.
+                    feedForward = gravityWeight * (cache.gravityCompensationForce[6 + dof] + cache.coriolisForce[6 + dof]) -
+                        contactForce[6 + dof];
 
                     // 부모와 이웃 관절의 목표 가속도까지 질량 행렬에 곱해 관성 하중을 미리 보상한다.
                     // 예: 무릎이 가속할 때 발목이 감당하는 토크를 발목 오차가 커지기 전에 제공한다.
