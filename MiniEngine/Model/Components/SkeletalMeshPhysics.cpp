@@ -228,14 +228,14 @@ namespace PARS
         {
             return;
         }
-        const auto& sample = m_FootSupport.GetSnapshot();
-        const auto& candidates = sample.candidates;
-        if (candidates.support < 0 || candidates.step < 0)
+        const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
+        const FootstepRoles roles = sample.footstep.GetRoles();
+        if (!roles.IsValid())
         {
             return;
         }
-        const int supportNode = sample.feet[candidates.support].boneNode;
-        const int stepNode = sample.feet[candidates.step].boneNode;
+        const int supportNode = sample.feet[roles.supportFoot].boneNode;
+        const int stepNode = sample.feet[roles.movableFoot].boneNode;
         if (supportNode >= 0 && stepNode >= 0)
         {
             m_ModelInstance.SetNodeDebugColor(uint32_t(supportNode), DirectX::XMFLOAT4(1, 0, 0, 1));

@@ -233,6 +233,123 @@ namespace
             planner.GetSnapshot().stepFoot == 0, "The following physics step evaluates the latest blue foot");
     }
 
+    void TestFootRolesFollowCommittedStep()
+    {
+        const FootstepSettings settings{.3f, .3f};
+        for (const int movingFoot : {0, 1})
+        {
+            FootstepPlanner planner;
+            FootstepInput input = Standing();
+            const int supportFoot = 1 - movingFoot;
+            std::array<std::vector<PxVec3>, 2> feet;
+            for (size_t side = 0; side < feet.size(); ++side)
+            {
+                const PxVec3 center = input.feet[side].position;
+                feet[side] = {center + PxVec3(-.05f, 0, -.1f), center + PxVec3(.05f, 0, -.1f),
+                    center + PxVec3(.05f, 0, .1f), center + PxVec3(-.05f, 0, .1f)};
+            }
+            input.com.x = input.feet[supportFoot].position.x;
+            input.blueFoot = EvaluateFootSupportCandidates(input.hull, input.com, feet, input.zone).step;
+            input.velocity = PxVec3(0);
+            planner.Update(input, settings);
+            FootstepRoles roles = planner.GetSnapshot().GetRoles();
+            Check(roles.IsValid() && roles.movableFoot == movingFoot && roles.supportFoot == supportFoot && !roles.locked,
+                "Standing roles identify the eligible moving foot and its actual supporting opposite foot");
+
+            input.velocity.z = 1;
+            ++input.completedStep;
+            planner.Update(input, settings);
+            const uint64_t startedStep = planner.GetSnapshot().startedStep;
+            roles = planner.GetSnapshot().GetRoles();
+            Check(planner.GetSnapshot().justStarted && roles.locked && roles.movableFoot == movingFoot,
+                "Starting a step commits the same moving foot that was displayed while standing");
+
+            // 실제 거리 판정으로 후보를 뒤집되 이륙 대기와 공중 이동의 역할은 바꾸지 않는다.
+            input.com.x = input.feet[movingFoot].position.x;
+            input.blueFoot = EvaluateFootSupportCandidates(input.hull, input.com, feet, input.zone).step;
+            Check(input.blueFoot == supportFoot, "COM crossing really flips the geometric candidate");
+            for (const bool grounded : {true, false})
+            {
+                input.feet[movingFoot].grounded = grounded;
+                ++input.completedStep;
+                planner.Update(input, settings);
+                const FootstepSnapshot& state = planner.GetSnapshot();
+                roles = state.GetRoles();
+                Check(state.rawBlueFoot != state.stepFoot && roles.locked && roles.movableFoot == state.stepFoot &&
+                        roles.supportFoot == state.supportFoot && roles.movableFoot == movingFoot,
+                    "Awaiting takeoff and airborne colors follow committed roles despite COM candidate reversal");
+            }
+
+            input.blueFoot = -1;
+            input.feet[supportFoot].grounded = false;
+            ++input.completedStep;
+            planner.Update(input, settings);
+            roles = planner.GetSnapshot().GetRoles();
+            Check(!planner.GetSnapshot().motion.valid && roles.locked && roles.movableFoot == movingFoot &&
+                    roles.supportFoot == supportFoot,
+                "Missing candidate and lost stance contact suspend motion without dropping or swapping roles");
+            input.feet[supportFoot].grounded = true;
+            input.feet[movingFoot].hasContactSample = false;
+            ++input.completedStep;
+            planner.Update(input, settings);
+            Check(planner.GetSnapshot().GetRoles().movableFoot == movingFoot,
+                "Missing contact samples retain the committed moving role");
+            input.feet[movingFoot].hasContactSample = true;
+            input.feet[movingFoot].grounded = true;
+            input.blueFoot = supportFoot;
+            ++input.completedStep;
+            planner.Update(input, settings);
+            Check(!planner.GetSnapshot().justLanded && planner.GetSnapshot().GetRoles().movableFoot == movingFoot,
+                "Early recontact cannot unlock roles before the existing landing rule accepts it");
+            input.completedStep = startedStep + 18;
+            planner.Update(input, settings);
+            roles = planner.GetSnapshot().GetRoles();
+            Check(planner.GetSnapshot().justLanded && roles.locked && roles.movableFoot == movingFoot,
+                "The landing event retains the roles used by recovery in that same physics tick");
+            ++input.completedStep;
+            planner.Update(input, settings);
+            roles = planner.GetSnapshot().GetRoles();
+            Check(planner.GetSnapshot().justStarted && roles.movableFoot == supportFoot && roles.supportFoot == movingFoot,
+                "Only the next step can adopt the new geometric roles after landing");
+
+            input.zone = FootSupportZone::Outside;
+            ++input.completedStep;
+            planner.Update(input, settings);
+            Check(!planner.GetSnapshot().GetRoles().IsValid(), "Aborting clears visible roles even when stored foot IDs remain");
+            input.zone = FootSupportZone::Inside;
+            ++input.completedStep;
+            planner.Update(input, settings);
+            Check(!planner.GetSnapshot().GetRoles().IsValid(), "Returning inside B cannot display a movable role while abort is latched");
+            planner.Reset();
+            Check(!planner.GetSnapshot().GetRoles().IsValid(), "Reset clears committed and candidate roles together");
+        }
+
+        for (int blocked = 0; blocked < 4; ++blocked)
+        {
+            FootstepPlanner planner;
+            FootstepInput input = Standing();
+            if (blocked == 0)
+            {
+                input.active = false;
+            }
+            else if (blocked == 1)
+            {
+                input.automaticSupport = false;
+            }
+            else if (blocked == 2)
+            {
+                input.idleAnimation = false;
+            }
+            else
+            {
+                input.feet[0].grounded = false;
+            }
+            planner.Update(input, settings);
+            Check(!planner.GetSnapshot().GetRoles().IsValid(),
+                "Unavailable stepping modes and missing actual support cannot advertise movable foot roles");
+        }
+    }
+
     void TestAbortAndInvalidInputs()
     {
         FootstepPlanner planner;
@@ -535,6 +652,7 @@ void TestFootstepPlanner()
     TestStartConditions();
     TestBufferStartCandidates();
     TestStepLifecycle();
+    TestFootRolesFollowCommittedStep();
     TestAbortAndInvalidInputs();
     TestTargetGeometry();
     TestMotionHeightAndProgress();

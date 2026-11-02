@@ -1429,7 +1429,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     }
                     ImGui::SameLine();
                 }
-                if (ImGui::Button(m_FootCandidateDebugVisible ? u8"발 후보 표시 끄기" : u8"발 후보 표시"))
+                if (ImGui::Button(m_FootCandidateDebugVisible ? u8"발 역할 표시 끄기" : u8"발 역할 표시"))
                 {
                     SetFootCandidateDebugVisible(!m_FootCandidateDebugVisible);
                 }
@@ -1440,30 +1440,39 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 }
                 if (m_FootCandidateDebugVisible)
                 {
-                    const auto drawCandidates = [](PARS::Character* character, const char* label)
+                    void (*const drawRoles)(PARS::Character*, const char*) = [](PARS::Character* character, const char* label) -> void
                     {
                         if (!character)
                         {
                             return;
                         }
-                        const auto& candidates = character->GetMesh().GetFootSupport().GetSnapshot().candidates;
+                        const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
+                        const PARS::FootstepRoles roles = sample.footstep.GetRoles();
                         ImGui::TextUnformatted(label);
-                        if (candidates.support >= 0)
+                        if (roles.IsValid())
                         {
                             const char* const feet[] = {u8"왼발", u8"오른발"};
-                            ImGui::TextColored(ImVec4(1, .15f, .15f, 1), u8"지지 후보: %s", feet[candidates.support]);
+                            ImGui::TextColored(ImVec4(1, .15f, .15f, 1), u8"지지발: %s", feet[roles.supportFoot]);
                             ImGui::SameLine();
-                            ImGui::TextColored(ImVec4(.2f, .45f, 1, 1), u8"디딜 후보: %s", feet[candidates.step]);
-                            ImGui::Text(u8"COM 거리: 왼발 %.1f / 오른발 %.1f cm",
-                                candidates.distances[0] * 100, candidates.distances[1] * 100);
+                            ImGui::TextColored(ImVec4(.2f, .45f, 1, 1), roles.locked ? u8"이동발: %s" : u8"이동 가능 발: %s",
+                                feet[roles.movableFoot]);
+                            if (roles.locked)
+                            {
+                                ImGui::TextUnformatted(u8"발딛기 역할 유지: 착지 처리까지 고정");
+                            }
                         }
                         else
                         {
-                            ImGui::TextUnformatted(u8"후보 없음: COM이 A 안에 있고 양발 투영이 유효해야 합니다.");
+                            ImGui::TextWrapped(u8"발 역할 없음: %s", PARS::FootstepReasonLabel(sample.footstep.reason));
+                        }
+                        if (sample.candidates.support >= 0)
+                        {
+                            ImGui::Text(u8"COM 거리: 왼발 %.1f / 오른발 %.1f cm",
+                                sample.candidates.distances[0] * 100, sample.candidates.distances[1] * 100);
                         }
                     };
-                    drawCandidates(GetPreviewCharacter(), u8"플레이어 발 후보");
-                    drawCandidates(m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr, u8"더미 발 후보");
+                    drawRoles(GetPreviewCharacter(), u8"플레이어 발 역할");
+                    drawRoles(m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr, u8"더미 발 역할");
                 }
                 if (m_ImpactTest && !m_ImpactTest->GetStatusMessage().empty())
                 {

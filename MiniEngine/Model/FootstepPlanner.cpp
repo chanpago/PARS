@@ -124,6 +124,23 @@ namespace
     }
 }
 
+FootstepRoles FootstepSnapshot::GetRoles() const
+{
+    if (IsInProgress() || justLanded)
+    {
+        // 목표 출력이나 지면 정보가 잠시 없어져도 착지를 처리한 틱까지 선택한 역할을 유지한다.
+        const FootstepRoles roles{supportFoot, stepFoot, true};
+        return roles.IsValid() ? roles : FootstepRoles{};
+    }
+    if (phase == FootstepPhase::Idle && rawBlueFoot >= 0 && rawBlueFoot < 2 && candidates[rawBlueFoot].valid)
+    {
+        // 대기 중에는 반대 발의 실제 지지를 확인한 이동 후보만 역할로 표시한다.
+        return FootstepRoles{1 - rawBlueFoot, rawBlueFoot, false};
+    }
+    // 중단·비활성·유효 후보 없음 상태에서 이전 발을 이동 가능한 발로 표시하지 않는다.
+    return FootstepRoles{};
+}
+
 void FootstepPlanner::Reset()
 {
     m_Snapshot = {};

@@ -92,6 +92,18 @@ namespace PARS
         float landingError = 0;
     };
 
+    struct FootstepRoles
+    {
+        int supportFoot = -1;
+        int movableFoot = -1;
+        bool locked = false;
+
+        bool IsValid() const
+        {
+            return supportFoot >= 0 && supportFoot < 2 && movableFoot == 1 - supportFoot;
+        }
+    };
+
     struct FootstepSnapshot
     {
         FootstepPhase phase = FootstepPhase::Idle;
@@ -111,6 +123,9 @@ namespace PARS
         {
             return phase == FootstepPhase::AwaitingTakeoff || phase == FootstepPhase::Airborne;
         }
+
+        // 제어에서 확정한 역할을 색상과 UI에서도 사용한다. 거리 후보와 진행 중인 역할을 섞지 않는다.
+        FootstepRoles GetRoles() const;
     };
 
     // 물리 상태를 읽어 판단과 목표만 만든다. 바디 이동, IK와 힘 적용은 하지 않는다.
