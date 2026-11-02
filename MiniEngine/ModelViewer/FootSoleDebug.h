@@ -26,4 +26,5 @@ private:
     bool m_Visible = true, m_ShowRays = true, m_ShowHull = true;
     bool m_ShowCenterOfMass = true, m_ShowBuffer = true;
     bool m_ShowFootstep = true;
+    bool m_ShowLandingFoot = true;
 };

@@ -14,6 +14,7 @@ namespace
     constexpr PxU32 ComColor = 0xffffdd44, OutsideColor = 0xffff0000, UnknownColor = 0xff000000;
     constexpr PxU32 PredictionColor = 0xff00ffff, TargetColor = 0xffff8800, RawTargetColor = 0xffaaaaaa;
     constexpr PxU32 MotionTargetColor = 0xffff66cc;
+    constexpr PxU32 LandingFootColor = 0xff3388ff;
     constexpr PxU32 IKStepColor = 0xffffff33, IKSupportColor = 0xff44dd88, KneeHintColor = 0xffcc88ff;
 
     const char* FootLabel(int foot)
@@ -60,6 +61,41 @@ namespace
         Line(lines, point - Vector3(0, 0, radius), point + Vector3(0, 0, radius), color);
     }
 
+    void LandingFoot(std::vector<PxDebugLine>& lines, const PARS::FootSoleSample& foot, const PxTransform& target)
+    {
+        const float halfWidth = (foot.corners[1] - foot.corners[0]).magnitude() * .5f;
+        const float halfLength = (foot.corners[2] - foot.corners[1]).magnitude() * .5f;
+        if (!foot.available || !target.isSane() || !std::isfinite(halfWidth) || !std::isfinite(halfLength) ||
+            halfWidth <= .001f || halfLength <= .001f)
+        {
+            return;
+        }
+        // 실제 발바닥 크기를 유지하고 지지 평면의 법선 방향으로 표시만 4mm 올린다.
+        const PxVec3 offset = target.q.rotate(PxVec3(0, .004f, 0));
+        for (int stroke = -1; stroke <= 1; ++stroke)
+        {
+            // 1픽셀 선을 겹쳐 바닥의 다른 디버그 선 사이에서도 착지 윤곽이 보이게 한다.
+            const float w = halfWidth + stroke * .001f;
+            const float l = halfLength + stroke * .001f;
+            const std::array<PxVec3, 4> corners
+            {
+                target.transform(PxVec3(-w, 0, -l)) + offset,
+                target.transform(PxVec3(w, 0, -l)) + offset,
+                target.transform(PxVec3(w, 0, l)) + offset,
+                target.transform(PxVec3(-w, 0, l)) + offset
+            };
+            for (size_t corner = 0; corner < corners.size(); ++corner)
+            {
+                lines.emplace_back(corners[corner], corners[(corner + 1) % corners.size()], LandingFootColor);
+            }
+        }
+        // 발바닥 로컬 +Z가 발끝 방향이다. 화살표는 이동 방향이 아니라 착지할 발의 방향을 뜻한다.
+        const PxVec3 tip = target.transform(PxVec3(0, 0, halfLength * .7f)) + offset;
+        lines.emplace_back(target.transform(PxVec3(0, 0, -halfLength * .5f)) + offset, tip, LandingFootColor);
+        lines.emplace_back(target.transform(PxVec3(-halfWidth * .5f, 0, halfLength * .3f)) + offset, tip, LandingFootColor);
+        lines.emplace_back(target.transform(PxVec3(halfWidth * .5f, 0, halfLength * .3f)) + offset, tip, LandingFootColor);
+    }
+
     void ProjectionMarker(std::vector<PxDebugLine>& lines, Vector3 point, PxU32 color, bool bold)
     {
         constexpr float radius = .025f;
@@ -88,7 +124,7 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     {
         return;
     }
-    const auto& sample = mesh.GetFootSupport().GetSnapshot();
+    const PARS::FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
     for (size_t side = 0; side < sample.feet.size(); ++side)
     {
         const auto& foot = sample.feet[side];
@@ -148,6 +184,21 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
             const PxU32 color = sample.hull.empty() ? UnknownColor : sample.comInsideHull ? HitColor : OutsideColor;
             Line(lines, center, projected, ComColor);
             ProjectionMarker(lines, projected, color, sample.hull.empty() || !sample.comInsideHull);
+        }
+    }
+    if (m_ShowLandingFoot)
+    {
+        const PARS::FootstepSnapshot& step = sample.footstep;
+        const PARS::FootstepRoles roles = step.GetRoles();
+        const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();
+        if (step.IsInProgress() && roles.IsValid() &&
+            ik.status == PARS::FootstepIKStatus::Applied && ik.revision == sample.contactRevision &&
+            ik.stepFoot == roles.movableFoot && ik.legs[roles.movableFoot].valid)
+        {
+            // 새 목표 출력이 잠시 멈춰도 저장된 최종 착지점은 유지한다. 회전은 제어가 요청한 발바닥 목표와 같다.
+            // 공중 이동 궤적의 높이는 포함하지 않는다.
+            const PxTransform target(step.target, ik.legs[roles.movableFoot].requestedSole.q);
+            LandingFoot(lines, sample.feet[roles.movableFoot], target);
         }
     }
     if (m_ShowFootstep)
@@ -318,6 +369,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
             static_cast<unsigned long long>(recovery.recoveryCount), static_cast<unsigned long long>(recovery.returnCount));
         ImGui::TextWrapped(u8"Recovery에서는 접촉이 잠시 끊겨도 양발 목표를 유지합니다. 연한 파랑 영역은 현재 양발 중심에 맞춘 애니메이션 기준 발 영역입니다.");
         ImGui::Checkbox(u8"발딛기 판단·목표 3D 표시", &m_ShowFootstep);
+        ImGui::Checkbox(u8"파란 발 착지 윤곽 표시", &m_ShowLandingFoot);
+        ImGui::TextWrapped(u8"밝은 파랑 윤곽: 최종 착지 발바닥 위치·크기 / 화살표: 발끝 방향. 새 목표 계산이 잠시 멈춰도 마지막 착지 목표를 유지합니다.");
         ImGui::Text(u8"상태: %s", PARS::FootstepPhaseLabel(step.phase));
         ImGui::TextWrapped(u8"사유: %s", PARS::FootstepReasonLabel(step.reason));
         ImGui::Text(u8"빨강 지지발: %s / 파랑 이동 가능 발: %s", FootLabel(roles.supportFoot), FootLabel(roles.movableFoot));
