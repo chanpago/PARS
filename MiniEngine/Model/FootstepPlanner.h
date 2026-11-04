@@ -109,20 +109,38 @@ namespace PARS
         }
     };
 
+    // 발딛기 플래너의 현재 판단과 진행 상태
     struct FootstepSnapshot
     {
-        FootstepPhase phase = FootstepPhase::Idle;
-        FootstepReason reason = FootstepReason::Inactive;
-        bool hasPrediction = false, needsStep = false, hasTarget = false;
-        bool justStarted = false, justLanded = false;
-        int rawBlueFoot = -1, stepFoot = -1, supportFoot = -1;
-        physx::PxVec3 predictedCom{0}, target{0}, targetNormal{0};
-        physx::PxVec3 startPosition{0}, initialTarget{0};
-        float initialDistance = 0;
-        FootstepMotion motion;
-        std::array<FootstepTarget, 2> candidates;
-        uint64_t completedStep = 0, revision = 0, startedStep = 0;
-        uint64_t startCount = 0, landingCount = 0, abortCount = 0;
+        FootstepPhase phase = FootstepPhase::Idle;                          // 발딛기 진행 단계. 대기, 이륙 대기, 공중, 착지, 중단 상태를 구분
+        FootstepReason reason = FootstepReason::Inactive;                   // 현재 판단과 진행 상태의 사유. 목표 계산 실패나 발딛기 중단 원인 등을 기록
+
+        bool hasPrediction = false;                                         // 미래 COM 위치를 유효하게 계산했는지. predictedCom을 사용할 때 확인
+        bool needsStep = false;                                             // 예측 COM이 현재 지지 영역 A 밖이어서 발딛기가 필요한지
+        bool hasTarget = false;                                             // 이번 완료 물리 스텝에서 선택한 발의 유효한 착지 목표를 출력했는지
+        bool justStarted = false;                                           // 이번 완료 물리 스텝에서 새 발딛기를 시작했는지
+        bool justLanded = false;                                            // 이번 완료 물리 스텝에서 계획 시간이 끝나고 실제 접지를 확인해 착지 처리했는지
+
+        int rawBlueFoot = -1;                                               // 현재 입력에서 받은 움직일 발 후보. 0은 왼발, 1은 오른발, -1은 후보 없음
+        int stepFoot = -1;                                                  // 발딛기 시작 시 확정한 움직일 발. 진행 중에는 유지하며 -1이면 미선택
+        int supportFoot = -1;                                               // 발딛기 시작 시 확정한 지지발. 움직일 발의 반대쪽이며 -1이면 미선택
+
+        physx::PxVec3 predictedCom{0};                                      // 발딛기 필요 여부를 판단할 미래 COM 위치. XZ는 현재 COM과 속도로 예측하고 Y는 지면 투영 높이
+        physx::PxVec3 target{0};                                            // 선택한 발의 최신 착지 목표 월드 위치(m). 진행 중 입력에 따라 갱신
+        physx::PxVec3 targetNormal{0};                                      // 최신 착지 목표 평면의 법선. 발바닥 목표 방향을 지면에 맞출 때 사용
+        physx::PxVec3 startPosition{0};                                     // 발딛기 시작 순간 움직일 발의 실제 발바닥 월드 위치(m). 이동 궤적의 시작점
+        physx::PxVec3 initialTarget{0};                                     // 발딛기 시작 순간의 최초 착지 목표 월드 위치(m). 이후 목표가 갱신돼도 유지
+        float initialDistance = 0;                                          // 시작 위치에서 최초 착지 목표까지의 수평 거리(m). 발 들기 높이와 골반 낮추기 계산에 사용
+
+        FootstepMotion motion;                                              // 현재 발 이동 궤적의 목표 위치, 경과 시간, 시간 및 실측 진행률과 착지 오차
+        std::array<FootstepTarget, 2> candidates;                           // 양발 각각의 착지 목표 후보. 위치, 유효성, 거리 및 교차 제한 여부와 실패 사유를 저장
+
+        uint64_t completedStep = 0;                                         // 마지막으로 처리한 완료 물리 스텝 번호. 같은 결과를 중복 처리하지 않도록 사용
+        uint64_t revision = 0;                                              // 입력 접촉 이력의 버전 번호. 변경되면 발딛기 상태와 누적 횟수를 초기화
+        uint64_t startedStep = 0;                                           // 현재 또는 마지막 발딛기를 시작한 완료 물리 스텝 번호. 경과 시간 계산의 기준
+        uint64_t startCount = 0;                                            // 초기화 이후 발딛기를 시작한 누적 횟수
+        uint64_t landingCount = 0;                                          // 초기화 이후 실제 접지를 확인해 착지 처리한 누적 횟수
+        uint64_t abortCount = 0;                                            // 초기화 이후 발딛기가 중단 상태로 전환된 누적 횟수
 
         bool IsInProgress() const
         {
