@@ -5,15 +5,20 @@
 
 namespace PARS
 {
+    // 발 이동에 관한 세팅 값
     struct FootstepSettings
     {
-        float startPredictionTime = .6f, landingPredictionTime = .6f;
-        float stanceScale = .8f, maximumStepLength = 2.0f;
-        bool preventCrossing = false;
-        float crossingOffset = .1f;
+        float startPredictionTime = .6f;                                    // 발딛기가 필요한지 판단할 때, 몇 초뒤의 COM을 예측할지
+        float landingPredictionTime = .6f;                                  // 착지 위치를 계산할 때, 몇 초 뒤의 COM을 기준으로 삼을지
+        float stanceScale = .8f;                                            // Idle 기준 발 배치 오프셋을 적용하는 비율 
+        float maximumStepLength = 2.0f;                                     // 지지발에서 착지 목표까지 허용하는 최대거리
+        bool preventCrossing = false;                                       // 움직이는 발이 반대편으로 교차하는 것을 제한할지
+        float crossingOffset = .1f;                                         // 교차 제한을 켰을 때 지지발 바깥 방향으로 확보할 최소거리
+
         // 착지 예측 시간과 별개인 발 이동 시간(s)과 궤적의 최소 최고 높이(m)다.
-        float liftHeightScale = .35f;
-        float stepDuration = .3f, minimumLiftHeight = .08f;
+        float liftHeightScale = .35f;                                       // 발 이동 거리에 비례해 들어 올리는 높이를 정하는 비율 
+        float stepDuration = .3f;                                           // 발 이동 목표 궤적의 진행시간
+        float minimumLiftHeight = .08f;                                     // 발을 들어 올리는 최고 높이를 계산할 때 사용하는 최소값
     };
 
     enum class FootstepPhase
