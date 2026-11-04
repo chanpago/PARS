@@ -22,6 +22,8 @@ void RagdollRecovery::Update(const RecoveryInput& input, const RecoverySettings&
         return;
     }
     m_HasSample = true;
+
+	// 입력을 기반으로 m_Snapshot의 상태를 갱신한다. 회복 상태, 이유, 안정화 시간, 블렌딩 상태 등을 결정
     auto& state = m_Snapshot;
     state.revision = input.revision;
     state.completedStep = input.completedStep;
@@ -32,6 +34,8 @@ void RagdollRecovery::Update(const RecoveryInput& input, const RecoverySettings&
     state.bothGrounded = input.bothGrounded;
     state.impactVelocity = input.impactVelocity;
     state.horizontalSpeed = input.horizontalSpeed;
+
+    // 유효성 검사
     const bool valid = std::isfinite(input.deltaTime) && input.deltaTime > 0 &&
         std::isfinite(input.impactVelocity) && input.impactVelocity >= 0 &&
         std::isfinite(input.horizontalSpeed) && input.horizontalSpeed >= 0 &&
@@ -39,8 +43,12 @@ void RagdollRecovery::Update(const RecoveryInput& input, const RecoverySettings&
         std::isfinite(settings.maximumReturnSpeed) && settings.maximumReturnSpeed >= 0 &&
         std::isfinite(settings.stableDuration) && settings.stableDuration > 0 &&
         std::isfinite(settings.blendDuration) && settings.blendDuration > 0;
+
     const bool impact = valid && input.impactVelocity >= settings.impactVelocity;
+
     const bool recoveryNeeded = input.fallen || impact || input.needsStep || input.stepping;
+
+	// 만약 애니메이션 상태에서 회복이 필요하면 , 상태를 Recovery로 전환하고 관련 플래그와 카운터를 초기화한다.
     if (state.state == RecoveryState::Animation && recoveryNeeded)
     {
         state.state = RecoveryState::Recovery;
@@ -51,6 +59,8 @@ void RagdollRecovery::Update(const RecoveryInput& input, const RecoverySettings&
         m_BlendTime = 0;
         ++state.recoveryCount;
     }
+
+	// 떨어지는 상태가 아니고 회복 상태일 때, 목표를 유지하는지 여부를 설정한다.
     state.holdingTargets = state.state == RecoveryState::Recovery && !input.fallen;
     if (!valid || input.fallen)
     {
