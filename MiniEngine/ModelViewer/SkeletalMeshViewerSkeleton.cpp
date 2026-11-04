@@ -11,7 +11,7 @@ namespace
 
 void SkeletalMeshViewer::BuildSkeleton()
 {
-    const auto& model = *m_Mesh->GetSkeletalMesh();
+    const Model& model = *m_Mesh->GetSkeletalMesh();
     const uint32_t count = model.m_NumNodes;
     m_BoneChildren.assign(count, {});
     m_BoneRoots.clear();
@@ -59,8 +59,8 @@ void SkeletalMeshViewer::BuildSkeleton()
 
 void SkeletalMeshViewer::DrawBoneTree(int32_t node)
 {
-    const auto& model = *m_Mesh->GetSkeletalMesh();
-    const auto& fullName = model.m_NodeNames[node];
+    const Model& model = *m_Mesh->GetSkeletalMesh();
+    const std::string& fullName = model.m_NodeNames[node];
     const int body = m_PhysicsAsset.FindBody(fullName);
     if (m_PhysicsTreeOnly && body < 0)
     {
@@ -112,7 +112,7 @@ void SkeletalMeshViewer::DrawBoneTree(int32_t node)
     {
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     }
-    const auto separator = fullName.find_last_of(':');
+    const std::string::size_type separator = fullName.find_last_of(':');
     const char* label = fullName.c_str() + (separator == std::string::npos ? 0 : separator + 1);
     const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<intptr_t>(node + 1)), flags,
         "%s%s%s", label, m_IsJoint[node] ? "" : u8" (루트)", body >= 0 ? u8" [바디]" : "");
@@ -143,8 +143,8 @@ void SkeletalMeshViewer::DrawBoneTree(int32_t node)
     {
         for (int index : constraints)
         {
-            const auto& joint = m_PhysicsAsset.constraints[index];
-            const auto colon = joint.parentBone.find_last_of(':');
+            const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[index];
+            const std::string::size_type colon = joint.parentBone.find_last_of(':');
             const std::string title = u8"[관절] 부모: " + joint.parentBone.substr(colon == std::string::npos ? 0 : colon + 1);
             ImGui::PushID(index + 0x600000);
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(.85f, .8f, .45f, 1));
@@ -212,8 +212,8 @@ void SkeletalMeshViewer::CancelInteraction()
 
 void SkeletalMeshViewer::UpdateBoneWorld()
 {
-    const auto& model = *m_Mesh->GetSkeletalMesh();
-    const auto& instance = m_Mesh->GetModelInstance();
+    const Model& model = *m_Mesh->GetSkeletalMesh();
+    const ModelInstance& instance = m_Mesh->GetModelInstance();
     std::vector<bool> assigned(model.m_NumNodes, false);
     // DefaultVS와 동일한 메시 * 애니메이션 조인트 공간 변환 순서를 따른다.
     // 특히 Armature의 0.01 스케일이 두 번 적용되지 않도록 한다.
@@ -246,7 +246,7 @@ void SkeletalMeshViewer::UpdateBoneWorld()
 
 Vector3 SkeletalMeshViewer::GetBoneAxis(int axis) const
 {
-    const auto matrix = GetGizmoWorld();
+    const Math::Matrix4 matrix = GetGizmoWorld();
     const Vector3 direction = axis == 0 ? Vector3(matrix.GetX()) : axis == 1 ? Vector3(matrix.GetY())
                                                                              : Vector3(matrix.GetZ());
     const float length = Length(direction);
@@ -262,7 +262,7 @@ float SkeletalMeshViewer::GetGizmoLength() const
 
 void SkeletalMeshViewer::DrawSkeleton()
 {
-    const auto& model = *m_Mesh->GetSkeletalMesh();
+    const Model& model = *m_Mesh->GetSkeletalMesh();
     if (m_ShowBones)
     {
         for (uint32_t node = 0; node < model.m_NumNodes; ++node)
@@ -375,7 +375,7 @@ void SkeletalMeshViewer::HandlePick(uint32_t id)
 
 void SkeletalMeshViewer::BeginGizmoDrag(uint32_t axis)
 {
-    auto& animation = m_Mesh->GetAnimInstance();
+    PARS::AnimInstance& animation = m_Mesh->GetAnimInstance();
     animation.SetPlaying(false);
     if (m_EditPose.empty())
     {
@@ -403,7 +403,7 @@ void SkeletalMeshViewer::BeginGizmoDrag(uint32_t axis)
         return;
     }
     m_DragScreenAxis = endpoint - m_DragCenter;
-    const auto& model = *m_Mesh->GetSkeletalMesh();
+    const Model& model = *m_Mesh->GetSkeletalMesh();
     const int32_t parent = model.m_NodeParents[m_SelectedBone];
     const Matrix4 parentWorld = EditingConstraint() ? GetConstraintBodyWorld(m_ConstraintFrame) : EditingBody() ? PARS::PhysicsBoneFrame(m_NodeWorld[m_SelectedBone])
         : (parent < 0 || m_DragOriginal.skeletonRoot)                                                           ? m_NodeMeshWorld[m_SelectedBone]
@@ -460,10 +460,10 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
     const float amount = denominator > 36 ? (dx * sx + dy * sy) / denominator : -dy / 80;
     if (EditingConstraint())
     {
-        auto& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
+        PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
         joint = m_DragConstraintOriginal;
         const Matrix4 previousWorld = GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame);
-        auto& frame = m_ConstraintFrame == 0 ? joint.parentFrame : joint.childFrame;
+        PARS::PhysicsJointFrame& frame = m_ConstraintFrame == 0 ? joint.parentFrame : joint.childFrame;
         if (m_GizmoMode == 0)
         {
             XMStoreFloat3(&frame.offset, Vector3(frame.offset) + m_DragLocalDirection * (amount * m_DragLength));
@@ -485,7 +485,7 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
     }
     if (EditingBody())
     {
-        auto body = m_DragBodyOriginal;
+        PARS::PhysicsBody body = m_DragBodyOriginal;
         if (m_GizmoMode == 0)
         {
             XMStoreFloat3(&body.offset, Vector3(body.offset) + m_DragLocalDirection * (amount * m_DragLength));
@@ -521,7 +521,7 @@ void SkeletalMeshViewer::UpdateGizmoDrag(float mouseX, float mouseY)
         m_PhysicsDirty = true;
         return;
     }
-    auto& node = m_EditPose[m_SelectedBone];
+    GraphNode& node = m_EditPose[m_SelectedBone];
     node = m_DragOriginal;
     if (m_GizmoMode == 0)
     {

@@ -41,7 +41,7 @@ void RagdollComparisonRunner::Reset()
 {
     m_Meshes[0] = m_Meshes[1] = nullptr;
     m_World.Clear();
-    if (auto* physics = m_World.GetPhysicsWorld())
+    if (PhysicsWorld* physics = m_World.GetPhysicsWorld())
     {
         physics->Shutdown();
     }
@@ -62,7 +62,7 @@ void RagdollComparisonRunner::Fail(const std::string& message)
 bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& settings)
 {
     std::string error;
-    auto playback = settings;
+    RagdollComparisonRunner::Settings playback = settings;
     if (playback.simulation == Simulation::A || playback.simulation == Simulation::B)
     {
         if (m_Models.size() < (playback.simulation == Simulation::A ? SequenceCount : 2))
@@ -111,7 +111,7 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
         Fail(u8"비교용 바닥을 생성하지 못했습니다.");
         return false;
     }
-    auto& physics = *m_World.GetPhysicsWorld();
+    PhysicsWorld& physics = *m_World.GetPhysicsWorld();
     physics.ResetClock();
     m_World.SetPhysicsPaused(true);
     // 서로의 배치만 제거한다. 진행 경로와 골반의 추종 오차는 기록에 남긴다.
@@ -121,8 +121,8 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
     m_Placements[1] = Vector3(halfSpacing, height, 0);
     for (int side = 0; side < 2; ++side)
     {
-        auto* actor = m_World.SpawnActor<Actor>(side == 0 ? "Kinematic reference" : "Active ragdoll");
-        auto& mesh = actor->CreateDefaultSubobject<SkeletalMeshComponent>("Comparison mesh");
+        PARS::Actor* actor = m_World.SpawnActor<Actor>(side == 0 ? "Kinematic reference" : "Active ragdoll");
+        PARS::SkeletalMeshComponent& mesh = actor->CreateDefaultSubobject<SkeletalMeshComponent>("Comparison mesh");
         actor->SetRootComponent(mesh);
         actor->SetActorLocation(m_Placements[side]);
         m_Meshes[side] = &mesh;
@@ -148,7 +148,7 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
     }
     m_World.BeginPlay();
     m_World.Tick(0);
-    for (auto* mesh : m_Meshes)
+    for (PARS::SkeletalMeshComponent* mesh : m_Meshes)
     {
         if (!mesh->GetRagdoll().IsActive() || !mesh->GetPhysicsError().empty())
         {
@@ -187,10 +187,10 @@ bool RagdollComparisonRunner::Start(const PhysicsAsset& asset, const Settings& s
 bool RagdollComparisonRunner::Capture(bool baseline)
 {
     std::vector<Matrix4> poses[2];
-    const auto& asset = m_Results.GetAsset();
+    const PARS::PhysicsAsset& asset = m_Results.GetAsset();
     for (int side = 0; side < 2; ++side)
     {
-        auto& ragdoll = m_Meshes[side]->GetRagdoll();
+        PARS::Ragdoll& ragdoll = m_Meshes[side]->GetRagdoll();
         if (!ragdoll.IsFinite() || !m_Meshes[side]->GetPhysicsError().empty())
         {
             Fail(u8"물리 상태가 올바르지 않거나 유효하지 않은 수치가 있습니다: " + m_Meshes[side]->GetPhysicsError());
@@ -201,8 +201,8 @@ bool RagdollComparisonRunner::Capture(bool baseline)
             poses[side].push_back(ragdoll.GetBoneWorld(i) * asset.bodies[i].GetLocalTransform());
         }
     }
-    const auto& reference = m_Meshes[0]->GetAnimInstance();
-    const auto& actual = m_Meshes[1]->GetAnimInstance();
+    const PARS::AnimInstance& reference = m_Meshes[0]->GetAnimInstance();
+    const PARS::AnimInstance& actual = m_Meshes[1]->GetAnimInstance();
     const float time = reference.GetAnimationTime();
     if (std::abs(time - actual.GetAnimationTime()) > 1e-6f ||
         reference.GetCurrentAnimationIndex() != actual.GetCurrentAnimationIndex() ||
@@ -230,17 +230,17 @@ bool RagdollComparisonRunner::Step()
     }
     const int clip = GetTargetClip();
     const float startTime = m_Settings.simulation == Simulation::A && clip == 2 ? SimulationARunStartTime : 0.0f;
-    const auto path = GetPathTransform((m_Steps + 1) * PhysicsWorld::FixedDeltaTime);
+    const Math::AffineTransform path = GetPathTransform((m_Steps + 1) * PhysicsWorld::FixedDeltaTime);
     for (int side = 0; side < 2; ++side)
     {
-        auto& animation = m_Meshes[side]->GetAnimInstance();
+        PARS::AnimInstance& animation = m_Meshes[side]->GetAnimInstance();
         if (animation.GetCurrentAnimationIndex() != uint32_t(clip) &&
             !animation.TransitionToAnimation(clip, BlendDuration, true, startTime))
         {
             Fail(u8"다음 동작으로 블렌딩하지 못했습니다.");
             return false;
         }
-        auto placement = path;
+        Math::AffineTransform placement = path;
         placement.SetTranslation(m_Placements[side] + path.GetTranslation());
         m_Meshes[side]->GetOwner().SetActorTransform(placement);
     }
@@ -293,7 +293,7 @@ float RagdollComparisonRunner::GetTravelDistance(double time) const
     // 자세 블렌딩과 같은 시간 동안 경로 속도도 바꾼다. 구간별 속도를 적분해
     // 전환 시 위치가 뛰지 않으며, 일시정지나 렌더 FPS가 경로에 영향을 주지 않는다.
     double distance = 0, start = 0, previousSpeed = 0;
-    for (const auto& stage : Sequence)
+    for (const SequenceStage& stage : Sequence)
     {
         const double elapsed = std::max(0.0, std::min(time - start, stage.endTime - start));
         const double blend = std::min(elapsed, double(BlendDuration));
@@ -390,7 +390,7 @@ void RagdollComparisonRunner::RequestLocomotionComparison(const PhysicsAsset* ed
         return;
     }
     const bool useEditor = editor && !editor->bodies.empty();
-    const auto* source = useEditor ? editor : character;
+    const PARS::PhysicsAsset* source = useEditor ? editor : character;
     if (!source || source->bodies.empty())
     {
         m_Message = u8"비교를 시작하기 전에 물리 에셋을 적용하세요.";
@@ -455,13 +455,13 @@ std::string RagdollComparisonRunner::GetDescription(bool korean) const
     std::ostringstream text;
     if (korean)
     {
-        const auto& name = m_Names[m_Settings.clip];
-        const auto clip = name == "Walking" ? u8"걷기 (Walking)" : name == "Idle" ? u8"대기 (Idle)"
-            : name == "Slow Run"                                                  ? u8"달리기 (Slow Run)"
-                                                                                  : name.c_str();
-        const auto source = m_SourceLabel == "Editor PA (snapshot at start)" ? u8"에디터 PA (시작 시 복사)"
-            : m_SourceLabel == "Character PA (snapshot at start)"            ? u8"캐릭터 PA (시작 시 복사)"
-                                                                             : u8"입력된 PA (시작 시 복사)";
+        const std::string& name = m_Names[m_Settings.clip];
+        const char* const clip = name == "Walking" ? u8"걷기 (Walking)" : name == "Idle" ? u8"대기 (Idle)"
+            : name == "Slow Run"                                                         ? u8"달리기 (Slow Run)"
+                                                                                         : name.c_str();
+        const char* const source = m_SourceLabel == "Editor PA (snapshot at start)" ? u8"에디터 PA (시작 시 복사)"
+            : m_SourceLabel == "Character PA (snapshot at start)"                   ? u8"캐릭터 PA (시작 시 복사)"
+                                                                                    : u8"입력된 PA (시작 시 복사)";
         if (m_Settings.simulation == Simulation::A)
         {
             text << u8"시뮬레이션 A | 연속 재생: 대기 0–2초 → 걷기 2–6초 → 달리기 (Slow Run) 6–10초"

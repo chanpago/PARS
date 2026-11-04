@@ -20,7 +20,7 @@ namespace PARS
 
         PxTransform ToPx(const Matrix4& value)
         {
-            const auto frame = PhysicsJointFrame::FromTransform(value);
+            const PARS::PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(value);
             return PxTransform(PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
                 PxQuat(frame.rotation.x, frame.rotation.y, frame.rotation.z, frame.rotation.w));
         }
@@ -64,7 +64,7 @@ namespace PARS
         std::vector<float> ControlInertias(const float* massMatrix, unsigned count, const std::vector<unsigned>& freeAxes)
         {
             const size_t freeCount = freeAxes.size();
-            const auto lower = FactorFreeMass(massMatrix, count, freeAxes);
+            const std::vector<double> lower = FactorFreeMass(massMatrix, count, freeAxes);
             std::vector<float> result(count);
             std::vector<double> projected(freeCount);
             for (unsigned axis = 0; axis < count; ++axis)
@@ -132,7 +132,7 @@ namespace PARS
         std::vector<int> parent(count, -1), inbound(count, -1);
         for (size_t i = 0; i < m_Asset.constraints.size(); ++i)
         {
-            const auto& joint = m_Asset.constraints[i];
+            const PARS::PhysicsConstraint& joint = m_Asset.constraints[i];
             const int child = m_Asset.FindBody(joint.childBone);
             if (parent[child] >= 0)
             {
@@ -181,9 +181,9 @@ namespace PARS
                 {
                     continue;
                 }
-                const auto& body = m_Asset.bodies[i];
+                const PARS::PhysicsBody& body = m_Asset.bodies[i];
                 const int node = static_cast<int>(std::find(m_BoneNames.begin(), m_BoneNames.end(), body.bone) - m_BoneNames.begin());
-                const auto pose = ToPx(PhysicsBoneFrame(boneWorld[node]) * body.GetLocalTransform());
+                const physx::PxTransform pose = ToPx(PhysicsBoneFrame(boneWorld[node]) * body.GetLocalTransform());
                 PxGeometryHolder geometry;
                 switch (body.shape)
                 {
@@ -197,8 +197,8 @@ namespace PARS
                     geometry.storeAny(PxBoxGeometry(body.halfExtents.x, body.halfExtents.y, body.halfExtents.z));
                     break;
                 }
-                auto* parentLink = parent[i] < 0 ? nullptr : m_Bodies[parent[i]]->is<PxArticulationLink>();
-                auto* link = world.CreateArticulationLink(*m_Articulation, parentLink, pose, geometry.any(), body.mass, body.bone.c_str(), body.material);
+                physx::PxArticulationLink* parentLink = parent[i] < 0 ? nullptr : m_Bodies[parent[i]]->is<PxArticulationLink>();
+                physx::PxArticulationLink* link = world.CreateArticulationLink(*m_Articulation, parentLink, pose, geometry.any(), body.mass, body.bone.c_str(), body.material);
                 if (!link)
                 {
                     error = "Could not create articulation link: " + body.bone;
@@ -211,10 +211,10 @@ namespace PARS
                 {
                     continue;
                 }
-                auto* joint = link->getInboundJoint();
-                const auto& data = m_Asset.constraints[inbound[i]];
-                const auto parentFrame = ToPx(data.parentFrame.GetTransform());
-                const auto childFrame = ToPx(data.childFrame.GetTransform());
+                physx::PxArticulationJointReducedCoordinate* joint = link->getInboundJoint();
+                const PARS::PhysicsConstraint& data = m_Asset.constraints[inbound[i]];
+                const physx::PxTransform parentFrame = ToPx(data.parentFrame.GetTransform());
+                const physx::PxTransform childFrame = ToPx(data.childFrame.GetTransform());
                 joint->setParentPose(parentFrame);
                 joint->setChildPose(childFrame);
                 joint->setJointType(PxArticulationJointType::eSPHERICAL);
@@ -233,7 +233,7 @@ namespace PARS
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     // 잠긴 축도 3축 구면 관절의 내부 제한으로 처리해 회전 좌표의 순서를 유지한다.
-                    const auto motion = motions[axis] == PhysicsJointMotion::Free ? PxArticulationMotion::eFREE : PxArticulationMotion::eLIMITED;
+                    const physx::PxArticulationMotion::Enum motion = motions[axis] == PhysicsJointMotion::Free ? PxArticulationMotion::eFREE : PxArticulationMotion::eLIMITED;
                     joint->setMotion(AngularAxes[axis], motion);
                     const bool locked = motions[axis] == PhysicsJointMotion::Locked;
                     joint->setLimitParams(AngularAxes[axis], PxArticulationLimit(locked ? -1e-6f : lower[axis], locked ? 1e-6f : upper[axis]));
@@ -264,18 +264,18 @@ namespace PARS
         }
         // PhysX의 내부 링크 순서는 PA의 배열 순서와 다를 수 있다.
         std::vector<unsigned> dofs(count), offsets(count);
-        for (const auto* body : m_Bodies)
+        for (const physx::PxRigidBody* body : m_Bodies)
         {
-            const auto* link = body->is<PxArticulationLink>();
+            const physx::PxArticulationLink* link = body->is<PxArticulationLink>();
             dofs[link->getLinkIndex()] = link->getInboundJointDof();
         }
         for (size_t i = 1; i < count; ++i)
         {
             offsets[i] = offsets[i - 1] + dofs[i - 1];
         }
-        for (const auto& joint : m_Asset.constraints)
+        for (const PARS::PhysicsConstraint& joint : m_Asset.constraints)
         {
-            const auto* link = m_Bodies[m_Asset.FindBody(joint.childBone)]->is<PxArticulationLink>();
+            const physx::PxArticulationLink* link = m_Bodies[m_Asset.FindBody(joint.childBone)]->is<PxArticulationLink>();
             m_ArticulationDofOffsets.push_back(offsets[link->getLinkIndex()]);
         }
         return true;
@@ -312,7 +312,7 @@ namespace PARS
         {
             pose[m_BoneNodes[i]] = GetBoneWorld(i);
         }
-        auto prepared = std::make_unique<Ragdoll>();
+        std::unique_ptr<PARS::Ragdoll> prepared = std::make_unique<Ragdoll>();
         if (!prepared->CreateConfiguration(*m_World, m_Asset, m_BoneNames, pose, Vector3(kZero), error, !IsSimulating()))
         {
             return false;
@@ -347,7 +347,7 @@ namespace PARS
         }
         else
         {
-            for (auto* body : m_Bodies)
+            for (physx::PxRigidBody* body : m_Bodies)
             {
                 if (active && !body->getScene() && !m_World->AddRigidBody(*body->is<PxRigidDynamic>()))
                 {
@@ -379,7 +379,7 @@ namespace PARS
         poses.reserve(m_Bodies.size());
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
-            const auto pose = ToPx(PhysicsBoneFrame(boneWorld[m_BoneNodes[i]]) * m_Asset.bodies[i].GetLocalTransform());
+            const physx::PxTransform pose = ToPx(PhysicsBoneFrame(boneWorld[m_BoneNodes[i]]) * m_Asset.bodies[i].GetLocalTransform());
             if (!pose.isValid() || !ToPx(linear[i]).isFinite() || !ToPx(angular[i]).isFinite())
             {
                 error = "Prepared ragdoll received an invalid pose or velocity.";
@@ -403,10 +403,10 @@ namespace PARS
             m_Articulation->setRootGlobalPose(poses[m_ArticulationRoot], false);
             for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
             {
-                const auto& data = m_Asset.constraints[i];
-                const auto parent = poses[m_Asset.FindBody(data.parentBone)] * ToPx(data.parentFrame.GetTransform());
-                const auto child = poses[m_Asset.FindBody(data.childBone)] * ToPx(data.childFrame.GetTransform());
-                const auto position = RotationVector(parent.q.getConjugate() * child.q);
+                const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
+                const physx::PxTransform parent = poses[m_Asset.FindBody(data.parentBone)] * ToPx(data.parentFrame.GetTransform());
+                const physx::PxTransform child = poses[m_Asset.FindBody(data.childBone)] * ToPx(data.childFrame.GetTransform());
+                const physx::PxVec3 position = RotationVector(parent.q.getConjugate() * child.q);
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     m_ArticulationJoints[i]->setJointPosition(AngularAxes[axis], position[axis]);
@@ -416,7 +416,7 @@ namespace PARS
             }
             m_Articulation->updateKinematic(PxArticulationKinematicFlag::ePOSITION);
             SetArticulationVelocities(linear, angular);
-            for (auto* body : m_Bodies)
+            for (physx::PxRigidBody* body : m_Bodies)
             {
                 body->clearForce();
                 body->clearTorque();
@@ -452,8 +452,8 @@ namespace PARS
             pose[m_BoneNodes[i]] = GetBoneWorld(i);
             if (IsSimulating())
             {
-                const auto v = m_Bodies[i]->getLinearVelocity();
-                const auto w = m_Bodies[i]->getAngularVelocity();
+                const physx::PxVec3 v = m_Bodies[i]->getLinearVelocity();
+                const physx::PxVec3 w = m_Bodies[i]->getAngularVelocity();
                 linear[i] = Vector3(v.x, v.y, v.z);
                 angular[i] = Vector3(w.x, w.y, w.z);
             }
@@ -532,7 +532,7 @@ namespace PARS
         {
             for (size_t i = 0; i < m_Bodies.size(); ++i)
             {
-                auto* body = m_Bodies[i]->is<PxRigidDynamic>();
+                physx::PxRigidDynamic* body = m_Bodies[i]->is<PxRigidDynamic>();
                 body->setLinearVelocity(ToPx(linear[i]));
                 body->setAngularVelocity(ToPx(angular[i]));
             }
@@ -542,11 +542,11 @@ namespace PARS
         m_Articulation->setRootAngularVelocity(ToPx(angular[m_ArticulationRoot]));
         for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
         {
-            const auto& data = m_Asset.constraints[i];
+            const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
             const int parent = m_Asset.FindBody(data.parentBone), child = m_Asset.FindBody(data.childBone);
-            auto* joint = m_ArticulationJoints[i];
-            const auto frame = m_Bodies[child]->getGlobalPose() * joint->getChildPose();
-            const auto relative = frame.q.rotateInv(ToPx(angular[child] - angular[parent]));
+            physx::PxArticulationJointReducedCoordinate* joint = m_ArticulationJoints[i];
+            const physx::PxTransform frame = m_Bodies[child]->getGlobalPose() * joint->getChildPose();
+            const physx::PxVec3 relative = frame.q.rotateInv(ToPx(angular[child] - angular[parent]));
             for (int axis = 0; axis < 3; ++axis)
             {
                 joint->setJointVelocity(AngularAxes[axis], relative[axis]);
@@ -567,7 +567,7 @@ namespace PARS
             m_Articulation->wakeUp();
             return;
         }
-        for (auto* body : m_Bodies)
+        for (physx::PxRigidBody* body : m_Bodies)
         {
             if (!(body->getRigidBodyFlags() & PxRigidBodyFlag::eKINEMATIC))
             {
@@ -582,18 +582,18 @@ namespace PARS
 #if defined(_M_X64)
         DirectX::XMFLOAT4 q;
         DirectX::XMStoreFloat4(&q, rotation);
-        const auto& data = m_Asset.constraints[index];
-        const auto* joint = m_ArticulationJoints[index];
-        const auto* childBody = m_Bodies[m_Asset.FindBody(data.childBone)];
+        const PARS::PhysicsConstraint& data = m_Asset.constraints[index];
+        const physx::PxArticulationJointReducedCoordinate* joint = m_ArticulationJoints[index];
+        const physx::PxRigidBody* childBody = m_Bodies[m_Asset.FindBody(data.childBone)];
         // 이 SDK의 spherical drive는 목표 벡터를 내부 motion matrix로 한 번 더 회전한다.
         // DyFeatherstoneArticulation::setupInternalConstraintsRecursive의 driveAxis 계산을 보정한다.
         // 관절 위치/제한 좌표는 그대로 두고, 드라이브에 전달하는 벡터만 역변환한다.
-        const auto childJointInMass = childBody->getCMassLocalPose().getInverse() * joint->getChildPose();
-        const auto position = childJointInMass.q.rotateInv(RotationVector(PxQuat(q.x, q.y, q.z, q.w)));
-        const auto parent = m_Bodies[m_Asset.FindBody(data.parentBone)]->getGlobalPose() * joint->getParentPose();
-        const auto child = m_Bodies[m_Asset.FindBody(data.childBone)]->getGlobalPose() * joint->getChildPose();
+        const physx::PxTransform childJointInMass = childBody->getCMassLocalPose().getInverse() * joint->getChildPose();
+        const physx::PxVec3 position = childJointInMass.q.rotateInv(RotationVector(PxQuat(q.x, q.y, q.z, q.w)));
+        const physx::PxTransform parent = m_Bodies[m_Asset.FindBody(data.parentBone)]->getGlobalPose() * joint->getParentPose();
+        const physx::PxTransform child = m_Bodies[m_Asset.FindBody(data.childBone)]->getGlobalPose() * joint->getChildPose();
         // 목표 차분은 부모 관절 좌표다. Articulation의 속도/토크 축은 현재 자식 관절 좌표다.
-        const auto velocity = child.q.rotateInv(parent.q.rotate(ToPx(angularVelocity)));
+        const physx::PxVec3 velocity = child.q.rotateInv(parent.q.rotate(ToPx(angularVelocity)));
         for (int axis = 0; axis < 3; ++axis)
         {
             m_ArticulationJoints[index]->setDriveTarget(AngularAxes[axis], position[axis], false);

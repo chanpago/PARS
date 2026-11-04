@@ -24,7 +24,7 @@ void RagdollRecovery::Update(const RecoveryInput& input, const RecoverySettings&
     m_HasSample = true;
 
 	// 입력을 기반으로 m_Snapshot의 상태를 갱신한다. 회복 상태, 이유, 안정화 시간, 블렌딩 상태 등을 결정
-    auto& state = m_Snapshot;
+    PARS::RecoverySnapshot& state = m_Snapshot;
     state.revision = input.revision;
     state.completedStep = input.completedStep;
     state.enteredRecovery = state.startedBlend = false;

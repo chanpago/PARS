@@ -4,6 +4,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <cmath>
+#include <functional>
 
 using namespace PARS;
 using namespace Math;
@@ -12,7 +13,7 @@ using namespace physx;
 bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character& player, const std::wstring& path)
 {
     std::ofstream report(path);
-    const auto check = [&](bool condition, const char* message)
+    const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << " | " << test.GetStatusMessage() << std::endl;
         if (!condition)
@@ -23,17 +24,17 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
     try
     {
         check(test.SetAutomaticSupport(false), "Use manual support for the existing projection and projectile baseline");
-        auto* dummy = test.GetDummy();
+        PARS::Character* dummy = test.GetDummy();
         check(dummy && dummy != &player && dummy->GetController() == nullptr,
             "Idle dummy is independent of the possessed player");
         check(dummy->GetMesh().IsActiveRagdoll() && dummy->GetMesh().GetRagdoll().IsRootSupported(),
             "Dummy is dynamic with angular drives and pelvis support enabled");
-        const auto tick = [&]()
+        const std::function<void()> tick = [&]() -> void
         {
             world.Tick(1.0f / 60);
             test.Update();
         };
-        auto& support = dummy->GetMesh().GetFootSupport();
+        PARS::FootSupport& support = dummy->GetMesh().GetFootSupport();
         check(support.GetSnapshot().hasCenterOfMass && !support.GetSnapshot().hull.empty() &&
                 !support.GetSnapshot().balance.bufferHull.empty(),
             "Reset prepares COM and A/B before the first physics step or render");
@@ -41,29 +42,30 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         FootSoleDebug debug;
         debug.SetVisible(false);
         std::vector<PxDebugLine> lines;
-        const auto pausedSample = support.GetSnapshot().sampleNumber;
+        const uint64_t pausedSample = support.GetSnapshot().sampleNumber;
         debug.BuildLines(dummy->GetMesh(), lines);
         tick();
         check(lines.empty() && support.GetSnapshot().sampleNumber == pausedSample,
             "Hidden debug and paused rendering do not change the physics snapshot");
-        const auto previousStep = world.GetPhysicsWorld()->GetStepCount();
+        const uint64_t previousStep = world.GetPhysicsWorld()->GetStepCount();
         world.RequestPhysicsStep();
         tick();
         check(support.GetSnapshot().sampleNumber == pausedSample + 1 &&
                 support.GetSnapshot().completedPhysicsStep == previousStep,
             "Single stepping samples the completed body state once even with debug hidden");
         debug.SetVisible(true);
-        const auto renderedSample = support.GetSnapshot().sampleNumber;
+        const uint64_t renderedSample = support.GetSnapshot().sampleNumber;
         debug.BuildLines(dummy->GetMesh(), lines);
         debug.BuildLines(dummy->GetMesh(), lines);
         bool hasBufferLines = false;
-        for (const auto& line : lines)
+        for (const physx::PxDebugLine& line : lines)
         {
             hasBufferLines |= line.color0 == 0xffffffff;
         }
         check(hasBufferLines && support.GetSnapshot().sampleNumber == renderedSample,
             "Drawing B's white dashes reads the snapshot without running any queries");
-        const auto leftSettings = support.GetSoleSettings(0), rightSettings = support.GetSoleSettings(1);
+        const PARS::FootSoleSettings leftSettings = support.GetSoleSettings(0);
+        const PARS::FootSoleSettings rightSettings = support.GetSoleSettings(1);
         support.GetSoleSettings(0).offset.y += 1;
         world.RequestPhysicsStep();
         tick();
@@ -83,8 +85,8 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         world.SetPhysicsPaused(false);
         for (int fps : {30, 120})
         {
-            const auto initialSample = support.GetSnapshot().sampleNumber;
-            const auto initialStep = world.GetPhysicsWorld()->GetStepCount();
+            const uint64_t initialSample = support.GetSnapshot().sampleNumber;
+            const uint64_t initialStep = world.GetPhysicsWorld()->GetStepCount();
             for (int frame = 0; frame < fps; ++frame)
             {
                 world.Tick(1.0f / fps);
@@ -101,11 +103,11 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             {
                 tick();
             }
-            const auto origin = dummy->GetMesh().GetRagdoll().GetPosition();
+            const Math::Vector3 origin = dummy->GetMesh().GetRagdoll().GetPosition();
             if (trial == 1)
             {
                 check(test.FireFrom(player), "Fire through the same command used by the R key");
-                const auto shots = test.GetProjectiles();
+                const std::vector<physx::PxRigidDynamic*> shots = test.GetProjectiles();
                 check(shots.size() == 1 && std::abs(shots[0]->getMass() - 2.0f) < 1e-5f &&
                         std::abs(shots[0]->getLinearVelocity().magnitude() - 7.5f) < 1e-4f,
                     "Projectile has the configured 2 kg mass and 7.5 m/s initial speed");
@@ -134,8 +136,8 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             "Dummy keeps the Idle animation after being hit");
 
         check(test.SetProjectileSettings(.5f, 7.5f) && test.Reset(), "Use the existing 0.5 kg fixture for camera aiming checks");
-        auto* physics = world.GetPhysicsWorld();
-        const auto toPx = [](Vector3 v)
+        PhysicsWorld* physics = world.GetPhysicsWorld();
+        physx::PxVec3 (*const toPx)(Math::Vector3) = [](Vector3 v) -> physx::PxVec3
         {
             return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ()));
         };
@@ -143,7 +145,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const Vector3 camera = shotOrigin + Vector3(0, 1, -4);
         const Vector3 target = shotOrigin + Vector3(6, 2, 6);
         const Vector3 aim = Normalize(target - camera);
-        const auto release = [](PxRigidStatic* body)
+        void (*const release)(physx::PxRigidStatic*) = [](PxRigidStatic* body) -> void
         {
             if (body)
             {
@@ -157,7 +159,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(aimTarget && ownBody, "Create aiming targets");
         ownBody->userData = &player;
         check(test.FireAimed(player, camera, aim), "Fire using an offset third-person camera ray");
-        auto* aimedShot = test.GetProjectiles().back();
+        physx::PxRigidDynamic* aimedShot = test.GetProjectiles().back();
         const PxVec3 start = aimedShot->getGlobalPose().p;
         const PxVec3 direction = aimedShot->getLinearVelocity().getNormalized();
         const PxVec3 toTarget = toPx(target) - start;
@@ -187,7 +189,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         muzzleWall.reset();
 
         test.ClearProjectiles();
-        const auto bodies = world.GetPhysicsWorld()->GetDynamicBodyCount();
+        const uint32_t bodies = world.GetPhysicsWorld()->GetDynamicBodyCount();
         for (int shot = 0; shot < 13; ++shot)
         {
             check(test.FireFrom(player), "Repeat firing");
@@ -206,12 +208,13 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
 
         // Deterministically exercise both release causes, and re-entry without rearming.
         world.SetPhysicsPaused(true);
-        const auto singleStep = [&]()
+        const std::function<void()> singleStep = [&]() -> void
         {
             world.RequestPhysicsStep();
             tick();
         };
-        const auto originalLeft = support.GetSoleSettings(0), originalRight = support.GetSoleSettings(1);
+        const PARS::FootSoleSettings originalLeft = support.GetSoleSettings(0);
+        const PARS::FootSoleSettings originalRight = support.GetSoleSettings(1);
         support.GetSoleSettings(0).offset.x += 2;
         support.GetSoleSettings(1).offset.x += 2;
         singleStep();

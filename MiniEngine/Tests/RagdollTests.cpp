@@ -31,9 +31,9 @@ namespace
         using namespace physx;
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize COM scene");
-        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -1, 0)), PxVec3(10, .5f, 10), "COM floor");
+        physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -1, 0)), PxVec3(10, .5f, 10), "COM floor");
         Check(floor != nullptr, "Create COM floor");
-        auto& scene = *floor->getScene();
+        physx::PxScene& scene = *floor->getScene();
         const std::vector<std::string> names{"hip", "leg"};
         const std::vector<Matrix4> pose{
             Matrix4(OrthogonalTransform(Quaternion(Vector3(kZUnitVector), XM_PIDIV2), Vector3(1, 3, 0))),
@@ -60,7 +60,7 @@ namespace
         Check(!empty.GetCenterOfMass(center, totalMass) && totalMass == 0, "Empty ragdoll has no COM");
         for (bool articulation : {false, true})
         {
-            auto configured = asset;
+            PARS::PhysicsAsset configured = asset;
             if (articulation)
             {
                 ConfigureDefaultDrives(configured);
@@ -79,7 +79,7 @@ namespace
                 Check(scene.getArticulations(&rig, 1) == 1, "Find COM articulation");
                 PxArticulationLink* links[2];
                 Check(rig->getLinks(links, 2) == 2, "Find COM links");
-                for (auto* link : links)
+                for (physx::PxArticulationLink* link : links)
                 {
                     if (std::strcmp(link->getName(), "hip") == 0)
                     {
@@ -91,7 +91,7 @@ namespace
             {
                 PxActor* actors[2];
                 Check(scene.getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors, 2) == 2, "Find COM bodies");
-                for (auto* actor : actors)
+                for (physx::PxActor* actor : actors)
                 {
                     if (std::strcmp(actor->getName(), "hip") == 0)
                     {
@@ -118,9 +118,9 @@ namespace
         using namespace physx;
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize PA movement queries");
-        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -.5f, 0)), PxVec3(10, .5f, 10), "Floor");
-        auto* wall = world.CreateStaticBox(PxTransform(PxVec3(0, 1, 2)), PxVec3(10, 2, .1f), "Wall");
-        auto* trigger = world.CreateStaticBox(PxTransform(PxVec3(0, .5f, .5f)), PxVec3(2, 1, .05f), "Trigger");
+        physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -.5f, 0)), PxVec3(10, .5f, 10), "Floor");
+        physx::PxRigidStatic* wall = world.CreateStaticBox(PxTransform(PxVec3(0, 1, 2)), PxVec3(10, 2, .1f), "Wall");
+        physx::PxRigidStatic* trigger = world.CreateStaticBox(PxTransform(PxVec3(0, .5f, .5f)), PxVec3(2, 1, .05f), "Trigger");
         Check(floor && wall && trigger, "Create PA movement obstacles");
         PxShape* triggerShape = nullptr;
         trigger->getShapes(&triggerShape, 1);
@@ -155,14 +155,14 @@ namespace
             Ragdoll ragdoll;
             std::string error;
             Check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error), "Create PA movement bodies");
-            const auto forward = ragdoll.ConstrainHorizontalMovement(pose, Vector3(0, 0, 4));
+            const Math::Vector3 forward = ragdoll.ConstrainHorizontalMovement(pose, Vector3(0, 0, 4));
             Check(float(forward.GetZ()) > 1.65f && float(forward.GetZ()) < 1.77f,
                 "PA box and rotated capsule stop at the wall without using the wider movement capsule");
-            const auto diagonal = ragdoll.ConstrainHorizontalMovement(pose, Vector3(3, 0, 4));
+            const Math::Vector3 diagonal = ragdoll.ConstrainHorizontalMovement(pose, Vector3(3, 0, 4));
             Check(std::abs(float(diagonal.GetX()) - 3) < .001f && float(diagonal.GetZ()) < 1.77f,
                 "PA movement slides tangentially along the wall");
-            auto target = pose;
-            for (auto& bone : target)
+            std::vector<Math::Matrix4> target = pose;
+            for (Math::Matrix4& bone : target)
             {
                 bone.SetW(bone.GetW() + Vector4(0, 0, 1.78f, 0));
             }
@@ -180,18 +180,24 @@ namespace
     void CheckBodyMaterials(physx::PxRigidStatic& floor, const PhysicsAsset& asset)
     {
         using namespace physx;
-        auto& scene = *floor.getScene();
+        physx::PxScene& scene = *floor.getScene();
         std::vector<PxActor*> dynamics(scene.getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC));
         scene.getActors(PxActorTypeFlag::eRIGID_DYNAMIC, dynamics.data(), static_cast<PxU32>(dynamics.size()));
         std::vector<PxRigidActor*> bodies;
-        for (auto* actor : dynamics) bodies.push_back(static_cast<PxRigidActor*>(actor));
+        for (physx::PxActor* actor : dynamics)
+        {
+            bodies.push_back(static_cast<PxRigidActor*>(actor));
+        }
         std::vector<PxArticulationReducedCoordinate*> articulations(scene.getNbArticulations());
         scene.getArticulations(articulations.data(), static_cast<PxU32>(articulations.size()));
-        for (auto* articulation : articulations)
+        for (physx::PxArticulationReducedCoordinate* articulation : articulations)
         {
             std::vector<PxArticulationLink*> links(articulation->getNbLinks());
             articulation->getLinks(links.data(), static_cast<PxU32>(links.size()));
-            for (auto* link : links) bodies.push_back(link);
+            for (physx::PxArticulationLink* link : links)
+            {
+                bodies.push_back(link);
+            }
         }
         PxShape* floorShape = nullptr;
         PxMaterial* floorMaterial = nullptr;
@@ -201,11 +207,14 @@ namespace
             floorMaterial->getRestitution() == .1f && floorMaterial->getFrictionCombineMode() == PxCombineMode::eAVERAGE,
             "Per-body overrides do not mutate the shared floor material");
         size_t checked = 0;
-        for (auto* body : bodies)
+        for (physx::PxRigidActor* body : bodies)
         {
             const int index = body->getName() ? asset.FindBody(body->getName()) : -1;
-            if (index < 0) continue;
-            const auto& expected = asset.bodies[index].material;
+            if (index < 0)
+            {
+                continue;
+            }
+            const PARS::PhysicsMaterialSettings& expected = asset.bodies[index].material;
             PxShape* shape = nullptr;
             PxMaterial* material = nullptr;
             Check(body->getShapes(&shape, 1) == 1 && shape->getMaterials(&material, 1) == 1, "Read PA body material");
@@ -264,9 +273,9 @@ void RunRagdollTests()
     asset.constraints[0].swingY = PhysicsJointMotion::Free;
     PhysicsWorld physics;
     Check(physics.Initialize(false), "Initialize ragdoll world");
-    auto* floor = physics.CreateStaticBox(physx::PxTransform(physx::PxVec3(0, -.25f, 0)), physx::PxVec3(100, .25f, 100), "RagdollFloor");
+    physx::PxRigidStatic* floor = physics.CreateStaticBox(physx::PxTransform(physx::PxVec3(0, -.25f, 0)), physx::PxVec3(100, .25f, 100), "RagdollFloor");
     Check(floor != nullptr, "Create ragdoll floor");
-    const auto baseMaterialCount = floor->getScene()->getPhysics().getNbMaterials();
+    const physx::PxU32 baseMaterialCount = floor->getScene()->getPhysics().getNbMaterials();
     Ragdoll ragdoll;
     Check(ragdoll.Create(physics, asset, skeleton.names, initial, Vector3(kZero), error) &&
         ragdoll.GetBodyCount() == 3 && ragdoll.GetJointCount() == 2, "Create all three PA shapes and D6 joints");
@@ -286,8 +295,11 @@ void RunRagdollTests()
     Check(ragdoll.UpdateKinematicPose(initial, true, error), "Restore animation pose immediately");
     for (int i = 0; i < 120; ++i) physics.Step();
     Check(Near(ragdoll.GetBoneWorld(0), PhysicsBoneFrame(initial[1])), "Kinematic bones resist gravity");
-    auto moved = initial;
-    for (auto& bone : moved) bone = motion * bone;
+    std::vector<Math::Matrix4> moved = initial;
+    for (Math::Matrix4& bone : moved)
+    {
+        bone = motion * bone;
+    }
     Check(ragdoll.UpdateKinematicPose(moved, false, error), "Set animation targets in rotated/transformed world space");
     physics.Step();
     Check(Near(ragdoll.GetBoneWorld(0), PhysicsBoneFrame(moved[1])) &&
@@ -296,7 +308,7 @@ void RunRagdollTests()
     Check(ragdoll.SetSimulating(true, Vector3(1, 0, 0), error) && ragdoll.IsSimulating() &&
         ragdoll.GetKinematicBodyCount() == 0 && physics.GetDynamicBodyCount() == 3 && physics.GetConstraintCount() == 2,
         "Switch existing kinematic objects to dynamic simulation without duplicates");
-    const auto beforeFall = ragdoll.GetPosition();
+    const Math::Vector3 beforeFall = ragdoll.GetPosition();
     for (int i = 0; i < 30; ++i) physics.Step();
     Check(float(ragdoll.GetPosition().GetY()) < float(beforeFall.GetY()) - .2f, "Gravity resumes after kinematic-to-dynamic transition");
     ragdoll.Destroy();
@@ -312,11 +324,11 @@ void RunRagdollTests()
 
     // Reproduce the old editor bug: changing a collider without rebasing its
     // body-local joints makes articulation reconstruction move the skinned bones.
-    auto editedBody = asset.bodies[1];
+    PARS::PhysicsBody editedBody = asset.bodies[1];
     editedBody.offset = XMFLOAT3(.17f, -.08f, .12f);
     XMStoreFloat4(&editedBody.rotation, Quaternion(Vector3(kYUnitVector), .7f) * Quaternion(Vector3(kZUnitVector), -.9f));
     editedBody.shape = PhysicsShapeType::Capsule;
-    auto uncorrected = asset;
+    PARS::PhysicsAsset uncorrected = asset;
     ConfigureDefaultDrives(uncorrected);
     uncorrected.bodies[1] = editedBody;
     Check(ragdoll.Create(physics, uncorrected, skeleton.names, initial, Vector3(kZero), error, false),
@@ -331,13 +343,13 @@ void RunRagdollTests()
     const std::vector<int> bodyNodes{1, 3, 4};
     for (bool articulation : {false, true})
     {
-        auto edited = asset;
+        PARS::PhysicsAsset edited = asset;
         if (articulation)
         {
             ConfigureDefaultDrives(edited);
         }
         Check(edited.UpdateBody(1, editedBody), "Rebase both joints of an edited middle collider");
-        auto editedToe = edited.bodies[2];
+        PARS::PhysicsBody editedToe = edited.bodies[2];
         editedToe.shape = PhysicsShapeType::Box;
         editedToe.material.staticFriction = .1f;
         editedToe.material.dynamicFriction = .05f;
@@ -356,7 +368,7 @@ void RunRagdollTests()
         std::vector<Matrix4> editedTargets;
         for (size_t i = 0; i < bodyNodes.size(); ++i)
         {
-            const auto& bone = initial[bodyNodes[i]];
+            const Math::Matrix4& bone = initial[bodyNodes[i]];
             Check(Near(ragdoll.GetBoneWorld(i), PhysicsBoneFrame(bone)),
                 "Collider translation, rotation and primitive edits do not change initial physics bone poses");
             editedTargets.push_back(ragdoll.GetBoneWorld(i) * Invert(PhysicsBoneFrame(bone)) * bone);
@@ -381,12 +393,12 @@ void RunRagdollTests()
     slippery.staticFriction = .1f;
     slippery.dynamicFriction = .05f;
     slippery.frictionCombine = PhysicsFrictionCombine::Minimum;
-    auto* normal = physics.CreateDynamicBody(physx::PxTransform(physx::PxVec3(-4, .1f, -2)),
+    physx::PxRigidDynamic* normal = physics.CreateDynamicBody(physx::PxTransform(physx::PxVec3(-4, .1f, -2)),
         physx::PxBoxGeometry(.15f, .1f, .15f), 1, "NormalMaterial");
-    auto* ice = physics.CreateDynamicBody(physx::PxTransform(physx::PxVec3(-4, .1f, 2)),
+    physx::PxRigidDynamic* ice = physics.CreateDynamicBody(physx::PxTransform(physx::PxVec3(-4, .1f, 2)),
         physx::PxBoxGeometry(.15f, .1f, .15f), 1, "SlipperyMaterial", slippery);
     Check(normal && ice, "Create independent contact-friction probes");
-    const auto angularLocks = physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_X |
+    const physx::PxFlags<physx::PxRigidDynamicLockFlag::Enum, physx::PxU8> angularLocks = physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_X |
         physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_Y | physx::PxRigidDynamicLockFlag::eLOCK_ANGULAR_Z;
     normal->setRigidDynamicLockFlags(angularLocks);
     ice->setRigidDynamicLockFlags(angularLocks);

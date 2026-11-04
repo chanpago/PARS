@@ -35,8 +35,8 @@ namespace
 
     float PlotValue(void* data, int frame)
     {
-        const auto& plot = *static_cast<PlotData*>(data);
-        const auto& sample = plot.frames[frame];
+        const PlotData& plot = *static_cast<PlotData*>(data);
+        const PARS::ComparisonFrame& sample = plot.frames[frame];
         switch (plot.metric)
         {
         case 0:
@@ -67,7 +67,7 @@ void RagdollComparisonRunner::DrawUI(const PhysicsAsset* editor, const PhysicsAs
     {
         return;
     }
-    const auto display = ImGui::GetIO().DisplaySize;
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowSize(ImVec2(std::min(1020.0f, display.x - 40), std::min(740.0f, display.y - 70)), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(20, 40), ImGuiCond_FirstUseEver);
     if (m_WindowFocusRequested)
@@ -83,7 +83,7 @@ void RagdollComparisonRunner::DrawUI(const PhysicsAsset* editor, const PhysicsAs
     ImGui::TextUnformatted(u8"키네마틱 기준 | 액티브 래그돌");
     ImGui::TextWrapped(u8"플레이어와 분리된 더미 장면입니다. 두 더미가 같은 애니메이션·블렌딩·경로를 따릅니다. "
                        u8"최초 배치 차이만 제거하며 원본 애니메이션을 절대 기준으로 사용합니다.");
-    const auto* source = m_UseEditor ? editor : character;
+    const PARS::PhysicsAsset* source = m_UseEditor ? editor : character;
     ImGui::BeginDisabled(!source || source->bodies.empty());
     if (ImGui::Button(u8"시뮬레이션 A 시작"))
     {
@@ -236,7 +236,7 @@ void RagdollComparisonRunner::DrawUI(const PhysicsAsset* editor, const PhysicsAs
 
 void RagdollComparisonRunner::DrawSelectedSample()
 {
-    const auto& frames = m_Results.GetFrames();
+    const std::vector<PARS::ComparisonFrame>& frames = m_Results.GetFrames();
     const int last = static_cast<int>(frames.size()) - 1;
     if (m_FollowLatest)
     {
@@ -250,7 +250,7 @@ void RagdollComparisonRunner::DrawSelectedSample()
     {
         m_FollowLatest = false;
     }
-    const auto& frame = frames[m_SelectedFrame];
+    const PARS::ComparisonFrame& frame = frames[m_SelectedFrame];
     ImGui::Text(u8"표본 %d | 실험 시간 %.4f초 | 애니메이션 시간 %.4f초 (반복)", m_SelectedFrame + 1, frame.time, frame.clipTime);
     ImGui::Text(u8"동작: %s | %s %.0f%%", ViewerLabels::Animation(frame.clipName),
         frame.blendAlpha < 1 ? u8"전환 블렌딩" : u8"목표 동작", frame.blendAlpha * 100);
@@ -259,16 +259,16 @@ void RagdollComparisonRunner::DrawSelectedSample()
 
 void RagdollComparisonRunner::DrawBodyResults()
 {
-    const auto& results = m_Results.GetBodies();
-    const auto& frames = m_Results.GetFrames();
-    const auto& asset = m_Results.GetAsset();
+    const std::vector<PARS::ComparisonBodyResult>& results = m_Results.GetBodies();
+    const std::vector<PARS::ComparisonFrame>& frames = m_Results.GetFrames();
+    const PARS::PhysicsAsset& asset = m_Results.GetAsset();
     ImGui::TextWrapped(u8"위치 오차는 콜라이더 중심 간 거리입니다. 이동량 오차는 스텝별 변위 벡터의 차이이며 "
                        u8"이동 거리끼리의 차이가 아닙니다. 회전 오차는 월드 공간 바디 방향의 차이입니다.");
     if (ImGui::BeginTable("Body errors", 9, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX | ImGuiTableFlags_Resizable, ImVec2(0, 240)))
     {
         const char* headers[] = {u8"바디 (큰 오차순)", u8"위치 오차 평균 (cm)", u8"위치 오차 RMS (cm)", u8"위치 오차 최대 (cm)", u8"최대 시각 (초)",
             u8"이동량 오차 평균 (cm/스텝)", u8"이동량 오차 최대 (cm/스텝)", u8"회전 오차 평균 (도)", u8"회전 오차 최대 (도)"};
-        for (const auto* header : headers)
+        for (const char* header : headers)
         {
             ImGui::TableSetupColumn(header);
         }
@@ -276,12 +276,13 @@ void RagdollComparisonRunner::DrawBodyResults()
         ImGui::TableHeadersRow();
         std::vector<int> order(results.size());
         std::iota(order.begin(), order.end(), 0);
-        std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+        std::stable_sort(order.begin(), order.end(), [&](int a, int b) -> bool
+            {
             return results[a].position.maximum > results[b].position.maximum;
         });
         for (int i : order)
         {
-            const auto& body = results[i];
+            const PARS::ComparisonBodyResult& body = results[i];
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             if (ImGui::Selectable(asset.bodies[i].bone.c_str(), m_SelectedBody == i, ImGuiSelectableFlags_SpanAllColumns))
@@ -299,7 +300,7 @@ void RagdollComparisonRunner::DrawBodyResults()
         }
         ImGui::EndTable();
     }
-    const auto& sample = frames[m_SelectedFrame].bodies[m_SelectedBody];
+    const PARS::ComparisonBodySample& sample = frames[m_SelectedFrame].bodies[m_SelectedBody];
     ImGui::Text(u8"선택: %s", asset.bodies[m_SelectedBody].bone.c_str());
     if (ImGui::Button(u8"최대 위치 오차 보기"))
     {
@@ -318,9 +319,9 @@ void RagdollComparisonRunner::DrawBodyResults()
 
 void RagdollComparisonRunner::DrawJointResults()
 {
-    const auto& results = m_Results.GetJoints();
-    const auto& frames = m_Results.GetFrames();
-    const auto& asset = m_Results.GetAsset();
+    const std::vector<PARS::ComparisonJointResult>& results = m_Results.GetJoints();
+    const std::vector<PARS::ComparisonFrame>& frames = m_Results.GetFrames();
+    const PARS::PhysicsAsset& asset = m_Results.GetAsset();
     if (results.empty())
     {
         ImGui::TextUnformatted(u8"이 PA에는 관절이 없습니다.");
@@ -332,7 +333,7 @@ void RagdollComparisonRunner::DrawJointResults()
     {
         const char* headers[] = {u8"관절 (큰 보정순)", u8"목표 보정 평균 (도)", u8"목표 보정 최대 (도)", u8"추종 오차 평균 (도)", u8"추종 오차 최대 (도)",
             u8"트위스트 위반 (%)", u8"스윙 Y 위반 (%)", u8"스윙 Z 위반 (%)", u8"원뿔 위반 (%)"};
-        for (const auto* header : headers)
+        for (const char* header : headers)
         {
             ImGui::TableSetupColumn(header);
         }
@@ -340,12 +341,13 @@ void RagdollComparisonRunner::DrawJointResults()
         ImGui::TableHeadersRow();
         std::vector<int> order(results.size());
         std::iota(order.begin(), order.end(), 0);
-        std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+        std::stable_sort(order.begin(), order.end(), [&](int a, int b) -> bool
+            {
             return results[a].clamp.maximum > results[b].clamp.maximum;
         });
         for (int i : order)
         {
-            const auto& joint = results[i];
+            const PARS::ComparisonJointResult& joint = results[i];
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             if (joint.clamp.maximum > .01f)
@@ -360,16 +362,16 @@ void RagdollComparisonRunner::DrawJointResults()
             Number(joint.clamp.maximum * Degrees);
             Number(joint.tracking.Mean() * Degrees);
             Number(joint.tracking.maximum * Degrees);
-            for (const auto& violation : joint.violations)
+            for (const PARS::ComparisonViolation& violation : joint.violations)
             {
                 Number(100.0f * violation.frames / frames.size());
             }
         }
         ImGui::EndTable();
     }
-    const auto& config = asset.constraints[m_SelectedJoint];
-    const auto& result = results[m_SelectedJoint];
-    const auto& sample = frames[m_SelectedFrame].joints[m_SelectedJoint];
+    const PARS::PhysicsConstraint& config = asset.constraints[m_SelectedJoint];
+    const PARS::ComparisonJointResult& result = results[m_SelectedJoint];
+    const PARS::ComparisonJointSample& sample = frames[m_SelectedFrame].joints[m_SelectedJoint];
     ImGui::Text(u8"%s → %s | %s | 원본 → 실제: %.3f도",
         config.parentBone.c_str(), config.childBone.c_str(), m_Results.GetAsset().UsesArticulation() ? u8"Articulation 회전 벡터" :
             config.useSlerpDrive ? "SLERP" : u8"스윙 / 트위스트", sample.totalError * Degrees);
@@ -385,14 +387,14 @@ void RagdollComparisonRunner::DrawJointResults()
     {
         const char* headers[] = {u8"축", u8"허용 범위 (도)", u8"원본 (도)", u8"보정 목표 (도)", u8"실제 (도)",
             u8"원본 최대 초과 (도)", u8"위반 총시간 (초)", u8"최장 연속 (초)", u8"최초 / 마지막 (초)", u8"실제 최대 초과 (도)"};
-        for (const auto* header : headers)
+        for (const char* header : headers)
         {
             ImGui::TableSetupColumn(header);
         }
         ImGui::TableHeadersRow();
         for (int axis = 0; axis < 4; ++axis)
         {
-            const auto& violation = result.violations[axis];
+            const PARS::ComparisonViolation& violation = result.violations[axis];
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(Axes[axis]);
@@ -442,7 +444,7 @@ void RagdollComparisonRunner::DrawJointResults()
     ImGui::TextDisabled(u8"원뿔 초과량은 스윙 각도 좌표에서 경계까지의 방사 방향 거리입니다. 위반 판정 허용치: 0.0001 rad.");
     for (int axis = 0; axis < 3; ++axis)
     {
-        const auto& drive = config.drives[config.useSlerpDrive ? 0 : axis];
+        const PARS::PhysicsAngularDrive& drive = config.drives[config.useSlerpDrive ? 0 : axis];
         ImGui::Text(u8"%s: 원본 범위 [%.2f, %.2f]도 | 드라이브 %s | %s Kp %.1f Kd %.1f 최대 %.1f Nm",
             Axes[axis], result.minimumAngles[axis] * Degrees, result.maximumAngles[axis] * Degrees,
             drive.enabled ? u8"켜짐" : u8"꺼짐", drive.useAcceleration ? u8"관성 정규화" : u8"토크",

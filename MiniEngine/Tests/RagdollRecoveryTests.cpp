@@ -51,7 +51,7 @@ namespace
     {
         RagdollRecovery control;
         RecoverySettings settings;
-        auto input = Balanced();
+        PARS::RecoveryInput input = Balanced();
         control.Update(input, settings);
         Check(control.GetSnapshot().state == RecoveryState::Animation && !control.GetSnapshot().blending,
             "Balanced idle starts in Animation without a transition");
@@ -133,7 +133,7 @@ namespace
     {
         RagdollRecovery control;
         RecoverySettings settings;
-        auto input = Balanced();
+        PARS::RecoveryInput input = Balanced();
         input.needsStep = true;
         control.Update(input, settings);
         Check(control.GetSnapshot().state == RecoveryState::Recovery,
@@ -213,7 +213,7 @@ namespace
         to = {target};
         Check(BlendRecoveryPose(from, to, .5f) && !to[0].staleMatrix,
             "An animation destination is evaluated from its TRS cache when its matrix is stale");
-        const auto before = to;
+        const std::vector<GraphNode> before = to;
         Check(!BlendRecoveryPose({}, to, .5f) && Near(to[0].xform, before[0].xform),
             "A different skeleton size does not partially mutate the destination");
         Check(!BlendRecoveryPose(from, to, std::numeric_limits<float>::quiet_NaN()), "Reject a nonfinite blend weight");

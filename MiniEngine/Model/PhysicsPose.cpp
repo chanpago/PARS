@@ -1,6 +1,7 @@
 ﻿#include "PhysicsPose.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 using namespace Math;
 namespace PARS
@@ -241,7 +242,7 @@ namespace PARS
         {
             return false;
         }
-        const auto sourceScene = scene;
+        const std::vector<Math::Matrix4> sourceScene = scene;
         std::vector<int> bodyAtNode(source.size(), -1);
         for (size_t i = 0; i < nodes.size(); ++i)
         {
@@ -276,11 +277,12 @@ namespace PARS
         {
             return false;
         }
-        const auto find = [&](const std::string& suffix) {
+        const std::function<int(const std::string&)> find = [&](const std::string& suffix) -> int
+        {
             for (size_t i = 0; i < skeleton.names.size(); ++i)
             {
-                const auto& name = skeleton.names[i];
-                const auto colon = name.find_last_of(':');
+                const std::string& name = skeleton.names[i];
+                const std::string::size_type colon = name.find_last_of(':');
                 if (name.substr(colon == std::string::npos ? 0 : colon + 1) == suffix && skeleton.meshNodes[i] >= 0)
                 {
                     return static_cast<int>(i);
@@ -363,7 +365,7 @@ namespace PARS
         std::vector<int> nodes;
         std::vector<double> bodyVolumes;
         double groupVolumes[MassGroupCount]{};
-        for (const auto& part : parts)
+        for (const Part& part : parts)
         {
             const int node = find(part.bone), end = find(part.end);
             if (node < 0 || end < 0)
@@ -421,7 +423,8 @@ namespace PARS
                 totalMassKg * massFractions[group] * bodyVolumes[i] / groupVolumes[group]);
         }
 
-        const auto position = [&](int node) {
+        const std::function<Math::Vector3(int)> position = [&](int node) -> Math::Vector3
+        {
             return Vector3(world[node].GetW());
         };
         const Vector3 left = Normalize(position(find("LeftUpLeg")) - position(find("RightUpLeg")));
@@ -641,14 +644,14 @@ namespace PARS
             return false;
         }
         ConfigureDefaultDrives(candidate);
-        for (auto& joint : candidate.constraints)
+        for (PARS::PhysicsConstraint& joint : candidate.constraints)
         {
-            const auto group = parts[candidate.FindBody(joint.childBone)].massGroup;
+            const MassGroup group = parts[candidate.FindBody(joint.childBone)].massGroup;
             if (group == LeftHand || group == RightHand || group == LeftFoot || group == RightFoot)
             {
                 // 레퍼런스 erLimb.cpp의 손목/발목 dampingMult=3을 프리셋 값으로 드러낸다.
                 // 주파수는 16을 유지하며, 에디터에서 보이는 감쇠비만 1 -> 3으로 설정한다.
-                for (auto& drive : joint.drives)
+                for (PARS::PhysicsAngularDrive& drive : joint.drives)
                 {
                     drive.dampingRatio = 3.0f;
                 }
@@ -656,7 +659,7 @@ namespace PARS
             if (group == LeftShank || group == RightShank)
             {
                 // 무릎의 기존 토크 여유는 유지하되, 반응 속도와 감쇠비는 다른 관절과 같은 기본값을 쓴다.
-                for (auto& drive : joint.drives)
+                for (PARS::PhysicsAngularDrive& drive : joint.drives)
                 {
                     drive.maxTorque *= 2;
                 }

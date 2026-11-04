@@ -49,7 +49,7 @@ namespace
 void RunRagdollComparisonTests()
 {
     std::string error;
-    auto asset = TestAsset();
+    PARS::PhysicsAsset asset = TestAsset();
     RagdollComparison recorder;
     const Matrix4 placementA(Quaternion(Vector3(kYUnitVector), .5f), Vector3(-3, 1, 5));
     const Matrix4 placementB(Quaternion(Vector3(kYUnitVector), -.7f), Vector3(3, 1, -2));
@@ -77,34 +77,34 @@ void RunRagdollComparisonTests()
     {
         CheckComparison(recorder.Sample({Matrix4(kIdentity), raw}, {Matrix4(kIdentity), bounded}, .1f * i, error), "Limit sample");
     }
-    const auto& result = recorder.GetJoints()[0];
+    const PARS::ComparisonJointResult& result = recorder.GetJoints()[0];
     CheckComparison(Near(result.clamp.Mean(), .3f) && result.tracking.maximum < 1e-5f && Near(result.total.maximum, .3f),
         "Raw target clamping remains visible even when physical tracking is perfect");
     CheckComparison(result.violations[0].frames == 3 && result.violations[0].longestFrames == 3 &&
             Near(result.violations[0].firstTime, .1f) && Near(result.violations[0].lastTime, .3f),
         "Violation exposure and timestamps use fixed physics samples");
-    auto joint = asset.constraints[0];
-    auto locked = AnalyzeComparisonJoint(joint, Quaternion(Vector3(kYUnitVector), .3f));
+    PARS::PhysicsConstraint joint = asset.constraints[0];
+    PARS::ComparisonJointRotation locked = AnalyzeComparisonJoint(joint, Quaternion(Vector3(kYUnitVector), .3f));
     CheckComparison(Near(locked.excess[1], .3f), "Locked swing violation");
     joint.swingY = joint.swingZ = PhysicsJointMotion::Limited;
     joint.swingYLimit = joint.swingZLimit = .5f;
     const float t = std::tan(.4f * .25f), r2 = 2 * t * t;
     const Quaternion diagonal(XMVectorSet(0, 2 * t / (1 + r2), 2 * t / (1 + r2), (1 - r2) / (1 + r2)));
-    const auto cone = AnalyzeComparisonJoint(joint, diagonal);
+    const PARS::ComparisonJointRotation cone = AnalyzeComparisonJoint(joint, diagonal);
     CheckComparison(cone.excess[1] == 0 && cone.excess[2] == 0 && cone.excess[3] > .06f,
         "Coupled swing cone detects diagonal violations within both individual limits");
-    const auto native = AnalyzeComparisonJoint(joint, diagonal, true);
+    const PARS::ComparisonJointRotation native = AnalyzeComparisonJoint(joint, diagonal, true);
     CheckComparison(native.excess == std::array<float, 4>{} &&
         ComparisonRotationError(diagonal, ClampArticulationDriveTarget(joint, diagonal)) < 1e-5f,
         "Articulation diagnostics use independent rotation-vector bounds instead of the D6 cone");
-    const auto nativeClamped = ClampArticulationDriveTarget(joint, Quaternion(Vector3(kYUnitVector), .8f));
+    const Math::Quaternion nativeClamped = ClampArticulationDriveTarget(joint, Quaternion(Vector3(kYUnitVector), .8f));
     CheckComparison(Near(AnalyzeComparisonJoint(joint, nativeClamped, true).angles[1], .5f),
         "Articulation target and diagnostic limit coordinates agree");
-    const auto negative = AnalyzeComparisonJoint(joint, -diagonal);
+    const PARS::ComparisonJointRotation negative = AnalyzeComparisonJoint(joint, -diagonal);
     CheckComparison(Near(cone.excess[3], negative.excess[3]) && ComparisonRotationError(diagonal, -diagonal) < 1e-6f,
         "Quaternion sign does not change diagnostics");
     joint.twist = joint.swingY = joint.swingZ = PhysicsJointMotion::Free;
-    const auto free = AnalyzeComparisonJoint(joint, diagonal);
+    const PARS::ComparisonJointRotation free = AnalyzeComparisonJoint(joint, diagonal);
     CheckComparison(free.excess == std::array<float, 4>{}, "Free axes never produce limit exposure");
     CheckComparison(AnalyzeComparisonJoint(joint, Quaternion(XMVectorSet(0, 1, 0, 0))).singular,
         "Ambiguous twist at 180-degree swing is flagged");
@@ -124,8 +124,8 @@ void RunRagdollComparisonTests()
     {
         World isolated;
         CheckComparison(isolated.InitializePhysics(false, &owner), "Separate scene shares SDK services");
-        auto* physics = isolated.GetPhysicsWorld();
-        auto* body = physics->CreateDynamicBox(physx::PxTransform(physx::PxVec3(0, 3, 0)), physx::PxVec3(.2f), 1, "Isolated");
+        PhysicsWorld* physics = isolated.GetPhysicsWorld();
+        physx::PxRigidDynamic* body = physics->CreateDynamicBox(physx::PxTransform(physx::PxVec3(0, 3, 0)), physx::PxVec3(.2f), 1, "Isolated");
         CheckComparison(body && owner.GetDynamicBodyCount() == 0, "Objects stay out of owner scene");
         physics->Step();
         CheckComparison(physics->GetStepCount() == 1 && owner.GetStepCount() == 0, "Isolated fixed clock");

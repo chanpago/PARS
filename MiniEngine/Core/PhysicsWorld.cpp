@@ -7,6 +7,7 @@
 #include <Windows.h>
 #include <cmath>
 #include <algorithm>
+#include <functional>
 
 using namespace physx;
 
@@ -41,9 +42,9 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
 {
     for (PxU32 i = 0; i < count; ++i)
     {
-        const auto& pair = pairs[i];
-        auto cached = std::find_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& contact)
-        {
+        const physx::PxContactPair& pair = pairs[i];
+        std::vector<PhysicsWorld::ContactPair>::iterator cached = std::find_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& contact) -> bool
+            {
             return contact.actors[0] == header.actors[0] && contact.actors[1] == header.actors[1] &&
                 contact.shapes[0] == pair.shapes[0] && contact.shapes[1] == pair.shapes[1];
         });
@@ -80,20 +81,22 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
 
 void PhysicsWorld::InvalidateContacts(const PxRigidActor& body)
 {
-    m_Contacts.erase(std::remove_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& pair)
-    {
+    m_Contacts.erase(std::remove_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& pair) -> bool
+                         {
         return pair.actors[0] == &body || pair.actors[1] == &body;
-    }), m_Contacts.end());
+    }),
+        m_Contacts.end());
 }
 
 void PhysicsWorld::onRelease(const PxBase* object, void*, PxDeletionEventFlag::Enum)
 {
     // 해제된 객체를 역참조하지 않는다. PA 재생성 시 같은 주소가 재사용돼도 접촉이 남지 않는다.
-    m_Contacts.erase(std::remove_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& pair)
-    {
+    m_Contacts.erase(std::remove_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& pair) -> bool
+                         {
         return pair.actors[0] == object || pair.actors[1] == object ||
             pair.shapes[0] == object || pair.shapes[1] == object;
-    }), m_Contacts.end());
+    }),
+        m_Contacts.end());
 }
 
 bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundContact& contact,
@@ -104,27 +107,27 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
     {
         return false;
     }
-    for (const auto& pair : m_Contacts)
+    for (const PhysicsWorld::ContactPair& pair : m_Contacts)
     {
         const int side = pair.actors[0] == &body ? 0 : pair.actors[1] == &body ? 1 : -1;
         if (side < 0)
         {
             continue;
         }
-        const auto* other = pair.actors[1 - side];
+        const physx::PxActor* other = pair.actors[1 - side];
         if (other->getScene() != m_Scene || (ignoredOwner && other->userData == ignoredOwner) ||
             !pair.shapes[0]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) ||
             !pair.shapes[1]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE))
         {
             continue;
         }
-        const auto* link = body.is<PxArticulationLink>();
-        const auto* otherLink = other->is<PxArticulationLink>();
+        const physx::PxArticulationLink* link = body.is<PxArticulationLink>();
+        const physx::PxArticulationLink* otherLink = other->is<PxArticulationLink>();
         if (link && otherLink && &link->getArticulation() == &otherLink->getArticulation())
         {
             continue;
         }
-        for (const auto& point : pair.points)
+        for (const physx::PxContactPairPoint& point : pair.points)
         {
             const PxVec3 normal = side == 0 ? point.normal : -point.normal;
             // 이동 캡슐과 같은 45도 기준으로 벽을 제외한다. 접촉 오프셋 안의 근접만으로는 지지가 아니다.
@@ -154,7 +157,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
     {
         return impulse;
     }
-    for (const auto& pair : m_Contacts)
+    for (const PhysicsWorld::ContactPair& pair : m_Contacts)
     {
         const int side = pair.actors[0] == &body ? 0 : pair.actors[1] == &body ? 1 : -1;
         // 잠든 접촉의 과거 충격량을 매 프레임 새 충격처럼 재사용하지 않는다.
@@ -162,9 +165,9 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
         {
             continue;
         }
-        const auto* other = pair.actors[1 - side];
-        const auto* link = body.is<PxArticulationLink>();
-        const auto* otherLink = other->is<PxArticulationLink>();
+        const physx::PxActor* other = pair.actors[1 - side];
+        const physx::PxArticulationLink* link = body.is<PxArticulationLink>();
+        const physx::PxArticulationLink* otherLink = other->is<PxArticulationLink>();
         if (other->getScene() != m_Scene || (ignoredOwner && other->userData == ignoredOwner) ||
             (link && otherLink && &link->getArticulation() == &otherLink->getArticulation()) ||
             !pair.shapes[0]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) ||
@@ -172,7 +175,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
         {
             continue;
         }
-        for (const auto& point : pair.points)
+        for (const physx::PxContactPairPoint& point : pair.points)
         {
             const PxVec3 normal = side == 0 ? point.normal : -point.normal;
             if (normal.isFinite() && normal.y < .70710678f && point.impulse.isFinite())
@@ -490,7 +493,7 @@ PxRigidStatic* PhysicsWorld::CreateStaticBox(const PxTransform& pose,
     {
         return nullptr;
     }
-    auto* material = CreateBodyMaterial(settings);
+    physx::PxMaterial* material = CreateBodyMaterial(settings);
     if (!material)
     {
         return nullptr;
@@ -530,11 +533,11 @@ PhysicsQueryCapsule* PhysicsWorld::CreateQueryCapsule(const PxVec3& centre,
     {
         return nullptr;
     }
-    auto capsule = std::make_unique<PhysicsQueryCapsule>();
+    std::unique_ptr<PhysicsQueryCapsule> capsule = std::make_unique<PhysicsQueryCapsule>();
     capsule->centre = centre;
     capsule->radius = radius;
     capsule->halfHeight = halfHeight;
-    auto* result = capsule.get();
+    PhysicsQueryCapsule* result = capsule.get();
     m_QueryCapsules.push_back(std::move(capsule));
     return result;
 }
@@ -542,9 +545,10 @@ PhysicsQueryCapsule* PhysicsWorld::CreateQueryCapsule(const PxVec3& centre,
 void PhysicsWorld::DestroyQueryCapsule(PhysicsQueryCapsule* capsule)
 {
     m_QueryCapsules.erase(std::remove_if(m_QueryCapsules.begin(), m_QueryCapsules.end(),
-                              [capsule](const auto& entry) {
-                                  return entry.get() == capsule;
-                              }),
+                              [capsule](const std::unique_ptr<PhysicsQueryCapsule>& entry) -> bool
+                              {
+        return entry.get() == capsule;
+    }),
         m_QueryCapsules.end());
 }
 
@@ -662,7 +666,7 @@ float PhysicsWorld::SweepSphereDistance(const PxVec3& origin, const PxVec3& disp
         PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER), &filter);
     float allowed = hit.hasBlock ? PxMax(0.0f, hit.block.distance) : distance;
     // 이동용 캡슐은 씬에 PxActor를 만들지 않으므로 별도로 검사한다.
-    for (const auto& capsule : m_QueryCapsules)
+    for (const std::unique_ptr<PhysicsQueryCapsule>& capsule : m_QueryCapsules)
     {
         if (ignoredOwner && capsule->owner == ignoredOwner)
         {
@@ -721,7 +725,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         CapsulePenetration overlaps(capsule, !blockHorizontal);
         m_Scene->overlap(overlaps.geometry, overlaps.pose, overlaps,
             PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::eNO_BLOCK), &filter);
-        for (const auto& other : m_QueryCapsules)
+        for (const std::unique_ptr<PhysicsQueryCapsule>& other : m_QueryCapsules)
         {
             if (blockHorizontal && other.get() != &capsule)
             {
@@ -743,7 +747,8 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         }
     }
 
-    const auto sweep = [&](const PxVec3& origin, const PxVec3& delta, PxGeomSweepHit& hit) {
+    const std::function<bool(const physx::PxVec3&, const physx::PxVec3&, physx::PxGeomSweepHit&)> sweep = [&](const PxVec3& origin, const PxVec3& delta, PxGeomSweepHit& hit) -> bool
+    {
         const float distance = delta.magnitude();
         if (distance < 1e-6f)
         {
@@ -751,8 +756,8 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         }
         filter.direction = delta / distance;
         PxSweepBuffer buffer;
-        const auto geometry = CapsuleGeometry(capsule, CapsuleSkin);
-        const auto pose = CapsulePose(origin);
+        const physx::PxCapsuleGeometry geometry = CapsuleGeometry(capsule, CapsuleSkin);
+        const physx::PxTransform pose = CapsulePose(origin);
         const PxHitFlags flags = PxHitFlag::eDEFAULT | PxHitFlag::eMTD;
         m_Scene->sweep(geometry, pose, filter.direction, distance, buffer, flags,
             PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::ePOSTFILTER), &filter);
@@ -762,7 +767,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
             hit = buffer.block;
         }
         // 다른 캐릭터도 프록시 바디를 등록하지 않고 쿼리 형상으로만 처리한다.
-        for (const auto& other : m_QueryCapsules)
+        for (const std::unique_ptr<PhysicsQueryCapsule>& other : m_QueryCapsules)
         {
             if (!blockHorizontal || other.get() == &capsule)
             {
@@ -779,7 +784,8 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         }
         return found;
     };
-    const auto travel = [](const PxVec3& delta, const PxGeomSweepHit& hit) {
+    physx::PxVec3 (*const travel)(const physx::PxVec3&, const physx::PxGeomSweepHit&) = [](const PxVec3& delta, const PxGeomSweepHit& hit) -> physx::PxVec3
+    {
         // 스윕 형상에 이미 접촉 여유 두께가 포함되어 있으므로 충돌 지점에서 정확히 멈춘다.
         // 간격을 추가하면 기존 캐릭터의 발 높이가 달라진다.
         return delta.getNormalized() * PxMax(0.0f, hit.distance);
@@ -808,7 +814,8 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
             result.grounded = true;
         }
     }
-    const auto slide = [&](PxVec3 remaining, bool vertical) {
+    const std::function<void(physx::PxVec3, bool)> slide = [&](PxVec3 remaining, bool vertical) -> void
+    {
         for (int iteration = 0; iteration < 8 && remaining.magnitudeSquared() > 1e-10f; ++iteration)
         {
             PxGeomSweepHit hit;
@@ -817,7 +824,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
                 capsule.centre += remaining;
                 break;
             }
-            const auto moved = travel(remaining, hit);
+            const physx::PxVec3 moved = travel(remaining, hit);
             capsule.centre += moved;
             remaining -= moved;
             PxVec3 normal = hit.normal;
@@ -879,11 +886,12 @@ void PhysicsWorld::GetCapsuleDebugLines(std::vector<PxDebugLine>& lines) const
         return;
     }
     constexpr PxU32 color = 0xffe8b84a;
-    for (const auto& capsule : m_QueryCapsules)
+    for (const std::unique_ptr<PhysicsQueryCapsule>& capsule : m_QueryCapsules)
     {
         const PxVec3 centre = capsule->centre;
         const float radius = capsule->radius, halfCylinder = capsule->halfHeight - radius;
-        const auto line = [&](const PxVec3& a, const PxVec3& b) {
+        const std::function<void(const physx::PxVec3&, const physx::PxVec3&)> line = [&](const PxVec3& a, const PxVec3& b) -> void
+        {
             lines.emplace_back(centre + a, centre + b, color);
         };
         for (int end : {-1, 1})
@@ -917,7 +925,7 @@ void PhysicsWorld::SetPvdSceneQueries(bool enabled)
 {
     if (m_Scene)
     {
-        if (auto* client = m_Scene->getScenePvdClient())
+        if (physx::PxPvdSceneClient* client = m_Scene->getScenePvdClient())
         {
             client->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, enabled);
         }
@@ -937,7 +945,7 @@ PxMaterial* PhysicsWorld::CreateBodyMaterial(const PARS::PhysicsMaterialSettings
         m_Material->acquireReference();
         return m_Material;
     }
-    auto* material = m_Physics->createMaterial(settings.staticFriction, settings.dynamicFriction, settings.restitution);
+    physx::PxMaterial* material = m_Physics->createMaterial(settings.staticFriction, settings.dynamicFriction, settings.restitution);
     if (material)
     {
         const PxCombineMode::Enum modes[] = {PxCombineMode::eAVERAGE, PxCombineMode::eMIN, PxCombineMode::eMULTIPLY, PxCombineMode::eMAX};
@@ -953,12 +961,12 @@ PxRigidDynamic* PhysicsWorld::CreateDynamicBody(const PxTransform& pose, const P
     {
         return nullptr;
     }
-    auto* material = CreateBodyMaterial(settings);
+    physx::PxMaterial* material = CreateBodyMaterial(settings);
     if (!material)
     {
         return nullptr;
     }
-    auto* body = PxCreateDynamic(*m_Physics, pose, geometry, *material, 1.0f);
+    physx::PxRigidDynamic* body = PxCreateDynamic(*m_Physics, pose, geometry, *material, 1.0f);
     material->release(); // The shape retains its own material reference.
     if (!body)
     {
@@ -992,18 +1000,18 @@ PxArticulationLink* PhysicsWorld::CreateArticulationLink(PxArticulationReducedCo
     {
         return nullptr;
     }
-    auto* material = CreateBodyMaterial(settings);
+    physx::PxMaterial* material = CreateBodyMaterial(settings);
     if (!material)
     {
         return nullptr;
     }
-    auto* link = articulation.createLink(parent, pose);
+    physx::PxArticulationLink* link = articulation.createLink(parent, pose);
     if (!link)
     {
         material->release();
         return nullptr;
     }
-    auto* shape = PxRigidActorExt::createExclusiveShape(*link, geometry, *material);
+    physx::PxShape* shape = PxRigidActorExt::createExclusiveShape(*link, geometry, *material);
     material->release();
     if (!shape || !PxRigidBodyExt::setMassAndUpdateInertia(*link, mass))
     {
@@ -1057,7 +1065,7 @@ uint32_t PhysicsWorld::GetDynamicBodyCount() const
     uint32_t count = m_Scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC);
     std::vector<PxArticulationReducedCoordinate*> articulations(m_Scene->getNbArticulations());
     m_Scene->getArticulations(articulations.data(), static_cast<PxU32>(articulations.size()));
-    for (const auto* articulation : articulations)
+    for (const physx::PxArticulationReducedCoordinate* articulation : articulations)
     {
         count += articulation->getNbLinks();
     }

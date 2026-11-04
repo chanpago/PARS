@@ -31,8 +31,8 @@ namespace
     {
         FootstepTarget result;
         result.reason = FootstepReason::InvalidTarget;
-        const auto& foot = input.feet[side];
-        const auto& stance = input.feet[1 - side];
+        const PARS::FootstepFootInput& foot = input.feet[side];
+        const PARS::FootstepFootInput& stance = input.feet[1 - side];
         if (!input.hasReference)
         {
             result.reason = FootstepReason::NoReference;
@@ -158,7 +158,7 @@ void FootstepPlanner::Abort(FootstepReason reason)
     m_Snapshot.hasTarget = false;
     m_Snapshot.motion.valid = false;
     m_Snapshot.candidates = {};
-    for (auto& candidate : m_Snapshot.candidates)
+    for (PARS::FootstepTarget& candidate : m_Snapshot.candidates)
     {
         candidate.reason = reason;
     }

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <functional>
 
 using namespace Math;
 using namespace PARS;
@@ -26,11 +27,11 @@ bool RunPelvisDriveValidation(World& world, Character& character, const std::wst
         {
             throw std::runtime_error("Invalid pelvis validation output or configuration");
         }
-        auto& mesh = character.GetMesh();
-        auto& ragdoll = mesh.GetRagdoll();
-        auto& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
-        auto& physics = *world.GetPhysicsWorld();
-        const auto asset = *mesh.GetPhysicsAsset();
+        PARS::SkeletalMeshComponent& mesh = character.GetMesh();
+        PARS::Ragdoll& ragdoll = mesh.GetRagdoll();
+        PreviewAnimInstance& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
+        PhysicsWorld& physics = *world.GetPhysicsWorld();
+        const PARS::PhysicsAsset asset = *mesh.GetPhysicsAsset();
         PhysicsSkeleton skeleton;
         std::string error;
         if (!mesh.BuildPhysicsSkeleton(skeleton, error) || !character.StopRagdoll(error))
@@ -50,7 +51,7 @@ bool RunPelvisDriveValidation(World& world, Character& character, const std::wst
             world.Tick(deltaTime);
         }
         character.GetCharacterMovement().SetTickEnabled(false);
-        const auto base = character.GetActorTransform();
+        const Math::AffineTransform base = character.GetActorTransform();
         if (!character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) ||
             !ragdoll.SetRootSupported(true, error) || !ragdoll.UsesArticulation())
         {
@@ -81,7 +82,7 @@ bool RunPelvisDriveValidation(World& world, Character& character, const std::wst
                 yaw = XM_PI * (Clamp((time - 1.0f) / .25f, 0.0f, 1.0f) -
                     Clamp((time - 3.0f) / .25f, 0.0f, 1.0f));
             }
-            auto transform = base;
+            Math::AffineTransform transform = base;
             transform.SetBasis(Matrix3::MakeYRotation(yaw) * base.GetBasis());
             character.SetActorTransform(transform);
             world.Tick(deltaTime);
@@ -98,17 +99,17 @@ bool RunPelvisDriveValidation(World& world, Character& character, const std::wst
             const float rootPosition = ragdoll.GetRootPositionError();
             maxRootRotation = Max(maxRootRotation, rootRotation);
             maxRootPosition = Max(maxRootPosition, rootPosition);
-            for (const auto& joint : asset.constraints)
+            for (const PARS::PhysicsConstraint& joint : asset.constraints)
             {
                 const int parent = asset.FindBody(joint.parentBone);
                 const int child = asset.FindBody(joint.childBone);
-                const auto parentLocal = asset.bodies[parent].GetLocalTransform();
-                const auto childLocal = asset.bodies[child].GetLocalTransform();
-                auto desired = EvaluateJointDriveTarget(joint,
+                const Math::Matrix4 parentLocal = asset.bodies[parent].GetLocalTransform();
+                const Math::Matrix4 childLocal = asset.bodies[child].GetLocalTransform();
+                Math::Quaternion desired = EvaluateJointDriveTarget(joint,
                     PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[parent]]) * parentLocal,
                     PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[child]]) * childLocal, false);
                 desired = ClampArticulationDriveTarget(joint, desired);
-                const auto actual = EvaluateJointDriveTarget(joint, ragdoll.GetBoneWorld(parent) * parentLocal,
+                const Math::Quaternion actual = EvaluateJointDriveTarget(joint, ragdoll.GetBoneWorld(parent) * parentLocal,
                     ragdoll.GetBoneWorld(child) * childLocal, false);
                 const float dot = std::abs(XMVectorGetX(XMVector4Dot(desired, actual)));
                 const float angleError = 2.0f * std::acos(Clamp(dot, 0.0f, 1.0f));
@@ -141,53 +142,76 @@ bool RunPelvisDriveValidation(World& world, Character& character, const std::wst
 void RunActiveRagdollValidation(World& world, Character& character, std::ostream& report)
 {
     std::string error;
-    const auto check = [&](bool value, const char* message) {
+    const std::function<void(bool, const char*)> check = [&](bool value, const char* message) -> void
+    {
         report << (value ? "PASS: " : "FAIL: ") << message << " | " << error << std::endl;
-        if (!value) throw std::runtime_error(message);
+        if (!value)
+        {
+            throw std::runtime_error(message);
+        }
     };
-    auto& mesh = character.GetMesh(); auto& ragdoll = mesh.GetRagdoll();
-    auto& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
-    auto& physics = *world.GetPhysicsWorld();
-    const auto originalAsset = *mesh.GetPhysicsAsset();
-    auto start = character.GetActorLocation();
-    const auto bodyCount = physics.GetDynamicBodyCount(), jointCount = physics.GetConstraintCount();
+    PARS::SkeletalMeshComponent& mesh = character.GetMesh();
+    PARS::Ragdoll& ragdoll = mesh.GetRagdoll();
+    PreviewAnimInstance& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
+    PhysicsWorld& physics = *world.GetPhysicsWorld();
+    const PARS::PhysicsAsset originalAsset = *mesh.GetPhysicsAsset();
+    Math::Vector3 start = character.GetActorLocation();
+    const uint32_t bodyCount = physics.GetDynamicBodyCount();
+    const uint32_t jointCount = physics.GetConstraintCount();
     PhysicsSkeleton skeleton;
     check(mesh.BuildPhysicsSkeleton(skeleton, error), "Active: imported skeleton bindings");
-    const auto samePose = [](const Matrix4& a, const Matrix4& b) {
+    bool (*const samePose)(const Math::Matrix4&, const Math::Matrix4&) = [](const Matrix4& a, const Matrix4& b) -> bool
+    {
         return float(Length(Vector3(a.GetW()) - Vector3(b.GetW()))) < .0001f &&
             float(Length(Vector3(a.GetX()) - Vector3(b.GetX()))) < .0001f &&
             float(Length(Vector3(a.GetY()) - Vector3(b.GetY()))) < .0001f;
     };
-    const auto pelvisTracksAnimation = [&]() {
+    const std::function<bool()> pelvisTracksAnimation = [&]() -> bool
+    {
         std::vector<Matrix4> target;
-        if (!EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), target, error)) return false;
-        const auto actual = ragdoll.GetBoneWorld(0), desired = PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[0]]);
+        if (!EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), target, error))
+        {
+            return false;
+        }
+        const Math::Matrix4 actual = ragdoll.GetBoneWorld(0);
+        const Math::Matrix4 desired = PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[0]]);
         return float(Length(Vector3(actual.GetW()) - Vector3(desired.GetW()))) < .08f &&
             std::abs(XMVectorGetX(XMVector4Dot(Quaternion(actual), Quaternion(desired)))) > std::cos(.35f * .5f);
     };
-    const auto prepare = [&](uint32_t clip, bool suspended = true) {
+    const std::function<void(uint32_t, bool)> prepare = [&](uint32_t clip, bool suspended = true) -> void
+    {
         check(character.StopRagdoll(error), "Active: return to animation");
         character.GetCharacterMovement().SetTickEnabled(true);
         character.SetActorLocation(start);
-        animation.SetLocomotionEnabled(false); animation.SetAutoCycleEnabled(false);
+        animation.SetLocomotionEnabled(false);
+        animation.SetAutoCycleEnabled(false);
         animation.PlayAnimation(clip);
         physics.ResetClock();
-        for (int i = 0; i < 24; ++i) world.Tick(1.0f / 60);
+        for (int i = 0; i < 24; ++i)
+        {
+            world.Tick(1.0f / 60);
+        }
         // Isolate joint tracking from floor obstruction: a supported, hanging
         // character can reach the animation targets. Test floor contact separately.
-        if (suspended) character.SetActorLocation(character.GetActorLocation() + Vector3(0, 1, 0));
+        if (suspended)
+        {
+            character.SetActorLocation(character.GetActorLocation() + Vector3(0, 1, 0));
+        }
         world.Tick(0);
-        if (suspended) character.GetCharacterMovement().SetTickEnabled(false);
+        if (suspended)
+        {
+            character.GetCharacterMovement().SetTickEnabled(false);
+        }
         check(character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) && ragdoll.SetRootSupported(true, error),
             "Active: enter supported dynamic drive mode");
         check(ragdoll.GetDrivenJointCount() == 19 && ragdoll.GetKinematicBodyCount() == 0 &&
-            physics.GetConstraintCount() == jointCount + 1,
+                physics.GetConstraintCount() == jointCount + 1,
             "Active: 20 dynamic bodies, 19 driven joints and one pelvis force/torque support constraint");
     };
     for (uint32_t clip = 0; clip < 3; ++clip)
     {
-        prepare(clip);
-        const auto initialPelvis = ragdoll.GetBoneWorld(0);
+        prepare(clip, true);
+        const Math::Matrix4 initialPelvis = ragdoll.GetBoneWorld(0);
         const float initialTime = animation.GetAnimationTime();
         world.Tick(1.0f / 60);
         check(animation.GetAnimationTime() != initialTime, "Active: target animation continues during physics");
@@ -198,14 +222,14 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
         double elapsedMs = 0;
         for (int step = 0; step < 360; ++step)
         {
-            const auto before = std::chrono::steady_clock::now();
+            const std::chrono::steady_clock::time_point before = std::chrono::steady_clock::now();
             world.Tick(1.0f / 60);
             elapsedMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - before).count();
             if (!ragdoll.IsFinite()) check(false, "Active: finite dynamic state");
             if (!pelvisTracksAnimation()) check(false, "Active: dynamic pelvis tracks animation within 8 cm / 0.35 rad");
             pelvisPositionError = Max(pelvisPositionError, ragdoll.GetRootPositionError());
             pelvisRotationError = Max(pelvisRotationError, ragdoll.GetRootRotationError());
-            const auto pelvis = ragdoll.GetBoneWorld(0);
+            const Math::Matrix4 pelvis = ragdoll.GetBoneWorld(0);
             pelvisTravel = Max(pelvisTravel, float(Length(Vector3(pelvis.GetW()) - Vector3(initialPelvis.GetW()))));
             pelvisRotation = Max(pelvisRotation, Max(float(Length(Vector3(pelvis.GetX()) - Vector3(initialPelvis.GetX()))),
                 float(Length(Vector3(pelvis.GetY()) - Vector3(initialPelvis.GetY())))));
@@ -232,7 +256,7 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
         const float restError = ragdoll.GetMaxDriveError();
         const float restPelvisError = ragdoll.GetRootPositionError();
         const float frozenTime = animation.GetAnimationTime();
-        const auto targetBeforePush = animation.GetPose();
+        const std::vector<GraphNode> targetBeforePush = animation.GetPose();
         ragdoll.AddVelocity(Vector3(0, 1, 2));
         float peak = 0, pelvisPeak = 0;
         for (int i = 0; i < 240; ++i)
@@ -250,14 +274,16 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             check(float(Length(Vector3(targetBeforePush[i].xform.GetW()) - Vector3(animation.GetPose()[i].xform.GetW()))) < 1e-6f &&
                 std::abs(XMVectorGetX(XMVector4Dot(targetBeforePush[i].rotation, animation.GetPose()[i].rotation))) > .99999f,
                 "Active: target bone is independent of physical disturbance");
-        auto& render = GraphicsContext::Begin(L"Validate active physical render pose");
+        GraphicsContext& render = GraphicsContext::Begin(L"Validate active physical render pose");
         check(mesh.UpdateRenderData(render), "Active: DX12 pose upload"); render.Finish(true);
         for (size_t i = 0; i < ragdoll.GetBodyCount(); ++i)
         {
-            const auto node = ragdoll.GetBoneNodes()[i]; Matrix4 skin, owner;
+            const int32_t node = ragdoll.GetBoneNodes()[i];
+            Matrix4 skin, owner;
             mesh.GetModelInstance().GetNodeTransform(node, skin);
             mesh.GetModelInstance().GetNodeTransform(skeleton.meshNodes[node], owner);
-            const auto actual = PhysicsBoneFrame(owner * skin), physical = ragdoll.GetBoneWorld(i);
+            const Math::Matrix4 actual = PhysicsBoneFrame(owner * skin);
+            const Math::Matrix4 physical = ragdoll.GetBoneWorld(i);
             check(float(Length(Vector3(actual.GetW()) - Vector3(physical.GetW()))) < .001f &&
                 float(Length(Vector3(actual.GetX()) - Vector3(physical.GetX()))) < .001f,
                 "Active: renderer uses physical bone transforms");
@@ -277,10 +303,17 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
         check(ragdoll.SetRootSupported(true, error), "Active: explicitly restore pelvis support for animated-pelvis checks");
         animation.SetPlaying(true);
         world.SetPhysicsPaused(true);
-        const auto pausedPelvis = ragdoll.GetBoneWorld(0);
-        const float time = animation.GetAnimationTime(); const auto steps = physics.GetStepCount();
-        auto disabled = originalAsset;
-        for (auto& joint : disabled.constraints) for (auto& drive : joint.drives) drive.enabled = false;
+        const Math::Matrix4 pausedPelvis = ragdoll.GetBoneWorld(0);
+        const float time = animation.GetAnimationTime();
+        const uint64_t steps = physics.GetStepCount();
+        PARS::PhysicsAsset disabled = originalAsset;
+        for (PARS::PhysicsConstraint& joint : disabled.constraints)
+        {
+            for (PARS::PhysicsAngularDrive& drive : joint.drives)
+            {
+                drive.enabled = false;
+            }
+        }
         check(mesh.QueueDriveSettings(disabled, error), "Active: queue drive edits while paused");
         world.Tick(1);
         check(physics.GetStepCount() == steps && animation.GetAnimationTime() == time && mesh.HasPendingDriveSettings() &&
@@ -315,7 +348,7 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             "Active: unsupported character collides with floor");
         check(character.SetPhysicsMode(PhysicsAnimationMode::PassiveRagdoll, error), "Active: disable motors after floor contact");
         for (int i = 0; i < 60; ++i) world.Tick(1.0f / 60);
-        const auto fallen = ragdoll.GetBoneWorld(0);
+        const Math::Matrix4 fallen = ragdoll.GetBoneWorld(0);
         check(character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) && !ragdoll.IsRootSupported() &&
             float(Length(Vector3(fallen.GetW()) - Vector3(ragdoll.GetBoneWorld(0).GetW()))) < 1e-6f,
             "Active: enable motors from a fallen pose without teleporting or adding support");
@@ -350,34 +383,34 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
     // 사용자에게 보였던 제자리 회전을 실제 Mixamo Idle 포즈와 바닥 접촉 상태에서 재현한다.
     prepare(0, false);
     character.GetCharacterMovement().SetTickEnabled(false);
-    const auto turnBase = character.GetActorTransform();
+    const Math::AffineTransform turnBase = character.GetActorTransform();
     float armTurnError = 0;
     for (int step = 0; step < 360; ++step)
     {
         const float phase = Clamp((step / 60.0f - 1.0f) / 3.0f, 0.0f, 1.0f);
         const float wave = std::sin(phase * XM_PI);
-        auto transform = turnBase;
+        Math::AffineTransform transform = turnBase;
         transform.SetBasis(Matrix3::MakeYRotation(XM_PI * wave * wave) * turnBase.GetBasis());
         character.SetActorTransform(transform);
         world.Tick(1.0f / 60);
         std::vector<Matrix4> target;
         check(EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), target, error),
             "Active turn: sample imported animation target");
-        for (const auto& joint : originalAsset.constraints)
+        for (const PARS::PhysicsConstraint& joint : originalAsset.constraints)
         {
-            const auto& name = joint.childBone;
+            const std::string& name = joint.childBone;
             if (name.find("Arm") == std::string::npos && name.find("Hand") == std::string::npos && name.find("Shoulder") == std::string::npos)
             {
                 continue;
             }
             const int parent = originalAsset.FindBody(joint.parentBone), child = originalAsset.FindBody(joint.childBone);
-            const auto parentLocal = originalAsset.bodies[parent].GetLocalTransform();
-            const auto childLocal = originalAsset.bodies[child].GetLocalTransform();
-            auto desired = EvaluateJointDriveTarget(joint,
+            const Math::Matrix4 parentLocal = originalAsset.bodies[parent].GetLocalTransform();
+            const Math::Matrix4 childLocal = originalAsset.bodies[child].GetLocalTransform();
+            Math::Quaternion desired = EvaluateJointDriveTarget(joint,
                 PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[parent]]) * parentLocal,
                 PhysicsBoneFrame(target[ragdoll.GetBoneNodes()[child]]) * childLocal, false);
             desired = ClampArticulationDriveTarget(joint, desired);
-            const auto actual = EvaluateJointDriveTarget(joint, ragdoll.GetBoneWorld(parent) * parentLocal,
+            const Math::Quaternion actual = EvaluateJointDriveTarget(joint, ragdoll.GetBoneWorld(parent) * parentLocal,
                 ragdoll.GetBoneWorld(child) * childLocal, false);
             const float dot = std::abs(XMVectorGetX(XMVector4Dot(desired, actual)));
             if (step > 60)
@@ -398,7 +431,8 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
     float referenceTime = 0;
     for (int fps : {30, 60, 144})
     {
-        prepare(1); physics.ResetClock();
+        prepare(1, true);
+        physics.ResetClock();
         for (int frame = 0; frame < fps * 2; ++frame) world.Tick(1.0f / fps);
         check(physics.GetStepCount() == 120, "Active: equal fixed-step count at 30/60/144 FPS");
         if (reference.empty())
@@ -415,7 +449,7 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
                     "Active: physical tracking is render-FPS independent");
         }
     }
-    prepare(0);
+    prepare(0, true);
     for (uint32_t next : {1u, 2u, 0u})
     {
         check(animation.SelectAnimation(next), "Active: select a new target clip while simulated");
@@ -430,42 +464,50 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
         check(animation.GetCurrentAnimationIndex() == next && settledError < .35f,
             "Active: blended target clip switch settles within tracking tolerance");
     }
-    prepare(1); physics.ResetClock();
+    prepare(1, true);
+    physics.ResetClock();
     const float slowStart = animation.GetAnimationTime();
     world.SetPhysicsTimeScale(.5f);
     for (int i = 0; i < 60; ++i) world.Tick(1.0f / 60);
     check(physics.GetStepCount() == 30, "Active: half speed runs exactly 30 fixed steps per render second");
     const float slowTime = animation.GetAnimationTime();
     world.SetPhysicsTimeScale(1);
-    prepare(1); physics.ResetClock();
+    prepare(1, true);
+    physics.ResetClock();
     check(std::abs(animation.GetAnimationTime() - slowStart) < .0001f, "Active: repeatable slow-motion baseline");
     for (int i = 0; i < 30; ++i) world.Tick(1.0f / 60);
     check(std::abs(animation.GetAnimationTime() - slowTime) < .0001f, "Active: target animation uses the same slowed physics clock");
     check(character.StopRagdoll(error) && physics.GetErrorCount() == 0, "Active: restore animation without PhysX errors");
 
-    auto* player = dynamic_cast<PlayerController*>(character.GetController());
+    PARS::PlayerController* player = dynamic_cast<PlayerController*>(character.GetController());
     check(player != nullptr, "Active movement: preview has a player controller");
     // Earlier regressions already walked forward. Leave enough room to measure
     // unrestricted walk/run before deliberately driving into the +Z wall.
     start = Vector3(2, .95f, -1);
-    const auto prepareMovement = [&]() {
+    const std::function<void()> prepareMovement = [&]() -> void
+    {
         player->SetInputEnabled(false);
         prepare(0, false);
         animation.SetLocomotionEnabled(true);
-        player->SetControlYaw(0); player->SetInputEnabled(true);
+        player->SetControlYaw(0);
+        player->SetInputEnabled(true);
     };
-    const auto moveFrames = [&](int count, float dt = 1.0f / 60) {
+    const std::function<void(int, float)> moveFrames = [&](int count, float dt = 1.0f / 60) -> void
+    {
         for (int i = 0; i < count; ++i)
         {
             world.Tick(dt);
             if (!ragdoll.IsFinite() || ragdoll.GetKinematicBodyCount() != 0 || ragdoll.GetMaxAnchorError() > .08f)
+            {
                 check(false, "Active movement: dynamic body state and joint anchors remain valid");
+            }
         }
     };
     prepareMovement();
-    const auto walkStart = character.GetActorLocation();
-    const auto pelvisStart = ragdoll.GetPosition();
-    player->SetMoveInput(1, 0, false); moveFrames(60);
+    const Math::Vector3 walkStart = character.GetActorLocation();
+    const Math::Vector3 pelvisStart = ragdoll.GetPosition();
+    player->SetMoveInput(1, 0, false);
+    moveFrames(60, 1.0f / 60);
     report << "active_walk_travel_m=" << float(character.GetActorLocation().GetZ() - walkStart.GetZ())
         << " pelvis_error_m=" << ragdoll.GetRootPositionError() << " speed_mps=" << character.GetCharacterMovement().GetGroundSpeed()
         << " clip=" << animation.GetCurrentAnimationIndex() << std::endl;
@@ -473,7 +515,7 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
         float(character.GetActorLocation().GetZ() - walkStart.GetZ()) > 1.4f &&
         float(ragdoll.GetPosition().GetZ() - pelvisStart.GetZ()) > 1.2f && ragdoll.GetRootPositionError() < .2f &&
         animation.GetCurrentAnimationIndex() == 1, "Active movement: WASD walks the physical character and selects Walk");
-    auto& movingRender = GraphicsContext::Begin(L"Validate moving active ragdoll pose");
+    GraphicsContext& movingRender = GraphicsContext::Begin(L"Validate moving active ragdoll pose");
     check(mesh.UpdateRenderData(movingRender), "Active movement: upload moving physical pose"); movingRender.Finish(true);
     Matrix4 movingSkin, movingOwner;
     const int pelvisNode = ragdoll.GetBoneNodes()[0];
@@ -481,28 +523,35 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
     mesh.GetModelInstance().GetNodeTransform(skeleton.meshNodes[pelvisNode], movingOwner);
     check(float(Length(Vector3(PhysicsBoneFrame(movingOwner * movingSkin).GetW()) - Vector3(ragdoll.GetBoneWorld(0).GetW()))) < .001f,
         "Active movement: moving actor transform does not double-transform the rendered physical pelvis");
-    const auto runStart = character.GetActorLocation();
-    player->SetMoveInput(1, 0, true); moveFrames(60);
+    const Math::Vector3 runStart = character.GetActorLocation();
+    player->SetMoveInput(1, 0, true);
+    moveFrames(60, 1.0f / 60);
     report << "active_run_travel_m=" << float(character.GetActorLocation().GetZ() - runStart.GetZ())
         << " pelvis_error_m=" << ragdoll.GetRootPositionError() << " speed_mps=" << character.GetCharacterMovement().GetGroundSpeed()
         << " clip=" << animation.GetCurrentAnimationIndex() << std::endl;
     check(float(character.GetActorLocation().GetZ() - runStart.GetZ()) > 3 &&
         ragdoll.GetRootPositionError() < .25f && animation.GetCurrentAnimationIndex() == 2,
         "Active movement: Shift increases travel speed and selects Run");
-    player->SetMoveInput(0, 0, false); moveFrames(60);
+    player->SetMoveInput(0, 0, false);
+    moveFrames(60, 1.0f / 60);
     check(character.GetCharacterMovement().GetGroundSpeed() < .01f && animation.GetCurrentAnimationIndex() == 0,
         "Active movement: releasing input brakes the character and returns to Idle");
-    player->SetControlYaw(XM_PI); player->SetMoveInput(1, 0, false); moveFrames(90);
+    player->SetControlYaw(XM_PI);
+    player->SetMoveInput(1, 0, false);
+    moveFrames(90, 1.0f / 60);
     check(float(character.GetActorTransform().GetZ().GetZ()) < -.99f && ragdoll.GetRootRotationError() < .35f,
         "Active movement: dynamic pelvis torque follows a change in travel direction");
-    player->SetControlYaw(0); player->SetMoveInput(1, 0, true); moveFrames(150);
+    player->SetControlYaw(0);
+    player->SetMoveInput(1, 0, true);
+    moveFrames(150, 1.0f / 60);
     check(float(character.GetActorLocation().GetZ()) < 5.5f && character.GetCharacterMovement().GetGroundSpeed() < .05f &&
         animation.GetCurrentAnimationIndex() == 0 && float(ragdoll.GetPosition().GetZ()) < 5.8f,
         "Active movement: scene wall stops the capsule and physical pelvis, and animation returns to Idle");
 
     prepareMovement();
-    player->SetMoveInput(1, 0, false); moveFrames(30);
-    const auto pausedPosition = character.GetActorLocation();
+    player->SetMoveInput(1, 0, false);
+    moveFrames(30, 1.0f / 60);
+    const Math::Vector3 pausedPosition = character.GetActorLocation();
     const float pausedTime = animation.GetAnimationTime();
     world.SetPhysicsPaused(true); world.Tick(.5f);
     check(float(Length(character.GetActorLocation() - pausedPosition)) < 1e-6f && animation.GetAnimationTime() == pausedTime,
@@ -512,21 +561,21 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
         "Active movement: a single step advances capsule, target and physical body together");
     world.SetPhysicsPaused(false);
     check(ragdoll.SetRootSupported(false, error), "Active movement: disable pelvis support");
-    const auto unsupportedPosition = character.GetActorLocation();
-    moveFrames(6);
+    const Math::Vector3 unsupportedPosition = character.GetActorLocation();
+    moveFrames(6, 1.0f / 60);
     check(!character.CanControlMovement() && !character.GetCapsuleComponent().HasPhysicsCollision() &&
         float(Length(character.GetActorLocation() - unsupportedPosition)) < 1e-6f,
         "Active movement: releasing support stops movement and removes the capsule");
     check(ragdoll.SetRootSupported(true, error), "Active movement: re-enable pelvis support");
-    moveFrames(30);
+    moveFrames(30, 1.0f / 60);
     check(character.CanControlMovement() && character.GetCapsuleComponent().HasPhysicsCollision() &&
         float(character.GetActorLocation().GetZ() - unsupportedPosition.GetZ()) > .4f,
         "Active movement: support restoration resumes movement without self-collision");
-    const auto passivePosition = character.GetActorLocation();
+    const Math::Vector3 passivePosition = character.GetActorLocation();
     check(character.SetPhysicsMode(PhysicsAnimationMode::PassiveRagdoll, error) && !character.CanControlMovement() &&
         !character.GetCharacterMovement().IsTickEnabled() && !character.GetCapsuleComponent().HasPhysicsCollision(),
         "Active movement: Passive immediately disables movement and capsule collision");
-    moveFrames(12);
+    moveFrames(12, 1.0f / 60);
     check(float(Length(character.GetActorLocation() - passivePosition)) < 1e-6f,
         "Active movement: held input cannot move a passive character target");
     player->SetInputEnabled(false);
@@ -538,7 +587,7 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
     for (int fps : {30, 60, 144})
     {
         prepareMovement(); physics.ResetClock();
-        const auto begin = character.GetActorLocation();
+        const Math::Vector3 begin = character.GetActorLocation();
         player->SetMoveInput(1, 0, false); moveFrames(fps, 1.0f / fps);
         const float travel = float(character.GetActorLocation().GetZ() - begin.GetZ());
         if (fps == 30) referenceTravel = travel;
@@ -546,9 +595,11 @@ void RunActiveRagdollValidation(World& world, Character& character, std::ostream
             "Active movement: actual travel is independent of 30/60/144 render FPS");
     }
     prepareMovement();
-    player->SetMoveInput(1, 0, false); moveFrames(12);
-    const auto validTransform = mesh.GetRelativeTransform();
-    auto invalidTransform = validTransform; invalidTransform.SetBasis(Matrix3::MakeScale(2.0f));
+    player->SetMoveInput(1, 0, false);
+    moveFrames(12, 1.0f / 60);
+    const Math::AffineTransform validTransform = mesh.GetRelativeTransform();
+    Math::AffineTransform invalidTransform = validTransform;
+    invalidTransform.SetBasis(Matrix3::MakeScale(2.0f));
     mesh.SetRelativeTransform(invalidTransform); world.Tick(1.0f / 60);
     check(mesh.GetPhysicsMode() == PhysicsAnimationMode::PassiveRagdoll && !ragdoll.IsRootSupported() &&
         !character.GetCharacterMovement().IsTickEnabled() && !character.GetCapsuleComponent().HasPhysicsCollision() &&

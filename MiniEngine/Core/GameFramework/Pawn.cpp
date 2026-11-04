@@ -10,7 +10,7 @@ namespace PARS
     }
     void Pawn::EndPlay()
     {
-        if (auto controller = GetController())
+        if (PARS::Controller* controller = GetController())
         {
             if (controller->m_Pawn == GetHandle())
             {

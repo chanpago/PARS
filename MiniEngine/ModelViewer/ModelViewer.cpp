@@ -168,7 +168,7 @@ public:
                 g_SceneColorBuffer.ExportToFile(comparisonCapture + L".scene");
                 if (captureReturn)
                 {
-                    const auto* player = GetPlayerController();
+                    const PARS::PlayerController* player = GetPlayerController();
                     const bool controlsRestored = player && player->IsInputEnabled() && !m_FreeCamera &&
                         !(m_MeshViewer && m_MeshViewer->WantsInput());
                     const bool springArmApplied = m_SpringArm && &m_SpringArm->GetOwner() == GetPreviewCharacter() &&
@@ -395,7 +395,7 @@ void ModelViewer::Startup(void)
                 uint32_t clip = 0;
                 CommandLineArgs::GetInteger(L"turnprofile", profile);
                 CommandLineArgs::GetInteger(L"testclip", clip);
-                if (auto* character = GetPreviewCharacter())
+                if (PARS::Character* character = GetPreviewCharacter())
                 {
                     RunPelvisDriveValidation(m_World, *character, ragdollReport, profile, clip);
                 }
@@ -403,7 +403,7 @@ void ModelViewer::Startup(void)
             }
             else if (CommandLineArgs::GetString(L"patransitiontest", ragdollReport))
             {
-                if (auto* character = GetPreviewCharacter())
+                if (PARS::Character* character = GetPreviewCharacter())
                 {
                     RunPATransitionValidation(m_World, *character, ragdollReport);
                 }
@@ -411,7 +411,7 @@ void ModelViewer::Startup(void)
             }
             else if (CommandLineArgs::GetString(L"pawalltest", ragdollReport))
             {
-                if (auto* character = GetPreviewCharacter())
+                if (PARS::Character* character = GetPreviewCharacter())
                 {
                     RunCharacterWallValidation(m_World, *character, ragdollReport);
                 }
@@ -419,7 +419,7 @@ void ModelViewer::Startup(void)
             }
             else if (CommandLineArgs::GetString(L"ragdolltest", ragdollReport))
             {
-                if (auto* character = GetPreviewCharacter())
+                if (PARS::Character* character = GetPreviewCharacter())
                 {
                     RunRagdollValidation(m_World, *character, ragdollReport);
                 }
@@ -514,7 +514,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     std::shared_ptr<const Model> models[kPreviewCount];
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
-        auto& model = models[i];
+        std::shared_ptr<const Model>& model = models[i];
         model = Renderer::LoadModel(root + L"Converted/" + kPreviewFiles[i], forceRebuild);
         if (!model || model->m_NumAnimations == 0 || model->m_Animations[0].duration <= 0.0f)
         {
@@ -525,20 +525,20 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 
     // [캐릭터 생성] 앞에서 읽은 Model 데이터를 사용할 실제 캐릭터 Actor를 월드에 만든다.
     // World가 소유하는 Character를 첫 BeginPlay/Tick 전에 설정한다.
-    auto* character = m_World.SpawnActor<PARS::Character>("MixamoCharacter");
+    PARS::Character* character = m_World.SpawnActor<PARS::Character>("MixamoCharacter");
     if (!character)
     {
         return;
     }
     // 캐릭터가 가진 SkeletalMeshComponent의 참조다. 외형, 애니메이션, PA를 이 컴포넌트에 연결한다.
-    auto& mesh = character->GetMesh();
+    PARS::SkeletalMeshComponent& mesh = character->GetMesh();
 
     // [외형·본 연결 및 애니메이션 등록] 외형은 Idle 모델 하나를 사용하고, 동작은 세 모델에서 가져온다.
     // 이 반복문은 PA의 충돌체나 물리 관절을 읽지 않는다. PA 설정은 아래의 별도 단계에서 수행한다.
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
         // 앞에서 로딩해 둔 Model을 참조한다. 여기서 모델 파일을 다시 읽는 것은 아니다.
-        const auto& model = models[i];
+        const std::shared_ptr<const Model>& model = models[i];
 
         // 첫 번째 모델(Idle)의 외형과 본 구조를 캐릭터의 기준 스켈레탈 메시로 한 번만 설정한다.
         if (i == 0)
@@ -623,7 +623,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     }
     // [애니메이션 재생·조작 연결] 등록한 0번 클립(Idle)을 처음부터 반복 재생하도록 설정한다.
     mesh.GetAnimInstance().PlayAnimation(0);
-    auto animation = GetPreviewAnimation();
+    PreviewAnimInstance* animation = GetPreviewAnimation();
     bool characterControl = false;
 #if defined(_M_X64)
     characterControl = m_PhysicsDemo != nullptr;
@@ -633,14 +633,14 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     if (characterControl)
     {
         m_SpringArm = &character->CreateDefaultSubobject<PARS::SpringArmComponent>("SpringArmComponent");
-        auto cameraSettings = m_SpringArm->GetSettings();
+        PARS::SpringArmComponent::Settings cameraSettings = m_SpringArm->GetSettings();
         cameraSettings.collisionTest = false;
         m_SpringArm->SetSettings(cameraSettings);
         m_SpringArm->AttachToComponent(character->GetCapsuleComponent());
         m_SpringArm->SetRelativeLocation(Vector3(0, .55f, 0));
         // 래그돌의 최종 위치와 렌더 프레임 시간을 사용하도록 World::Tick 뒤에 갱신한다.
         m_SpringArm->SetTickEnabled(false);
-        auto player = m_World.SpawnActor<PARS::PlayerController>("PlayerController");
+        PARS::PlayerController* player = m_World.SpawnActor<PARS::PlayerController>("PlayerController");
         if (player && player->Possess(*character))
         {
             m_PlayerController = player->GetHandle();
@@ -664,7 +664,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     }
 #endif
     SetFootCandidateDebugVisible(m_FootCandidateDebugVisible);
-    auto& context = GraphicsContext::Begin(L"Initialize Character Pose");
+    GraphicsContext& context = GraphicsContext::Begin(L"Initialize Character Pose");
     // 현재 포즈의 스키닝 행렬 등 렌더 데이터를 준비하고, GPU 명령 완료를 기다린다.
     Renderer::UpdateWorldRenderData(m_World, context);
     context.Finish(true);
@@ -706,14 +706,14 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 void ModelViewer::SetFootCandidateDebugVisible(bool visible)
 {
     m_FootCandidateDebugVisible = visible;
-    if (auto* player = GetPreviewCharacter())
+    if (PARS::Character* player = GetPreviewCharacter())
     {
         player->GetMesh().SetFootCandidateDebugVisible(visible);
     }
 #if defined(_M_X64)
     if (m_ImpactTest)
     {
-        if (auto* dummy = m_ImpactTest->GetDummy())
+        if (PARS::Character* dummy = m_ImpactTest->GetDummy())
         {
             dummy->GetMesh().SetFootCandidateDebugVisible(visible);
         }
@@ -723,7 +723,7 @@ void ModelViewer::SetFootCandidateDebugVisible(bool visible)
 
 void ModelViewer::SelectPreview(uint32_t index)
 {
-    if (auto animation = GetPreviewAnimation())
+    if (PreviewAnimInstance* animation = GetPreviewAnimation())
     {
         animation->SelectAnimation(index);
     }
@@ -731,7 +731,7 @@ void ModelViewer::SelectPreview(uint32_t index)
 
 PreviewAnimInstance* ModelViewer::GetPreviewAnimation() const
 {
-    auto character = GetPreviewCharacter();
+    PARS::Character* character = GetPreviewCharacter();
     return character ? dynamic_cast<PreviewAnimInstance*>(&character->GetMesh().GetAnimInstance()) : nullptr;
 }
 
@@ -767,13 +767,13 @@ void ModelViewer::ResetPreviewCamera()
             return;
         }
         m_Camera.SetEyeAtUp(Vector3(5, 3.2f, 7), Vector3(1, 1.8f, 0), Vector3(kYUnitVector));
-        auto controller = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
+        FlyingFPSCamera* controller = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
         controller->SetMoveSpeed(5.0f);
         m_CameraController.reset(controller);
         return;
     }
 #endif
-    auto character = GetPreviewCharacter();
+    PARS::Character* character = GetPreviewCharacter();
     if (!m_PreviewReady || !character)
     {
         m_CameraController.reset(new OrbitCamera(m_Camera, BoundingSphere(Vector3(0, 8, 0), 14.0f)));
@@ -788,19 +788,19 @@ void ModelViewer::ResetPreviewCamera()
 void ModelViewer::SetFreeCamera(bool freeCamera)
 {
     m_FreeCamera = freeCamera;
-    if (auto player = GetPlayerController())
+    if (PARS::PlayerController* player = GetPlayerController())
     {
         player->SetInputEnabled(!freeCamera);
     }
     if (freeCamera)
     {
-        auto camera = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
+        FlyingFPSCamera* camera = new FlyingFPSCamera(m_Camera, Vector3(kYUnitVector));
         camera->SetMoveSpeed(5.0f);
         m_CameraController.reset(camera);
     }
     else
     {
-        const auto forward = m_Camera.GetForwardVec();
+        const Math::Vector3 forward = m_Camera.GetForwardVec();
         m_ControlYaw = std::atan2(float(forward.GetX()), float(forward.GetZ()));
         m_ControlPitch = Clamp(std::asin(Clamp(-float(forward.GetY()), -1.0f, 1.0f)), -1.1f, 1.1f);
         if (m_SpringArm)
@@ -813,7 +813,7 @@ void ModelViewer::SetFreeCamera(bool freeCamera)
 void ModelViewer::UpdateCharacterInput(float deltaTime)
 {
     using namespace GameInput;
-    auto player = GetPlayerController();
+    PARS::PlayerController* player = GetPlayerController();
     if (!player)
     {
         return;
@@ -834,7 +834,7 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
     {
         SetFreeCamera(!m_FreeCamera);
     }
-    auto* character = GetPreviewCharacter();
+    PARS::Character* character = GetPreviewCharacter();
     player->SetInputEnabled(!m_FreeCamera && character && character->CanControlMovement());
     if (m_FreeCamera)
     {
@@ -857,7 +857,7 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
 
 void ModelViewer::UpdateFollowCamera(float deltaTime)
 {
-    auto character = GetPreviewCharacter();
+    PARS::Character* character = GetPreviewCharacter();
     if (!character || !m_SpringArm)
     {
         return;
@@ -944,7 +944,7 @@ void ModelViewer::Update(float deltaT)
         if (m_Comparison->ConsumeFocusRequest() && m_Comparison->IsShowingScene())
         {
             // 비교 경로의 중심을 바라보도록 카메라의 위치, 주시점, 위쪽 방향을 설정한다.
-            const auto target = m_Comparison->GetViewCenter();
+            const Math::Vector3 target = m_Comparison->GetViewCenter();
             m_Camera.SetEyeAtUp(target + Vector3(5, 3, 7), target, Vector3(kYUnitVector));
             // 플레이어 조작을 끄고 자유 카메라를 사용한다.
             SetFreeCamera(true);
@@ -1032,12 +1032,12 @@ void ModelViewer::Update(float deltaT)
     }
 #if defined(_M_X64)
     // 이번 프레임의 이동과 카메라 회전을 반영한 뒤, 화면 중앙과 같은 시선으로 발사한다.
-    const auto* player = GetPlayerController();
-    auto* character = GetPreviewCharacter();
+    const PARS::PlayerController* player = GetPlayerController();
+    PARS::Character* character = GetPreviewCharacter();
     const bool canFire = m_ImpactTest && player && player->IsInputEnabled() && character &&
         character->CanControlMovement() && !m_FreeCamera &&
         !(m_MeshViewer && m_MeshViewer->WantsInput()) && !(m_Comparison && m_Comparison->IsShowingScene());
-    const auto& io = ImGui::GetIO();
+    const ImGuiIO& io = ImGui::GetIO();
     m_IsAiming = canFire && !io.WantCaptureMouse && GameInput::IsPressed(GameInput::kMouse1);
     const bool fireKey = !io.WantCaptureKeyboard && GameInput::IsFirstPressed(GameInput::kKey_r);
     const bool fireMouse = m_IsAiming && GameInput::IsFirstPressed(GameInput::kMouse0);
@@ -1057,7 +1057,7 @@ void ModelViewer::Update(float deltaT)
         if (m_Comparison->ShouldFollowCamera())
         {
             // 비교 추적 옵션이 켜져 있으면 비교 경로의 현재 중심을 바라보도록 카메라를 갱신한다.
-            const auto target = m_Comparison->GetViewCenter();
+            const Math::Vector3 target = m_Comparison->GetViewCenter();
             m_Camera.SetEyeAtUp(target + Vector3(5, 3, 7), target, Vector3(kYUnitVector));
             m_Camera.Update();
         }
@@ -1106,13 +1106,13 @@ void ModelViewer::Update(float deltaT)
 
 void ModelViewer::ApplyPendingPhysicsAssetSave()
 {
-    auto pending = std::move(m_PendingSavedPA);
-    auto* character = GetPreviewCharacter();
+    std::unique_ptr<PARS::PhysicsAsset> pending = std::move(m_PendingSavedPA);
+    PARS::Character* character = GetPreviewCharacter();
     if (!character || !m_MeshViewer || !pending)
     {
         return;
     }
-    const auto& asset = *pending;
+    const PARS::PhysicsAsset& asset = *pending;
     std::vector<PARS::SkeletalMeshComponent*> meshes{&character->GetMesh()};
 #if defined(_M_X64)
     if (m_ImpactTest && m_ImpactTest->GetDummy())
@@ -1121,7 +1121,7 @@ void ModelViewer::ApplyPendingPhysicsAssetSave()
     }
 #endif
     std::vector<PARS::PhysicsAsset> previous;
-    for (auto* mesh : meshes)
+    for (PARS::SkeletalMeshComponent* mesh : meshes)
     {
         if (!mesh->GetPhysicsAsset())
         {
@@ -1134,7 +1134,7 @@ void ModelViewer::ApplyPendingPhysicsAssetSave()
     std::string error;
     // 기존 캐릭터에서 실제 물리 상태를 생성할 수 있는지 확인한 뒤 파일을 교체한다.
     size_t applied = 0;
-    for (auto* mesh : meshes)
+    for (PARS::SkeletalMeshComponent* mesh : meshes)
     {
         if (!mesh->SetPhysicsAsset(asset, error, true))
         {
@@ -1178,7 +1178,7 @@ void ModelViewer::EnableActiveRagdoll(PARS::Character& character)
     {
         return;
     }
-    if (auto* animation = GetPreviewAnimation())
+    if (PreviewAnimInstance* animation = GetPreviewAnimation())
     {
         animation->SetAutoCycleEnabled(false);
     }
@@ -1194,8 +1194,8 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     {
         return;
     }
-    auto& mesh = character.GetMesh();
-    const auto* asset = mesh.GetPhysicsAsset();
+    PARS::SkeletalMeshComponent& mesh = character.GetMesh();
+    const PARS::PhysicsAsset* asset = mesh.GetPhysicsAsset();
     if (asset)
     {
         ImGui::Text(u8"적용된 PA: 바디 %zu개 / 관절 %zu개", asset->bodies.size(), asset->constraints.size());
@@ -1204,7 +1204,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     {
         ImGui::TextUnformatted(u8"물리 에셋이 적용되지 않았습니다.");
     }
-    const auto& runtime = mesh.GetRagdoll();
+    const PARS::Ragdoll& runtime = mesh.GetRagdoll();
     ImGui::Text(u8"PhysX: 바디 %zu개 / 관절 %zu개", runtime.GetBodyCount(), runtime.GetJointCount());
 #if defined(_M_X64)
     m_FootSoles.DrawUI(mesh);
@@ -1297,7 +1297,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     ImGui::BeginDisabled(!asset);
     if (ImGui::Button(u8"가속도 PD 기본값 적용"))
     {
-        auto candidate = *asset;
+        PARS::PhysicsAsset candidate = *asset;
         PARS::ConfigureDefaultDrives(candidate);
         if (mesh.QueueDriveSettings(candidate, m_RagdollMessage))
         {
@@ -1323,7 +1323,7 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
         }
         if (ImGui::Button(u8"래그돌 다시 시작"))
         {
-            const auto mode = mesh.GetPhysicsMode();
+            const PARS::PhysicsAnimationMode mode = mesh.GetPhysicsMode();
             const bool support = runtime.IsRootSupported();
             if (character.StopRagdoll(m_RagdollMessage) && character.SetPhysicsMode(mode, m_RagdollMessage) &&
                 mode == PARS::PhysicsAnimationMode::ActiveRagdoll)
@@ -1363,12 +1363,12 @@ void ModelViewer::RenderUI(GraphicsContext& context)
 #if defined(_M_X64)
     if (m_IsAiming)
     {
-        const auto* viewport = ImGui::GetMainViewport();
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
         const ImVec2 center(viewport->Pos.x + viewport->Size.x * .5f, viewport->Pos.y + viewport->Size.y * .5f);
-        auto* draw = ImGui::GetForegroundDrawList();
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
         const float scale = (std::max)(1.0f, viewport->Size.y / 720.0f);
         const ImVec2 axes[] = {ImVec2(1, 0), ImVec2(-1, 0), ImVec2(0, 1), ImVec2(0, -1)};
-        for (const auto& axis : axes)
+        for (const ImVec2& axis : axes)
         {
             const ImVec2 start(center.x + axis.x * 5 * scale, center.y + axis.y * 5 * scale);
             const ImVec2 end(center.x + axis.x * 13 * scale, center.y + axis.y * 13 * scale);
@@ -1485,7 +1485,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
             }
             if (m_Comparison && ImGui::Button(u8"시뮬레이션 A 시작"))
             {
-                auto character = GetPreviewCharacter();
+                PARS::Character* character = GetPreviewCharacter();
                 m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
                     character ? character->GetMesh().GetPhysicsAsset() : nullptr);
             }
@@ -1494,7 +1494,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 ImGui::SameLine();
                 if (ImGui::Button(u8"시뮬레이션 B 시작"))
                 {
-                    auto character = GetPreviewCharacter();
+                    PARS::Character* character = GetPreviewCharacter();
                     m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
                         character ? character->GetMesh().GetPhysicsAsset() : nullptr, RagdollComparisonRunner::Simulation::B);
                 }
@@ -1504,7 +1504,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 }
             }
 #endif
-            auto animation = GetPreviewAnimation();
+            PreviewAnimInstance* animation = GetPreviewAnimation();
             if (!m_PreviewReady || !animation)
             {
                 ImGui::TextWrapped("%s", m_PreviewError.empty() ? u8"월드에 미리보기 캐릭터가 없습니다." : m_PreviewError.c_str());
@@ -1512,9 +1512,9 @@ void ModelViewer::RenderUI(GraphicsContext& context)
             else
             {
                 ImGui::Text(u8"재생 중: %s", ViewerLabels::Animation(animation->GetAnimationName(animation->GetCurrentAnimationIndex())));
-                if (auto character = GetPreviewCharacter())
+                if (PARS::Character* character = GetPreviewCharacter())
                 {
-                    const auto& movement = character->GetCharacterMovement();
+                    const PARS::CharacterMovementComponent& movement = character->GetCharacterMovement();
                     ImGui::Text(u8"속도: %.2f m/s | %s", movement.GetGroundSpeed(),
                         movement.IsMovingOnGround() ? u8"지면 접촉" : u8"공중");
                     ImGui::Text(u8"블렌딩: %.0f%%", animation->GetBlendAlpha() * 100.0f);
@@ -1523,7 +1523,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                             : character->IsRagdoll() ? u8"수평 이동 제어: 꺼짐 (패시브 래그돌)"
                                 : u8"수평 충돌: 이동 캡슐");
                 }
-                if (auto character = GetPreviewCharacter())
+                if (PARS::Character* character = GetPreviewCharacter())
                 {
                     DrawRagdollPanel(*character);
                 }
@@ -1578,7 +1578,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 ImGui::EndDisabled();
                 if (m_SpringArm && ImGui::CollapsingHeader(u8"스프링암 카메라"))
                 {
-                    auto settings = m_SpringArm->GetSettings();
+                    PARS::SpringArmComponent::Settings settings = m_SpringArm->GetSettings();
                     ImGui::SetNextItemWidth(110);
                     bool changed = ImGui::DragFloat(u8"기본 거리 (m)", &settings.targetArmLength, .1f, .5f, 8, "%.1f", ImGuiSliderFlags_AlwaysClamp);
                     ImGui::SetNextItemWidth(110);
@@ -1597,7 +1597,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 {
                     if (ImGui::Button(u8"캐릭터 초기화"))
                     {
-                        if (auto character = GetPreviewCharacter())
+                        if (PARS::Character* character = GetPreviewCharacter())
                         {
                             if (character->StopRagdoll(m_RagdollMessage))
                             {
@@ -1621,11 +1621,11 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         ImGui::End();
         if (m_MeshViewer)
         {
-            const auto* character = GetPreviewCharacter();
+            const PARS::Character* character = GetPreviewCharacter();
             const bool physicsSaveAvailable = character && !m_PendingSavedPA;
 #if defined(_M_X64)
             m_MeshViewer->RenderUI(context, m_Comparison != nullptr, physicsSaveAvailable);
-            const auto comparison = m_MeshViewer->ConsumeComparisonRequest();
+            const SkeletalMeshViewer::ComparisonRequest comparison = m_MeshViewer->ConsumeComparisonRequest();
             if (comparison != SkeletalMeshViewer::ComparisonRequest::None && m_Comparison)
             {
                 m_Comparison->RequestLocomotionComparison(&m_MeshViewer->GetPhysicsAsset(),
@@ -1645,7 +1645,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
 #if defined(_M_X64)
         if (m_Comparison)
         {
-            auto character = GetPreviewCharacter();
+            PARS::Character* character = GetPreviewCharacter();
             m_Comparison->DrawUI(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
                 character ? character->GetMesh().GetPhysicsAsset() : nullptr);
         }
@@ -1852,7 +1852,7 @@ void ModelViewer::RenderScene(void)
             m_ImpactTest->BuildLines(lines);
             m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
         }
-        if (auto* character = GetPreviewCharacter())
+        if (PARS::Character* character = GetPreviewCharacter())
         {
             std::vector<physx::PxDebugLine> lines;
             m_FootSoles.BuildLines(character->GetMesh(), lines);

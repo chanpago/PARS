@@ -8,6 +8,7 @@
 #pragma warning(push)
 #pragma warning(disable: 4100)
 #include "../Model/json.hpp"
+#include <functional>
 #pragma warning(pop)
 
 using namespace Math;
@@ -51,18 +52,19 @@ namespace
                 Matrix4(Matrix3(Quaternion(Vector3(kZUnitVector), .3f)), Vector3(kZero)));
             asset.constraints.push_back(joint);
         }
-        const auto original = asset;
-        const auto checkFrames = [&]() {
+        const PARS::PhysicsAsset original = asset;
+        const std::function<void()> checkFrames = [&]() -> void
+        {
             for (size_t i = 0; i < asset.constraints.size(); ++i)
             {
                 Check(SameFrame(bones[i] * asset.bodies[i].GetLocalTransform() * asset.constraints[i].parentFrame.GetTransform(),
                           bones[i] * original.bodies[i].GetLocalTransform() * original.constraints[i].parentFrame.GetTransform()) &&
                         SameFrame(bones[i + 1] * asset.bodies[i + 1].GetLocalTransform() * asset.constraints[i].childFrame.GetTransform(),
-                          bones[i + 1] * original.bodies[i + 1].GetLocalTransform() * original.constraints[i].childFrame.GetTransform()),
+                            bones[i + 1] * original.bodies[i + 1].GetLocalTransform() * original.constraints[i].childFrame.GetTransform()),
                     "Body edits preserve incoming/outgoing joint anchors, axes and asymmetric frame bias");
             }
         };
-        auto edited = asset.bodies[1];
+        PARS::PhysicsBody edited = asset.bodies[1];
         edited.offset = DirectX::XMFLOAT3(-.3f, .15f, .2f);
         DirectX::XMStoreFloat4(&edited.rotation, Quaternion(Vector3(kXUnitVector), .8f) * Quaternion(Vector3(kYUnitVector), -.6f));
         edited.shape = PhysicsShapeType::Box;
@@ -82,7 +84,7 @@ namespace
                     SameFrame(asset.constraints[i].childFrame.GetTransform(), original.constraints[i].childFrame.GetTransform()),
                 "Restoring a body also restores its joint attachment frames");
         }
-        const auto framesBeforeResize = asset.constraints;
+        const std::vector<PARS::PhysicsConstraint> framesBeforeResize = asset.constraints;
         edited = asset.bodies[1];
         edited.radius *= 2;
         edited.mass *= 3;
@@ -171,7 +173,8 @@ void RunPhysicsAssetTests()
     Check(loaded.Load(path, error) && loaded.bodies.size() == 3, "Load all primitive types");
     for (int i = 0; i < 3; ++i)
     {
-        const auto& a = original.bodies[i]; const auto& b = loaded.bodies[i];
+        const PARS::PhysicsBody& a = original.bodies[i];
+        const PARS::PhysicsBody& b = loaded.bodies[i];
         Check(a.bone == b.bone && a.shape == b.shape && a.mass == b.mass && a.radius == b.radius && a.halfLength == b.halfLength &&
             Near(Vector3(a.offset), Vector3(b.offset)) && Near(Vector3(a.halfExtents), Vector3(b.halfExtents)) &&
             Near(Quaternion(DirectX::XMLoadFloat4(&a.rotation)) * Vector3(kXUnitVector), Quaternion(DirectX::XMLoadFloat4(&b.rotation)) * Vector3(kXUnitVector)),
@@ -181,7 +184,7 @@ void RunPhysicsAssetTests()
             "Per-body friction, restitution and combine mode survive a PA round trip");
     }
     Check(loaded.constraints.size() == 1, "Round trip preserves joint count");
-    const auto& savedJoint = loaded.constraints[0];
+    const PARS::PhysicsConstraint& savedJoint = loaded.constraints[0];
     Check(savedJoint.drives[0].enabled && savedJoint.drives[0].stiffness == 135 && savedJoint.drives[0].damping == 12 &&
         savedJoint.drives[0].maxTorque == 28 && !savedJoint.drives[0].useAcceleration && !savedJoint.drives[1].enabled,
         "Legacy force settings and disabled axes survive PA v4 round trip");
@@ -214,25 +217,25 @@ void RunPhysicsAssetTests()
     Check(!invalid.Validate(error), "Reject non-finite drive gains");
     invalid = loaded; invalid.constraints[0].useSlerpDrive = true;
     Check(!invalid.Validate(error), "Reject SLERP with a locked angular axis");
-    auto slerp = loaded;
+    PARS::PhysicsAsset slerp = loaded;
     slerp.constraints[0].swingY = PhysicsJointMotion::Limited;
     slerp.constraints[0].useSlerpDrive = true;
     PhysicsAsset slerpLoaded;
     Check(slerp.Save(path, error) && slerpLoaded.Load(path, error) && slerpLoaded.constraints[0].useSlerpDrive,
         "SLERP drive mode survives PA v4 round trip");
-    auto acceleration = original;
+    PARS::PhysicsAsset acceleration = original;
     ConfigureDefaultDrives(acceleration);
     acceleration.constraints[0].drives[0].naturalFrequency = 24.0f;
     acceleration.constraints[0].drives[0].dampingRatio = .75f;
     PhysicsAsset accelerationLoaded;
     Check(acceleration.Save(path, error) && accelerationLoaded.Load(path, error), "Round trip acceleration drives");
-    const auto& accelerationDrive = accelerationLoaded.constraints[0].drives[0];
+    const PARS::PhysicsAngularDrive& accelerationDrive = accelerationLoaded.constraints[0].drives[0];
     Check(accelerationDrive.useAcceleration && accelerationDrive.naturalFrequency == 24.0f &&
         accelerationDrive.dampingRatio == .75f && accelerationDrive.GetStiffness() == 576.0f &&
         accelerationDrive.GetDamping() == 36.0f && !accelerationLoaded.constraints[0].drives[1].enabled,
         "Acceleration drive preserves frequency, ratio and locked axes without interpreting torque gains");
-    auto heavier = original;
-    for (auto& body : heavier.bodies)
+    PARS::PhysicsAsset heavier = original;
+    for (PARS::PhysicsBody& body : heavier.bodies)
     {
         body.mass *= 3.0f;
     }
@@ -244,11 +247,11 @@ void RunPhysicsAssetTests()
         "Mass changes torque capacity but not the requested acceleration response");
     for (float frequency : {-1.0f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::max()})
     {
-        auto badResponse = acceleration;
+        PARS::PhysicsAsset badResponse = acceleration;
         badResponse.constraints[0].drives[0].naturalFrequency = frequency;
         Check(!badResponse.Validate(error), "Reject negative, non-finite or overflowing acceleration frequency");
     }
-    auto badResponse = acceleration;
+    PARS::PhysicsAsset badResponse = acceleration;
     badResponse.constraints[0].drives[0].dampingRatio = -1.0f;
     Check(!badResponse.Validate(error), "Reject negative damping ratio");
     badResponse.constraints[0].drives[0].dampingRatio = std::numeric_limits<float>::infinity();
@@ -284,9 +287,13 @@ void RunPhysicsAssetTests()
         "Deleting the middle body removes both attached joints without dangling references");
     nlohmann::json saved;
     { std::ifstream input(path); input >> saved; }
-    const auto writeJson = [&](const nlohmann::json& value) { std::ofstream output(path); output << value.dump(); };
+    const std::function<void(const nlohmann::json&)> writeJson = [&](const nlohmann::json& value) -> void
+    {
+        std::ofstream output(path);
+        output << value.dump();
+    };
     Check(saved.at("version").get<int>() == 5, "Per-body materials use PA version 5");
-    auto corruptMaterial = saved;
+    nlohmann::json corruptMaterial = saved;
     corruptMaterial["bodies"][1]["material"]["frictionCombine"] = "unknown";
     writeJson(corruptMaterial);
     Check(!loaded.Load(path, error) && loaded.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Minimum,
@@ -295,7 +302,7 @@ void RunPhysicsAssetTests()
     corruptMaterial["bodies"][1]["material"]["restitution"] = 2;
     writeJson(corruptMaterial);
     Check(!loaded.Load(path, error) && loaded.bodies[1].material.restitution == 0, "Invalid material values reject the whole load");
-    auto defaultMaterial = saved;
+    nlohmann::json defaultMaterial = saved;
     defaultMaterial["bodies"][1].erase("material");
     writeJson(defaultMaterial);
     PhysicsAsset defaultsLoaded;
@@ -303,15 +310,18 @@ void RunPhysicsAssetTests()
         defaultsLoaded.bodies[1].material.dynamicFriction == .5f && defaultsLoaded.bodies[1].material.restitution == .1f &&
         defaultsLoaded.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Average,
         "Omitted material uses the original shared material values");
-    auto legacyMaterial = saved;
+    nlohmann::json legacyMaterial = saved;
     legacyMaterial["version"] = 4;
-    for (auto& body : legacyMaterial["bodies"]) body.erase("material");
+    for (nlohmann::json& body : legacyMaterial["bodies"])
+    {
+        body.erase("material");
+    }
     writeJson(legacyMaterial);
     Check(defaultsLoaded.Load(path, error) && defaultsLoaded.bodies[1].material.staticFriction == .6f &&
         defaultsLoaded.bodies[1].material.dynamicFriction == .5f && defaultsLoaded.bodies[1].material.restitution == .1f &&
         defaultsLoaded.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Average &&
         defaultsLoaded.constraints[0].drives[0].stiffness == 135, "Existing v4 PAs retain material and drive behavior");
-    auto corruptJoint = saved;
+    nlohmann::json corruptJoint = saved;
     corruptJoint["constraints"][0]["childBone"] = "unknown";
     writeJson(corruptJoint);
     Check(!loaded.Load(path, error) && loaded.bodies.size() == 3 && loaded.constraints.size() == 1 &&
@@ -328,12 +338,12 @@ void RunPhysicsAssetTests()
     corruptJoint["constraints"][0]["drives"][0]["type"] = "acceleration";
     writeJson(corruptJoint);
     Check(!loaded.Load(path, error), "Acceleration files must supply frequency and ratio instead of legacy gains");
-    auto legacyForce = saved;
+    nlohmann::json legacyForce = saved;
     legacyForce["version"] = 3;
     legacyForce["driveUnits"] = "Nm-radians-seconds";
-    for (auto& entry : legacyForce["constraints"])
+    for (nlohmann::json& entry : legacyForce["constraints"])
     {
-        for (auto& drive : entry["drives"])
+        for (nlohmann::json& drive : entry["drives"])
         {
             drive.erase("type");
         }
@@ -342,8 +352,13 @@ void RunPhysicsAssetTests()
     Check(loaded.Load(path, error) && !loaded.constraints[0].drives[0].useAcceleration &&
         loaded.constraints[0].drives[0].GetStiffness() == 135.0f && loaded.constraints[0].drives[0].GetDamping() == 12.0f,
         "Legacy v3 torque gains remain force drives rather than becoming acceleration gains");
-    auto legacy = saved; legacy["version"] = 2; legacy.erase("driveUnits");
-    for (auto& entry : legacy["constraints"]) entry.erase("drives");
+    nlohmann::json legacy = saved;
+    legacy["version"] = 2;
+    legacy.erase("driveUnits");
+    for (nlohmann::json& entry : legacy["constraints"])
+    {
+        entry.erase("drives");
+    }
     writeJson(legacy);
     Check(loaded.Load(path, error) && !loaded.constraints[0].drives[0].enabled, "Legacy v2 PA loads with angular drives disabled");
     legacy["version"] = 1; legacy.erase("constraints"); legacy.erase("angleUnits");

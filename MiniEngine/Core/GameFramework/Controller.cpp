@@ -23,7 +23,7 @@ namespace PARS
 
         UnPossess();
 
-        if (auto old = pawn.GetController())
+        if (PARS::Controller* old = pawn.GetController())
         {
             old->UnPossess();
         }
@@ -38,7 +38,7 @@ namespace PARS
 
     void Controller::UnPossess()
     {
-        if (auto pawn = GetPawn())
+        if (PARS::Pawn* pawn = GetPawn())
         {
             pawn->m_Controller = {};
             pawn->ConsumeMovementInput();

@@ -190,8 +190,8 @@ void BlendAnimationPoses(const GraphNode* source, GraphNode* target, uint32_t co
     }
     for (uint32_t i = 0; i < count; ++i)
     {
-        const auto& from = source[i];
-        auto& to = target[i];
+        const GraphNode& from = source[i];
+        GraphNode& to = target[i];
         // 행렬만 가진 정적 노드는 보존하고, 애니메이션이 적용되는 노드만 TRS를 다시 구성한다.
         if (from.staleMatrix || to.staleMatrix ||
             std::memcmp(&from.rotation, &to.rotation, sizeof(to.rotation)) != 0 ||

@@ -10,9 +10,9 @@ namespace PARS
         EndPlay();
         m_RootComponent = nullptr;
         // 생성 순서와 관계없이 다른 컴포넌트들이 모두 살아 있을 때 연결을 해제한다.
-        for (const auto& component : m_Components)
+        for (const std::unique_ptr<PARS::ActorComponent>& component : m_Components)
         {
-            if (auto scene = dynamic_cast<SceneComponent*>(component.get()))
+            if (PARS::SceneComponent* scene = dynamic_cast<SceneComponent*>(component.get()))
             {
                 scene->DetachFromParent();
             }
@@ -26,7 +26,7 @@ namespace PARS
 
     bool Actor::OwnsComponent(const ActorComponent& component) const
     {
-        for (const auto& owned : m_Components)
+        for (const std::unique_ptr<PARS::ActorComponent>& owned : m_Components)
         {
             if (owned.get() == &component)
             {
@@ -63,7 +63,7 @@ namespace PARS
 
     bool Actor::SetActorLocation(Math::Vector3 location)
     {
-        auto transform = GetActorTransform();
+        Math::AffineTransform transform = GetActorTransform();
         transform.SetTranslation(location);
         return SetActorTransform(transform);
     }
@@ -75,7 +75,7 @@ namespace PARS
             return;
         }
         m_BegunPlay = true;
-        for (const auto& component : m_Components)
+        for (const std::unique_ptr<PARS::ActorComponent>& component : m_Components)
         {
             if (!m_BegunPlay || m_PendingDestroy)
             {
@@ -94,7 +94,7 @@ namespace PARS
         }
         m_EndingPlay = true;
         m_BegunPlay = false;
-        for (auto it = m_Components.rbegin(); it != m_Components.rend(); ++it)
+        for (std::vector<std::unique_ptr<PARS::ActorComponent>>::reverse_iterator it = m_Components.rbegin(); it != m_Components.rend(); ++it)
         {
             if (!(*it)->m_BegunPlay)
             {
@@ -113,7 +113,7 @@ namespace PARS
             return;
         }
 
-        for (const auto& component : m_Components)
+        for (const std::unique_ptr<PARS::ActorComponent>& component : m_Components)
         {
             if (!m_BegunPlay || m_PendingDestroy)
             {
@@ -134,7 +134,7 @@ namespace PARS
             return;
         }
 
-        for (const auto& component : m_Components)
+        for (const std::unique_ptr<PARS::ActorComponent>& component : m_Components)
         {
             if (m_PendingDestroy || !m_BegunPlay)
             {
@@ -154,7 +154,7 @@ namespace PARS
             return;
         }
 
-        for (const auto& component : m_Components)
+        for (const std::unique_ptr<PARS::ActorComponent>& component : m_Components)
         {
             if (m_PendingDestroy || !m_BegunPlay)
             {

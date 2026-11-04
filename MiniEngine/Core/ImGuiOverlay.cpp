@@ -225,7 +225,7 @@ void ImGuiOverlay::UnregisterTexture(uint64_t texture)
     }
     const UINT64 offset = texture - s_DescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr;
     ASSERT(offset % s_DescriptorSize == 0 && offset / s_DescriptorSize < kDescriptorCount);
-    auto cpu = s_DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = s_DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
     cpu.ptr += static_cast<SIZE_T>(offset);
     FreeDescriptor(nullptr, cpu, {texture});
 }

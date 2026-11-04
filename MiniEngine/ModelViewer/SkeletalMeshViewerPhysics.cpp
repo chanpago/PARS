@@ -39,7 +39,7 @@ bool SkeletalMeshViewer::SetPhysicsAsset(const PhysicsAsset& asset, std::string&
         return false;
     }
     std::vector<std::string> joints;
-    const auto& model = *m_Mesh->GetSkeletalMesh();
+    const Model& model = *m_Mesh->GetSkeletalMesh();
     for (uint32_t i = 0; i < model.m_NumNodes; ++i)
     {
         if (m_IsJoint[i])
@@ -60,9 +60,9 @@ bool SkeletalMeshViewer::SetPhysicsAsset(const PhysicsAsset& asset, std::string&
 
 int SkeletalMeshViewer::FindBodyNode(int index) const
 {
-    const auto& names = m_Mesh->GetSkeletalMesh()->m_NodeNames;
-    const auto& bone = m_PhysicsAsset.bodies[index].bone;
-    const auto it = std::find(names.begin(), names.end(), bone);
+    const std::vector<std::string>& names = m_Mesh->GetSkeletalMesh()->m_NodeNames;
+    const std::string& bone = m_PhysicsAsset.bodies[index].bone;
+    const std::vector<std::string>::const_iterator it = std::find(names.begin(), names.end(), bone);
     return it == names.end() ? -1 : static_cast<int>(it - names.begin());
 }
 
@@ -99,14 +99,14 @@ void SkeletalMeshViewer::CreatePhysicsBody(PhysicsShapeType shape)
         return;
     }
     CancelInteraction();
-    const auto& names = m_Mesh->GetSkeletalMesh()->m_NodeNames;
+    const std::vector<std::string>& names = m_Mesh->GetSkeletalMesh()->m_NodeNames;
     const int existing = m_PhysicsAsset.FindBody(names[m_SelectedBone]);
     if (existing >= 0)
     {
         SelectBody(existing);
         return;
     }
-    auto& animation = m_Mesh->GetAnimInstance();
+    PARS::AnimInstance& animation = m_Mesh->GetAnimInstance();
     animation.SetPlaying(false);
     if (m_EditPose.empty())
     {
@@ -184,10 +184,11 @@ void SkeletalMeshViewer::DrawPhysicsBodies()
     }
     // 볼록 표면은 뒷면을 컬링한다. 알파 블렌딩을 위해 바디를 먼 순서부터 정렬한다.
     // 본 검색과 강체 좌표계 추출은 정렬 비교마다 수행하지 않고 바디마다 한 번만 수행한다.
-    std::sort(sorted.begin(), sorted.end(), [](const VisibleBody& a, const VisibleBody& b) {
+    std::sort(sorted.begin(), sorted.end(), [](const VisibleBody& a, const VisibleBody& b) -> bool
+        {
         return a.depth > b.depth;
     });
-    for (const auto& visible : sorted)
+    for (const VisibleBody& visible : sorted)
     {
         const int index = visible.index;
         const bool selected = EditingBody() && index == m_SelectedBody;
@@ -268,7 +269,7 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
         PhysicsAsset candidate;
         if (candidate.Load(m_PhysicsPath, m_PhysicsMessage))
         {
-            const auto& model = *m_Mesh->GetSkeletalMesh();
+            const Model& model = *m_Mesh->GetSkeletalMesh();
             std::vector<std::string> joints;
             for (uint32_t i = 0; i < model.m_NumNodes; ++i)
             {
@@ -350,7 +351,7 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     {
         return;
     }
-    auto body = m_PhysicsAsset.bodies[m_SelectedBody];
+    PARS::PhysicsBody body = m_PhysicsAsset.bodies[m_SelectedBody];
     bool changed = false;
     ImGui::SetNextItemWidth(100);
     int shape = static_cast<int>(body.shape);

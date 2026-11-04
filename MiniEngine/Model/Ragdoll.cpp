@@ -17,11 +17,11 @@ namespace PARS
         }
         m_CollisionEnabled = enabled;
 #if defined(_M_X64)
-        for (auto* body : m_Bodies)
+        for (physx::PxRigidBody* body : m_Bodies)
         {
             std::vector<physx::PxShape*> shapes(body->getNbShapes());
             body->getShapes(shapes.data(), static_cast<physx::PxU32>(shapes.size()));
-            for (auto* shape : shapes)
+            for (physx::PxShape* shape : shapes)
             {
                 shape->setFlag(physx::PxShapeFlag::eSIMULATION_SHAPE, enabled);
             }
@@ -36,9 +36,9 @@ namespace PARS
     {
         PxTransform ToPx(const Matrix4& matrix)
         {
-            const auto frame = PhysicsJointFrame::FromTransform(matrix);
-            const auto& p = frame.offset;
-            const auto& q = frame.rotation;
+            const PARS::PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(matrix);
+            const DirectX::XMFLOAT3& p = frame.offset;
+            const DirectX::XMFLOAT4& q = frame.rotation;
             return PxTransform(PxVec3(p.x, p.y, p.z), PxQuat(q.x, q.y, q.z, q.w));
         }
         Matrix4 FromPx(const PxTransform& pose)
@@ -110,7 +110,7 @@ namespace PARS
             {
                 return Vector3(kZero);
             }
-            const auto target = ToPx(PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform());
+            const physx::PxTransform target = ToPx(PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform());
             if (!target.isValid())
             {
                 return Vector3(kZero);
@@ -128,22 +128,22 @@ namespace PARS
             PxVec3 normal(0);
             for (size_t i = 0; i < m_Bodies.size(); ++i)
             {
-                const auto* body = m_Bodies[i];
-                auto* scene = body->getScene();
+                const physx::PxRigidBody* body = m_Bodies[i];
+                physx::PxScene* scene = body->getScene();
                 if (!scene)
                 {
                     continue;
                 }
                 std::vector<PxShape*> shapes(body->getNbShapes());
                 body->getShapes(shapes.data(), static_cast<PxU32>(shapes.size()));
-                for (const auto* shape : shapes)
+                for (const physx::PxShape* shape : shapes)
                 {
                     if (!shape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE))
                     {
                         continue;
                     }
                     // 실제 바디뿐 아니라 목표 형상도 검사해 바디가 막혔을 때 루트만 계속 전진하지 않게 한다.
-                    for (auto pose : {body->getGlobalPose() * shape->getLocalPose(), targets[i] * shape->getLocalPose()})
+                    for (physx::PxTransform pose : {body->getGlobalPose() * shape->getLocalPose(), targets[i] * shape->getLocalPose()})
                     {
                         pose.p += moved;
                         PxSweepBuffer hit;
@@ -188,7 +188,7 @@ namespace PARS
         {
             m_SupportJoint->release();
         }
-        for (auto* joint : m_Joints)
+        for (physx::PxD6Joint* joint : m_Joints)
         {
             joint->release();
         }
@@ -202,7 +202,7 @@ namespace PARS
         }
         else
         {
-            for (auto* body : m_Bodies)
+            for (physx::PxRigidBody* body : m_Bodies)
             {
                 body->release();
             }
@@ -341,7 +341,7 @@ namespace PARS
         }
         else
         {
-            for (const auto& body : m_Asset.bodies)
+            for (const PARS::PhysicsBody& body : m_Asset.bodies)
             {
                 const int node = static_cast<int>(std::find(names.begin(), names.end(), body.bone) - names.begin());
                 const PxTransform transform = ToPx(PhysicsBoneFrame(boneWorld[node]) * body.GetLocalTransform());
@@ -358,7 +358,7 @@ namespace PARS
                     geometry.storeAny(PxBoxGeometry(body.halfExtents.x, body.halfExtents.y, body.halfExtents.z));
                     break;
                 }
-                auto* actor = world.CreateDynamicBody(transform, geometry.any(), body.mass, body.bone.c_str(), body.material);
+                physx::PxRigidDynamic* actor = world.CreateDynamicBody(transform, geometry.any(), body.mass, body.bone.c_str(), body.material);
                 if (!actor)
                 {
                     error = "Could not create ragdoll body: " + body.bone;
@@ -374,9 +374,9 @@ namespace PARS
                 m_BoneNodes.push_back(node);
             }
         }
-        for (const auto& data : m_Asset.constraints)
+        for (const PARS::PhysicsConstraint& data : m_Asset.constraints)
         {
-            auto* joint = world.CreateJoint(*m_Bodies[asset.FindBody(data.parentBone)], ToPx(data.parentFrame.GetTransform()),
+            physx::PxD6Joint* joint = world.CreateJoint(*m_Bodies[asset.FindBody(data.parentBone)], ToPx(data.parentFrame.GetTransform()),
                 *m_Bodies[asset.FindBody(data.childBone)], ToPx(data.childFrame.GetTransform()));
             if (!joint)
             {
@@ -389,7 +389,7 @@ namespace PARS
             joint->setAngularDriveConfig(PxD6AngularDriveConfig::eSWING_TWIST);
             joint->setConstraintFlag(PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
             // Articulation에서는 연결과 제한을 내부 관절이 담당하며 D6는 진단 좌표계만 보관한다.
-            const auto translation = m_Articulation ? PxD6Motion::eFREE : PxD6Motion::eLOCKED;
+            const physx::PxD6Motion::Enum translation = m_Articulation ? PxD6Motion::eFREE : PxD6Motion::eLOCKED;
             joint->setMotion(PxD6Axis::eX, translation);
             joint->setMotion(PxD6Axis::eY, translation);
             joint->setMotion(PxD6Axis::eZ, translation);
@@ -473,7 +473,7 @@ namespace PARS
         }
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
-            auto* body = m_Bodies[i]->is<PxRigidDynamic>();
+            physx::PxRigidDynamic* body = m_Bodies[i]->is<PxRigidDynamic>();
             body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, !simulate);
             // 이동 스윕이 캐릭터 자신의 애니메이션 본 형상에 충돌하지 않도록 한다.
             // 시뮬레이션 형상은 계속 활성화하며, 두 모드 모두 PVD에 표시한다.
@@ -485,7 +485,8 @@ namespace PARS
             }
             if (simulate)
             {
-                const auto toPx = [](Vector3 v) {
+                physx::PxVec3 (*const toPx)(Math::Vector3) = [](Vector3 v) -> physx::PxVec3
+                {
                     return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ()));
                 };
                 body->setLinearVelocity(inheritAnimationVelocity && m_AnimatedLinearVelocity.size() == m_Bodies.size() ? toPx(m_AnimatedLinearVelocity[i]) : initialVelocity);
@@ -523,7 +524,7 @@ namespace PARS
                 error = "Invalid animated PA bone index.";
                 return false;
             }
-            const auto pose = ToPx(PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform());
+            const physx::PxTransform pose = ToPx(PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform());
             if (!pose.isValid())
             {
                 error = "Invalid animated PA transform.";
@@ -547,7 +548,7 @@ namespace PARS
         {
             if (teleport && m_LastKinematicTargets.size() == m_Bodies.size())
             {
-                const auto previous = ToPx(m_LastKinematicTargets[i]);
+                const physx::PxTransform previous = ToPx(m_LastKinematicTargets[i]);
                 // 순간이동이나 클립 초기화 시에는 유한차분으로 구한 속도를 무효화한다.
                 // 일반적인 틱 이후에 같은 포즈를 갱신할 때는 해당 속도를 보존한다.
                 if ((poses[i].p - previous.p).magnitudeSquared() > 1e-8f || PxAbs(poses[i].q.dot(previous.q)) < .999999f)
@@ -558,7 +559,7 @@ namespace PARS
             }
             if (!teleport && m_LastKinematicTargets.size() == m_Bodies.size())
             {
-                const auto previous = ToPx(m_LastKinematicTargets[i]);
+                const physx::PxTransform previous = ToPx(m_LastKinematicTargets[i]);
                 const PxVec3 linear = (poses[i].p - previous.p) / float(PhysicsWorld::FixedDeltaTime);
                 PxQuat delta = poses[i].q * previous.q.getConjugate();
                 if (delta.w < 0)
@@ -571,7 +572,7 @@ namespace PARS
                 m_AnimatedLinearVelocity.resize(m_Bodies.size());
                 m_AnimatedAngularVelocity.resize(m_Bodies.size());
                 m_AnimatedLinearVelocity[i] = Vector3(linear.x, linear.y, linear.z);
-                const auto angular = axis * PxMin(angle / float(PhysicsWorld::FixedDeltaTime), 20.0f);
+                const physx::PxVec3 angular = axis * PxMin(angle / float(PhysicsWorld::FixedDeltaTime), 20.0f);
                 m_AnimatedAngularVelocity[i] = Vector3(angular.x, angular.y, angular.z);
             }
             if (teleport)
@@ -599,7 +600,7 @@ namespace PARS
     {
         size_t count = 0;
 #if defined(_M_X64)
-        for (const auto* body : m_Bodies)
+        for (const physx::PxRigidBody* body : m_Bodies)
         {
             if (body->getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC))
             {
@@ -629,7 +630,7 @@ namespace PARS
         totalMass = 0;
 #if defined(_M_X64)
         double massSum = 0, x = 0, y = 0, z = 0;
-        for (const auto* body : m_Bodies)
+        for (const physx::PxRigidBody* body : m_Bodies)
         {
             const float mass = body->getMass();
             if (!std::isfinite(mass) || mass <= 0)
@@ -683,7 +684,7 @@ namespace PARS
         velocity = Vector3(kZero);
 #if defined(_M_X64)
         double massSum = 0, x = 0, y = 0, z = 0;
-        for (const auto* body : m_Bodies)
+        for (const physx::PxRigidBody* body : m_Bodies)
         {
             const float mass = body->getMass();
             const PxVec3 linear = body->getLinearVelocity();
@@ -725,7 +726,7 @@ namespace PARS
 #if defined(_M_X64)
         if (m_World && m_CollisionEnabled)
         {
-            for (const auto* body : m_Bodies)
+            for (const physx::PxRigidBody* body : m_Bodies)
             {
                 impulse += m_World->GetExternalImpactImpulse(*body, m_QueryOwner);
             }
@@ -740,7 +741,7 @@ namespace PARS
 #if defined(_M_X64)
         if (m_World)
         {
-            for (const auto* body : m_Bodies)
+            for (const physx::PxRigidBody* body : m_Bodies)
             {
                 m_World->InvalidateContacts(*body);
             }
@@ -764,7 +765,7 @@ namespace PARS
                 m_Articulation->updateKinematic(PxArticulationKinematicFlag::eVELOCITY);
                 return;
             }
-            for (auto* body : m_Bodies)
+            for (physx::PxRigidBody* body : m_Bodies)
             {
                 if (!(body->getRigidBodyFlags() & PxRigidBodyFlag::eKINEMATIC))
                 {
@@ -780,7 +781,7 @@ namespace PARS
     {
         m_QueryOwner = owner;
 #if defined(_M_X64)
-        for (auto* body : m_Bodies)
+        for (physx::PxRigidBody* body : m_Bodies)
         {
             body->userData = owner;
         }
@@ -793,7 +794,7 @@ namespace PARS
     {
         float result = 0;
 #if defined(_M_X64)
-        for (auto* joint : m_Joints)
+        for (physx::PxD6Joint* joint : m_Joints)
         {
             PxRigidActor* a;
             PxRigidActor* b;
@@ -814,7 +815,7 @@ namespace PARS
         for (size_t i = 0; i < m_Joints.size(); ++i)
         {
             const float previous = result;
-            const auto& data = m_Asset.constraints[i];
+            const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
             if (m_Articulation)
             {
                 const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
@@ -838,7 +839,7 @@ namespace PARS
                 }
                 continue;
             }
-            const auto* joint = m_Joints[i];
+            const physx::PxD6Joint* joint = m_Joints[i];
             // 상대 쿼터니언의 부호가 바뀌면 PhysX가 +/-2pi 부근의 동등한 각도를 반환할 수 있다.
             // 제한을 검사할 때는 최단 트위스트 각도를 사용한다.
             const float twist = std::remainder(joint->getTwistAngle(), PxTwoPi);
@@ -892,7 +893,7 @@ namespace PARS
     {
         float result = 1e30f;
 #if defined(_M_X64)
-        for (const auto* body : m_Bodies)
+        for (const physx::PxRigidBody* body : m_Bodies)
         {
             result = PxMin(result, body->getWorldBounds(1.0f).minimum.y);
         }
@@ -902,7 +903,7 @@ namespace PARS
     bool Ragdoll::IsFinite() const
     {
 #if defined(_M_X64)
-        for (auto* body : m_Bodies)
+        for (physx::PxRigidBody* body : m_Bodies)
         {
             if (!body->getGlobalPose().isValid() || !body->getLinearVelocity().isFinite() || !body->getAngularVelocity().isFinite())
             {

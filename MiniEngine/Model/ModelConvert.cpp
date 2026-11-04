@@ -459,9 +459,13 @@ bool Renderer::BuildModel(ModelData& model, const glTF::Asset& asset, int sceneI
     uint32_t numNodes = WalkGraph(model.m_SceneGraph, model.m_BoundingSphere, model.m_BoundingBox, model.m_Meshes, bufferMemory, scene->nodes, 0, Matrix4(kIdentity));
     model.m_SceneGraph.resize(numNodes);
     model.m_NodeNames.resize(numNodes);
-    for (const auto& node : asset.m_nodes)
+    for (const glTF::Node& node : asset.m_nodes)
+    {
         if (node.linearIdx >= 0 && static_cast<uint32_t>(node.linearIdx) < numNodes)
+        {
             model.m_NodeNames[node.linearIdx] = node.name;
+        }
+    }
 
     BuildAnimations(model, asset);
     BuildSkins(model, asset);

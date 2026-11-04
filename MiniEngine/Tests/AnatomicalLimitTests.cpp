@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 
 using namespace Math;
 using namespace PARS;
@@ -90,7 +91,7 @@ void RunAnatomicalLimitTests()
     PhysicsAsset asset;
     std::string error;
     Check(BuildMixamoPhysicsAsset(rig.skeleton, rig.pose, asset, error), "Generate anatomical T-pose preset");
-    for (const auto& joint : asset.constraints)
+    for (const PARS::PhysicsConstraint& joint : asset.constraints)
     {
         Check(joint.twist == PhysicsJointMotion::Limited &&
                 joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited,
@@ -120,12 +121,12 @@ void RunAnatomicalLimitTests()
             const std::string prefix = side > 0 ? "Left" : "Right";
             for (const char* suffix : {"Leg", "Foot"})
             {
-                auto& transform = splayed.pose[splayed.Find(prefix + suffix)].xform;
+                Math::Matrix4& transform = splayed.pose[splayed.Find(prefix + suffix)].xform;
                 transform.SetW(Vector4(Vector3(transform.GetW()) + Vector3(side * .025f, 0, 0), 1));
             }
             for (const char* suffix : {"ForeArm", "Hand"})
             {
-                auto& transform = splayed.pose[splayed.Find(prefix + suffix)].xform;
+                Math::Matrix4& transform = splayed.pose[splayed.Find(prefix + suffix)].xform;
                 transform.SetW(Vector4(Vector3(transform.GetW()) + Vector3(0, -.02f, .015f), 1));
             }
         }
@@ -134,11 +135,12 @@ void RunAnatomicalLimitTests()
         Check(BuildMixamoPhysicsAsset(splayed.skeleton, splayed.pose, splayedAsset, error) &&
             EvaluatePhysicsPose(splayed.skeleton, splayed.pose, Matrix4(kIdentity), splayedWorld, error),
             "Generate a splayed reference pose");
-        for (const auto& joint : splayedAsset.constraints)
+        for (const PARS::PhysicsConstraint& joint : splayedAsset.constraints)
+        {
             if (joint.childBone == "LeftLeg" || joint.childBone == "RightLeg" ||
                 joint.childBone == "LeftForeArm" || joint.childBone == "RightForeArm")
             {
-                const auto& body = splayedAsset.bodies[splayedAsset.FindBody(joint.childBone)];
+                const PARS::PhysicsBody& body = splayedAsset.bodies[splayedAsset.FindBody(joint.childBone)];
                 const bool elbow = joint.childBone.find("ForeArm") != std::string::npos;
                 const std::string prefix = joint.childBone.find("Left") == 0 ? "Left" : "Right";
                 const int node = splayed.Find(joint.childBone);
@@ -149,6 +151,7 @@ void RunAnatomicalLimitTests()
                     std::abs(float(Dot(Vector3(frame.GetX()), direction))) < 1e-4f,
                     "Splayed elbow/knee twist references follow their distal segments with perpendicular hinge axes");
             }
+        }
     }
 
     PhysicsWorld physics;
@@ -161,10 +164,16 @@ void RunAnatomicalLimitTests()
         {
             const std::string name = prefix + suffix;
             const PhysicsConstraint* joint = nullptr;
-            for (const auto& entry : asset.constraints) if (entry.childBone == name) joint = &entry;
+            for (const PARS::PhysicsConstraint& entry : asset.constraints)
+            {
+                if (entry.childBone == name)
+                {
+                    joint = &entry;
+                }
+            }
             Check(joint != nullptr, "Find anatomical test joint");
-            const auto& parent = asset.bodies[asset.FindBody(joint->parentBone)];
-            const auto& child = asset.bodies[asset.FindBody(joint->childBone)];
+            const PARS::PhysicsBody& parent = asset.bodies[asset.FindBody(joint->parentBone)];
+            const PARS::PhysicsBody& child = asset.bodies[asset.FindBody(joint->childBone)];
             PhysicsAsset pair; pair.bodies = {parent, child}; pair.constraints = {*joint};
             const int parentNode = rig.Find(parent.bone), childNode = rig.Find(child.bone);
             std::vector<Matrix4> bones{world[parentNode], world[childNode]};
@@ -197,7 +206,8 @@ void RunAnatomicalLimitTests()
                     "Auxiliary rotations are actively driven instead of left passive");
             }
             const Matrix3 neutral(x, y, Cross(x, y));
-            const auto sample = [&](float bend, float lateral, float twist) {
+            const std::function<float(float, float, float)> sample = [&](float bend, float lateral, float twist) -> float
+            {
                 const Matrix3 rotation(Quaternion(Vector3(kYUnitVector), XMConvertToRadians(bend)) *
                     Quaternion(Vector3(kZUnitVector), XMConvertToRadians(lateral)) *
                     Quaternion(Vector3(kXUnitVector), XMConvertToRadians(twist)));

@@ -15,8 +15,8 @@ bool PARS::BlendRecoveryPose(const std::vector<GraphNode>& source, std::vector<G
     {
         return true;
     }
-    auto result = target;
-    const auto local = [](const GraphNode& node)
+    std::vector<GraphNode> result = target;
+    Math::Matrix4 (*const local)(const GraphNode&) = [](const GraphNode& node) -> Math::Matrix4
     {
         Matrix4 value = node.xform;
         if (node.staleMatrix)
@@ -33,7 +33,7 @@ bool PARS::BlendRecoveryPose(const std::vector<GraphNode>& source, std::vector<G
         {
             return false;
         }
-        auto& node = result[i];
+        GraphNode& node = result[i];
         if (alpha == 0)
         {
             node.xform = from;

@@ -5,6 +5,7 @@
 #include <cmath>
 #if defined(_M_X64)
 #include "../PhysicsWorld.h"
+#include <functional>
 #endif
 
 namespace
@@ -90,7 +91,7 @@ namespace PARS
         {
             return nullptr;
         }
-        for (const auto& actor : m_Actors)
+        for (const std::unique_ptr<PARS::Actor>& actor : m_Actors)
         {
             if (actor->GetHandle() == handle && !actor->IsPendingDestroy())
             {
@@ -114,17 +115,19 @@ namespace PARS
     size_t World::GetActorCount() const
     {
         return static_cast<size_t>(std::count_if(m_Actors.begin(), m_Actors.end(),
-            [](const std::unique_ptr<Actor>& actor) {
-                return !actor->IsPendingDestroy();
-            }));
+            [](const std::unique_ptr<Actor>& actor) -> bool
+            {
+            return !actor->IsPendingDestroy();
+        }));
     }
 
     bool World::HasPendingDestroy() const
     {
         return std::any_of(m_Actors.begin(), m_Actors.end(),
-            [](const std::unique_ptr<Actor>& actor) {
-                return actor->IsPendingDestroy();
-            });
+            [](const std::unique_ptr<Actor>& actor) -> bool
+            {
+            return actor->IsPendingDestroy();
+        });
     }
 
     void World::ForEachActor(const std::function<void(Actor&)>& visitor)
@@ -159,7 +162,8 @@ namespace PARS
         {
             return;
         }
-        ForEachActor([](Actor& actor) {
+        ForEachActor([](Actor& actor) -> void
+            {
             if (!actor.HasBegunPlay())
             {
                 actor.BeginPlay();
@@ -234,7 +238,8 @@ namespace PARS
             // 다음 프레임에서 물리 시뮬레이션이 시작될 때, 이전 프레임에서 남아있던 substep이 없음을 의미한다.
             m_Physics->Update(0.0); // 고정 스텝 미만의 누적 시간은 유지하고, 프레임별 통계만 초기화한다.
 
-            const auto stepActors = [&](float dt) {
+            const std::function<void(float)> stepActors = [&](float dt) -> void
+            {
                 IterationScope scope(m_IterationDepth);
                 const size_t count = m_Actors.size();
 
@@ -295,7 +300,8 @@ namespace PARS
         }
         IterationScope scope(m_IterationDepth);
         std::vector<std::unique_ptr<Actor>> retired;
-        auto end = std::remove_if(m_Actors.begin(), m_Actors.end(), [&](std::unique_ptr<Actor>& actor) {
+        std::vector<std::unique_ptr<PARS::Actor>>::iterator end = std::remove_if(m_Actors.begin(), m_Actors.end(), [&](std::unique_ptr<Actor>& actor) -> bool
+            {
             if (!actor->IsPendingDestroy())
             {
                 return false;
@@ -306,7 +312,7 @@ namespace PARS
         m_Actors.erase(end, m_Actors.end());
         // 콜백 전에 소유 목록에서 제거한다. EndPlay에서 다른 객체를 파괴하거나 대체 객체를
         // 생성해도, 이미 분리한 삭제 대상 목록은 바뀌지 않는다.
-        for (auto it = retired.rbegin(); it != retired.rend(); ++it)
+        for (std::vector<std::unique_ptr<PARS::Actor>>::reverse_iterator it = retired.rbegin(); it != retired.rend(); ++it)
         {
             (*it)->EndPlay();
             (*it)->m_World = nullptr;
@@ -322,7 +328,7 @@ namespace PARS
     {
         m_Playing = false;
         m_Clearing = true;
-        for (const auto& actor : m_Actors)
+        for (const std::unique_ptr<PARS::Actor>& actor : m_Actors)
         {
             actor->m_PendingDestroy = true;
         }

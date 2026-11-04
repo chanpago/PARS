@@ -34,13 +34,13 @@ void RunRagdollReuseTests(bool verifyReuse)
 {
     PhysicsWorld world;
     Require(world.Initialize(false), "Initialize reusable ragdoll world");
-    auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(20, 1, 20), "floor");
+    physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(20, 1, 20), "floor");
     Require(floor != nullptr, "Create scene reference");
-    auto& scene = *floor->getScene();
-    auto& physics = scene.getPhysics();
-    const auto materialsBefore = physics.getNbMaterials();
-    const auto shapesBefore = physics.getNbShapes();
-    const auto articulationsBefore = physics.getNbArticulations();
+    physx::PxScene& scene = *floor->getScene();
+    physx::PxPhysics& physics = scene.getPhysics();
+    const physx::PxU32 materialsBefore = physics.getNbMaterials();
+    const physx::PxU32 shapesBefore = physics.getNbShapes();
+    const physx::PxU32 articulationsBefore = physics.getNbArticulations();
     PhysicsAsset asset;
     std::vector<std::string> names;
     std::vector<Matrix4> pose;
@@ -67,7 +67,7 @@ void RunRagdollReuseTests(bool verifyReuse)
     Ragdoll ragdoll;
     std::string error;
     using Clock = std::chrono::steady_clock;
-    auto begin = Clock::now();
+    std::chrono::steady_clock::time_point begin = Clock::now();
     Require(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error, false), "Prepare initial bodies", error);
     const double creationMs = std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
     std::printf("reuse_initialization_ms=%.6f\n", creationMs);
@@ -77,7 +77,7 @@ void RunRagdollReuseTests(bool verifyReuse)
             "Articulation is allocated before activation and absent from the scene");
         Require(physics.getNbShapes() == shapesBefore + 40, "Both complete shape sets are prepared");
     }
-    const auto preparedMaterials = physics.getNbMaterials();
+    const physx::PxU32 preparedMaterials = physics.getNbMaterials();
     PxActor* kinematic[20];
     Require(scene.getActors(PxActorTypeFlag::eRIGID_DYNAMIC, kinematic, 20) == 20,
         "Only the kinematic set is registered initially");
@@ -109,7 +109,7 @@ void RunRagdollReuseTests(bool verifyReuse)
         originalArticulation = articulation;
         for (size_t i = 0; i < pose.size(); ++i)
         {
-            const auto actual = ragdoll.GetBoneWorld(i);
+            const Math::Matrix4 actual = ragdoll.GetBoneWorld(i);
             Require(float(Length(Vector3(actual.GetW()) - Vector3(pose[i].GetW()))) < .0001f &&
                     float(Length(Vector3(actual.GetX()) - Vector3(pose[i].GetX()))) < .0001f,
                 "Activation inherits current root and joint pose, including bent limbs");
@@ -118,7 +118,7 @@ void RunRagdollReuseTests(bool verifyReuse)
             "Activation resets the root velocity to the requested value");
         PxArticulationLink* links[20];
         Require(articulation->getLinks(links, 20) == 20, "Read active links");
-        for (auto* link : links)
+        for (physx::PxArticulationLink* link : links)
         {
             PxShape* shape = nullptr;
             link->getShapes(&shape, 1);
@@ -128,7 +128,7 @@ void RunRagdollReuseTests(bool verifyReuse)
         // 대기 전에 남긴 외력이 다음 활성화에 재적용되지 않는지 실제 물리 스텝으로 확인한다.
         world.Step();
         float velocityX = 0;
-        for (auto* link : links)
+        for (physx::PxArticulationLink* link : links)
         {
             velocityX += link->getLinearVelocity().x / 20.0f;
         }
@@ -151,7 +151,7 @@ void RunRagdollReuseTests(bool verifyReuse)
         {
             PxActor* current[20];
             Require(scene.getActors(PxActorTypeFlag::eRIGID_DYNAMIC, current, 20) == 20, "Read reused kinematic bodies");
-            for (auto* body : kinematic)
+            for (physx::PxActor* body : kinematic)
             {
                 Require(std::find(current, current + 20, body) != current + 20, "Kinematic body identities are retained");
             }
@@ -165,7 +165,7 @@ void RunRagdollReuseTests(bool verifyReuse)
         Require(!ragdoll.SetSimulating(true, Vector3(invalid, 0, 0), error) &&
                 !ragdoll.IsSimulating() && scene.getNbArticulations() == 0 && world.GetDynamicBodyCount() == 20,
             "Invalid activation leaves the current configuration intact");
-        auto edited = asset;
+        PARS::PhysicsAsset edited = asset;
         edited.constraints[0].drives[0].enabled = false;
         Require(ragdoll.ApplyDriveSettings(edited, error), "Edit drives while articulation is parked", error);
         Require(ragdoll.SetSimulating(true, Vector3(kZero), error), "Activate after drive edits", error);
@@ -176,21 +176,21 @@ void RunRagdollReuseTests(bool verifyReuse)
         PxArticulationLink* links[20];
         articulation->getLinks(links, 20);
         bool checked = false;
-        for (auto* link : links)
+        for (physx::PxArticulationLink* link : links)
         {
-            const auto* joint = link->getInboundJoint();
+            const physx::PxArticulationJointReducedCoordinate* joint = link->getInboundJoint();
             if (joint && std::string(joint->getName()) == names[1])
             {
-                const auto drive = joint->getDriveParams(PxArticulationAxis::eTWIST);
+                const physx::PxArticulationDrive drive = joint->getDriveParams(PxArticulationAxis::eTWIST);
                 Require(drive.stiffness == 0 && drive.damping == 0 && drive.maxForce == 0,
                     "The reactivated joint receives the edited drive settings");
                 checked = true;
             }
         }
         Require(checked, "Inspect edited joint");
-        for (auto& joint : edited.constraints)
+        for (PARS::PhysicsConstraint& joint : edited.constraints)
         {
-            for (auto& drive : joint.drives)
+            for (PARS::PhysicsAngularDrive& drive : joint.drives)
             {
                 drive.useAcceleration = false;
             }

@@ -25,7 +25,7 @@ void SkeletonOverlay::Initialize(uint32_t resolution)
     m_DrawPSO.SetRootSignature(m_DrawRoot);
     m_DrawPSO.SetInputLayout(_countof(layout), layout);
     m_DrawPSO.SetRasterizerState(RasterizerTwoSided);
-    auto blend = BlendTraditional;
+    D3D12_BLEND_DESC blend = BlendTraditional;
     blend.IndependentBlendEnable = TRUE;
     blend.RenderTarget[1] = BlendDisable.RenderTarget[0]; // 반투명 제한 영역에서도 ID 값을 정확하게 유지한다.
     m_DrawPSO.SetBlendState(blend);
@@ -120,7 +120,8 @@ void SkeletonOverlay::Line(Vector3 start, Vector3 end, Vector3 color, uint32_t i
 void SkeletonOverlay::ClipLine(Vector4 a, Vector4 b, Vector3 color, uint32_t id, float width)
 {
     // W로 나누기 전에 동차 공간에서 클리핑한다. 역방향 Z도 지원한다.
-    const auto distance = [](Vector4 p, int plane) -> float {
+    float (*const distance)(Math::Vector4, int) = [](Vector4 p, int plane) -> float
+    {
         switch (plane)
         {
         case 0:
@@ -253,7 +254,7 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
         context.TransitionResource(m_SurfaceMesh, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
         context.SetVertexBuffer(0, m_SurfaceMesh.VertexBufferView());
         // 호출자가 정한 먼 순서부터의 정렬과 정확한 피킹 ID를 유지한다.
-        for (const auto& body : m_BodyDraws)
+        for (const SkeletonOverlay::BodyDraw& body : m_BodyDraws)
         {
             context.SetDynamicConstantBufferView(1, offsetof(BodyDraw, firstVertex), &body);
             context.Draw(body.vertexCount, body.firstVertex);
@@ -265,7 +266,7 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
         context.SetRootSignature(m_DrawRoot);
         context.SetPipelineState(m_DrawPSO);
         context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        for (const auto* vertices : {&m_FillVertices, &m_Vertices})
+        for (const std::vector<SkeletonOverlay::Vertex>* vertices : {&m_FillVertices, &m_Vertices})
         {
             if (vertices->empty())
             {
@@ -278,7 +279,7 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
     context.TransitionResource(target, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     if (m_PickRequested)
     {
-        auto& compute = context.GetComputeContext();
+        ComputeContext& compute = context.GetComputeContext();
         compute.TransitionResource(m_Ids, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         compute.TransitionResource(m_PickResult, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         compute.SetRootSignature(m_PickRoot);

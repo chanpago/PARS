@@ -1,6 +1,7 @@
 ﻿#include "CharacterMovementComponent.h"
 #include "CapsuleComponent.h"
 #include <cmath>
+#include <functional>
 
 using namespace Math;
 namespace PARS
@@ -20,7 +21,7 @@ namespace PARS
         m_Input = m_Velocity = m_LocomotionVelocity = Vector3(kZero);
         m_VerticalSpeed = 0;
         m_Grounded = false;
-        if (auto pawn = GetPawnOwner())
+        if (PARS::Pawn* pawn = GetPawnOwner())
         {
             pawn->ConsumeMovementInput();
         }
@@ -28,7 +29,7 @@ namespace PARS
 
     void CharacterMovementComponent::PreparePhysics(float)
     {
-        auto pawn = GetPawnOwner();
+        PARS::Pawn* pawn = GetPawnOwner();
         m_Input = pawn ? pawn->ConsumeMovementInput() : Vector3(kZero);
         m_Input.SetY(0);
         const float length = Length(m_Input);
@@ -44,15 +45,15 @@ namespace PARS
 
     void CharacterMovementComponent::FixedTickComponent(float dt)
     {
-        auto capsule = dynamic_cast<CapsuleComponent*>(GetUpdatedComponent());
-        auto pawn = GetPawnOwner();
+        PARS::CapsuleComponent* capsule = dynamic_cast<CapsuleComponent*>(GetUpdatedComponent());
+        PARS::Pawn* pawn = GetPawnOwner();
         if (!capsule || !pawn || !capsule->HasPhysicsCollision() || dt <= 0)
         {
             return;
         }
         const Vector3 desired = m_Input * (pawn->IsRunRequested() ? RunSpeed : WalkSpeed);
         const float acceleration = float(LengthSquare(m_Input)) > 0.0001f ? 10.0f : 14.0f;
-        const auto accelerate = [&](Vector3 velocity)
+        const std::function<Math::Vector3(Math::Vector3)> accelerate = [&](Vector3 velocity) -> Math::Vector3
         {
             const Vector3 difference = desired - velocity;
             const float distance = Length(difference);
@@ -69,7 +70,7 @@ namespace PARS
         const Vector3 before = capsule->GetComponentTransform().GetTranslation();
         const Vector3 requested = horizontal * dt;
         const Vector3 allowed = m_HorizontalMoveConstraint ? m_HorizontalMoveConstraint(requested) : requested;
-        const auto collision = capsule->Move(allowed + Vector3(0, m_VerticalSpeed * dt, 0), dt);
+        const PARS::CapsuleComponent::MoveResult collision = capsule->Move(allowed + Vector3(0, m_VerticalSpeed * dt, 0), dt);
         m_Grounded = collision.grounded;
         if (collision.grounded || (collision.ceiling && m_VerticalSpeed > 0))
         {
@@ -79,7 +80,7 @@ namespace PARS
         m_Velocity.SetY(m_VerticalSpeed);
         if (GetLocomotionSpeed() > 0.05f)
         {
-            auto transform = capsule->GetComponentTransform();
+            Math::AffineTransform transform = capsule->GetComponentTransform();
             const Vector3 forward = transform.GetZ();
             const float yaw = std::atan2(float(forward.GetX()), float(forward.GetZ()));
             const float target = std::atan2(float(m_LocomotionVelocity.GetX()), float(m_LocomotionVelocity.GetZ()));

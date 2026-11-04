@@ -39,7 +39,7 @@ namespace
         ImGui::TextUnformatted(u8"바디 기준 위치 (m)");
         ImGui::SetNextItemWidth(-1);
         bool changed = ImGui::DragFloat3("##JointOffset", &frame.offset.x, .002f, -100, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-        const auto& q = frame.rotation;
+        const DirectX::XMFLOAT4& q = frame.rotation;
         float xyz[] = {
             XMConvertToDegrees(std::atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x * q.x + q.y * q.y))),
             XMConvertToDegrees(std::asin(Clamp(2 * (q.w * q.y - q.z * q.x), -1.0f, 1.0f))),
@@ -61,7 +61,7 @@ int SkeletalMeshViewer::FindConstraintParent() const
     {
         return -1;
     }
-    const auto& model = *m_Mesh->GetSkeletalMesh();
+    const Model& model = *m_Mesh->GetSkeletalMesh();
     // 모든 본을 요구하지 않고 보조 노드와 바디가 없는 본은 건너뛴다.
     for (int node = model.m_NodeParents[m_SelectedBone]; node >= 0; node = model.m_NodeParents[node])
     {
@@ -76,14 +76,14 @@ int SkeletalMeshViewer::FindConstraintParent() const
 
 Matrix4 SkeletalMeshViewer::GetConstraintWorld(int index, int frame) const
 {
-    const auto& joint = m_PhysicsAsset.constraints[index];
+    const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[index];
     const int body = m_PhysicsAsset.FindBody(frame == 0 ? joint.parentBone : joint.childBone);
     return body < 0 ? Matrix4(kIdentity) : GetBodyWorld(body) * (frame == 0 ? joint.parentFrame : joint.childFrame).GetTransform();
 }
 
 Matrix4 SkeletalMeshViewer::GetConstraintBodyWorld(int frame) const
 {
-    const auto& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
+    const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
     return GetBodyWorld(m_PhysicsAsset.FindBody(frame == 0 ? joint.parentBone : joint.childBone));
 }
 
@@ -101,7 +101,7 @@ void SkeletalMeshViewer::SelectConstraint(int index)
     {
         return;
     }
-    const auto& joint = m_PhysicsAsset.constraints[index];
+    const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[index];
     m_SelectedBody = m_PhysicsAsset.FindBody(joint.childBone);
     m_SelectedBone = FindBodyNode(m_SelectedBody);
     m_ConstraintParent = m_PhysicsAsset.FindBody(joint.parentBone);
@@ -121,9 +121,9 @@ void SkeletalMeshViewer::ResetConstraintFrames(PhysicsConstraint& joint)
 
 void SkeletalMeshViewer::MoveOtherConstraintFrame(const Matrix4& previousWorld)
 {
-    auto& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
+    PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
     const Matrix4 delta = GetConstraintWorld(m_SelectedConstraint, m_ConstraintFrame) * Invert(previousWorld);
-    auto& other = m_ConstraintFrame == 0 ? joint.childFrame : joint.parentFrame;
+    PARS::PhysicsJointFrame& other = m_ConstraintFrame == 0 ? joint.childFrame : joint.parentFrame;
     const Matrix4 otherBody = GetConstraintBodyWorld(1 - m_ConstraintFrame);
     // 두 좌표계 사이의 해부학적 편향을 유지하면서 동일한 월드 공간 편집을 적용한다.
     // 반대쪽 좌표계를 이쪽에 그대로 맞추면 비대칭 가동 범위가 사라진다.
@@ -137,15 +137,15 @@ void SkeletalMeshViewer::CreateConstraint()
         return;
     }
     CancelInteraction();
-    const auto& parent = m_PhysicsAsset.bodies[m_ConstraintParent].bone;
-    const auto& child = m_PhysicsAsset.bodies[m_SelectedBody].bone;
+    const std::string& parent = m_PhysicsAsset.bodies[m_ConstraintParent].bone;
+    const std::string& child = m_PhysicsAsset.bodies[m_SelectedBody].bone;
     const int existing = m_PhysicsAsset.FindConstraint(parent, child);
     if (existing >= 0)
     {
         SelectConstraint(existing);
         return;
     }
-    auto& animation = m_Mesh->GetAnimInstance();
+    PARS::AnimInstance& animation = m_Mesh->GetAnimInstance();
     animation.SetPlaying(false);
     if (m_EditPose.empty())
     {
@@ -191,9 +191,9 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     {
         for (int i = 0; i < static_cast<int>(m_PhysicsAsset.constraints.size()); ++i)
         {
-            const auto& joint = m_PhysicsAsset.constraints[i];
+            const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[i];
             ImGui::PushID(i);
-            const auto label = joint.parentBone + " -> " + joint.childBone;
+            const std::string label = joint.parentBone + " -> " + joint.childBone;
             if (ImGui::Selectable(label.c_str(), i == m_SelectedConstraint))
             {
                 SelectConstraint(i);
@@ -210,7 +210,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     {
         return;
     }
-    auto& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
+    PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[m_SelectedConstraint];
     ImGui::TextWrapped("%s -> %s", joint.parentBone.c_str(), joint.childBone.c_str());
     if (ImGui::Button(u8"관절 삭제"))
     {
@@ -309,7 +309,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
         for (int axis = 0; axis < (joint.useSlerpDrive ? 1 : 3); ++axis)
         {
             ImGui::PushID(axis);
-            auto& drive = joint.drives[axis];
+            PARS::PhysicsAngularDrive& drive = joint.drives[axis];
             ImGui::BeginDisabled(motions[axis] == PhysicsJointMotion::Locked);
             changed |= ImGui::Checkbox(joint.useSlerpDrive ? u8"회전 드라이브" : names[axis], &drive.enabled);
             ImGui::BeginDisabled(!drive.enabled);
@@ -356,7 +356,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
 
 Vector3 SkeletalMeshViewer::GetTwistDisplayReference(const PhysicsConstraint& joint)
 {
-    const auto colon = joint.childBone.find_last_of(':');
+    const std::string::size_type colon = joint.childBone.find_last_of(':');
     const char* bone = joint.childBone.c_str() + (colon == std::string::npos ? 0 : colon + 1);
 
     // 월드 축 대신 BuildMixamoPhysicsAsset의 해부학적 자식 좌표계에 맞춘다.
@@ -395,7 +395,7 @@ void SkeletalMeshViewer::DrawConstraints()
     }
     for (int i = 0; i < static_cast<int>(m_PhysicsAsset.constraints.size()); ++i)
     {
-        const auto& joint = m_PhysicsAsset.constraints[i];
+        const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[i];
         const Matrix4 parent = GetConstraintWorld(i, 0), child = GetConstraintWorld(i, 1);
         const Vector3 pivot(parent.GetW()), childPivot(child.GetW());
         const uint32_t id = 0x600001 + i;
