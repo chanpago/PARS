@@ -128,7 +128,7 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     const PARS::FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
     for (size_t side = 0; side < sample.feet.size(); ++side)
     {
-        const auto& foot = sample.feet[side];
+        const PARS::FootSoleSample& foot = sample.feet[side];
         if (!foot.available)
         {
             continue;
@@ -164,7 +164,7 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     }
     if (m_ShowBuffer)
     {
-        const auto& buffer = sample.balance.bufferHull;
+        const std::vector<physx::PxVec3>& buffer = sample.balance.bufferHull;
         for (size_t i = 0; i < buffer.size(); ++i)
         {
             DashedLine(lines, buffer[i], buffer[(i + 1) % buffer.size()]);
@@ -204,12 +204,12 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     }
     if (m_ShowFootstep)
     {
-        const auto& referenceHull = mesh.GetRecoveryReferenceHull();
+        const std::vector<physx::PxVec3>& referenceHull = mesh.GetRecoveryReferenceHull();
         for (size_t i = 0; i < referenceHull.size(); ++i)
         {
             Line(lines, ToMath(referenceHull[i]), ToMath(referenceHull[(i + 1) % referenceHull.size()]), 0xff88bbff);
         }
-        const auto& step = sample.footstep;
+        const PARS::FootstepSnapshot& step = sample.footstep;
         if (step.hasPrediction)
         {
             Line(lines, ToMath(sample.projectedCenterOfMass), ToMath(step.predictedCom), PredictionColor);
@@ -217,13 +217,13 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
         }
         for (size_t side = 0; side < sample.feet.size(); ++side)
         {
-            const auto& contact = sample.feet[side].contact;
+            const PARS::FootContactSample& contact = sample.feet[side].contact;
             if (contact.grounded)
             {
                 Point(lines, ToMath(contact.position), HitColor, .015f);
                 Line(lines, ToMath(contact.position), ToMath(contact.position + contact.normal * .12f), HitColor);
             }
-            const auto& target = step.candidates[side];
+            const PARS::FootstepTarget& target = step.candidates[side];
             if (!target.valid)
             {
                 continue;
@@ -250,12 +250,12 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
             Line(lines, ToMath(step.target), goal, MotionTargetColor);
             Line(lines, foot, goal, MotionTargetColor);
         }
-        const auto& ik = mesh.GetFootstepIKSnapshot();
+        const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();
         if (ik.status == PARS::FootstepIKStatus::Applied)
         {
             for (size_t side = 0; side < ik.legs.size(); ++side)
             {
-                const auto& leg = ik.legs[side];
+                const PARS::LegIKResult& leg = ik.legs[side];
                 const PxU32 color = int(side) == ik.stepFoot ? IKStepColor : IKSupportColor;
                 Line(lines, ToMath(leg.hip.p), ToMath(leg.knee.p), color);
                 Line(lines, ToMath(leg.knee.p), ToMath(leg.ankle.p), color);
@@ -275,9 +275,9 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     {
         return;
     }
-    auto& support = mesh.GetFootSupport();
-    const auto& sample = support.GetSnapshot();
-    const auto& balance = sample.balance;
+    PARS::FootSupport& support = mesh.GetFootSupport();
+    const PARS::FootSupportSnapshot& sample = support.GetSnapshot();
+    const PARS::FootSupportBalance& balance = sample.balance;
     const char* zone = u8"판정 불가";
     switch (balance.zone)
     {
@@ -297,7 +297,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     ImGui::ProgressBar(balance.weight, ImVec2(-1, 0));
     if (mesh.UsesAutomaticRootSupport())
     {
-        const auto released = mesh.GetRootSupportRelease();
+        const PARS::RootSupportRelease released = mesh.GetRootSupportRelease();
         const char* state = released == PARS::RootSupportRelease::None ? u8"지지 중" :
             released == PARS::RootSupportRelease::OutsideBuffer ? u8"B 이탈로 해제" :
             released == PARS::RootSupportRelease::NoSupport ? u8"발 지지 없음으로 해제" : u8"지지 해제";
@@ -347,7 +347,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     }
     if (sample.hasCenterOfMassVelocity)
     {
-        const auto& velocity = sample.centerOfMassVelocity;
+        const physx::PxVec3& velocity = sample.centerOfMassVelocity;
         ImGui::Text(u8"실제 COM 속도 (%.3f, %.3f, %.3f) m/s", velocity.x, velocity.y, velocity.z);
     }
     if (ImGui::TreeNodeEx(u8"발딛기 판단 / 착지 목표", ImGuiTreeNodeFlags_DefaultOpen))
@@ -356,8 +356,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         const PARS::FootstepRoles roles = step.GetRoles();
         const PARS::FootstepRoles displayRoles = sample.GetDisplayRoles();
         PARS::FootstepSettings& settings = support.GetFootstepSettings();
-        const auto& recovery = mesh.GetRecoverySnapshot();
-        const auto& recoverySettings = mesh.GetRecoverySettings();
+        const PARS::RecoverySnapshot& recovery = mesh.GetRecoverySnapshot();
+        const PARS::RecoverySettings& recoverySettings = mesh.GetRecoverySettings();
         ImGui::Text(u8"제어 상태: %s%s", recovery.state == PARS::RecoveryState::Recovery ? "Recovery" : "Animation",
             recovery.blending ? u8" (복귀 블렌드)" : "");
         ImGui::TextWrapped(u8"전환 판단: %s", PARS::RecoveryReasonLabel(recovery.reason));
@@ -409,7 +409,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         }
         for (size_t side = 0; side < step.candidates.size(); ++side)
         {
-            const auto& target = step.candidates[side];
+            const PARS::FootstepTarget& target = step.candidates[side];
             if (target.valid)
             {
                 ImGui::Text(u8"%s 목표 (%.3f, %.3f, %.3f) m", FootLabel(static_cast<int>(side)),
@@ -455,13 +455,13 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         ImGui::TextWrapped(u8"설정은 다음 발딛기부터 적용됩니다. 출발점에서 부드럽게 이동하며 중간에 가장 높게 듭니다. 계획 시간이 끝난 뒤 실제 접촉을 확인해 종료합니다.");
         ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
         ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동/지지 다리의 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
-        const auto& ik = mesh.GetFootstepIKSnapshot();
+        const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();
         ImGui::Text(u8"IK → 관절 PD: %s", PARS::FootstepIKStatusLabel(ik.status));
         if (ik.status == PARS::FootstepIKStatus::Applied)
         {
             for (size_t side = 0; side < ik.legs.size(); ++side)
             {
-                const auto& leg = ik.legs[side];
+                const PARS::LegIKResult& leg = ik.legs[side];
                 const float actualError = (ToPx(Vector3(sample.feet[side].soleWorld.GetW())) - leg.requestedSole.p).magnitude();
                 ImGui::Text(u8"%s (%s): IK 도달 오차 %.2fcm / 실제 발 목표 오차 %.2fcm%s", FootLabel(int(side)),
                     int(side) == ik.stepFoot ? u8"이동" : u8"지지", leg.reachError * 100, actualError * 100,
@@ -485,12 +485,12 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
     const char* const labels[] = {u8"왼발", u8"오른발"};
     for (size_t side = 0; side < sample.feet.size(); ++side)
     {
-        auto& settings = support.GetSoleSettings(side);
-        const auto& foot = sample.feet[side];
+        PARS::FootSoleSettings& settings = support.GetSoleSettings(side);
+        const PARS::FootSoleSample& foot = sample.feet[side];
         ImGui::PushID(static_cast<int>(side));
         if (foot.available && ImGui::TreeNodeEx(labels[side], ImGuiTreeNodeFlags_DefaultOpen))
         {
-            const auto& contact = foot.contact;
+            const PARS::FootContactSample& contact = foot.contact;
             ImGui::Text(u8"실제 접촉: %s / 지면 접촉점 %u개", !contact.hasSample ? u8"물리 스텝 대기" :
                 contact.grounded ? u8"지지 중" : u8"접촉 없음", contact.pointCount);
             ImGui::Text(u8"접촉 이력: 이륙 %llu회 / 착지 %llu회",

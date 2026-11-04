@@ -5,6 +5,7 @@
 #include "CompiledShaders/PhysicsAssetPS.h"
 #include <cmath>
 #include <cstring>
+#include <functional>
 
 using namespace Math;
 using namespace Graphics;
@@ -19,8 +20,8 @@ namespace
 void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, const Matrix4& parent,
     const Matrix4& child, uint32_t id, bool selected, Vector3 twistReference, bool articulation)
 {
-    auto& geometry = m_ConstraintGeometry[id];
-    const auto& previous = geometry.settings;
+    SkeletonOverlay::ConstraintGeometry& geometry = m_ConstraintGeometry[id];
+    const PARS::PhysicsConstraint& previous = geometry.settings;
     if (!geometry.valid || geometry.articulation != articulation || geometry.selected != selected || previous.twist != joint.twist ||
         previous.swingY != joint.swingY || previous.swingZ != joint.swingZ ||
         previous.twistMin != joint.twistMin || previous.twistMax != joint.twistMax ||
@@ -38,11 +39,11 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
         std::memcmp(&geometry.clipTransform, &clipTransform, sizeof(Matrix4)) != 0)
     {
         const size_t lineStart = m_Vertices.size(), fillStart = m_FillVertices.size();
-        for (const auto& line : geometry.lines)
+        for (const SkeletonOverlay::LimitLine& line : geometry.lines)
         {
             ClipLine(clipTransform * line.a, clipTransform * line.b, line.color, id, line.width);
         }
-        for (const auto& triangle : geometry.triangles)
+        for (const SkeletonOverlay::LimitTriangle& triangle : geometry.triangles)
         {
             for (Vector3 point : {triangle.a, triangle.b, triangle.c})
             {
@@ -68,10 +69,12 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
     // 매 프레임 자식을 따라간다.
     const Vector3 origin(kZero), x(kXUnitVector), y(kYUnitVector), z(kZUnitVector), yellow(1, .85f, .05f);
     const float width = selected ? 2.5f : 1.25f;
-    const auto pointer = [&](Vector3 direction, float length) {
+    const std::function<void(Math::Vector3, float)> pointer = [&](Vector3 direction, float length) -> void
+    {
         const Vector3 tip = direction * length;
         const Vector3 side = Normalize(Cross(direction, std::abs(float(direction.GetY())) < .9f ? y : z));
-        const auto line = [&](Vector3 a, Vector3 b, float thickness) {
+        const std::function<void(Math::Vector3, Math::Vector3, float)> line = [&](Vector3 a, Vector3 b, float thickness) -> void
+        {
             ClipLine(clipTransform * a, clipTransform * b, yellow, id, thickness);
         };
         line(origin, tip, selected ? 3.5f : 2.5f);
@@ -81,7 +84,7 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
     const Quaternion relative = Normalize(Quaternion(Invert(parent) * child));
     if (articulation)
     {
-        const auto angles = PARS::JointRotationVector(relative);
+        const Math::Vector3 angles = PARS::JointRotationVector(relative);
         pointer(Quaternion(x, angles.GetX()) * twistReference, .062f);
         pointer(Quaternion(y, angles.GetY()) * x, .08f);
         pointer(Quaternion(z, angles.GetZ()) * x, .1f);
@@ -117,13 +120,16 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
     const Vector3 origin(kZero), x(kXUnitVector), y(kYUnitVector), z(kZUnitVector);
     const Vector3 red(1, .22f, .24f), green(.2f, .95f, .35f);
     const float width = selected ? 2.5f : 1.25f, opacity = selected ? .32f : .16f;
-    const auto line = [&](Vector3 a, Vector3 b, Vector3 color, float thickness) {
+    const std::function<void(Math::Vector3, Math::Vector3, Math::Vector3, float)> line = [&](Vector3 a, Vector3 b, Vector3 color, float thickness) -> void
+    {
         geometry.lines.push_back({a, b, color, thickness});
     };
-    const auto fill = [&](Vector3 a, Vector3 b, Vector3 c, Vector3 color, float alpha) {
+    const std::function<void(Math::Vector3, Math::Vector3, Math::Vector3, Math::Vector3, float)> fill = [&](Vector3 a, Vector3 b, Vector3 c, Vector3 color, float alpha) -> void
+    {
         geometry.triangles.push_back({a, b, c, color, alpha});
     };
-    const auto sector = [&](Vector3 center, Vector3 axis, Vector3 start, float low, float high, float alpha, Vector3 color) {
+    const std::function<void(Math::Vector3, Math::Vector3, Math::Vector3, float, float, float, Math::Vector3)> sector = [&](Vector3 center, Vector3 axis, Vector3 start, float low, float high, float alpha, Vector3 color) -> void
+    {
         for (int step = 0; step < segments; ++step)
         {
             const Vector3 a = center + Quaternion(axis, low + (high - low) * step / segments) * start;
@@ -164,7 +170,8 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
         // 이 SDK는 ConeLimitHelperTanLess를 사용한다. 스윙 각도 좌표에서 타원을 구한 뒤
         // tan(angle/4)로 변환하며, 반대 순서로 계산하지 않는다.
         // 경계는 순수 스윙 쿼터니언을 로컬 X축에 적용해 구한다.
-        const auto cone = [&](float angle) {
+        const std::function<Math::Vector3(float)> cone = [&](float angle) -> Math::Vector3
+        {
             const float sy = std::tan(joint.swingYLimit * std::cos(angle) * .25f);
             const float sz = std::tan(joint.swingZLimit * std::sin(angle) * .25f);
             const float norm = 1 + sy * sy + sz * sz;
@@ -209,7 +216,8 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
         // 방위각은 자유롭게 둔다. 허용되는 구면 띠를 표시한다.
         const bool limitedY = joint.swingY == Motion::Limited;
         const float limit = Min(limitedY ? joint.swingYLimit : joint.swingZLimit, XM_PIDIV2);
-        const auto band = [&](float elevation, float azimuth) {
+        const std::function<Math::Vector3(float, float)> band = [&](float elevation, float azimuth) -> Math::Vector3
+        {
             const float a = radius * std::cos(elevation) * std::cos(azimuth);
             const float b = radius * std::cos(elevation) * std::sin(azimuth);
             const float c = radius * std::sin(elevation);
@@ -260,7 +268,7 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
 void SkeletonOverlay::InitializeSurfaces()
 {
     m_SurfaceDepth.Create(L"PhysicsAsset picking depth", m_Resolution, m_Resolution, DXGI_FORMAT_D32_FLOAT);
-    const auto vertices = BuildSurfaceMesh();
+    const std::vector<SkeletonOverlay::SurfaceVertex> vertices = BuildSurfaceMesh();
     m_SurfaceMesh.Create(L"PhysicsAsset shared primitives", static_cast<uint32_t>(vertices.size()), sizeof(SurfaceVertex), vertices.data());
     m_SurfaceRoot.Reset(2);
     m_SurfaceRoot[0].InitAsConstantBuffer(0);
@@ -270,7 +278,7 @@ void SkeletonOverlay::InitializeSurfaces()
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"TEXCOORD", 0, DXGI_FORMAT_R32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
-    auto blend = BlendTraditional;
+    D3D12_BLEND_DESC blend = BlendTraditional;
     blend.IndependentBlendEnable = TRUE;
     blend.RenderTarget[1] = BlendDisable.RenderTarget[0]; // 불투명도와 관계없이 ID 값을 정확하게 유지한다.
     m_SurfacePSO.SetRootSignature(m_SurfaceRoot);
@@ -300,7 +308,8 @@ std::vector<SkeletonOverlay::SurfaceVertex> SkeletonOverlay::BuildSurfaceMesh()
     // 버텍스 셰이더에서 적용하므로 실시간 PA 편집도 반영된다.
     std::vector<SurfaceVertex> vertices;
     vertices.reserve(BoxVertices + CapsuleVertices);
-    const auto vertex = [&](Vector3 p, Vector3 n, float capOffset) {
+    const std::function<void(Math::Vector3, Math::Vector3, float)> vertex = [&](Vector3 p, Vector3 n, float capOffset) -> void
+    {
         SurfaceVertex v;
         XMStoreFloat3(&v.position, p);
         XMStoreFloat3(&v.normal, n);
@@ -313,7 +322,7 @@ std::vector<SkeletonOverlay::SurfaceVertex> SkeletonOverlay::BuildSurfaceMesh()
         const float corners[6][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
         for (int face = 0; face < 6; ++face)
         {
-            for (const auto& corner : corners)
+            for (const float(&corner)[2] : corners)
             {
                 vertex(normals[face] + tangents[face] * corner[0] + Cross(normals[face], tangents[face]) * corner[1], normals[face], 0);
             }
@@ -321,7 +330,8 @@ std::vector<SkeletonOverlay::SurfaceVertex> SkeletonOverlay::BuildSurfaceMesh()
     }
     // 두 반구와 별도의 원통 띠로 구성한다. 적도 정점을 중복해 원통 부분이
     // 곧게 유지되도록 하며, halfLength == 0인 경우에도 동일하게 처리한다.
-    const auto sample = [&](int ring, int side, Vector3& n, float& capOffset) {
+    const std::function<void(int, int, Math::Vector3&, float&)> sample = [&](int ring, int side, Vector3& n, float& capOffset) -> void
+    {
         const bool positive = ring > CapsuleHemisphere;
         const int latitude = positive ? ring - 1 : ring;
         const float angle = -XM_PIDIV2 + latitude * XM_PI / (CapsuleHemisphere * 2);

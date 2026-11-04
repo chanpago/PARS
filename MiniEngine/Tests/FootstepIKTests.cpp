@@ -63,8 +63,8 @@ namespace
 
     void TestGeometryAndOffsets()
     {
-        auto input = BentLeg();
-        auto result = SolveTwoBoneIK(input);
+        PARS::TwoBoneIKInput input = BentLeg();
+        PARS::LegIKResult result = SolveTwoBoneIK(input);
         CheckSegments(input, result);
         Check(!result.reachLimited && Near(result.solvedSole, input.targetSole) && result.reachError < 1e-5f,
             "A reachable sole position and orientation are reached together");
@@ -93,7 +93,7 @@ namespace
         }
 
         input = BentLeg();
-        const auto original = SolveTwoBoneIK(input);
+        const PARS::LegIKResult original = SolveTwoBoneIK(input);
         const PxTransform world(PxVec3(3, -2, 1), PxQuat(.8f, PxVec3(0, 1, 0)) * PxQuat(.4f, PxVec3(1, 0, 0)));
         input.hip = world * input.hip;
         input.knee = world * input.knee;
@@ -109,9 +109,9 @@ namespace
 
     void TestReachAndHints()
     {
-        auto input = BentLeg();
+        PARS::TwoBoneIKInput input = BentLeg();
         input.targetSole.p = PxVec3(0, -5, 3);
-        auto result = SolveTwoBoneIK(input);
+        PARS::LegIKResult result = SolveTwoBoneIK(input);
         CheckSegments(input, result);
         Check(result.reachLimited && result.reachError > 4 && Near(result.requestedSole, input.targetSole),
             "An unreachable goal retains the requested target and reports geometric reach error");
@@ -225,7 +225,7 @@ namespace
     {
         PoseFixture fixture;
         FootstepIK ik;
-        const auto original = fixture.pose;
+        const std::vector<physx::PxTransform> original = fixture.pose;
         Check(ik.Apply(fixture.input, fixture.parents, fixture.pose), "Both legs produce corrected joint targets");
         Check(ik.GetSnapshot().status == FootstepIKStatus::Applied && ik.GetSnapshot().correctedNodes.size() == 8,
             "Only both leg chains and their toe descendants are marked for correction");
@@ -233,7 +233,7 @@ namespace
             "The pelvis and upper-body animation goals remain unchanged");
         for (size_t side = 0; side < 2; ++side)
         {
-            const auto& leg = fixture.input.legs[side];
+            const PARS::FootIKLegInput& leg = fixture.input.legs[side];
             const PxTransform physical = leg.actualAnchor * fixture.pose[leg.anchorNode].getInverse();
             const PxTransform sole = physical * fixture.pose[leg.ankleNode] * leg.soleInBone;
             Check(Near(sole, leg.targetSole), "Joint-relative targets reach the world sole from the actual translated and tilted pelvis");
@@ -269,14 +269,14 @@ namespace
     {
         PoseFixture fixture;
         FootstepIK ik;
-        const auto original = fixture.pose;
+        const std::vector<physx::PxTransform> original = fixture.pose;
         Check(ik.Apply(fixture.input, fixture.parents, fixture.pose), "Prepare a previous valid bending direction");
         fixture.pose = original;
-        for (const auto& leg : fixture.input.legs)
+        for (const PARS::FootIKLegInput& leg : fixture.input.legs)
         {
             fixture.pose[leg.kneeNode].p = (fixture.pose[leg.hipNode].p + fixture.pose[leg.ankleNode].p) * .5f;
         }
-        const auto straight = fixture.pose;
+        const std::vector<physx::PxTransform> straight = fixture.pose;
         Check(ik.Apply(fixture.input, fixture.parents, fixture.pose) &&
             ik.GetSnapshot().legs[1].hintSource == KneeHintSource::Previous,
             "The next straight animation sample reuses the preceding valid knee direction");
@@ -292,19 +292,19 @@ namespace
         PoseFixture fixture;
         FootstepIK ik;
         fixture.input.stepFoot = -1;
-        const auto animated = fixture.pose;
+        const std::vector<physx::PxTransform> animated = fixture.pose;
         for (int frame = 0; frame < 20; ++frame)
         {
             fixture.pose = animated;
-            for (auto& leg : fixture.input.legs)
+            for (PARS::FootIKLegInput& leg : fixture.input.legs)
             {
                 leg.actualAnchor.p.x += .001f;
             }
             Check(ik.Apply(fixture.input, fixture.parents, fixture.pose),
                 "Recovery keeps both sole goals while no new footstep is active");
-            for (const auto& leg : fixture.input.legs)
+            for (const PARS::FootIKLegInput& leg : fixture.input.legs)
             {
-                const auto actualSole = leg.actualAnchor * fixture.pose[leg.anchorNode].getInverse() *
+                const physx::PxTransform actualSole = leg.actualAnchor * fixture.pose[leg.anchorNode].getInverse() *
                     fixture.pose[leg.ankleNode] * leg.soleInBone;
                 Check(Near(actualSole, leg.targetSole), "Stored recovery soles stay in world space as the pelvis moves");
             }

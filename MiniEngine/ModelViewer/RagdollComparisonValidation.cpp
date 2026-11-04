@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
+#include <functional>
 
 using namespace PARS;
 
@@ -14,16 +15,18 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
     PhysicsWorld& owner, const std::wstring& reportPath)
 {
     std::ofstream report(reportPath);
-    const auto check = [&](bool condition, const char* message) {
+    const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
+    {
         report << (condition ? "PASS: " : "FAIL: ") << message << " | " << runner.GetStatusMessage() << std::endl;
         if (!condition)
         {
             throw std::runtime_error(message);
         }
     };
-    const auto ownerBodies = owner.GetDynamicBodyCount(), ownerJoints = owner.GetConstraintCount();
-    const auto ownerSteps = owner.GetStepCount();
-    const auto initialErrors = owner.GetErrorCount();
+    const uint32_t ownerBodies = owner.GetDynamicBodyCount();
+    const uint32_t ownerJoints = owner.GetConstraintCount();
+    const uint64_t ownerSteps = owner.GetStepCount();
+    const uint32_t initialErrors = owner.GetErrorCount();
     try
     {
         check(report.good(), "Open imported-character comparison validation");
@@ -52,7 +55,7 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
         check(runner.Step() && runner.GetResults().GetFrames().back().clipName == "Walking" &&
                 std::abs(runner.GetResults().GetFrames().back().blendAlpha - 1.0f / 12) < 1e-5f,
             "The first Walking sample uses the existing 0.2-second pose blend");
-        const auto pausedBlend = runner.GetResults().GetFrames().back().blendAlpha;
+        const float pausedBlend = runner.GetResults().GetFrames().back().blendAlpha;
         runner.Advance(1);
         check(runner.GetResults().GetFrames().size() == 121 &&
                 runner.GetResults().GetFrames().back().blendAlpha == pausedBlend,
@@ -97,10 +100,11 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
                     runner.GetWorld().GetPhysicsWorld()->GetDynamicBodyCount() == 2 * asset.bodies.size(),
                 "Two non-player actors with complete rigid body sets");
             size_t kinematic = 0, dynamic = 0;
-            runner.GetWorld().ForEachActor([&](Actor& actor) {
-                for (const auto& component : actor.GetComponents())
+            runner.GetWorld().ForEachActor([&](Actor& actor) -> void
                 {
-                    if (auto* mesh = dynamic_cast<SkeletalMeshComponent*>(component.get()))
+                for (const std::unique_ptr<PARS::ActorComponent>& component : actor.GetComponents())
+                {
+                    if (PARS::SkeletalMeshComponent* mesh = dynamic_cast<SkeletalMeshComponent*>(component.get()))
                     {
                         kinematic += mesh->GetRagdoll().GetKinematicBodyCount();
                         dynamic += mesh->GetRagdoll().GetBodyCount() - mesh->GetRagdoll().GetKinematicBodyCount();
@@ -117,14 +121,14 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
             {
                 runner.Advance(1.0f / fps);
             }
-            const auto& results = runner.GetResults();
+            const PARS::RagdollComparison& results = runner.GetResults();
             check(runner.GetState() == RagdollComparisonRunner::State::Complete && results.GetFrames().size() == 600,
                 "Exactly 600 synchronized samples at 30/60/144 render FPS");
             bool correctStages = true;
             for (size_t i = 0; i < results.GetFrames().size(); ++i)
             {
-                const auto& sample = results.GetFrames()[i];
-                const auto* name = i < 120 ? "Idle" : i < 360 ? "Walking"
+                const PARS::ComparisonFrame& sample = results.GetFrames()[i];
+                const char* name = i < 120 ? "Idle" : i < 360 ? "Walking"
                                                               : "Slow Run";
                 const size_t start = i < 120 ? 0 : i < 360 ? 120
                                                            : 360;
@@ -138,7 +142,7 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
             check(std::abs(float(runner.GetViewCenter().GetZ()) - 18.1f) < 1e-4f,
                 "Camera follows the integrated 0/1.6/3 m/s path with continuous speed ramps");
             float maxClamp = 0;
-            for (const auto& joint : results.GetJoints())
+            for (const PARS::ComparisonJointResult& joint : results.GetJoints())
             {
                 maxClamp = std::max(maxClamp, joint.clamp.maximum);
             }
@@ -155,8 +159,8 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
                 bool samePlayback = true;
                 for (size_t frame = 0; frame < reference.size(); ++frame)
                 {
-                    const auto& before = reference[frame];
-                    const auto& after = results.GetFrames()[frame];
+                    const PARS::ComparisonFrame& before = reference[frame];
+                    const PARS::ComparisonFrame& after = results.GetFrames()[frame];
                     maxClockDelta = std::max(maxClockDelta, std::abs(before.clipTime - after.clipTime));
                     samePlayback &= before.clipName == after.clipName && std::abs(before.blendAlpha - after.blendAlpha) < 1e-6f;
                     for (size_t body = 0; body < before.bodies.size(); ++body)
@@ -179,7 +183,7 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
         check(owner.GetDynamicBodyCount() == ownerBodies && owner.GetConstraintCount() == ownerJoints &&
                 owner.GetStepCount() == ownerSteps,
             "Player physics scene and clock remain unchanged");
-        auto& context = GraphicsContext::Begin(L"Validate comparison dummy rendering");
+        GraphicsContext& context = GraphicsContext::Begin(L"Validate comparison dummy rendering");
         Renderer::UpdateWorldRenderData(runner.GetWorld(), context);
         context.Finish(true);
         check(runner.Export("../../.tools/comparison-imported.html"), "Export actual imported locomotion-sequence results");
@@ -189,14 +193,15 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
             RagdollComparisonRunner::Settings settings(RagdollComparisonRunner::Simulation::B);
             check(runner.Start(asset, settings), "Start twenty-second Idle/Walking U-turn comparison");
             std::vector<Actor*> dummies;
-            runner.GetWorld().ForEachActor([&](Actor& actor) {
+            runner.GetWorld().ForEachActor([&](Actor& actor) -> void
+                {
                 dummies.push_back(&actor);
             });
             check(dummies.size() == 2, "B has exactly two non-player dummies");
-            const auto initial = dummies[0]->GetActorLocation();
-            const auto separation = dummies[1]->GetActorLocation() - initial;
-            auto previous = initial;
-            auto previousForward = dummies[0]->GetActorTransform().GetZ();
+            const Math::Vector3 initial = dummies[0]->GetActorLocation();
+            const Math::Vector3 separation = dummies[1]->GetActorLocation() - initial;
+            Math::Vector3 previous = initial;
+            Math::Vector3 previousForward = dummies[0]->GetActorTransform().GetZ();
             size_t previousSamples = 0;
             bool pathValid = true, tangentValid = true, matchingTargets = true;
             bool upperTurn = false, lowerTurn = false, returnStraight = false;
@@ -208,12 +213,12 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
                 {
                     continue;
                 }
-                const auto target = dummies[0]->GetActorTransform();
-                const auto other = dummies[1]->GetActorTransform();
-                const auto position = target.GetTranslation();
-                const auto forward = target.GetZ();
-                const auto local = position - initial;
-                const auto movement = position - previous;
+                const Math::AffineTransform target = dummies[0]->GetActorTransform();
+                const Math::AffineTransform other = dummies[1]->GetActorTransform();
+                const Math::Vector3 position = target.GetTranslation();
+                const Math::Vector3 forward = target.GetZ();
+                const Math::Vector3 local = position - initial;
+                const Math::Vector3 movement = position - previous;
                 const float distance = Math::Length(movement);
                 const float dt = float((samples - previousSamples) * PhysicsWorld::FixedDeltaTime);
                 const float x = float(local.GetX()), z = float(local.GetZ());
@@ -241,7 +246,7 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
                 previousForward = forward;
                 previousSamples = samples;
             }
-            const auto& frames = runner.GetResults().GetFrames();
+            const std::vector<PARS::ComparisonFrame>& frames = runner.GetResults().GetFrames();
             check(runner.GetState() == RagdollComparisonRunner::State::Complete && frames.size() == 1200,
                 "B records all twenty seconds and repeated turns");
             check(pathValid && upperTurn && lowerTurn && returnStraight,
@@ -303,17 +308,17 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
                     check(false, "Capture locomotion PA sample");
                 }
             }
-            const auto& results = runner.GetResults();
+            const PARS::RagdollComparison& results = runner.GetResults();
             check(runner.GetState() == RagdollComparisonRunner::State::Complete &&
                     results.GetFrames().size() == 360,
                 "Record the complete locomotion clip comparison");
             check(runner.Export(clipReports[clip]), "Export six-second locomotion PA results");
             for (size_t i = 0; i < asset.constraints.size(); ++i)
             {
-                const auto& bone = asset.constraints[i].childBone;
-                const auto separator = bone.find_last_of(':');
-                const auto name = separator == std::string::npos ? bone : bone.substr(separator + 1);
-                const auto& joint = results.GetJoints()[i];
+                const std::string& bone = asset.constraints[i].childBone;
+                const std::string::size_type separator = bone.find_last_of(':');
+                const std::string name = separator == std::string::npos ? bone : bone.substr(separator + 1);
+                const PARS::ComparisonJointResult& joint = results.GetJoints()[i];
                 report << "clip=" << clip << " joint=" << bone
                        << " clamp_mean_deg=" << DirectX::XMConvertToDegrees(joint.clamp.Mean())
                        << " clamp_max_deg=" << DirectX::XMConvertToDegrees(joint.clamp.maximum)
@@ -321,11 +326,11 @@ bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const Physi
                        << " tracking_max_deg=" << DirectX::XMConvertToDegrees(joint.tracking.maximum) << std::endl;
                 check(joint.clamp.maximum < 1e-4f && joint.singularFrames == 0,
                     "Every locomotion joint target fits the finite PA limits without clamping or singularities");
-                for (const auto& violation : joint.violations)
+                for (const PARS::ComparisonViolation& violation : joint.violations)
                 {
                     check(violation.frames == 0, "No raw twist, swing or coupled-cone limit violations");
                 }
-                for (const auto& violation : joint.actualViolations)
+                for (const PARS::ComparisonViolation& violation : joint.actualViolations)
                 {
                     check(violation.frames == 0,
                         "The current physical tracking trajectory also stays inside the finite PA limits");

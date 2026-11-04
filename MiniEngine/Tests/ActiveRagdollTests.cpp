@@ -1,10 +1,12 @@
 ﻿#include "../Model/Ragdoll.h"
+#include <cstddef>
 #include "../Model/PhysicsPose.h"
 #include "../Core/PhysicsWorld.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
+#include <functional>
 
 using namespace Math;
 using namespace PARS;
@@ -21,7 +23,7 @@ namespace
     {
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize acceleration drive world");
-        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "floor");
+        physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "floor");
         Check(floor != nullptr, "Create acceleration test scene");
         PhysicsAsset asset;
         PhysicsBody parent;
@@ -45,7 +47,7 @@ namespace
         }
         asset.constraints.push_back(joint);
         ConfigureDefaultDrives(asset);
-        for (auto& drive : asset.constraints[0].drives)
+        for (PARS::PhysicsAngularDrive& drive : asset.constraints[0].drives)
         {
             drive.maxTorque = maxTorque;
         }
@@ -60,7 +62,7 @@ namespace
         PxArticulationLink* links[2]{};
         Check(articulation->getLinks(links, 2) == 2, "Find acceleration test links");
         PxRigidBody* childBody = nullptr;
-        for (auto* body : links)
+        for (physx::PxArticulationLink* body : links)
         {
             body->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
             body->setAngularDamping(0);
@@ -72,7 +74,7 @@ namespace
         }
         Check(childBody != nullptr, "Find child inertia for torque bound");
         // 질량과 형상만 바꾸고 외력, 바디 감쇠, 관절 오프셋의 영향을 분리해 응답을 비교한다.
-        auto target = initial;
+        std::vector<Math::Matrix4> target = initial;
         target[1] = Pose(Vector3(0, 3, 0), Quaternion(Vector3(kXUnitVector), .5f));
         Check(ragdoll.UpdateDriveTargets(target, 0, error), "Set acceleration target without a velocity spike");
         ragdoll.SetDrivesEnabled(true);
@@ -90,19 +92,19 @@ namespace
                     "Acceleration mode keeps its torque limit in Nm");
             }
         }
-        auto changed = asset;
+        PARS::PhysicsAsset changed = asset;
         changed.constraints[0].drives[0].naturalFrequency = 8.0f;
         changed.constraints[0].drives[0].dampingRatio = .7f;
-        const auto before = childBody->getGlobalPose();
-        const auto velocity = childBody->getAngularVelocity();
+        const physx::PxTransform before = childBody->getGlobalPose();
+        const physx::PxVec3 velocity = childBody->getAngularVelocity();
         Check(ragdoll.ApplyDriveSettings(changed, error) &&
             (childBody->getGlobalPose().p - before.p).magnitude() < 1e-7f &&
             std::abs(childBody->getGlobalPose().q.dot(before.q)) > .999999f &&
             (childBody->getAngularVelocity() - velocity).magnitude() < 1e-7f,
             "Live frequency and ratio edits preserve the physical state");
-        const auto beforeBackendSwitch = ragdoll.GetBoneWorld(1);
-        auto forceAsset = changed;
-        for (auto& drive : forceAsset.constraints[0].drives)
+        const Math::Matrix4 beforeBackendSwitch = ragdoll.GetBoneWorld(1);
+        PARS::PhysicsAsset forceAsset = changed;
+        for (PARS::PhysicsAngularDrive& drive : forceAsset.constraints[0].drives)
         {
             drive.useAcceleration = false;
             drive.stiffness = 100;
@@ -124,9 +126,9 @@ namespace
     {
         for (bool slerp : {false, true})
         {
-            const auto reference = SampleAccelerationResponse(1.0f, .1f, slerp, 10000);
-            const auto heavy = SampleAccelerationResponse(8.0f, .1f, slerp, 10000);
-            const auto larger = SampleAccelerationResponse(1.0f, .4f, slerp, 10000);
+            const std::vector<float> reference = SampleAccelerationResponse(1.0f, .1f, slerp, 10000);
+            const std::vector<float> heavy = SampleAccelerationResponse(8.0f, .1f, slerp, 10000);
+            const std::vector<float> larger = SampleAccelerationResponse(1.0f, .4f, slerp, 10000);
             float difference = 0;
             for (size_t i = 0; i < reference.size(); ++i)
             {
@@ -137,10 +139,10 @@ namespace
                 slerp ? "SLERP" : "twist", difference, reference.back());
             Check(difference < .003f && reference.back() < .005f,
                 "Same frequency and ratio produce matching response for different masses and shape inertias");
-            const auto limited = SampleAccelerationResponse(1.0f, .4f, slerp, .001f);
+            const std::vector<float> limited = SampleAccelerationResponse(1.0f, .4f, slerp, .001f);
             Check(limited.back() > .4f, "Torque capacity still limits an acceleration drive");
         }
-        const auto rotated = SampleAccelerationResponse(1.0f, .1f, true, 10000, true);
+        const std::vector<float> rotated = SampleAccelerationResponse(1.0f, .1f, true, 10000, true);
         std::printf("rotated articulation frame error=%.6f\n", rotated.back());
         Check(rotated.back() < .005f, "Articulation drive target respects rotated parent/child joint frames");
         std::puts("PASS: acceleration drives normalize inertia, preserve torque caps and support live response edits");
@@ -150,7 +152,7 @@ namespace
     {
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize articulated arm world");
-        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -5, 0)), PxVec3(10, .1f, 10), "floor");
+        physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -5, 0)), PxVec3(10, .1f, 10), "floor");
         PhysicsBody torso;
         torso.bone = "torso";
         torso.shape = PhysicsShapeType::Sphere;
@@ -163,11 +165,11 @@ namespace
         upper.halfLength = .21f;
         upper.mass = 2;
         XMStoreFloat4(&upper.rotation, Quaternion(Vector3(kZUnitVector), XM_PIDIV2));
-        auto lower = upper;
+        PARS::PhysicsBody lower = upper;
         lower.bone = "lower";
         lower.halfLength = .16f;
         lower.mass = 1.3f;
-        auto hand = torso;
+        PARS::PhysicsBody hand = torso;
         hand.bone = "hand";
         hand.radius = .055f;
         hand.mass = .5f;
@@ -177,12 +179,13 @@ namespace
         const std::vector<std::string> names{"torso", "upper", "lower", "hand"};
         const std::vector<Matrix4> initial{Pose(Vector3(0, 3, 0)), Pose(Vector3(.3f, 2.75f, 0)),
             Pose(Vector3(.3f, 2.3f, 0)), Pose(Vector3(.3f, 2.05f, 0))};
-        const auto addJoint = [&](const char* parent, const char* child, Vector3 anchor) {
+        const std::function<void(const char*, const char*, Math::Vector3)> addJoint = [&](const char* parent, const char* child, Vector3 anchor) -> void
+        {
             PhysicsConstraint joint;
             joint.parentBone = parent;
             joint.childBone = child;
-            const auto parentNode = std::find(names.begin(), names.end(), parent) - names.begin();
-            const auto childNode = std::find(names.begin(), names.end(), child) - names.begin();
+            const std::ptrdiff_t parentNode = std::find(names.begin(), names.end(), parent) - names.begin();
+            const std::ptrdiff_t childNode = std::find(names.begin(), names.end(), child) - names.begin();
             joint.SetWorldFrame(initial[parentNode] * asset.bodies[asset.FindBody(parent)].GetLocalTransform(),
                 initial[childNode] * asset.bodies[asset.FindBody(child)].GetLocalTransform(), Pose(anchor));
             joint.twist = joint.swingY = joint.swingZ = PhysicsJointMotion::Free;
@@ -201,8 +204,9 @@ namespace
             "Animation enters connected-body simulation");
         Check(ragdoll.SetRootSupported(true, error), "Support dynamic torso");
         ragdoll.SetDrivesEnabled(true);
-        const auto target = [&](float yaw, float raise) {
-            auto result = initial;
+        const std::function<std::vector<Math::Matrix4>(float, float)> target = [&](float yaw, float raise) -> std::vector<Math::Matrix4>
+        {
+            std::vector<Math::Matrix4> result = initial;
             const Matrix4 turn = initial[0] * Pose(Vector3(kZero), Quaternion(Vector3(kYUnitVector), yaw)) * Invert(initial[0]);
             const Matrix4 shoulder = Pose(Vector3(.3f, 3, 0));
             const Matrix4 lift = shoulder * Pose(Vector3(kZero), Quaternion(Vector3(kZUnitVector), raise)) * Invert(shoulder);
@@ -214,7 +218,7 @@ namespace
             return result;
         };
         // 팔 전체를 수평으로 들어 손까지의 지렛팔과 중력 하중을 실제로 만든다.
-        const auto horizontal = target(0, XM_PIDIV2);
+        const std::vector<Math::Matrix4> horizontal = target(0, XM_PIDIV2);
         Check(ragdoll.UpdateDriveTargets(horizontal, 0, error), "Set horizontal arm target");
         for (int step = 0; step < 240; ++step)
         {
@@ -249,11 +253,11 @@ namespace
         Check(floor->getScene()->getArticulations(&articulation, 1) == 1, "One articulation owns the arm");
         PxArticulationLink* links[4]{};
         articulation->getLinks(links, 4);
-        for (const auto* link : links)
+        for (const physx::PxArticulationLink* link : links)
         {
             Check(link->userData == &owner, "Actor owner survives animation-to-articulation transition");
         }
-        auto* cache = articulation->createCache();
+        physx::PxArticulationCache* cache = articulation->createCache();
         ragdoll.SetDrivesEnabled(false);
         articulation->copyInternalStateToCache(*cache, PxArticulationCacheFlag::eFORCE);
         for (unsigned i = 0; i < articulation->getDofs(); ++i)
@@ -262,7 +266,7 @@ namespace
         }
         cache->release();
         Check(ragdoll.SetRootSupported(false, error), "Release the torso support");
-        const auto before = ragdoll.GetBoneWorld(1);
+        const Math::Matrix4 before = ragdoll.GetBoneWorld(1);
         for (int step = 0; step < 30; ++step)
         {
             world.Step();
@@ -283,7 +287,7 @@ namespace
     {
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize pelvis inertia world");
-        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "floor");
+        physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "floor");
         PhysicsAsset asset;
         PhysicsBody pelvis;
         pelvis.bone = "pelvis";
@@ -301,7 +305,7 @@ namespace
         asset.constraints.push_back(joint);
         ConfigureDefaultDrives(asset);
         // 중력/접촉/지레팔 효과를 분리하고 질량과 축별 형상 관성에 대한 응답만 비교한다.
-        const auto initial = Pose(Vector3(0, 3, 0));
+        const Math::Matrix4 initial = Pose(Vector3(0, 3, 0));
         const std::vector<std::string> names{pelvis.bone, child.bone};
         Ragdoll ragdoll;
         std::string error;
@@ -311,7 +315,7 @@ namespace
         Check(floor->getScene()->getArticulations(&articulation, 1) == 1, "Find pelvis articulation");
         PxArticulationLink* links[2]{};
         Check(articulation->getLinks(links, 2) == 2, "Find pelvis inertia links");
-        for (auto* link : links)
+        for (physx::PxArticulationLink* link : links)
         {
             link->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
             link->setAngularDamping(0);
@@ -319,7 +323,7 @@ namespace
         }
         ragdoll.SetDrivesEnabled(true);
         Check(ragdoll.SetRootSupported(true, error), "Enable articulated pelvis support");
-        const auto target = Pose(Vector3(0, 3, 0), Quaternion(axis, .4f));
+        const Math::Matrix4 target = Pose(Vector3(0, 3, 0), Quaternion(axis, .4f));
         Check(ragdoll.UpdateDriveTargets({target, target}, 0, error), "Set pelvis target without target acceleration spike");
         std::vector<float> errors;
         for (int frame = 0; frame < 120; ++frame)
@@ -329,8 +333,8 @@ namespace
             Check(ragdoll.IsFinite() && ragdoll.GetKinematicBodyCount() == 0, "Pelvis control stays finite and dynamic");
             errors.push_back(ragdoll.GetRootRotationError());
         }
-        const auto pose = articulation->getRootGlobalPose();
-        const auto angular = articulation->getRootAngularVelocity();
+        const physx::PxTransform pose = articulation->getRootGlobalPose();
+        const physx::PxVec3 angular = articulation->getRootAngularVelocity();
         Check(ragdoll.SetRootSupported(false, error), "Release inertia-based pelvis control");
         Check((pose.p - articulation->getRootGlobalPose().p).magnitude() < 1e-7f &&
             std::abs(pose.q.dot(articulation->getRootGlobalPose().q)) > .999999f &&
@@ -356,11 +360,11 @@ namespace
     {
         std::vector<float> reference;
         float maximumDifference = 0;
-        for (const auto axis : {Vector3(kXUnitVector), Vector3(kYUnitVector), Vector3(kZUnitVector)})
+        for (const Math::Vector3 axis : {Vector3(kXUnitVector), Vector3(kYUnitVector), Vector3(kZUnitVector)})
         {
-            for (const auto scales : {PxVec2(1, 1), PxVec2(8, 1), PxVec2(1, 3)})
+            for (const physx::PxVec2 scales : {PxVec2(1, 1), PxVec2(8, 1), PxVec2(1, 3)})
             {
-                const auto response = SamplePelvisInertiaResponse(scales.x, scales.y, axis);
+                const std::vector<float> response = SamplePelvisInertiaResponse(scales.x, scales.y, axis);
                 if (reference.empty())
                 {
                     reference = response;
@@ -386,7 +390,7 @@ namespace
             {
                 PhysicsWorld world;
                 Check(world.Initialize(false), "Initialize weighted support fixture");
-                auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "fixture");
+                physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "fixture");
                 PhysicsBody pelvis;
                 pelvis.bone = "pelvis";
                 pelvis.shape = PhysicsShapeType::Box;
@@ -398,7 +402,7 @@ namespace
                 std::vector<Matrix4> initial{Pose(Vector3(0, 3, 0))};
                 if (articulated)
                 {
-                    auto child = pelvis;
+                    PARS::PhysicsBody child = pelvis;
                     child.bone = "child";
                     asset.bodies.push_back(child);
                     names.push_back("child");
@@ -423,7 +427,7 @@ namespace
                     PxArticulationLink* links[2]{};
                     articulation->getLinks(links, 2);
                     root = links[0];
-                    for (auto* link : links)
+                    for (physx::PxArticulationLink* link : links)
                     {
                         link->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
                     }
@@ -450,8 +454,8 @@ namespace
                 angularSpeed[trial] = root->getAngularVelocity().magnitude();
                 Check(PxAbs(root->getLinearVelocity().x) < 1e-5f && PxAbs(root->getLinearVelocity().z) < 1e-5f,
                     "Distant X/Z targets produce no horizontal restoring force");
-                const auto pose = root->getGlobalPose();
-                const auto velocity = root->getLinearVelocity();
+                const physx::PxTransform pose = root->getGlobalPose();
+                const physx::PxVec3 velocity = root->getLinearVelocity();
                 Check(ragdoll.SetRootSupport(0, false, error) && ragdoll.AreDrivesEnabled() &&
                         (root->getGlobalPose().p - pose.p).magnitude() < 1e-7f &&
                         (root->getLinearVelocity() - velocity).magnitude() < 1e-7f,
@@ -498,7 +502,7 @@ namespace
         {
             PhysicsWorld world;
             Check(world.Initialize(false), "Initialize support history fixture");
-            auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "fixture");
+            physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "fixture");
             PhysicsBody root;
             root.bone = "root";
             root.mass = 4;
@@ -521,7 +525,7 @@ namespace
             floor->getScene()->getArticulations(&articulation, 1);
             PxArticulationLink* links[2]{};
             articulation->getLinks(links, 2);
-            for (auto* link : links)
+            for (physx::PxArticulationLink* link : links)
             {
                 link->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
             }
@@ -533,7 +537,7 @@ namespace
             Check(ragdoll.SetRootSupport(trial == 0 ? 1.0f : .5f, false, error), "Edit support strength between targets");
             target[1] = Pose(Vector3(0, 3, 0), Quaternion(Vector3(kXUnitVector), .03f));
             Check(ragdoll.UpdateDriveTargets(target, 1.0f / 60, error), "Differentiate the second target velocity");
-            auto* cache = articulation->createCache();
+            physx::PxArticulationCache* cache = articulation->createCache();
             articulation->copyInternalStateToCache(*cache, PxArticulationCacheFlag::eFORCE);
             forces[trial] = cache->jointForce[0];
             Check(ragdoll.UpdateDriveTargets(target, 0, error) && ragdoll.UpdateDriveTargets(target, 1.0f / 60, error),
@@ -561,7 +565,7 @@ namespace
     {
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize dynamic pelvis world");
-        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -1, 0)), PxVec3(20, .1f, 20), "floor");
+        physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -1, 0)), PxVec3(20, .1f, 20), "floor");
         PhysicsAsset asset;
         PhysicsBody pelvis; pelvis.bone = "pelvis"; pelvis.mass = 6;
         pelvis.shape = PhysicsShapeType::Box; pelvis.halfExtents = XMFLOAT3(.14f, .1f, .12f);
@@ -569,30 +573,31 @@ namespace
         XMStoreFloat4(&pelvis.rotation, Quaternion(Vector3(kZUnitVector), .4f));
         asset.bodies.push_back(pelvis);
         const std::vector<std::string> names{"pelvis"};
-        const auto initial = Pose(Vector3(-2, 3, 1), Quaternion(Vector3(kYUnitVector), .7f));
+        const Math::Matrix4 initial = Pose(Vector3(-2, 3, 1), Quaternion(Vector3(kYUnitVector), .7f));
         Ragdoll ragdoll; std::string error;
         Check(ragdoll.Create(world, asset, names, {initial}, Vector3(kZero), error) &&
             ragdoll.SetRootSupported(true, error) && ragdoll.GetKinematicBodyCount() == 0 && world.GetConstraintCount() == 1,
             "Pelvis support adds one force/torque constraint and no kinematic bodies");
-        auto* scene = floor->getScene();
+        physx::PxScene* scene = floor->getScene();
         PxActor* actor = nullptr; scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, &actor, 1);
-        auto* body = actor->is<PxRigidDynamic>();
+        physx::PxRigidDynamic* body = actor->is<PxRigidDynamic>();
         // 위치 주파수 30에서 별도의 중력 보상 힘이 없으므로 평형점은 목표 + g/30²이다.
         const PxVec3 gravityOffset = scene->getGravity() / (30.0f * 30.0f);
         const Vector3 equilibriumOffset(gravityOffset.x, gravityOffset.y, gravityOffset.z);
-        const auto positionErrorFromEquilibrium = [&](const Matrix4& target)
+        const std::function<float(const Math::Matrix4&)> positionErrorFromEquilibrium = [&](const Matrix4& target) -> float
         {
             return float(Length(Vector3(ragdoll.GetBoneWorld(0).GetW()) -
                 Vector3(target.GetW()) - equilibriumOffset));
         };
-        const auto step = [&](const Matrix4& target) {
+        const std::function<void(const Math::Matrix4&)> step = [&](const Matrix4& target) -> void
+        {
             Check(ragdoll.UpdateDriveTargets({target}, 1.0f / 60, error), "Update pelvis target");
             world.Step();
             Check(ragdoll.IsFinite() && ragdoll.GetKinematicBodyCount() == 0, "Pelvis remains finite and dynamic");
         };
         // A distant target must produce bounded acceleration, never a teleport.
-        const auto before = body->getGlobalPose();
-        const auto distant = Pose(Vector3(10, 3, 1), Quaternion(Vector3(kYUnitVector), .7f));
+        const physx::PxTransform before = body->getGlobalPose();
+        const Math::Matrix4 distant = Pose(Vector3(10, 3, 1), Quaternion(Vector3(kYUnitVector), .7f));
         Check(ragdoll.UpdateDriveTargets({distant}, 0, error) &&
             (before.p - body->getGlobalPose().p).magnitude() < 1e-7f,
             "Setting a pelvis target does not overwrite the body pose");
@@ -612,7 +617,7 @@ namespace
             step(target);
             if (i > 60)
             {
-                const auto actual = ragdoll.GetBoneWorld(0);
+                const Math::Matrix4 actual = ragdoll.GetBoneWorld(0);
                 positionError = (std::max)(positionError, positionErrorFromEquilibrium(target));
                 rotationError = (std::max)(rotationError, Difference(Quaternion(actual), Quaternion(target)));
             }
@@ -633,13 +638,14 @@ namespace
             positionErrorFromEquilibrium(target) < .002f && ragdoll.GetRootRotationError() < .02f,
             "Impulses displace and rotate the pelvis, then the drives recover to gravity equilibrium");
         // Block the target with a wall: finite motors must yield to contact.
-        auto* wall = world.CreateStaticBox(PxTransform(PxVec3(-1, 3, 1)), PxVec3(.1f, 2, 2), "pelvis wall");
-        const auto blocked = Pose(Vector3(0, 3, 1));
+        physx::PxRigidStatic* wall = world.CreateStaticBox(PxTransform(PxVec3(-1, 3, 1)), PxVec3(.1f, 2, 2), "pelvis wall");
+        const Math::Matrix4 blocked = Pose(Vector3(0, 3, 1));
         for (int i = 0; i < 240; ++i) step(blocked);
         Check(body->getGlobalPose().p.x < -1.15f && ragdoll.GetRootPositionError() > 1,
             "Supported dynamic pelvis is blocked by a static wall instead of following through it");
-        const auto releasePose = body->getGlobalPose();
-        const auto linear = body->getLinearVelocity(), angular = body->getAngularVelocity();
+        const physx::PxTransform releasePose = body->getGlobalPose();
+        const physx::PxVec3 linear = body->getLinearVelocity();
+        const physx::PxVec3 angular = body->getAngularVelocity();
         Check(ragdoll.SetRootSupported(false, error) && world.GetConstraintCount() == 0 &&
             (releasePose.p - body->getGlobalPose().p).magnitude() < 1e-7f &&
             (linear - body->getLinearVelocity()).magnitude() < 1e-7f &&
@@ -687,23 +693,24 @@ void RunActiveRagdollTests()
     hinge.drives[0].damping = 18;
     hinge.drives[0].maxTorque = 25;
     asset.constraints.push_back(hinge);
-    const auto target = [&](float angle) {
-        auto result = initial;
+    const std::function<std::vector<Math::Matrix4>(float)> target = [&](float angle) -> std::vector<Math::Matrix4>
+    {
+        std::vector<Math::Matrix4> result = initial;
         result[1] = initial[0] * Pose(Vector3(kZero), Quaternion(Vector3(kXUnitVector), angle)) * Invert(initial[0]) * initial[1];
         return result;
     };
-    const auto desired = target(.65f);
-    const auto goal = EvaluateJointDriveTarget(hinge, desired[0], desired[1] * child.GetLocalTransform());
+    const std::vector<Math::Matrix4> desired = target(.65f);
+    const Math::Quaternion goal = EvaluateJointDriveTarget(hinge, desired[0], desired[1] * child.GetLocalTransform());
     Check(Difference(goal, Quaternion(Vector3(kXUnitVector), .65f)) < .001f, "Drive conversion includes body offsets and both joint frames");
     const Matrix4 global = Pose(Vector3(-2, 1, 4), Quaternion(Vector3(kYUnitVector), .9f));
     Check(Difference(goal, EvaluateJointDriveTarget(hinge, global * desired[0], global * desired[1] * child.GetLocalTransform())) < .001f,
         "Joint drive target is invariant under actor world translation and rotation");
-    auto excessive = target(1.5f);
+    std::vector<Math::Matrix4> excessive = target(1.5f);
     Check(Difference(EvaluateJointDriveTarget(hinge, excessive[0], excessive[1] * child.GetLocalTransform()), Quaternion(Vector3(kXUnitVector), .9f)) < .001f,
         "Hinge target respects asymmetric twist endpoints");
     PhysicsConstraint cone;
     cone.twist = PhysicsJointMotion::Locked; cone.swingYLimit = .45f; cone.swingZLimit = .7f;
-    const auto diagonal = EvaluateJointDriveTarget(cone, Matrix4(kIdentity), Pose(Vector3(kZero), Quaternion(Normalize(Vector3(0, 1, 1)), 1.5f)));
+    const Math::Quaternion diagonal = EvaluateJointDriveTarget(cone, Matrix4(kIdentity), Pose(Vector3(kZero), Quaternion(Normalize(Vector3(0, 1, 1)), 1.5f)));
     XMFLOAT4 q; XMStoreFloat4(&q, diagonal);
     const float y = 4 * std::atan2(q.y, 1 + q.w), z = 4 * std::atan2(q.z, 1 + q.w);
     Check(y * y / (.45f * .45f) + z * z / (.7f * .7f) <= 1.0001f && std::abs(q.x) < .0001f,
@@ -711,14 +718,14 @@ void RunActiveRagdollTests()
 
     PhysicsWorld world;
     Check(world.Initialize(false), "Initialize active ragdoll test world");
-    auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -1, 0)), PxVec3(10, .1f, 10), "floor");
+    physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -1, 0)), PxVec3(10, .1f, 10), "floor");
     Ragdoll ragdoll; std::string error;
     Check(ragdoll.Create(world, asset, names, initial, Vector3(kZero), error), "Create dynamic twist hinge");
     Check(ragdoll.SetRootSupported(true, error) && ragdoll.GetKinematicBodyCount() == 0, "Support dynamic parent independently of drive mode");
     Check(ragdoll.UpdateDriveTargets(desired, 0, error), "Prepare stationary drive target");
     ragdoll.SetDrivesEnabled(true);
     Check(ragdoll.GetDrivenJointCount() == 1, "Locked swings allow twist-only D6 drive");
-    auto incompatible = asset;
+    PARS::PhysicsAsset incompatible = asset;
     incompatible.constraints[0].swingY = incompatible.constraints[0].swingZ = PhysicsJointMotion::Limited;
     incompatible.constraints[0].useSlerpDrive = true;
     Check(!ragdoll.ApplyDriveSettings(incompatible, error) && ragdoll.GetDrivenJointCount() == 1,
@@ -736,14 +743,17 @@ void RunActiveRagdollTests()
     }
     Check(peakError > heldError + .02f && ragdoll.GetMaxDriveError() < .08f, "Physical impulse disturbs hinge and PD restores target");
     PxActor* actors[2]; floor->getScene()->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors, 2);
-    auto* moving = actors[0]->is<PxRigidDynamic>();
+    physx::PxRigidDynamic* moving = actors[0]->is<PxRigidDynamic>();
     if (std::strcmp(moving->getName(), "child") != 0) moving = actors[1]->is<PxRigidDynamic>();
-    const auto pose = moving->getGlobalPose(); const auto velocity = moving->getLinearVelocity(); const auto angular = moving->getAngularVelocity();
+    const physx::PxTransform pose = moving->getGlobalPose();
+    const physx::PxVec3 velocity = moving->getLinearVelocity();
+    const physx::PxVec3 angular = moving->getAngularVelocity();
     ragdoll.SetDrivesEnabled(false); ragdoll.SetDrivesEnabled(true);
     Check((pose.p - moving->getGlobalPose().p).magnitude() < 1e-7f &&
         (velocity - moving->getLinearVelocity()).magnitude() < 1e-7f && (angular - moving->getAngularVelocity()).magnitude() < 1e-7f,
         "Drive mode switches preserve physical pose and both velocities");
-    auto weak = asset; weak.constraints[0].drives[0].maxTorque = .01f;
+    PARS::PhysicsAsset weak = asset;
+    weak.constraints[0].drives[0].maxTorque = .01f;
     Check(ragdoll.ApplyDriveSettings(weak, error), "Apply lower torque limit without recreating objects");
     float weakPeak = 0;
     for (int i = 0; i < 180; ++i) { ragdoll.UpdateDriveTargets(desired, 1.0f / 60, error); world.Step(); weakPeak = (std::max)(weakPeak, ragdoll.GetMaxDriveError()); }
@@ -754,21 +764,25 @@ void RunActiveRagdollTests()
     float movingError = 0;
     for (int i = 0; i < 240; ++i)
     {
-        const auto movingTarget = target(.4f * std::sin(i / 60.0f));
+        const std::vector<Math::Matrix4> movingTarget = target(.4f * std::sin(i / 60.0f));
         ragdoll.UpdateDriveTargets(movingTarget, 1.0f / 60, error); world.Step();
         if (i > 60) movingError = (std::max)(movingError, ragdoll.GetMaxDriveError());
     }
     std::printf("moving hinge peak error=%f\n", movingError);
     Check(movingError < .12f && ragdoll.GetMaxAngularError() < .02f, "Moving target tracks without unlocking hinge swings");
-    auto traveling = target(.2f);
-    const auto rootMotion = Pose(Vector3(.02f, .01f, -.01f), Quaternion(Vector3(kYUnitVector), .015f));
-    for (auto& bone : traveling) bone = rootMotion * bone;
+    std::vector<Math::Matrix4> traveling = target(.2f);
+    const Math::Matrix4 rootMotion = Pose(Vector3(.02f, .01f, -.01f), Quaternion(Vector3(kYUnitVector), .015f));
+    for (Math::Matrix4& bone : traveling)
+    {
+        bone = rootMotion * bone;
+    }
     Check(ragdoll.UpdateDriveTargets(traveling, 1.0f / 60, error), "Move supported root before release");
     world.Step();
-    auto* supported = actors[0]->is<PxRigidDynamic>();
+    physx::PxRigidDynamic* supported = actors[0]->is<PxRigidDynamic>();
     if (std::strcmp(supported->getName(), "root") != 0) supported = actors[1]->is<PxRigidDynamic>();
-    const auto rootPose = supported->getGlobalPose();
-    const auto rootLinear = supported->getLinearVelocity(), rootAngular = supported->getAngularVelocity();
+    const physx::PxTransform rootPose = supported->getGlobalPose();
+    const physx::PxVec3 rootLinear = supported->getLinearVelocity();
+    const physx::PxVec3 rootAngular = supported->getAngularVelocity();
     Check(rootLinear.magnitude() > .01f && rootAngular.magnitude() > .01f, "Supported dynamic root responds to moving position and rotation targets");
     ragdoll.SetDrivesEnabled(false);
     Check(ragdoll.GetDrivenJointCount() == 0 && ragdoll.IsRootSupported(), "Disabling angular drives alone preserves independent support");
@@ -780,8 +794,8 @@ void RunActiveRagdollTests()
         "Releasing support preserves the pelvis pose and both animated velocities");
     world.Step(); ragdoll.Destroy();
     // Exercise the separate SLERP solver path with simultaneous XYZ rotation.
-    auto ball = asset;
-    auto& ballJoint = ball.constraints[0];
+    PARS::PhysicsAsset ball = asset;
+    PARS::PhysicsConstraint& ballJoint = ball.constraints[0];
     ballJoint.useSlerpDrive = true;
     ballJoint.swingY = ballJoint.swingZ = PhysicsJointMotion::Limited;
     ballJoint.swingYLimit = ballJoint.swingZLimit = 1.2f;
@@ -796,15 +810,15 @@ void RunActiveRagdollTests()
     float ballError = 0;
     // The cone and its enclosing solver pyramid must not produce a second,
     // metre-sized overlay that ignores the requested joint visualization scale.
-    auto* scene = floor->getScene();
+    physx::PxScene* scene = floor->getScene();
     scene->setVisualizationParameter(PxVisualizationParameter::eSCALE, 1.0f);
     scene->setVisualizationParameter(PxVisualizationParameter::eJOINT_LIMITS, .04f);
     world.Step();
-    const auto& visualization = scene->getRenderBuffer();
+    const physx::PxRenderBuffer& visualization = scene->getRenderBuffer();
     Check(visualization.getNbLines() > 0, "D6 angular limit visualization is present");
     for (PxU32 i = 0; i < visualization.getNbLines(); ++i)
     {
-        const auto& line = visualization.getLines()[i];
+        const physx::PxDebugLine& line = visualization.getLines()[i];
         Check((line.pos0 - PxVec3(0, 3, 0)).magnitude() < .06f &&
             (line.pos1 - PxVec3(0, 3, 0)).magnitude() < .06f,
             "Cone plus enclosing pyramid respects joint visualization scale");
@@ -813,9 +827,9 @@ void RunActiveRagdollTests()
     for (int i = 0; i < 300; ++i)
     {
         const float t = i / 60.0f;
-        const auto rotation = Quaternion(Vector3(kZUnitVector), .35f * std::sin(t * 1.3f)) *
+        const Math::Quaternion rotation = Quaternion(Vector3(kZUnitVector), .35f * std::sin(t * 1.3f)) *
             Quaternion(Vector3(kYUnitVector), .3f * std::cos(t)) * Quaternion(Vector3(kXUnitVector), .4f * std::sin(t));
-        auto sample = initial;
+        std::vector<Math::Matrix4> sample = initial;
         sample[1] = initial[0] * Pose(Vector3(kZero), rotation) * Invert(initial[0]) * initial[1];
         Check(ragdoll.UpdateDriveTargets(sample, 1.0f / 60, error), "Update three-axis moving target");
         world.Step();

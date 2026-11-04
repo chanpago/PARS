@@ -57,7 +57,7 @@ namespace
     {
         FootstepPlanner planner;
         FootstepSettings settings{.3f, .3f};
-        auto input = Standing();
+        PARS::FootstepInput input = Standing();
         input.velocity = PxVec3(0);
         planner.Update(input, settings);
         Check(!planner.GetSnapshot().needsStep && planner.GetSnapshot().startCount == 0,
@@ -69,7 +69,7 @@ namespace
         input.velocity.z = 1;
         ++input.completedStep;
         planner.Update(input, settings);
-        const auto started = planner.GetSnapshot();
+        const PARS::FootstepSnapshot started = planner.GetSnapshot();
         Check(started.justStarted && started.stepFoot == 1 && started.supportFoot == 0 && started.startCount == 1,
             "Predictive exit starts the blue foot while actual COM is still inside A");
         Check(Near(started.predictedCom.z, .3f) && Near(started.predictedCom.y, .4f),
@@ -181,9 +181,9 @@ namespace
     {
         FootstepPlanner planner;
         const FootstepSettings settings{.3f, .3f};
-        auto input = Standing();
+        PARS::FootstepInput input = Standing();
         planner.Update(input, settings);
-        const auto start = planner.GetSnapshot();
+        const PARS::FootstepSnapshot start = planner.GetSnapshot();
         input.blueFoot = 0;
         planner.Update(input, settings);
         Check(planner.GetSnapshot().startCount == 1 && planner.GetSnapshot().stepFoot == 1,
@@ -354,7 +354,7 @@ namespace
     {
         FootstepPlanner planner;
         const FootstepSettings settings{.3f, .3f};
-        auto input = Standing();
+        PARS::FootstepInput input = Standing();
         planner.Update(input, settings);
         input.feet[1].grounded = false;
         input.hasVelocity = false;
@@ -405,11 +405,11 @@ namespace
     {
         FootstepPlanner planner;
         FootstepSettings settings{.3f, .3f};
-        auto input = Standing();
+        PARS::FootstepInput input = Standing();
         input.velocity = PxVec3(100, 100, 0);
         input.feet[1].position.x = 10;
         planner.Update(input, settings);
-        const auto capped = planner.GetSnapshot().candidates[1];
+        const PARS::FootstepTarget capped = planner.GetSnapshot().candidates[1];
         Check(capped.valid && capped.lengthLimited && Near(capped.stanceDistance, 2),
             "Maximum step length is two meters from the opposite foot");
         Check(capped.travelDistance > 2 && Near(capped.position.y, .4f),
@@ -418,7 +418,7 @@ namespace
         input = Standing();
         input.feet[0].normal = PxVec3(0, .8f, .6f);
         planner.Update(input, settings);
-        const auto slope = planner.GetSnapshot().candidates[1];
+        const PARS::FootstepTarget slope = planner.GetSnapshot().candidates[1];
         Check(slope.valid && std::abs((slope.position - input.feet[0].position).dot(input.feet[0].normal)) < 1e-5f,
             "Landing lies on the actual stance-normal plane through the stance sole");
         input.feet[0].normal = PxVec3(1, 0, 0);
@@ -435,7 +435,7 @@ namespace
         settings.preventCrossing = true;
         ++input.completedStep;
         planner.Update(input, settings);
-        const auto crossed = planner.GetSnapshot().candidates[1];
+        const PARS::FootstepTarget crossed = planner.GetSnapshot().candidates[1];
         Check(crossed.valid && crossed.crossingLimited &&
             Near(crossed.position.x - input.feet[0].position.x, .1f) && crossed.stanceDistance <= 2.00001f,
             "Optional crossing boundary and maximum radius remain satisfied together");

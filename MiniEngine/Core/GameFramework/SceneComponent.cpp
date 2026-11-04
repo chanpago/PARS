@@ -84,7 +84,7 @@ namespace PARS
             return;
         }
         const AffineTransform world = GetComponentTransform();
-        auto& siblings = m_Parent->m_Children;
+        std::vector<PARS::SceneComponent*>& siblings = m_Parent->m_Children;
         siblings.erase(std::remove(siblings.begin(), siblings.end(), this), siblings.end());
         m_Parent = nullptr;
         if (rule == AttachmentRule::KeepWorld)

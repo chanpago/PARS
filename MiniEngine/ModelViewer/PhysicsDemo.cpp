@@ -11,6 +11,7 @@
 #include <cmath>
 #include <Windows.h>
 #include <TlHelp32.h>
+#include <functional>
 
 using namespace physx;
 using namespace Graphics;
@@ -70,8 +71,9 @@ namespace
             HWND window;
             DWORD processId;
         } search{nullptr, processId};
-        EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
-            auto& result = *reinterpret_cast<Search*>(parameter);
+        EnumWindows([](HWND window, LPARAM parameter) -> BOOL
+            {
+            Search& result = *reinterpret_cast<Search*>(parameter);
             DWORD owner = 0;
             GetWindowThreadProcessId(window, &owner);
             wchar_t title[256] = {};
@@ -153,7 +155,7 @@ namespace
         for (unsigned face = 0; face < 6; ++face)
         {
             const PxVec3 bitangent = normals[face].cross(tangents[face]);
-            for (const auto& corner : corners)
+            for (const float(&corner)[2] : corners)
             {
                 const PxVec3 local = normals[face] + tangents[face] * corner[0] + bitangent * corner[1];
                 output->position = pose.transform(local.multiply(halfExtents));
@@ -352,7 +354,7 @@ void PhysicsDemo::Cleanup()
     {
         m_Floor->release();
     }
-    for (auto& wall : m_Walls)
+    for (physx::PxRigidStatic*& wall : m_Walls)
     {
         if (wall)
         {
@@ -612,22 +614,22 @@ void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& ca
     constexpr int latitudeCount = 12, longitudeCount = 24;
     std::vector<Vertex> vertices;
     vertices.reserve(spheres.size() * latitudeCount * longitudeCount * 6);
-    const auto normal = [=](int latitude, int longitude)
+    const std::function<physx::PxVec3(int, int)> normal = [=](int latitude, int longitude) -> physx::PxVec3
     {
         const float a = -PxHalfPi + PxPi * latitude / latitudeCount;
         const float b = PxTwoPi * longitude / longitudeCount;
         return PxVec3(std::cos(a) * std::cos(b), std::sin(a), std::cos(a) * std::sin(b));
     };
-    for (const auto* sphere : spheres)
+    for (const physx::PxRigidDynamic* sphere : spheres)
     {
-        const auto pose = sphere->getGlobalPose();
+        const physx::PxTransform pose = sphere->getGlobalPose();
         for (int y = 0; y < latitudeCount; ++y)
         {
             for (int x = 0; x < longitudeCount; ++x)
             {
                 const PxVec3 corners[] = {normal(y, x), normal(y + 1, x), normal(y + 1, x + 1),
                     normal(y, x), normal(y + 1, x + 1), normal(y, x + 1)};
-                for (const auto& n : corners)
+                for (const physx::PxVec3& n : corners)
                 {
                     vertices.push_back({pose.transform(n * radius), pose.q.rotate(n), PxVec3(1, .65f, .08f)});
                 }
@@ -686,7 +688,7 @@ void PhysicsDemo::RenderDebugLines(GraphicsContext& context, const Math::Camera&
     }
     std::vector<Vertex> vertices;
     vertices.reserve(lines.size() * 2);
-    for (const auto& line : lines)
+    for (const physx::PxDebugLine& line : lines)
     {
         const PxVec3 color(float((line.color0 >> 16) & 255) / 255, float((line.color0 >> 8) & 255) / 255, float(line.color0 & 255) / 255);
         vertices.push_back({line.pos0, PxVec3(0, 1, 0), color});

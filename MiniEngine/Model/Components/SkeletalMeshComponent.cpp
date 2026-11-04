@@ -41,7 +41,7 @@ namespace PARS
         std::vector<std::string> joints;
         for (uint32_t i = 0; i < m_SkeletalMesh->m_NumJoints; ++i)
         {
-            const auto node = m_SkeletalMesh->m_JointIndices[i];
+            const uint16_t node = m_SkeletalMesh->m_JointIndices[i];
             if (node >= m_SkeletalMesh->m_NodeNames.size())
             {
                 error = "Skeletal mesh has an invalid joint index.";
@@ -63,7 +63,7 @@ namespace PARS
         if (IsRagdoll())
         {
             bool hasDrive = false;
-            for (const auto& joint : asset.constraints)
+            for (const PARS::PhysicsConstraint& joint : asset.constraints)
             {
                 hasDrive |= HasEnabledAngularDrive(joint);
             }

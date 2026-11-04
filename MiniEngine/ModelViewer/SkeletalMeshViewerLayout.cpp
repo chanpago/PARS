@@ -3,6 +3,7 @@
 #include "imgui.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 using namespace Math;
 
@@ -10,7 +11,7 @@ namespace
 {
     std::string ShortBoneName(const std::string& name)
     {
-        const auto separator = name.find_last_of(':');
+        const std::string::size_type separator = name.find_last_of(':');
         return name.substr(separator == std::string::npos ? 0 : separator + 1);
     }
 }
@@ -38,18 +39,19 @@ void SkeletalMeshViewer::DrawOrientationAxes(float left, float top, float width,
         {Vector3(kZUnitVector), "Z", IM_COL32(75, 145, 255, 255), 0}};
     // 회전만 사용해 월드 방향을 카메라 기저에 투영한다.
     // PARS는 Y가 위쪽이다. 카메라 이동, FOV, 줌으로 이 위젯의 위치나 크기가 바뀌면 안 된다.
-    for (auto& axis : axes)
+    for (Axis& axis : axes)
     {
         axis.depth = Dot(axis.world, m_Camera.GetForwardVec());
     }
-    std::sort(std::begin(axes), std::end(axes), [](const Axis& a, const Axis& b) {
+    std::sort(std::begin(axes), std::end(axes), [](const Axis& a, const Axis& b) -> bool
+        {
         return a.depth > b.depth;
     });
-    auto* draw = ImGui::GetWindowDrawList();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
     draw->PushClipRect(ImVec2(left, top), ImVec2(left + width, top + height), true);
     constexpr ImU32 shadow = IM_COL32(0, 0, 0, 210);
     draw->AddCircleFilled(center, 3 * scale, IM_COL32(220, 225, 230, 255));
-    for (const auto& axis : axes)
+    for (const Axis& axis : axes)
     {
         const float dx = Dot(axis.world, m_Camera.GetRightVec());
         const float dy = -float(Dot(axis.world, m_Camera.GetUpVec())); // 화면 Y축은 아래쪽을 향한다.
@@ -139,7 +141,7 @@ void SkeletalMeshViewer::DrawDetails()
                 m_GizmoMode = 0;
             }
             m_Mesh->GetAnimInstance().SetPlaying(false);
-            const auto& model = *m_Mesh->GetSkeletalMesh();
+            const Model& model = *m_Mesh->GetSkeletalMesh();
             m_EditPose.assign(model.m_SceneGraph.get(), model.m_SceneGraph.get() + model.m_NumNodes);
         }
     }
@@ -153,8 +155,8 @@ void SkeletalMeshViewer::DrawDetails()
     }
     else if (m_SelectedBone >= 0)
     {
-        const auto& pose = m_EditPose.empty() ? m_Mesh->GetAnimInstance().GetPose() : m_EditPose;
-        const auto& node = pose[m_SelectedBone];
+        const std::vector<GraphNode>& pose = m_EditPose.empty() ? m_Mesh->GetAnimInstance().GetPose() : m_EditPose;
+        const GraphNode& node = pose[m_SelectedBone];
         ImGui::TextUnformatted(u8"로컬 위치 / 크기");
         ImGui::Text("%.2f  %.2f  %.2f", float(node.xform.GetW().GetX()), float(node.xform.GetW().GetY()), float(node.xform.GetW().GetZ()));
         ImGui::Text("%.2f  %.2f  %.2f", node.scale.x, node.scale.y, node.scale.z);
@@ -206,7 +208,7 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
     }
     if (selectedJoint >= 0)
     {
-        const auto& joint = m_PhysicsAsset.constraints[selectedJoint];
+        const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[selectedJoint];
         const int parent = m_PhysicsAsset.FindBody(joint.parentBone), child = m_PhysicsAsset.FindBody(joint.childBone);
         if (parent >= 0 && child >= 0)
         {
@@ -218,12 +220,12 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
     }
     else if (body >= 0 && body < static_cast<int>(m_PhysicsAsset.bodies.size()))
     {
-        const auto& name = m_PhysicsAsset.bodies[body].bone;
+        const std::string& name = m_PhysicsAsset.bodies[body].bone;
         nodes.push_back({u8"바디", body, 0, 0, bodyWidth, false});
         int row = 0;
         for (int i = 0; i < static_cast<int>(m_PhysicsAsset.constraints.size()); ++i)
         {
-            const auto& joint = m_PhysicsAsset.constraints[i];
+            const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[i];
             if (joint.parentBone != name && joint.childBone != name)
             {
                 continue;
@@ -264,7 +266,7 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         ImGui::EndChild();
         return;
     }
-    auto* draw = ImGui::GetWindowDrawList();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
     draw->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
     draw->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(23, 26, 30, 255));
     for (float x = std::fmod(m_GraphPanX, 24.0f); x < size.x; x += 24)
@@ -283,13 +285,13 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         return;
     }
     float contentWidth = 0, contentHeight = 0;
-    for (const auto& node : nodes)
+    for (const Node& node : nodes)
     {
         contentWidth = Max(contentWidth, node.x + node.width);
         contentHeight = Max(contentHeight, node.y + nodeHeight);
     }
     const float fit = Max(.05f, Min(1.0f, Min((size.x - 16) / contentWidth, (size.y - 16) / contentHeight)));
-    auto& io = ImGui::GetIO();
+    ImGuiIO& io = ImGui::GetIO();
     if (ImGui::IsWindowHovered())
     {
         if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle))
@@ -307,14 +309,15 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         }
     }
     const float scale = fit * m_GraphZoom;
-    const auto screen = [&](float x, float y) {
+    const std::function<ImVec2(float, float)> screen = [&](float x, float y) -> ImVec2
+    {
         return ImVec2(origin.x + (size.x - contentWidth * scale) * .5f + m_GraphPanX + x * scale,
             origin.y + (size.y - contentHeight * scale) * .5f + m_GraphPanY + y * scale);
     };
-    for (const auto& link : links)
+    for (const Link& link : links)
     {
-        const auto& a = nodes[link.a];
-        const auto& b = nodes[link.b];
+        const Node& a = nodes[link.a];
+        const Node& b = nodes[link.b];
         const ImVec2 start = screen(a.x + a.width, a.y + nodeHeight * .5f), end = screen(b.x, b.y + nodeHeight * .5f);
         const float bend = Max(12.0f, (end.x - start.x) * .5f);
         draw->AddBezierCubic(start, ImVec2(start.x + bend, start.y), ImVec2(end.x - bend, end.y), end,
@@ -323,7 +326,7 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
     int clickedBody = -1, clickedJoint = -1;
     for (int i = 0; i < static_cast<int>(nodes.size()); ++i)
     {
-        const auto& node = nodes[i];
+        const Node& node = nodes[i];
         const bool selected = node.joint ? node.index == selectedJoint : selectedJoint < 0 && node.index == body;
         const ImVec2 a = screen(node.x, node.y), b = screen(node.x + node.width, node.y + nodeHeight);
         ImGui::SetCursorScreenPos(a);
@@ -350,21 +353,22 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         std::string name, detail, tooltip;
         if (node.joint)
         {
-            const auto& joint = m_PhysicsAsset.constraints[node.index];
+            const PARS::PhysicsConstraint& joint = m_PhysicsAsset.constraints[node.index];
             name = ShortBoneName(joint.childBone);
             detail = u8"부모: " + ShortBoneName(joint.parentBone);
             tooltip = joint.parentBone + " -> " + joint.childBone;
         }
         else
         {
-            const auto& entry = m_PhysicsAsset.bodies[node.index];
+            const PARS::PhysicsBody& entry = m_PhysicsAsset.bodies[node.index];
             name = ShortBoneName(entry.bone);
             detail = entry.shape == PARS::PhysicsShapeType::Capsule ? u8"캡슐" : entry.shape == PARS::PhysicsShapeType::Box ? u8"상자"
                                                                                                                             : u8"구";
             tooltip = entry.bone;
         }
         const ImVec4 clip(a.x + 5 * scale, a.y, b.x - 5 * scale, b.y);
-        const auto text = [&](float y, const char* label, ImU32 color) {
+        const std::function<void(float, const char*, ImU32)> text = [&](float y, const char* label, ImU32 color) -> void
+        {
             const float fontSize = ImGui::GetFontSize() * scale * Min(.9f, (node.width - 14) / Max(1.0f, ImGui::CalcTextSize(label).x));
             draw->AddText(ImGui::GetFont(), fontSize, ImVec2(a.x + 7 * scale, a.y + y * scale), color, label, nullptr, 0, &clip);
         };

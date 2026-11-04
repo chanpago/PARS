@@ -23,8 +23,8 @@ namespace PARS
     bool SkeletalMeshComponent::CreatePhysicsState(const PhysicsAsset& asset, Ragdoll& candidate,
         PhysicsSkeleton& skeleton, std::string& error)
     {
-        auto* world = GetOwner().GetWorld();
-        auto* physics = world ? world->GetPhysicsWorld() : nullptr;
+        PARS::World* world = GetOwner().GetWorld();
+        PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
         // 에셋 편집 시에도 물리가 없는 월드에서 이 컴포넌트를 사용한다.
         if (!physics || asset.bodies.empty())
         {
@@ -97,8 +97,8 @@ namespace PARS
 
     void SkeletalMeshComponent::UpdateFootSupport()
     {
-        auto* world = GetOwner().GetWorld();
-        auto* physics = world ? world->GetPhysicsWorld() : nullptr;
+        PARS::World* world = GetOwner().GetWorld();
+        PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
         if (physics)
         {
             /*
@@ -113,7 +113,7 @@ namespace PARS
         {
             m_FootSupport.Reset();
         }
-        const auto& sample = m_FootSupport.GetSnapshot();
+        const PARS::FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         if (!IsActiveRagdoll() || sample.contactRevision != m_Recovery.GetSnapshot().revision)
         {
             ResetRecovery();
@@ -201,9 +201,9 @@ namespace PARS
                 return std::any_of(m_PhysicsAsset->constraints.begin(), m_PhysicsAsset->constraints.end(),
                     [&](const PhysicsConstraint& joint) -> bool
                     {
-                        return joint.parentBone == m_PhysicsSkeleton.names[parent] &&
-                            joint.childBone == m_PhysicsSkeleton.names[child];
-                    });
+                    return joint.parentBone == m_PhysicsSkeleton.names[parent] &&
+                        joint.childBone == m_PhysicsSkeleton.names[child];
+                });
             };
             if (!linked(leg.anchorNode, setup.hipNode) || !linked(setup.hipNode, setup.kneeNode) ||
                 !linked(setup.kneeNode, setup.ankleNode))
@@ -386,7 +386,7 @@ namespace PARS
             error = "Assign a skeletal mesh first.";
             return false;
         }
-        const auto& model = *m_SkeletalMesh;
+        const Model& model = *m_SkeletalMesh;
         skeleton.names = model.m_NodeNames;
         skeleton.parents = model.m_NodeParents;
         skeleton.meshNodes.assign(model.m_NumNodes, -1);
@@ -420,13 +420,13 @@ namespace PARS
                 }
                 for (uint32_t j = mesh.startJoint; j < uint32_t(mesh.startJoint) + mesh.numJoints; ++j)
                 {
-                    const auto node = model.m_JointIndices[j];
+                    const uint16_t node = model.m_JointIndices[j];
                     if (node >= model.m_NumNodes)
                     {
                         error = "Invalid skin joint index.";
                         return false;
                     }
-                    auto& owner = skeleton.meshNodes[node];
+                    int32_t& owner = skeleton.meshNodes[node];
                     if (owner >= 0 && owner != matrixNode[mesh.meshCBV])
                     {
                         error = "Ragdoll currently requires each joint to use one skin transform.";
@@ -474,8 +474,8 @@ namespace PARS
             error = "The PhysicsAsset has no bodies.";
             return false;
         }
-        auto* world = GetOwner().GetWorld();
-        auto* physics = world ? world->GetPhysicsWorld() : nullptr;
+        PARS::World* world = GetOwner().GetWorld();
+        PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
         if (!physics)
         {
             error = "The world has no physics scene.";
@@ -489,7 +489,7 @@ namespace PARS
         if (active)
         {
             bool hasDrive = false;
-            for (const auto& joint : m_PhysicsAsset->constraints)
+            for (const PARS::PhysicsConstraint& joint : m_PhysicsAsset->constraints)
             {
                 hasDrive |= HasEnabledAngularDrive(joint);
             }
@@ -546,13 +546,13 @@ namespace PARS
         {
             return false;
         }
-        auto candidate = std::make_unique<PhysicsAsset>(*m_PhysicsAsset);
+        std::unique_ptr<PARS::PhysicsAsset> candidate = std::make_unique<PhysicsAsset>(*m_PhysicsAsset);
         if (source.constraints.size() != candidate->constraints.size())
         {
             error = "Editor and character PA joints differ.";
             return false;
         }
-        for (auto& target : candidate->constraints)
+        for (PARS::PhysicsConstraint& target : candidate->constraints)
         {
             const int index = source.FindConstraint(target.parentBone, target.childBone);
             if (index < 0 || source.constraints[index].parentBone != target.parentBone)
@@ -577,7 +577,7 @@ namespace PARS
 
     void SkeletalMeshComponent::UpdatePhysicsPose()
     {
-        const auto& source = IsActiveRagdoll() ? m_AnimInstance->GetPose() : m_RagdollSourcePose;
+        const std::vector<GraphNode>& source = IsActiveRagdoll() ? m_AnimInstance->GetPose() : m_RagdollSourcePose;
         if (IsActiveRagdoll())
         {
             std::vector<Matrix4> animated;
@@ -600,7 +600,7 @@ namespace PARS
         // 컬링 영역은 멈춰 있는 Actor 루트가 아니라 떨어지는 메시를 따라가야 한다.
         const Vector3 center = m_Ragdoll.GetPosition();
         float radius = 0;
-        for (const auto& target : targets)
+        for (const Math::Matrix4& target : targets)
         {
             radius = Max(radius, float(Length(Vector3(target.GetW()) - center)));
         }

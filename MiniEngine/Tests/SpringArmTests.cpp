@@ -78,9 +78,9 @@ namespace
     void TestAttachmentAndInput()
     {
         Fixture f;
-        auto& arm = *f.rig->arm;
+        PARS::SpringArmComponent& arm = *f.rig->arm;
         Check(Near(arm.GetCameraLocation(), Vector3(0, 2, -4.5f)), "Unobstructed arm starts at its full length");
-        auto settings = arm.GetSettings();
+        PARS::SpringArmComponent::Settings settings = arm.GetSettings();
         settings.cameraLagSpeed = settings.armReturnSpeed = 0;
         Check(arm.SetSettings(settings), "Configure immediate follow");
         Check(arm.SetControlRotation(DirectX::XM_PIDIV2, 0), "Set world-space control rotation");
@@ -93,7 +93,7 @@ namespace
         Check(Near(arm.GetCameraLocation(), f.rig->GetActorLocation() + Vector3(-4.5f, .55f, 0)),
             "Post-physics component tick follows this frame's resolved actor position");
         Check(f.physics->GetDynamicBodyCount() == 0, "Spring arm owns no physics proxy bodies");
-        const auto camera = arm.GetCameraLocation();
+        const Math::Vector3 camera = arm.GetCameraLocation();
         const float nan = std::numeric_limits<float>::quiet_NaN();
         arm.UpdateArm(nan);
         arm.UpdateArm(-1);
@@ -109,12 +109,12 @@ namespace
     void TestCollisionFiltering()
     {
         Fixture f;
-        auto* self = f.physics->CreateDynamicBox(PxTransform(PxVec3(0, 2, -.3f)), PxVec3(.5f), 1, "Own ragdoll body");
+        physx::PxRigidDynamic* self = f.physics->CreateDynamicBox(PxTransform(PxVec3(0, 2, -.3f)), PxVec3(.5f), 1, "Own ragdoll body");
         self->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
         self->userData = f.rig;
-        auto* capsule = f.physics->CreateQueryCapsule(PxVec3(0, 2, 0), .3f, .9f);
+        PhysicsQueryCapsule* capsule = f.physics->CreateQueryCapsule(PxVec3(0, 2, 0), .3f, .9f);
         capsule->owner = f.rig;
-        auto* trigger = f.physics->CreateStaticBox(PxTransform(PxVec3(0, 2, -1)), PxVec3(.4f), "Trigger");
+        physx::PxRigidStatic* trigger = f.physics->CreateStaticBox(PxTransform(PxVec3(0, 2, -1)), PxVec3(.4f), "Trigger");
         PxShape* shape = nullptr;
         trigger->getShapes(&shape, 1);
         shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, false);
@@ -126,12 +126,12 @@ namespace
         f.world.Tick(0);
         Check(f.rig->arm->IsCollisionFixApplied() && std::abs(f.rig->arm->GetCurrentArmLength() - 1.68f) < .003f,
             "Sphere radius and collision padding keep the camera in front of the wall");
-        auto* other = f.physics->CreateQueryCapsule(PxVec3(0, 2, -1), .3f, .9f);
+        PhysicsQueryCapsule* other = f.physics->CreateQueryCapsule(PxVec3(0, 2, -1), .3f, .9f);
         f.world.Tick(0);
         Check(std::abs(f.rig->arm->GetCurrentArmLength() - .48f) < .003f, "Other characters' query-only capsules still obstruct the camera");
         f.physics->DestroyQueryCapsule(other);
         f.physics->DestroyQueryCapsule(capsule);
-        auto* dynamic = f.physics->CreateDynamicBox(PxTransform(PxVec3(0, 2, -.8f)), PxVec3(.1f), 1, "Moving obstacle");
+        physx::PxRigidDynamic* dynamic = f.physics->CreateDynamicBox(PxTransform(PxVec3(0, 2, -.8f)), PxVec3(.1f), 1, "Moving obstacle");
         dynamic->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
         f.world.Tick(0);
         Check(std::abs(f.rig->arm->GetCurrentArmLength() - .48f) < .003f, "Dynamic obstacles participate in camera sweeps");
@@ -141,8 +141,8 @@ namespace
     void TestRecoveryAndOverlap()
     {
         Fixture f;
-        auto& arm = *f.rig->arm;
-        auto* wall = f.physics->CreateStaticBox(PxTransform(PxVec3(0, 2, -2)), PxVec3(2, 2, .1f), "Wall");
+        PARS::SpringArmComponent& arm = *f.rig->arm;
+        physx::PxRigidStatic* wall = f.physics->CreateStaticBox(PxTransform(PxVec3(0, 2, -2)), PxVec3(2, 2, .1f), "Wall");
         f.world.Tick(1.0f / 60);
         wall->setGlobalPose(PxTransform(PxVec3(0, 2, -1)));
         f.world.Tick(1.0f / 144);
@@ -158,13 +158,13 @@ namespace
             previous = arm.GetCurrentArmLength();
         }
         Check(std::abs(previous - 4.5f) < .001f, "Restored arm reaches its configured length");
-        auto* overlap = f.physics->CreateStaticBox(PxTransform(PxVec3(0, 2, 0)), PxVec3(.1f), "Overlapping pivot");
+        physx::PxRigidStatic* overlap = f.physics->CreateStaticBox(PxTransform(PxVec3(0, 2, 0)), PxVec3(.1f), "Overlapping pivot");
         f.world.Tick(0);
         Check(arm.GetCurrentArmLength() == 0 && Near(arm.GetCameraLocation(), f.rig->GetActorLocation()) &&
                 std::abs(float(Length(arm.GetViewDirection())) - 1) < .001f,
             "Initial overlap collapses the arm without a degenerate look direction");
         overlap->release();
-        auto settings = arm.GetSettings();
+        PARS::SpringArmComponent::Settings settings = arm.GetSettings();
         settings.targetArmLength = 0;
         Check(arm.SetSettings(settings), "Allow a zero-length arm");
         f.world.Tick(0);
@@ -175,7 +175,7 @@ namespace
     float LagAt(int fps)
     {
         Fixture f;
-        auto settings = f.rig->arm->GetSettings();
+        PARS::SpringArmComponent::Settings settings = f.rig->arm->GetSettings();
         settings.cameraLagSpeed = 4;
         settings.maxCameraLagDistance = 10;
         settings.armReturnSpeed = 0;
@@ -197,13 +197,13 @@ namespace
         Check(std::abs(at30 - LagAt(60)) < 1e-5f && std::abs(at30 - LagAt(144)) < 1e-5f,
             "Settling after the same target displacement is independent of render FPS");
         Fixture f;
-        auto& arm = *f.rig->arm;
-        auto* edge = f.physics->CreateStaticBox(PxTransform(PxVec3(.18f, 2, -2)), PxVec3(.03f, 1, .1f), "Grazing edge");
+        PARS::SpringArmComponent& arm = *f.rig->arm;
+        physx::PxRigidStatic* edge = f.physics->CreateStaticBox(PxTransform(PxVec3(.18f, 2, -2)), PxVec3(.03f, 1, .1f), "Grazing edge");
         f.world.Tick(0);
         Check(arm.IsCollisionFixApplied() && arm.GetCurrentArmLength() < 2,
             "Sphere probe catches edges that a center ray would miss");
         edge->release();
-        auto settings = arm.GetSettings();
+        PARS::SpringArmComponent::Settings settings = arm.GetSettings();
         settings.maxCameraLagDistance = 10;
         arm.SetSettings(settings);
         arm.ResetLagState();

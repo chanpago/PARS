@@ -146,7 +146,7 @@ namespace PARS
         {
             return 0.0f;
         }
-        const auto& clip = m_Clips[index];
+        const PARS::AnimInstance::Clip& clip = m_Clips[index];
         return clip.source->m_Animations[clip.animationIndex].duration;
     }
 
@@ -215,7 +215,7 @@ namespace PARS
         std::memcpy(pose.data(), m_Skeleton->m_SceneGraph.get(), pose.size() * sizeof(GraphNode));
         if (index < m_Clips.size())
         {
-            const auto& clip = m_Clips[index];
+            const PARS::AnimInstance::Clip& clip = m_Clips[index];
             EvaluateAnimationPose(
                 clip.source->m_Animations[clip.animationIndex], // 사용할 애니메이션
                 clip.source->m_CurveData.get(),                 // 어느 노드의 어떤 값을 바꿀지

@@ -24,7 +24,7 @@ namespace PARS
         if (!enabled)
         {
             SetMoveInput(0, 0, false);
-            if (auto pawn = GetPawn())
+            if (PARS::Pawn* pawn = GetPawn())
             {
                 pawn->ConsumeMovementInput();
                 pawn->SetRunRequested(false);
@@ -39,7 +39,7 @@ namespace PARS
             return;
         }
 
-        if (auto pawn = GetPawn())
+        if (PARS::Pawn* pawn = GetPawn())
         {
             pawn->SetRunRequested(m_InputEnabled && m_Run);
             if (m_InputEnabled)

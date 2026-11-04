@@ -156,7 +156,7 @@ namespace PARS
         m_Step = step;
         m_Bodies.resize(asset.bodies.size());
         m_Joints.resize(asset.constraints.size());
-        for (const auto& joint : asset.constraints)
+        for (const PARS::PhysicsConstraint& joint : asset.constraints)
         {
             m_JointBodies.push_back({asset.FindBody(joint.parentBone), asset.FindBody(joint.childBone)});
         }
@@ -193,7 +193,7 @@ namespace PARS
             {
                 continue;
             }
-            auto& sample = frame.bodies[i];
+            PARS::ComparisonBodySample& sample = frame.bodies[i];
             const Vector3 movement = (pb - m_PreviousActual[i]) - (pa - m_PreviousReference[i]);
             XMStoreFloat3(&sample.reference, pa);
             XMStoreFloat3(&sample.actual, pb);
@@ -215,14 +215,14 @@ namespace PARS
         }
         for (size_t i = 0; i < m_Joints.size(); ++i)
         {
-            const auto& joint = m_Asset.constraints[i];
+            const PARS::PhysicsConstraint& joint = m_Asset.constraints[i];
             const int parent = m_JointBodies[i][0], child = m_JointBodies[i][1];
             const Quaternion raw = EvaluateJointDriveTarget(joint, reference[parent], reference[child], false);
             const Quaternion bounded = m_Articulation ? ClampArticulationDriveTarget(joint, raw) :
                 EvaluateJointDriveTarget(joint, reference[parent], reference[child]);
             const Quaternion physical = EvaluateJointDriveTarget(joint, actual[parent], actual[child], false);
-            auto& sample = frame.joints[i];
-            auto& result = m_Joints[i];
+            PARS::ComparisonJointSample& sample = frame.joints[i];
+            PARS::ComparisonJointResult& result = m_Joints[i];
             sample.raw = AnalyzeComparisonJoint(joint, raw, m_Articulation);
             sample.bounded = AnalyzeComparisonJoint(joint, bounded, m_Articulation);
             sample.actual = AnalyzeComparisonJoint(joint, physical, m_Articulation);

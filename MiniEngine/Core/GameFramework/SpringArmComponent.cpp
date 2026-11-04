@@ -5,6 +5,7 @@
 #include <cmath>
 #if defined(_M_X64)
 #include "../PhysicsWorld.h"
+#include <functional>
 #endif
 
 using namespace Math;
@@ -51,7 +52,7 @@ namespace PARS
 
     void SpringArmComponent::UpdateArm(float deltaTime)
     {
-        const auto pivot = GetComponentTransform().GetTranslation();
+        const Math::Vector3 pivot = GetComponentTransform().GetTranslation();
         if (!std::isfinite(deltaTime) || deltaTime < 0 || !std::isfinite(float(pivot.GetX())) ||
             !std::isfinite(float(pivot.GetY())) || !std::isfinite(float(pivot.GetZ())))
         {
@@ -59,17 +60,18 @@ namespace PARS
         }
         // 큰 순간이동은 이전 위치에서 카메라를 끌고 오지 않는다.
         const bool reset = !m_Initialized || float(Length(pivot - m_PreviousPivot)) > std::max(1.0f, 2 * m_Settings.targetArmLength);
-        const auto blend = [deltaTime](float speed) {
+        const std::function<float(float)> blend = [deltaTime](float speed) -> float
+        {
             return speed > 0 ? -std::expm1(-speed * deltaTime) : 1.0f;
         };
         m_LaggedPivot = reset ? pivot : Lerp(m_LaggedPivot, pivot, blend(m_Settings.cameraLagSpeed));
-        const auto lag = m_LaggedPivot - pivot;
+        const Math::Vector3 lag = m_LaggedPivot - pivot;
         const float lagDistance = Length(lag);
         if (lagDistance > m_Settings.maxCameraLagDistance)
         {
             m_LaggedPivot = pivot + lag * (m_Settings.maxCameraLagDistance / lagDistance);
         }
-        const auto desiredOffset = m_LaggedPivot - m_ViewDirection * m_Settings.targetArmLength - pivot;
+        const Math::Vector3 desiredOffset = m_LaggedPivot - m_ViewDirection * m_Settings.targetArmLength - pivot;
         const float desiredLength = Length(desiredOffset);
         if (!std::isfinite(desiredLength))
         {
@@ -78,8 +80,8 @@ namespace PARS
         }
         float allowed = desiredLength;
 #if defined(_M_X64)
-        const auto* world = GetOwner().GetWorld();
-        const auto* physics = world ? world->GetPhysicsWorld() : nullptr;
+        const PARS::World* world = GetOwner().GetWorld();
+        const PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
         if (m_Settings.collisionTest && physics && desiredLength > 1e-6f)
         {
             // 지연된 목표가 벽 반대편에 있어도 현재 피벗부터 검사해 벽을 뚫지 않는다.

@@ -141,7 +141,7 @@ const data = )HTML";
             << ",\"step\":" << m_Step << ",\"bodies\":[";
         for (size_t i = 0; i < m_Asset.bodies.size(); ++i)
         {
-            const auto& body = m_Asset.bodies[i];
+            const PARS::PhysicsBody& body = m_Asset.bodies[i];
             out << (i ? "," : "") << "{\"name\":" << JsonString(body.bone) << ",\"massKg\":" << body.mass
                 << ",\"shape\":" << static_cast<int>(body.shape) << ",\"radius\":" << body.radius << ",\"halfLength\":" << body.halfLength << ",\"halfExtents\":";
             Vector(out, body.halfExtents);
@@ -152,7 +152,7 @@ const data = )HTML";
         out << "],\"joints\":[";
         for (size_t i = 0; i < m_Asset.constraints.size(); ++i)
         {
-            const auto& joint = m_Asset.constraints[i];
+            const PARS::PhysicsConstraint& joint = m_Asset.constraints[i];
             out << (i ? "," : "") << "{\"name\":" << JsonString(joint.childBone) << ",\"parent\":" << JsonString(joint.parentBone)
                 << ",\"motion\":[" << static_cast<int>(joint.twist) << ',' << static_cast<int>(joint.swingY) << ',' << static_cast<int>(joint.swingZ)
                 << "],\"min\":[" << joint.twistMin << ',' << -joint.swingYLimit << ',' << -joint.swingZLimit
@@ -164,7 +164,7 @@ const data = )HTML";
             out << ",\"drives\":[";
             for (int axis = 0; axis < 3; ++axis)
             {
-                const auto& drive = joint.drives[axis];
+                const PARS::PhysicsAngularDrive& drive = joint.drives[axis];
                 out << (axis ? "," : "") << "{\"enabled\":" << (drive.enabled ? "true" : "false")
                     << ",\"acceleration\":" << (drive.useAcceleration ? "true" : "false")
                     << ",\"kp\":" << drive.GetStiffness() << ",\"kd\":" << drive.GetDamping() << ",\"maxNm\":" << drive.maxTorque;
@@ -179,12 +179,12 @@ const data = )HTML";
         out << "],\"frames\":[";
         for (size_t i = 0; i < m_Frames.size(); ++i)
         {
-            const auto& frame = m_Frames[i];
+            const PARS::ComparisonFrame& frame = m_Frames[i];
             out << (i ? "," : "") << "{\"t\":" << frame.time << ",\"clip\":" << frame.clipTime
                 << ",\"animation\":" << JsonString(frame.clipName) << ",\"blend\":" << frame.blendAlpha << ",\"b\":[";
             for (size_t b = 0; b < frame.bodies.size(); ++b)
             {
-                const auto& body = frame.bodies[b];
+                const PARS::ComparisonBodySample& body = frame.bodies[b];
                 out << (b ? "," : "") << "{\"r\":";
                 Vector(out, body.reference);
                 out << ",\"a\":";
@@ -198,7 +198,7 @@ const data = )HTML";
             out << "],\"j\":[";
             for (size_t j = 0; j < frame.joints.size(); ++j)
             {
-                const auto& joint = frame.joints[j];
+                const PARS::ComparisonJointSample& joint = frame.joints[j];
                 out << (j ? "," : "") << "{\"r\":";
                 Rotation(out, joint.raw);
                 out << ",\"b\":";

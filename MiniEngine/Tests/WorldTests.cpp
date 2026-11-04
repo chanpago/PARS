@@ -103,10 +103,11 @@ namespace
     {
         Record a, b, c;
         World world, other;
-        auto first = world.SpawnActor<ProbeActor>("First", a);
-        auto second = world.SpawnActor<ProbeActor>("Second", b);
-        auto foreign = other.SpawnActor<ProbeActor>("Foreign", c);
-        const auto firstHandle = first->GetHandle(), secondHandle = second->GetHandle();
+        ProbeActor* first = world.SpawnActor<ProbeActor>("First", a);
+        ProbeActor* second = world.SpawnActor<ProbeActor>("Second", b);
+        ProbeActor* foreign = other.SpawnActor<ProbeActor>("Foreign", c);
+        const PARS::ActorHandle firstHandle = first->GetHandle();
+        const PARS::ActorHandle secondHandle = second->GetHandle();
         Check(first->GetWorld() == &world && foreign->GetWorld() == &other, "Actor knows its owning World");
         Check(!world.FindActor(foreign->GetHandle()) && !world.DestroyActor(foreign->GetHandle()), "World rejects foreign handles");
         Check(world.FindActor<ProbeActor>(firstHandle) == first && !world.FindActor<Pawn>(firstHandle), "Typed handle lookup");
@@ -128,14 +129,17 @@ namespace
         Check(b.destroyed == 0 && b.ends == 0, "Actual destruction deferred to safe frame boundary");
         world.Tick(0.1f);
         Check(b.ticks == 1 && a.ticks == 2, "Pending actor no longer ticks");
-        second->probe->onEnd = [&](Actor& actor) { Check(actor.GetWorld() == &world, "World remains available during EndPlay"); };
+        second->probe->onEnd = [&](Actor& actor) -> void
+        {
+            Check(actor.GetWorld() == &world, "World remains available during EndPlay");
+        };
         world.CollectGarbage();
         Check(b.ends == 1 && b.destroyed == 1 && !world.HasPendingDestroy(), "EndPlay and deletion happen once");
         world.Clear();
         world.Clear();
         Check(a.ends == 1 && a.destroyed == 1 && world.GetActorCount() == 0, "Clear is idempotent");
         Check(!world.HasBegunPlay() && !world.FindActor(firstHandle), "Clear invalidates observer handles");
-        auto replacement = world.SpawnActor<ProbeActor>("Replacement", a);
+        ProbeActor* replacement = world.SpawnActor<ProbeActor>("Replacement", a);
         Check(replacement->GetHandle() != firstHandle && replacement->GetHandle() != secondHandle, "New actors cannot reuse old handles");
         world.BeginPlay();
         world.Clear();
@@ -152,10 +156,11 @@ namespace
         Check(existing.begins == 0 && !world.HasBegunPlay(), "Pending initialization does not start the World");
         world.BeginPlay();
 
-        auto actor = world.SpawnActor<ProbeActor>("Pending", pending);
+        ProbeActor* actor = world.SpawnActor<ProbeActor>("Pending", pending);
         actor->SetActorLocation(Math::Vector3(1, 2, 3));
         world.SpawnActor<ProbeActor>("Discarded", discarded)->Destroy();
-        actor->probe->onBegin = [&](Actor& self) {
+        actor->probe->onBegin = [&](Actor& self) -> void
+        {
             Check(float(self.GetActorLocation().GetY()) == 2, "BeginPlay sees the configured actor transform");
             world.SpawnActor<ProbeActor>("SpawnedDuringBegin", spawned);
             world.InitializePendingActors();
@@ -170,9 +175,11 @@ namespace
         world.InitializePendingActors();
         Check(existing.begins == 1 && pending.begins == 1 && spawned.begins == 1,
             "Repeated initialization starts deferred actors without restarting existing actors");
-        for (const auto* record : {&existing, &pending, &discarded, &spawned})
+        for (const Record* record : {&existing, &pending, &discarded, &spawned})
+        {
             Check(record->ticks == 0 && record->prepares == 0 && record->fixedTicks == 0,
                 "Initialization never dispatches frame updates or physics preparation");
+        }
         world.Tick(0.1f);
         Check(existing.ticks == 1 && pending.ticks == 1 && spawned.ticks == 1 && discarded.ticks == 0,
             "Explicitly initialized actors participate in the next normal tick");
@@ -184,8 +191,8 @@ namespace
         World world;
         Check(world.InitializePhysics(false), "Initialize physics for pending actors");
         world.BeginPlay();
-        auto actor = world.SpawnActor<Actor>("PendingCapsule");
-        auto& capsule = actor->CreateDefaultSubobject<CapsuleComponent>("Capsule");
+        PARS::Actor* actor = world.SpawnActor<Actor>("PendingCapsule");
+        PARS::CapsuleComponent& capsule = actor->CreateDefaultSubobject<CapsuleComponent>("Capsule");
         actor->SetRootComponent(capsule);
         actor->SetActorLocation(Math::Vector3(0, 2, 0));
         Check(!capsule.HasPhysicsCollision(), "Physics objects wait until actor initialization");
@@ -206,13 +213,17 @@ namespace
         Record firstRecord, victimRecord, tailRecord;
         std::vector<Record> spawnedRecords(256);
         World world;
-        auto first = world.SpawnActor<ProbeActor>("Spawner", firstRecord);
-        auto victim = world.SpawnActor<ProbeActor>("Victim", victimRecord);
+        ProbeActor* first = world.SpawnActor<ProbeActor>("Spawner", firstRecord);
+        ProbeActor* victim = world.SpawnActor<ProbeActor>("Victim", victimRecord);
         first->CreateDefaultSubobject<ProbeComponent>("Tail", tailRecord);
-        const auto firstHandle = first->GetHandle(), victimHandle = victim->GetHandle();
-        first->probe->onTick = [&](Actor& self) {
-            for (auto& record : spawnedRecords)
+        const PARS::ActorHandle firstHandle = first->GetHandle();
+        const PARS::ActorHandle victimHandle = victim->GetHandle();
+        first->probe->onTick = [&](Actor& self) -> void
+        {
+            for (Record& record : spawnedRecords)
+            {
                 Check(world.SpawnActor<ProbeActor>("Dummy", record) != nullptr, "Spawn while ticking");
+            }
             Check(self.Destroy() && world.DestroyActor(victimHandle), "Self and later actor destruction during Tick");
             world.CollectGarbage();
             world.Tick(0.1f); // Recursive dispatch is ignored.
@@ -222,23 +233,30 @@ namespace
         world.Tick(0.1f);
         Check(!world.FindActor(firstHandle) && world.GetActorCount() == 256, "Mutation survives ownership-vector reallocation");
         Check(victimRecord.ticks == 0 && tailRecord.ticks == 0, "Skip deleted actor and remaining self components");
-        for (const auto& record : spawnedRecords)
+        for (const Record& record : spawnedRecords)
+        {
             Check(record.begins == 0 && record.ticks == 0, "Spawned actors wait until next Tick");
+        }
         world.CollectGarbage();
         Check(firstRecord.ends == 1 && victimRecord.ends == 1 && tailRecord.ends == 1, "Deferred actors and components end once");
         world.Tick(0.1f);
-        for (const auto& record : spawnedRecords)
+        for (const Record& record : spawnedRecords)
+        {
             Check(record.begins == 1 && record.ticks == 1, "Every new dummy ticks next frame");
+        }
         int visits = 0;
-        world.ForEachActor([&](Actor& actor) {
+        world.ForEachActor([&](Actor& actor) -> void
+            {
             ++visits;
             actor.Destroy();
             world.CollectGarbage();
         });
         Check(visits == 256 && world.GetActorCount() == 0, "Render-style enumeration supports destruction requests");
         world.CollectGarbage();
-        for (const auto& record : spawnedRecords)
+        for (const Record& record : spawnedRecords)
+        {
             Check(record.ends == 1 && record.destroyed == 1, "All dummy lifetimes are reclaimed");
+        }
         std::puts("PASS: spawning 256 actors, deferred deletion and safe iteration");
     }
 
@@ -246,10 +264,16 @@ namespace
     {
         Record early, neverBegun, replacement, peer;
         World world;
-        auto actor = world.SpawnActor<ProbeActor>("DestroyOnBegin", early);
+        ProbeActor* actor = world.SpawnActor<ProbeActor>("DestroyOnBegin", early);
         actor->CreateDefaultSubobject<ProbeComponent>("NeverBegun", neverBegun);
-        actor->probe->onBegin = [](Actor& self) { self.Destroy(); };
-        actor->probe->onEnd = [&](Actor&) { world.SpawnActor<ProbeActor>("Replacement", replacement); };
+        actor->probe->onBegin = [](Actor& self) -> void
+        {
+            self.Destroy();
+        };
+        actor->probe->onEnd = [&](Actor&) -> void
+        {
+            world.SpawnActor<ProbeActor>("Replacement", replacement);
+        };
         world.BeginPlay();
         world.CollectGarbage();
         Check(early.begins == 1 && early.ends == 1 && early.destroyed == 1, "Destroy during BeginPlay is deferred");
@@ -257,13 +281,17 @@ namespace
         Check(replacement.begins == 0 && world.GetActorCount() == 1, "EndPlay may safely spawn a replacement");
         world.Tick(0.1f);
         Check(replacement.begins == 1 && replacement.ticks == 1, "Replacement begins on next tick");
-        auto clearing = world.SpawnActor<ProbeActor>("ClearWorld", peer);
-        clearing->probe->onTick = [&](Actor&) {
+        ProbeActor* clearing = world.SpawnActor<ProbeActor>("ClearWorld", peer);
+        clearing->probe->onTick = [&](Actor&) -> void
+        {
             world.Clear();
             Check(peer.destroyed == 0, "Clear during callback defers destruction");
             Check(world.SpawnActor<Actor>() == nullptr, "Spawning during Clear is rejected");
         };
-        clearing->probe->onEnd = [&](Actor&) { Check(world.SpawnActor<Actor>() == nullptr, "Spawning during shutdown EndPlay is rejected"); };
+        clearing->probe->onEnd = [&](Actor&) -> void
+        {
+            Check(world.SpawnActor<Actor>() == nullptr, "Spawning during shutdown EndPlay is rejected");
+        };
         world.Tick(0.1f);
         world.CollectGarbage();
         Check(!world.HasBegunPlay() && world.GetActorCount() == 0 && !world.HasPendingDestroy(), "Clear requested from Tick completes at safe boundary");
@@ -275,12 +303,19 @@ namespace
     {
         Record record;
         ProbeActor actor("Standalone", record);
-        actor.probe->onEnd = [](Actor& self) {
+        actor.probe->onEnd = [](Actor& self) -> void
+        {
             self.EndPlay();
             self.BeginPlay();
             bool rejected = false;
-            try { self.CreateDefaultSubobject<SceneComponent>("DuringEnd"); }
-            catch (const std::logic_error&) { rejected = true; }
+            try
+            {
+                self.CreateDefaultSubobject<SceneComponent>("DuringEnd");
+            }
+            catch (const std::logic_error&)
+            {
+                rejected = true;
+            }
             Check(rejected, "EndPlay cannot mutate the component ownership vector");
         };
         actor.BeginPlay();

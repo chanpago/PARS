@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <functional>
 
 using namespace physx;
 
@@ -28,7 +29,7 @@ namespace
     {
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize foot projection scene");
-        auto* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -.25f, 0)),
+        physx::PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -.25f, 0)),
             PxVec3(2, .25f, 2), "Projection floor");
         Check(floor != nullptr, "Create projection floor");
         PxRaycastHit hit;
@@ -41,7 +42,7 @@ namespace
         Check(!world.Raycast(PxVec3(3, .1f, 0), down, hit),
             "No imaginary floor beyond a platform edge");
         int owner = 0;
-        auto* ownBody = world.CreateDynamicBox(PxTransform(PxVec3(0, .1f, 0)),
+        physx::PxRigidDynamic* ownBody = world.CreateDynamicBox(PxTransform(PxVec3(0, .1f, 0)),
             PxVec3(.03f), 1, "Own foot");
         Check(ownBody != nullptr, "Create own foot query obstacle");
         ownBody->userData = &owner;
@@ -58,20 +59,20 @@ namespace
         const std::vector<PxVec3> left = {
             {-.15f, .4f, -.1f}, {-.05f, .4f, -.1f},
             {-.05f, .4f, .1f}, {-.15f, .4f, .1f}};
-        auto points = left;
+        std::vector<physx::PxVec3> points = left;
         points.insert(points.end(), {{.05f, .4f, 0}, {.15f, .4f, 0}, {.15f, .4f, .2f}, {.05f, .4f, .2f}});
         points.push_back(left[0]);
         points.emplace_back(0.0f, .4f, .05f); // Interior point must not affect the boundary.
-        const auto hull = PARS::BuildFootSupportHull(points);
+        const std::vector<physx::PxVec3> hull = PARS::BuildFootSupportHull(points);
         Check(hull.size() == 6, "Offset feet form a six-vertex support hull");
         double area = 0;
         for (size_t i = 0; i < hull.size(); ++i)
         {
-            const auto& a = hull[i];
-            const auto& b = hull[(i + 1) % hull.size()];
+            const physx::PxVec3& a = hull[i];
+            const physx::PxVec3& b = hull[(i + 1) % hull.size()];
             Check(a.y == .4f, "Hull preserves the real hit height");
             area += double(a.x) * b.z - double(a.z) * b.x;
-            for (const auto& point : points)
+            for (const physx::PxVec3& point : points)
             {
                 Check((double(b.x) - a.x) * (double(point.z) - a.z) -
                             (double(b.z) - a.z) * (double(point.x) - a.x) >=
@@ -86,7 +87,7 @@ namespace
         Check(PARS::BuildFootSupportHull({left[0], left[1]}).empty(), "Two points have no support polygon");
         Check(PARS::BuildFootSupportHull({{0, 0, 0}, {1, 0, 0}, {2, 0, 0}, {1, 1, 0}}).empty(),
             "Collinear and duplicate XZ points have no support polygon");
-        const auto oneFoot = PARS::BuildFootSupportHull(left);
+        const std::vector<physx::PxVec3> oneFoot = PARS::BuildFootSupportHull(left);
         Check(PARS::IsInsideFootSupportHull(oneFoot, PxVec3(-.1f, 100, 0)),
             "COM inside a foot is supported regardless of its height");
         Check(PARS::IsInsideFootSupportHull(hull, PxVec3(0, 2, .05f)),
@@ -107,18 +108,18 @@ namespace
     void TestFootSupportBalance()
     {
         using namespace PARS;
-        const auto hull = BuildFootSupportHull({{-1, .4f, -2}, {1, .4f, -2}, {1, .4f, 2}, {-1, .4f, 2}});
-        const auto center = EvaluateFootSupportBalance(hull, PxVec3(0));
+        const std::vector<physx::PxVec3> hull = BuildFootSupportHull({{-1, .4f, -2}, {1, .4f, -2}, {1, .4f, 2}, {-1, .4f, 2}});
+        const PARS::FootSupportBalance center = EvaluateFootSupportBalance(hull, PxVec3(0));
         Check(center.zone == FootSupportZone::Inside && center.weight == 1 && !center.hasDirection,
             "COM at the area centroid has full weight without normalizing a zero vector");
         Check(center.bufferHull.size() == 4 && center.bufferHull[0] == PxVec3(-2, .4f, -4),
             "B doubles XZ distances while preserving surface height");
         for (const PxVec3 direction : {PxVec3(1, 0, 0), PxVec3(0, 0, 2), PxVec3(1, 0, 2)})
         {
-            const auto edgeA = EvaluateFootSupportBalance(hull, direction);
-            const auto middle = EvaluateFootSupportBalance(hull, direction * 1.5f);
-            const auto edgeB = EvaluateFootSupportBalance(hull, direction * 2);
-            const auto outside = EvaluateFootSupportBalance(hull, direction * 3);
+            const PARS::FootSupportBalance edgeA = EvaluateFootSupportBalance(hull, direction);
+            const PARS::FootSupportBalance middle = EvaluateFootSupportBalance(hull, direction * 1.5f);
+            const PARS::FootSupportBalance edgeB = EvaluateFootSupportBalance(hull, direction * 2);
+            const PARS::FootSupportBalance outside = EvaluateFootSupportBalance(hull, direction * 3);
             Check(edgeA.weight == 1 && edgeA.zone == FootSupportZone::Inside,
                 "A edges and corners have full weight");
             Check(std::abs(middle.weight - .5f) < 1e-6f && middle.zone == FootSupportZone::Buffer,
@@ -136,31 +137,31 @@ namespace
             previous = weight;
         }
         // This trapezoid's area centroid differs from the average of its vertices.
-        const auto trapezoid = BuildFootSupportHull({{0, 0, 0}, {4, 0, 0}, {2, 0, 2}, {0, 0, 2}});
-        const auto centroid = EvaluateFootSupportBalance(trapezoid, PxVec3(0)).center;
+        const std::vector<physx::PxVec3> trapezoid = BuildFootSupportHull({{0, 0, 0}, {4, 0, 0}, {2, 0, 2}, {0, 0, 2}});
+        const physx::PxVec3 centroid = EvaluateFootSupportBalance(trapezoid, PxVec3(0)).center;
         Check(std::abs(centroid.x - 14.0f / 9) < 1e-6f && std::abs(centroid.z - 8.0f / 9) < 1e-6f,
             "Expansion uses the polygon area centroid, not the vertex average");
-        auto moved = hull;
-        const auto transform = [](PxVec3 v)
+        std::vector<physx::PxVec3> moved = hull;
+        physx::PxVec3 (*const transform)(physx::PxVec3) = [](PxVec3 v) -> physx::PxVec3
         {
             return PxVec3(100 - v.z, v.y + 7, 200 + v.x);
         };
-        for (auto& vertex : moved)
+        for (physx::PxVec3& vertex : moved)
         {
             vertex = transform(vertex);
         }
-        const auto movedBalance = EvaluateFootSupportBalance(moved, transform(PxVec3(1.5f, 0, 0)));
+        const PARS::FootSupportBalance movedBalance = EvaluateFootSupportBalance(moved, transform(PxVec3(1.5f, 0, 0)));
         Check(std::abs(movedBalance.weight - .5f) < 1e-6f &&
                 (movedBalance.center - transform(center.center)).magnitude() < 1e-5f,
             "Translation and rotation move A, B and centroid without changing weight");
         Check(EvaluateFootSupportBalance(hull, PxVec3(2, 0, 0), 3).weight == .5f,
             "Changing B scale changes the fade interval");
         const float nan = std::numeric_limits<float>::quiet_NaN();
-        for (const auto& invalid : {std::vector<PxVec3>{}, std::vector<PxVec3>{{0, 0, 0}, {1, 0, 0}},
-            std::vector<PxVec3>{{0, 0, 0}, {1, 0, 0}, {2, 0, 0}},
-            std::vector<PxVec3>{{nan, 0, 0}, {1, 0, 0}, {0, 0, 1}}})
+        for (const std::vector<physx::PxVec3>& invalid : {std::vector<PxVec3>{}, std::vector<PxVec3>{{0, 0, 0}, {1, 0, 0}},
+                 std::vector<PxVec3>{{0, 0, 0}, {1, 0, 0}, {2, 0, 0}},
+                 std::vector<PxVec3>{{nan, 0, 0}, {1, 0, 0}, {0, 0, 1}}})
         {
-            const auto result = EvaluateFootSupportBalance(invalid, PxVec3(0));
+            const PARS::FootSupportBalance result = EvaluateFootSupportBalance(invalid, PxVec3(0));
             Check(result.weight == 0 && result.zone == FootSupportZone::Invalid && result.bufferHull.empty(),
                 "Missing, collinear and nonfinite support cannot produce a buffer or positive weight");
         }
@@ -224,20 +225,20 @@ namespace
         Check(EvaluateFootSupportCandidates(hull, PxVec3(0), missing, FootSupportZone::Inside).support == -1 &&
                 EvaluateFootSupportCandidates(hull, PxVec3(.25f, 0, 0), missing, FootSupportZone::Buffer).step == -1,
             "Two valid foot polygons are required; a missing foot has no candidate pair");
-        const auto transform = [](PxVec3 point)
+        physx::PxVec3 (*const transform)(physx::PxVec3) = [](PxVec3 point) -> physx::PxVec3
         {
             return PxVec3(10 - point.z, point.y + 4, -7 + point.x);
         };
-        auto moved = feet;
-        for (auto& foot : moved)
+        std::array<std::vector<physx::PxVec3>, 2> moved = feet;
+        for (std::vector<physx::PxVec3>& foot : moved)
         {
-            for (auto& point : foot)
+            for (physx::PxVec3& point : foot)
             {
                 point = transform(point);
             }
         }
-        auto movedHull = hull;
-        for (auto& point : movedHull)
+        std::vector<physx::PxVec3> movedHull = hull;
+        for (physx::PxVec3& point : movedHull)
         {
             point = transform(point);
         }
@@ -253,7 +254,7 @@ namespace
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize");
         Check(world.CreateStaticBox(PxTransform(PxVec3(0, -0.25f, 0)), PxVec3(6, 0.25f, 6), "Test ground"), "Ground");
-        auto box = world.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), PxVec3(0.5f), 10, "Test box");
+        physx::PxRigidDynamic* box = world.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), PxVec3(0.5f), 10, "Test box");
         Check(box != nullptr, "Box");
         for (int frame = 0; frame < static_cast<int>(fps * seconds); ++frame)
             world.Update(1.0 / fps);
@@ -329,7 +330,7 @@ int main(int argc, char** argv)
     // Exercise actor replacement exactly as the UI's Reset drop command does.
     for (int i = 0; i < 10; ++i)
     {
-        auto box = world.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), PxVec3(0.5f), 10, "Reset box");
+        physx::PxRigidDynamic* box = world.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), PxVec3(0.5f), 10, "Reset box");
         Check(box != nullptr, "Recreate body");
         world.Step();
         box->release();
@@ -340,7 +341,7 @@ int main(int argc, char** argv)
     if (argc > 1 && std::strcmp(argv[1], "--require-pvd") == 0)
     {
         Check(PhysicsWorld::SupportsPvd(), "PVD requires Debug/Profile");
-        auto box = world.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), PxVec3(0.5f), 10, "PVD test box");
+        physx::PxRigidDynamic* box = world.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), PxVec3(0.5f), 10, "PVD test box");
         Check(box != nullptr, "Body exists before connecting to PVD");
         Check(world.ConnectPvd() && world.IsPvdConnected(), "Connect to running PVD");
         Check(world.ConnectPvd(), "Repeated PVD connect is harmless");
@@ -351,10 +352,10 @@ int main(int argc, char** argv)
             world.Step();
         Check(world.CreateStaticBox(PxTransform(PxVec3(0, -0.25f, 0)),
             PxVec3(6, 0.25f, 6), "PVD ground"), "PVD ground");
-        auto capsule = world.CreateQueryCapsule(PxVec3(2, 1, 0), 0.3f, 0.9f);
+        PhysicsQueryCapsule* capsule = world.CreateQueryCapsule(PxVec3(2, 1, 0), 0.3f, 0.9f);
         Check(capsule != nullptr, "PVD character capsule");
         world.SetPvdSceneQueries(true);
-        const auto moveCapsule = [&world, capsule](float)
+        const std::function<void(float)> moveCapsule = [&world, capsule](float) -> void
         {
             world.MoveQueryCapsule(*capsule, PxVec3(0.02f, -0.1f, 0));
         };
@@ -362,8 +363,8 @@ int main(int argc, char** argv)
         {
             // Movement sweeps leave query geometry in the previous PVD session.
             world.Step(moveCapsule);
-            const auto steps = world.GetStepCount();
-            const auto position = capsule->centre;
+            const uint64_t steps = world.GetStepCount();
+            const physx::PxVec3 position = capsule->centre;
             Check(world.ConnectPvd(true) && world.IsPvdConnected(),
                 "Reconnect after recording character scene queries");
             Check(world.GetStepCount() == steps && capsule->centre == position,

@@ -226,7 +226,7 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
     {
         return false;
     }
-    for (const auto& leg : input.legs)
+    for (const PARS::FootIKLegInput& leg : input.legs)
     {
         if (!leg.available || !Ancestor(parents, leg.anchorNode, leg.hipNode) ||
             !Ancestor(parents, leg.hipNode, leg.kneeNode) || !Ancestor(parents, leg.kneeNode, leg.ankleNode) ||
@@ -235,20 +235,20 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
             return false;
         }
     }
-    const auto& left = input.legs[0];
-    const auto& right = input.legs[1];
+    const PARS::FootIKLegInput& left = input.legs[0];
+    const PARS::FootIKLegInput& right = input.legs[1];
     if (left.hipNode == right.hipNode || Ancestor(parents, left.hipNode, right.hipNode) ||
         Ancestor(parents, right.hipNode, left.hipNode))
     {
         return false;
     }
 
-    auto corrected = pose;
+    std::vector<physx::PxTransform> corrected = pose;
     std::vector<bool> changed(pose.size(), false);
     m_Snapshot.status = FootstepIKStatus::InvalidTarget;
     for (size_t side = 0; side < input.legs.size(); ++side)
     {
-        const auto& leg = input.legs[side];
+        const PARS::FootIKLegInput& leg = input.legs[side];
         // 현재 물리 부모를 기준으로 풀되, 골반의 애니메이션 목표 자체는 덮어쓰지 않는다.
         const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
         TwoBoneIKInput solve;
@@ -262,7 +262,7 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         solve.referenceBend = solve.hip.q.rotate(leg.referenceBendInHip);
         solve.hasPreviousBend = m_HasPreviousBend[side];
         solve.previousBend = leg.actualAnchor.q.rotate(m_PreviousBendInAnchor[side]);
-        auto& result = m_Snapshot.legs[side];
+        PARS::LegIKResult& result = m_Snapshot.legs[side];
         result = SolveTwoBoneIK(solve);
         if (!result.valid)
         {

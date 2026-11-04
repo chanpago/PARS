@@ -11,6 +11,7 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 
 using namespace Math;
 
@@ -19,7 +20,7 @@ bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, 
     using namespace PARS;
     using namespace physx;
     std::ofstream report(reportPath);
-    const auto check = [&](bool condition, const char* message)
+    const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
         if (!condition)
@@ -27,19 +28,19 @@ bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, 
             throw std::runtime_error(message);
         }
     };
-    auto* physics = world.GetPhysicsWorld();
+    PhysicsWorld* physics = world.GetPhysicsWorld();
     PxRigidStatic* wall = nullptr;
     try
     {
         check(report.good() && physics && character.GetMesh().GetPhysicsAsset(), "Load actual character and saved PA");
-        const auto errors = physics->GetErrorCount();
+        const uint32_t errors = physics->GetErrorCount();
         wall = physics->CreateStaticBox(PxTransform(PxVec3(2, 2, 3.1f)), PxVec3(2, 2, .1f), "PA wall validation");
         check(wall != nullptr, "Create wall with its front face at Z=3m");
-        const auto bodyFront = [&]()
+        const std::function<float()> bodyFront = [&]() -> float
         {
-            auto* scene = wall->getScene();
+            physx::PxScene* scene = wall->getScene();
             float front = -100;
-            const auto consider = [&](const PxRigidActor* body)
+            const std::function<void(const physx::PxRigidActor*)> consider = [&](const PxRigidActor* body) -> void
             {
                 if (body->userData == &character)
                 {
@@ -48,27 +49,27 @@ bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, 
             };
             std::vector<PxActor*> actors(scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC));
             scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors.data(), static_cast<PxU32>(actors.size()));
-            for (auto* actor : actors)
+            for (physx::PxActor* actor : actors)
             {
                 consider(actor->is<PxRigidActor>());
             }
             std::vector<PxArticulationReducedCoordinate*> rigs(scene->getNbArticulations());
             scene->getArticulations(rigs.data(), static_cast<PxU32>(rigs.size()));
-            for (auto* rig : rigs)
+            for (physx::PxArticulationReducedCoordinate* rig : rigs)
             {
                 std::vector<PxArticulationLink*> links(rig->getNbLinks());
                 rig->getLinks(links.data(), static_cast<PxU32>(links.size()));
-                for (auto* link : links)
+                for (physx::PxArticulationLink* link : links)
                 {
                     consider(link);
                 }
             }
             return front;
         };
-        auto& mesh = character.GetMesh();
-        auto& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
-        auto& movement = character.GetCharacterMovement();
-        auto& capsule = character.GetCapsuleComponent();
+        PARS::SkeletalMeshComponent& mesh = character.GetMesh();
+        PreviewAnimInstance& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
+        PARS::CharacterMovementComponent& movement = character.GetCharacterMovement();
+        PARS::CapsuleComponent& capsule = character.GetCapsuleComponent();
         world.SetPhysicsPaused(false);
         world.SetPhysicsTimeScale(1);
         for (bool active : {false, true})
@@ -153,16 +154,20 @@ bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, c
     std::ofstream report(reportPath);
     std::ofstream samples(reportPath + L".csv");
     std::string error;
-    const auto check = [&](bool condition, const char* message) {
+    const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
+    {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
-        if (!condition) throw std::runtime_error(message);
+        if (!condition)
+        {
+            throw std::runtime_error(message);
+        }
     };
     try
     {
-        auto& mesh = character.GetMesh();
-        auto& runtime = mesh.GetRagdoll();
-        auto& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
-        auto* physics = world.GetPhysicsWorld();
+        PARS::SkeletalMeshComponent& mesh = character.GetMesh();
+        PARS::Ragdoll& runtime = mesh.GetRagdoll();
+        PreviewAnimInstance& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
+        PhysicsWorld* physics = world.GetPhysicsWorld();
         check(report.good() && samples.good() && physics && mesh.GetPhysicsAsset(), "Loaded character PA and physics world");
         std::wstring testAsset;
         if (CommandLineArgs::GetString(L"patestasset", testAsset))
@@ -179,7 +184,7 @@ bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, c
         CommandLineArgs::GetInteger(L"patestdiagnostic", diagnostic);
         runtime.SetCollisionEnabled(contacts != 0);
         samples << "clip,step,bone,world_rotation_error_rad,joint_error_rad,clamp_rad,position_error_m,actual_x,actual_y,actual_z,target_x,target_y,target_z\n";
-        const auto& asset = *mesh.GetPhysicsAsset();
+        const PARS::PhysicsAsset& asset = *mesh.GetPhysicsAsset();
         PARS::PhysicsSkeleton skeleton;
         check(mesh.BuildPhysicsSkeleton(skeleton, error), "Imported skeleton is available");
         animation.SetLocomotionEnabled(false);
@@ -197,7 +202,7 @@ bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, c
             std::vector<Matrix4> before, after;
             check(PARS::EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), before, error),
                 "Evaluate animated pose before switching");
-            const auto steps = physics->GetStepCount();
+            const uint64_t steps = physics->GetStepCount();
             check(character.SetPhysicsMode(PARS::PhysicsAnimationMode::ActiveRagdoll, error) && runtime.AreDrivesEnabled(),
                 "Switch kinematic PA to active ragdoll");
             check(physics->GetStepCount() == steps, "No physics step has run during the switch");
@@ -207,7 +212,8 @@ bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, c
             for (size_t node = 0; node < before.size(); ++node)
             {
                 maxPosition = Max(maxPosition, float(Length(Vector3(after[node].GetW()) - Vector3(before[node].GetW()))));
-                const auto a = PARS::PhysicsBoneFrame(before[node]), b = PARS::PhysicsBoneFrame(after[node]);
+                const Math::Matrix4 a = PARS::PhysicsBoneFrame(before[node]);
+                const Math::Matrix4 b = PARS::PhysicsBoneFrame(after[node]);
                 maxBasis = Max(maxBasis, Max(float(Length(Vector3(a.GetX()) - Vector3(b.GetX()))),
                     float(Length(Vector3(a.GetY()) - Vector3(b.GetY())))));
             }
@@ -233,25 +239,31 @@ bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, c
                 std::vector<Matrix4> target;
                 if (!PARS::EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), target, error))
                     check(false, "Evaluate active animation target");
-                const auto angle = [](Quaternion a, Quaternion b) {
+                float (*const angle)(Math::Quaternion, Math::Quaternion) = [](Quaternion a, Quaternion b) -> float
+                {
                     return 2.0f * std::acos(Clamp(std::abs(XMVectorGetX(XMVector4Dot(Normalize(a), Normalize(b)))), 0.0f, 1.0f));
                 };
-                for (const auto& joint : asset.constraints)
+                for (const PARS::PhysicsConstraint& joint : asset.constraints)
                 {
                     const int parent = asset.FindBody(joint.parentBone), child = asset.FindBody(joint.childBone);
-                    const auto parentLocal = asset.bodies[parent].GetLocalTransform(), childLocal = asset.bodies[child].GetLocalTransform();
-                    const auto desiredBone = PARS::PhysicsBoneFrame(target[runtime.GetBoneNodes()[child]]);
-                    const auto actualBone = runtime.GetBoneWorld(child);
-                    const auto desired = PARS::EvaluateJointDriveTarget(joint,
+                    const Math::Matrix4 parentLocal = asset.bodies[parent].GetLocalTransform();
+                    const Math::Matrix4 childLocal = asset.bodies[child].GetLocalTransform();
+                    const Math::Matrix4 desiredBone = PARS::PhysicsBoneFrame(target[runtime.GetBoneNodes()[child]]);
+                    const Math::Matrix4 actualBone = runtime.GetBoneWorld(child);
+                    const Math::Quaternion desired = PARS::EvaluateJointDriveTarget(joint,
                         PARS::PhysicsBoneFrame(target[runtime.GetBoneNodes()[parent]]) * parentLocal, desiredBone * childLocal, false);
-                    const auto limited = PARS::ClampArticulationDriveTarget(joint, desired);
-                    const auto actual = PARS::EvaluateJointDriveTarget(joint, runtime.GetBoneWorld(parent) * parentLocal, actualBone * childLocal, false);
-                    const auto actualVector = PARS::JointRotationVector(actual), targetVector = PARS::JointRotationVector(desired);
+                    const Math::Quaternion limited = PARS::ClampArticulationDriveTarget(joint, desired);
+                    const Math::Quaternion actual = PARS::EvaluateJointDriveTarget(joint, runtime.GetBoneWorld(parent) * parentLocal, actualBone * childLocal, false);
+                    const Math::Vector3 actualVector = PARS::JointRotationVector(actual);
+                    const Math::Vector3 targetVector = PARS::JointRotationVector(desired);
                     const float worldAngle = angle(Quaternion(Matrix3(desiredBone)), Quaternion(Matrix3(actualBone)));
                     const float clampAngle = angle(desired, limited);
                     if (step >= 120)
                     {
-                        if (joint.childBone.find("Head") != std::string::npos) maxHeadAngle = Max(maxHeadAngle, worldAngle);
+                        if (joint.childBone.find("Head") != std::string::npos)
+                        {
+                            maxHeadAngle = Max(maxHeadAngle, worldAngle);
+                        }
                         if (joint.childBone.find("Foot") != std::string::npos)
                         {
                             maxFootAngle = Max(maxFootAngle, worldAngle);
@@ -297,26 +309,30 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     std::ofstream report(reportPath);
-    const auto check = [&](bool condition, const char* message) {
+    const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
+    {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
-        if (!condition) throw std::runtime_error(message);
+        if (!condition)
+        {
+            throw std::runtime_error(message);
+        }
     };
     std::string error;
-    auto& mesh = character.GetMesh();
-    auto* physics = world.GetPhysicsWorld();
+    PARS::SkeletalMeshComponent& mesh = character.GetMesh();
+    PhysicsWorld* physics = world.GetPhysicsWorld();
     try
     {
         check(report.good() && physics && mesh.GetPhysicsAsset(), "Play character has a default PA and physics world");
         constexpr size_t bodyCount = 20, jointCount = 19;
-        const auto& asset = *mesh.GetPhysicsAsset();
+        const PARS::PhysicsAsset& asset = *mesh.GetPhysicsAsset();
         check(asset.bodies.size() == bodyCount && asset.constraints.size() == jointCount,
             "Default PA has 20 bodies / 19 joints including all spine, neck and shoulder bones");
         check(!mesh.IsRagdoll() && mesh.GetRagdoll().GetBodyCount() == bodyCount && mesh.GetRagdoll().GetJointCount() == jointCount &&
             mesh.GetRagdoll().GetKinematicBodyCount() == bodyCount, "PA bodies and joints are already registered as kinematic before starting ragdoll");
         if (physics->IsPvdConnected()) check(physics->ConnectPvd(true), "Reconnect PVD with animated kinematic bodies and D6 joints");
-        auto& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
+        PreviewAnimInstance& animation = static_cast<PreviewAnimInstance&>(mesh.GetAnimInstance());
         animation.SetLocomotionEnabled(false); animation.SetAutoCycleEnabled(false);
-        const auto initialCapsuleCount = physics->GetQueryCapsuleCount();
+        const uint32_t initialCapsuleCount = physics->GetQueryCapsuleCount();
         check(initialCapsuleCount > 0, "Query-only movement capsule exists before ragdoll");
         PARS::PhysicsSkeleton skeleton;
         check(mesh.BuildPhysicsSkeleton(skeleton, error), "Build imported mesh skin bindings");
@@ -326,7 +342,7 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
         for (size_t i = 0; i < skeleton.names.size(); ++i)
         {
             if (skeleton.meshNodes[i] < 0) continue;
-            const auto& name = skeleton.names[i];
+            const std::string& name = skeleton.names[i];
             bool excluded = name.find("Toe") != std::string::npos || name.find("_End") != std::string::npos;
             for (const char* digit : {"HandThumb", "HandIndex", "HandMiddle", "HandRing", "HandPinky"})
                 excluded |= name.find(digit) != std::string::npos;
@@ -335,18 +351,22 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
             check(hasBody != excluded, "Imported non-digit, non-terminal bone coverage");
         }
         float totalMass = 0;
-        for (const auto& body : asset.bodies)
+        for (const PARS::PhysicsBody& body : asset.bodies)
         {
             check(std::isfinite(body.mass) && body.mass > 0, "Every imported body has a finite positive mass");
             totalMass += body.mass;
             report << "mass: " << body.bone << " = " << body.mass << " kg" << std::endl;
         }
         check(std::abs(totalMass - 73.0f) < .001f, "Adult male preset preserves total 73 kg mass");
-        const auto massFor = [&](const std::string& suffix) {
-            for (const auto& body : asset.bodies)
+        const std::function<float(const std::string&)> massFor = [&](const std::string& suffix) -> float
+        {
+            for (const PARS::PhysicsBody& body : asset.bodies)
             {
-                const auto colon = body.bone.find_last_of(':');
-                if (body.bone.substr(colon == std::string::npos ? 0 : colon + 1) == suffix) return body.mass;
+                const std::string::size_type colon = body.bone.find_last_of(':');
+                if (body.bone.substr(colon == std::string::npos ? 0 : colon + 1) == suffix)
+                {
+                    return body.mass;
+                }
             }
             check(false, "Mass validation can find every anatomical body");
             return 0.0f;
@@ -374,29 +394,43 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
                 std::abs(massFor(prefix + "Foot") - 1.0001f) < .001f,
                 "Each leg uses per-side male thigh, shank and foot proportions");
         }
-        for (const auto& joint : asset.constraints)
+        for (const PARS::PhysicsConstraint& joint : asset.constraints)
         {
-            const auto child = std::find(skeleton.names.begin(), skeleton.names.end(), joint.childBone);
+            const std::vector<std::string>::iterator child = std::find(skeleton.names.begin(), skeleton.names.end(), joint.childBone);
             check(child != skeleton.names.end(), "Constraint child exists in imported skeleton");
             int parent = skeleton.parents[child - skeleton.names.begin()];
-            while (parent >= 0 && asset.FindBody(skeleton.names[parent]) < 0) parent = skeleton.parents[parent];
+            while (parent >= 0 && asset.FindBody(skeleton.names[parent]) < 0)
+            {
+                parent = skeleton.parents[parent];
+            }
             check(parent >= 0 && joint.parentBone == skeleton.names[parent], "Every constraint follows the nearest parent body without skipping spine/neck/shoulders");
         }
-        const auto checkKinematicPose = [&]() {
+        const std::function<bool()> checkKinematicPose = [&]() -> bool
+        {
             std::vector<Matrix4> expected;
-            if (!PARS::EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), expected, error)) return false;
-            const auto& runtime = mesh.GetRagdoll();
-            if (mesh.IsRagdoll() || runtime.GetKinematicBodyCount() != bodyCount || !mesh.GetPhysicsError().empty()) return false;
+            if (!PARS::EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), expected, error))
+            {
+                return false;
+            }
+            const PARS::Ragdoll& runtime = mesh.GetRagdoll();
+            if (mesh.IsRagdoll() || runtime.GetKinematicBodyCount() != bodyCount || !mesh.GetPhysicsError().empty())
+            {
+                return false;
+            }
             for (size_t body = 0; body < runtime.GetBodyCount(); ++body)
             {
                 const Matrix4 target = PARS::PhysicsBoneFrame(expected[runtime.GetBoneNodes()[body]]), actual = runtime.GetBoneWorld(body);
                 if (float(Length(Vector3(target.GetW()) - Vector3(actual.GetW()))) > .001f ||
                     float(Length(Vector3(target.GetX()) - Vector3(actual.GetX()))) > .001f ||
-                    float(Length(Vector3(target.GetY()) - Vector3(actual.GetY()))) > .001f) return false;
+                    float(Length(Vector3(target.GetY()) - Vector3(actual.GetY()))) > .001f)
+                {
+                    return false;
+                }
             }
             return true;
         };
-        const auto animatedBodies = physics->GetDynamicBodyCount(), animatedJoints = physics->GetConstraintCount();
+        const uint32_t animatedBodies = physics->GetDynamicBodyCount();
+        const uint32_t animatedJoints = physics->GetConstraintCount();
         check(animatedBodies == mesh.GetRagdoll().GetBodyCount() + 1,
             "Scene contains only PA bodies and the demo box, with no solid movement capsule");
         for (uint32_t clip = 0; clip < 3; ++clip)
@@ -415,7 +449,7 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
             std::vector<Matrix4> before;
             check(PARS::EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(mesh.GetComponentTransform()), before, error), "Evaluate actual animated pose");
             // Compare the CPU adapter to ModelInstance's renderer transform cache.
-            auto& context = GraphicsContext::Begin(L"Validate ragdoll initial pose");
+            GraphicsContext& context = GraphicsContext::Begin(L"Validate ragdoll initial pose");
             check(mesh.UpdateRenderData(context), "Upload animation pose to DX12");
             context.Finish(true);
             float renderError = 0;
@@ -433,7 +467,7 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
             check(started, "Start from animated pose");
             check(!character.GetCapsuleComponent().HasPhysicsCollision() && !character.GetCharacterMovement().IsTickEnabled() &&
                 physics->GetQueryCapsuleCount() + 1 == initialCapsuleCount, "Ragdoll disables movement and removes capsule collision");
-            auto& ragdoll = mesh.GetRagdoll();
+            PARS::Ragdoll& ragdoll = mesh.GetRagdoll();
             check(ragdoll.GetBodyCount() == bodyCount && ragdoll.GetJointCount() == jointCount, "Instantiate actual PA articulation links and joints");
             check(ragdoll.GetKinematicBodyCount() == 0 && physics->GetDynamicBodyCount() == animatedBodies &&
                 physics->GetConstraintCount() == animatedJoints, "Ragdoll switches registered bodies to dynamic without duplicating the PA");
@@ -467,7 +501,7 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
             check(maxGap < .08f && maxAngular < .35f, "Joint anchors and angular limits remain bounded");
             check(float(ragdoll.GetPosition().GetY()) < startHeight - .2f && ragdoll.GetLowestPoint() > -.04f, "Character falls and colliders stay above the floor");
             check(animation.GetAnimationTime() == animationTime, "Animation cannot overwrite the simulated pose");
-            auto& render = GraphicsContext::Begin(L"Validate ragdoll final pose");
+            GraphicsContext& render = GraphicsContext::Begin(L"Validate ragdoll final pose");
             check(mesh.UpdateRenderData(render), "Upload final physical pose to DX12");
             render.Finish(true);
             for (size_t body = 0; body < ragdoll.GetBodyCount(); ++body)
@@ -482,7 +516,8 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
                     "Rendered bone position and orientation follow its physical body");
             }
             world.SetPhysicsPaused(true);
-            const auto steps = physics->GetStepCount(); world.Tick(1);
+            const uint64_t steps = physics->GetStepCount();
+            world.Tick(1);
             check(steps == physics->GetStepCount(), "Pause freezes physics");
             world.RequestPhysicsStep(); world.Tick(0);
             check(steps + 1 == physics->GetStepCount(), "Single-step advances exactly one fixed step");
@@ -510,17 +545,19 @@ bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const 
         world.RequestPhysicsStep(); world.Tick(0);
         check(animation.GetAnimationTime() > pausedTime && checkKinematicPose(), "Single-step advances animation and kinematic PA together");
         world.SetPhysicsPaused(false);
-        const auto bodiesBefore = physics->GetDynamicBodyCount(), jointsBefore = physics->GetConstraintCount();
-        auto* disposable = world.SpawnActor<PARS::Character>("RagdollLifetimeTest");
+        const uint32_t bodiesBefore = physics->GetDynamicBodyCount();
+        const uint32_t jointsBefore = physics->GetConstraintCount();
+        PARS::Character* disposable = world.SpawnActor<PARS::Character>("RagdollLifetimeTest");
         disposable->SetActorLocation(Vector3(6, .95f, 0));
         disposable->GetMesh().SetSkeletalMesh(mesh.GetSkeletalMesh());
         world.Tick(0);
         check(!disposable->StartRagdoll(error) && disposable->GetCapsuleComponent().HasPhysicsCollision() &&
             disposable->GetCharacterMovement().IsTickEnabled(), "Failed start without PA preserves character control");
-        auto& otherMesh = disposable->GetMesh();
+        PARS::SkeletalMeshComponent& otherMesh = disposable->GetMesh();
         check(otherMesh.SetPhysicsAsset(*mesh.GetPhysicsAsset(), error) && otherMesh.GetRagdoll().GetKinematicBodyCount() == bodyCount,
             "Assigning PA after BeginPlay registers kinematic objects immediately");
-        auto invalid = *mesh.GetPhysicsAsset(); invalid.bodies[0].radius = -1;
+        PARS::PhysicsAsset invalid = *mesh.GetPhysicsAsset();
+        invalid.bodies[0].radius = -1;
         check(!otherMesh.SetPhysicsAsset(invalid, error) && otherMesh.GetRagdoll().GetKinematicBodyCount() == bodyCount,
             "Rejected PA replacement preserves live kinematic objects");
         check(otherMesh.SetPhysicsAsset(*mesh.GetPhysicsAsset(), error) && physics->GetConstraintCount() == jointsBefore + jointCount,

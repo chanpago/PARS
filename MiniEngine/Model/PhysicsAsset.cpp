@@ -8,6 +8,7 @@
 #include <cmath>
 #include <set>
 #include <algorithm>
+#include <functional>
 
 using namespace Math;
 using nlohmann::json;
@@ -54,18 +55,21 @@ namespace
 
     PARS::PhysicsFrictionCombine ReadFrictionCombine(const json& value)
     {
-        const auto name = value.get<std::string>();
-        for (const auto mode : {PARS::PhysicsFrictionCombine::Average, PARS::PhysicsFrictionCombine::Minimum,
+        const std::string name = value.get<std::string>();
+        for (const PARS::PhysicsFrictionCombine mode : {PARS::PhysicsFrictionCombine::Average, PARS::PhysicsFrictionCombine::Minimum,
                  PARS::PhysicsFrictionCombine::Multiply, PARS::PhysicsFrictionCombine::Maximum})
         {
-            if (name == FrictionCombineName(mode)) return mode;
+            if (name == FrictionCombineName(mode))
+            {
+                return mode;
+            }
         }
         throw std::runtime_error("Unknown friction combine mode.");
     }
 
     PARS::PhysicsJointMotion ReadMotion(const json& value)
     {
-        const auto name = value.get<std::string>();
+        const std::string name = value.get<std::string>();
         if (name == "locked")
         {
             return PARS::PhysicsJointMotion::Locked;
@@ -91,8 +95,8 @@ namespace
 
     PARS::PhysicsJointFrame ReadFrame(const json& value)
     {
-        const auto& p = value.at("offset");
-        const auto& q = value.at("rotation");
+        const nlohmann::json& p = value.at("offset");
+        const nlohmann::json& q = value.at("rotation");
         if (!p.is_array() || p.size() != 3 || !q.is_array() || q.size() != 4)
         {
             throw std::runtime_error("Invalid joint frame.");
@@ -108,9 +112,9 @@ namespace PARS
 {
     bool PhysicsAsset::UsesArticulation() const
     {
-        for (const auto& joint : constraints)
+        for (const PARS::PhysicsConstraint& joint : constraints)
         {
-            for (const auto& drive : joint.drives)
+            for (const PARS::PhysicsAngularDrive& drive : joint.drives)
             {
                 if (drive.useAcceleration)
                 {
@@ -185,7 +189,7 @@ namespace PARS
     {
         for (size_t i = 0; i < constraints.size(); ++i)
         {
-            const auto& joint = constraints[i];
+            const PARS::PhysicsConstraint& joint = constraints[i];
             if ((joint.parentBone == boneA && joint.childBone == boneB) ||
                 (joint.parentBone == boneB && joint.childBone == boneA))
             {
@@ -202,7 +206,7 @@ namespace PARS
         {
             return false;
         }
-        const auto& previous = bodies[index];
+        const PARS::PhysicsBody& previous = bodies[index];
         if (previous.offset.x != updated.offset.x || previous.offset.y != updated.offset.y || previous.offset.z != updated.offset.z ||
             previous.rotation.x != updated.rotation.x || previous.rotation.y != updated.rotation.y ||
             previous.rotation.z != updated.rotation.z || previous.rotation.w != updated.rotation.w)
@@ -210,7 +214,7 @@ namespace PARS
             // Bone * NewBody * NewJoint == Bone * OldBody * OldJoint.
             // 양쪽 관절 좌표계를 각각 보존해 비대칭 제한의 상대 회전도 유지한다.
             const Matrix4 correction = Invert(updated.GetLocalTransform()) * previous.GetLocalTransform();
-            for (auto& joint : constraints)
+            for (PARS::PhysicsConstraint& joint : constraints)
             {
                 if (joint.parentBone == previous.bone)
                 {
@@ -232,8 +236,9 @@ namespace PARS
         {
             return;
         }
-        const auto bone = bodies[index].bone;
-        constraints.erase(std::remove_if(constraints.begin(), constraints.end(), [&](const PhysicsConstraint& joint) {
+        const std::string bone = bodies[index].bone;
+        constraints.erase(std::remove_if(constraints.begin(), constraints.end(), [&](const PhysicsConstraint& joint) -> bool
+                              {
             return joint.parentBone == bone || joint.childBone == bone;
         }),
             constraints.end());
@@ -247,7 +252,7 @@ namespace PARS
             return false;
         }
         const std::set<std::string> names(jointNames.begin(), jointNames.end());
-        for (const auto& body : bodies)
+        for (const PARS::PhysicsBody& body : bodies)
         {
             if (!names.count(body.bone))
             {
@@ -267,7 +272,7 @@ namespace PARS
             error = "Too many physics bodies.";
             return false;
         }
-        for (const auto& body : bodies)
+        for (const PARS::PhysicsBody& body : bodies)
         {
             const float values[] = {body.offset.x, body.offset.y, body.offset.z,
                 body.rotation.x, body.rotation.y, body.rotation.z, body.rotation.w,
@@ -314,7 +319,7 @@ namespace PARS
             return false;
         }
         std::set<std::pair<std::string, std::string>> pairs;
-        for (const auto& joint : constraints)
+        for (const PARS::PhysicsConstraint& joint : constraints)
         {
             if (!names.count(joint.parentBone) || !names.count(joint.childBone) || joint.parentBone == joint.childBone)
             {
@@ -328,14 +333,14 @@ namespace PARS
             {
                 error = "Joint frames need finite positions and unit quaternions.";
             }
-            for (auto motion : {joint.twist, joint.swingY, joint.swingZ})
+            for (PARS::PhysicsJointMotion motion : {joint.twist, joint.swingY, joint.swingZ})
             {
                 if (motion != PhysicsJointMotion::Locked && motion != PhysicsJointMotion::Limited && motion != PhysicsJointMotion::Free)
                 {
                     error = "Unknown joint motion.";
                 }
             }
-            for (const auto& drive : joint.drives)
+            for (const PARS::PhysicsAngularDrive& drive : joint.drives)
             {
                 if (drive.useAcceleration &&
                     (!std::isfinite(drive.naturalFrequency) || !std::isfinite(drive.dampingRatio) ||
@@ -378,7 +383,7 @@ namespace PARS
         std::wstring temporary;
         try
         {
-            const auto destination = WidePath(path);
+            const std::wstring destination = WidePath(path);
             temporary = destination + L".tmp";
             json root;
             root["version"] = 5;
@@ -386,7 +391,7 @@ namespace PARS
             root["units"] = "metres";
             root["angleUnits"] = "radians";
             root["bodies"] = json::array();
-            for (const auto& body : bodies)
+            for (const PARS::PhysicsBody& body : bodies)
             {
                 json entry;
                 entry["bone"] = body.bone;
@@ -398,7 +403,7 @@ namespace PARS
                 entry["radius"] = body.radius;
                 entry["halfLength"] = body.halfLength;
                 entry["mass"] = body.mass;
-                auto& material = entry["material"];
+                nlohmann::json& material = entry["material"];
                 material["staticFriction"] = body.material.staticFriction;
                 material["dynamicFriction"] = body.material.dynamicFriction;
                 material["restitution"] = body.material.restitution;
@@ -406,7 +411,7 @@ namespace PARS
                 root["bodies"].push_back(entry);
             }
             root["constraints"] = json::array();
-            for (const auto& joint : constraints)
+            for (const PARS::PhysicsConstraint& joint : constraints)
             {
                 json entry;
                 entry["parentBone"] = joint.parentBone;
@@ -423,7 +428,7 @@ namespace PARS
                 entry["enableCollision"] = joint.enableCollision;
                 entry["driveMode"] = joint.useSlerpDrive ? "slerp" : "swingTwist";
                 entry["drives"] = json::array();
-                for (const auto& drive : joint.drives)
+                for (const PARS::PhysicsAngularDrive& drive : joint.drives)
                 {
                     json settings = {{"enabled", drive.enabled}, {"maxTorque", drive.maxTorque},
                         {"type", drive.useAcceleration ? "acceleration" : "force"}};
@@ -485,25 +490,26 @@ namespace PARS
             {
                 throw std::runtime_error("Unsupported angular drive units.");
             }
-            const auto& entries = root.at("bodies");
+            const nlohmann::json& entries = root.at("bodies");
             if (!entries.is_array() || entries.size() > 4096)
             {
                 throw std::runtime_error("Invalid body list.");
             }
             PhysicsAsset candidate;
-            for (const auto& entry : entries)
+            for (const nlohmann::json& entry : entries)
             {
                 PhysicsBody body;
                 body.bone = entry.at("bone").get<std::string>();
-                const auto shape = entry.at("shape").get<std::string>();
+                const std::string shape = entry.at("shape").get<std::string>();
                 if (shape != "capsule" && shape != "box" && shape != "sphere")
                 {
                     throw std::runtime_error("Unknown collision shape.");
                 }
                 body.shape = shape == "capsule" ? PhysicsShapeType::Capsule : shape == "box" ? PhysicsShapeType::Box
                                                                                              : PhysicsShapeType::Sphere;
-                const auto read = [&](const char* key, float* values, size_t count) {
-                    const auto& array = entry.at(key);
+                const std::function<void(const char*, float*, size_t)> read = [&](const char* key, float* values, size_t count) -> void
+                {
+                    const nlohmann::json& array = entry.at(key);
                     if (!array.is_array() || array.size() != count)
                     {
                         throw std::runtime_error("Invalid body transform/dimensions.");
@@ -521,7 +527,7 @@ namespace PARS
                 body.mass = entry.at("mass").get<float>();
                 if (version >= 5 && entry.count("material"))
                 {
-                    const auto& material = entry.at("material");
+                    const nlohmann::json& material = entry.at("material");
                     body.material.staticFriction = material.at("staticFriction").get<float>();
                     body.material.dynamicFriction = material.at("dynamicFriction").get<float>();
                     body.material.restitution = material.at("restitution").get<float>();
@@ -535,12 +541,12 @@ namespace PARS
                 {
                     throw std::runtime_error("Joint angles must use radians.");
                 }
-                const auto& joints = root.at("constraints");
+                const nlohmann::json& joints = root.at("constraints");
                 if (!joints.is_array() || joints.size() > 4096)
                 {
                     throw std::runtime_error("Invalid joint list.");
                 }
-                for (const auto& entry : joints)
+                for (const nlohmann::json& entry : joints)
                 {
                     PhysicsConstraint joint;
                     joint.parentBone = entry.at("parentBone").get<std::string>();
@@ -557,26 +563,26 @@ namespace PARS
                     joint.enableCollision = entry.at("enableCollision").get<bool>();
                     if (version >= 3)
                     {
-                        const auto mode = entry.at("driveMode").get<std::string>();
+                        const std::string mode = entry.at("driveMode").get<std::string>();
                         if (mode != "slerp" && mode != "swingTwist")
                         {
                             throw std::runtime_error("Unknown angular drive mode.");
                         }
                         joint.useSlerpDrive = mode == "slerp";
-                        const auto& drives = entry.at("drives");
+                        const nlohmann::json& drives = entry.at("drives");
                         if (!drives.is_array() || drives.size() != 3)
                         {
                             throw std::runtime_error("Expected three angular drives.");
                         }
                         for (size_t axis = 0; axis < 3; ++axis)
                         {
-                            auto& drive = joint.drives[axis];
-                            const auto& value = drives.at(axis);
+                            PARS::PhysicsAngularDrive& drive = joint.drives[axis];
+                            const nlohmann::json& value = drives.at(axis);
                             drive.enabled = value.at("enabled").get<bool>();
                             drive.maxTorque = value.at("maxTorque").get<float>();
                             if (version >= 4)
                             {
-                                const auto type = value.at("type").get<std::string>();
+                                const std::string type = value.at("type").get<std::string>();
                                 if (type != "acceleration" && type != "force")
                                 {
                                     throw std::runtime_error("Unknown angular drive type.");
@@ -615,14 +621,14 @@ namespace PARS
 
     void ConfigureDefaultDrives(PhysicsAsset& asset)
     {
-        for (auto& joint : asset.constraints)
+        for (PARS::PhysicsConstraint& joint : asset.constraints)
         {
             // 하위 부위 질량은 최대 토크의 초기 추정에만 사용한다.
             // 반응 속도와 감쇠비는 질량과 분리하고, 각 바디의 관성 반영은 가속도 드라이브에 맡긴다.
             std::set<std::string> descendants{joint.childBone};
             for (size_t pass = 0; pass < asset.bodies.size(); ++pass)
             {
-                for (const auto& link : asset.constraints)
+                for (const PARS::PhysicsConstraint& link : asset.constraints)
                 {
                     if (descendants.count(link.parentBone))
                     {
@@ -631,7 +637,7 @@ namespace PARS
                 }
             }
             float mass = 0;
-            for (const auto& body : asset.bodies)
+            for (const PARS::PhysicsBody& body : asset.bodies)
             {
                 if (descendants.count(body.bone))
                 {
@@ -643,7 +649,7 @@ namespace PARS
             joint.useSlerpDrive = joint.twist != PhysicsJointMotion::Locked && joint.swingY != PhysicsJointMotion::Locked && joint.swingZ != PhysicsJointMotion::Locked;
             for (int axis = 0; axis < 3; ++axis)
             {
-                auto& drive = joint.drives[axis];
+                PARS::PhysicsAngularDrive& drive = joint.drives[axis];
                 drive = PhysicsAngularDrive{};
                 drive.enabled = motions[axis] != PhysicsJointMotion::Locked;
                 drive.useAcceleration = true;
@@ -657,7 +663,7 @@ namespace PARS
         const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
         for (int axis = 0; axis < (joint.useSlerpDrive ? 1 : 3); ++axis)
         {
-            const auto& drive = joint.drives[axis];
+            const PARS::PhysicsAngularDrive& drive = joint.drives[axis];
             if (motions[axis] != PhysicsJointMotion::Locked && drive.enabled && drive.maxTorque > 0 && (drive.GetStiffness() > 0 || drive.GetDamping() > 0))
             {
                 return true;

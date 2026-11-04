@@ -18,7 +18,7 @@ namespace
     const char* const KneeNames[] = {"LeftLeg", "RightLeg"};
     bool Matches(const std::string& name, const char* leaf)
     {
-        const auto separator = name.find_last_of(':');
+        const std::string::size_type separator = name.find_last_of(':');
         return name.compare(separator == std::string::npos ? 0 : separator + 1,
             std::string::npos, leaf) == 0;
     }
@@ -134,11 +134,11 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
             continue;
         }
 
-        auto& sole = m_Feet[side];
+        PARS::FootSupport::Sole& sole = m_Feet[side];
         sole.bodyIndex = index;
         sole.source = asset->bodies[index];
         // 발목에서 부모 계층을 따라 무릎·고관절을 찾아 두 뼈 IK의 연결 정보를 저장한다.
-        auto& leg = sole.leg;
+        PARS::FootLegSetup& leg = sole.leg;
         leg.ankleNode = node;
         leg.kneeNode = FindAncestor(skeleton, node, KneeNames[side]);
         leg.hipNode = FindAncestor(skeleton, leg.kneeNode, HipNames[side]);
@@ -265,8 +265,8 @@ void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorl
     m_ContactStep = step;
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
-        auto& current = m_Contacts[side];
-        const auto previous = current;
+        PARS::FootContactSample& current = m_Contacts[side];
+        const PARS::FootContactSample previous = current;
         current.leftGround = current.landed = false;
         const int index = m_Feet[side].bodyIndex;
         current.hasSample = index >= 0 && size_t(index) < ragdoll.GetBodyCount();

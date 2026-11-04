@@ -22,7 +22,7 @@ void RagdollRecovery::Update(const RecoveryInput& input, const RecoverySettings&
         return;
     }
     m_HasSample = true;
-    auto& state = m_Snapshot;
+    PARS::RecoverySnapshot& state = m_Snapshot;
     state.revision = input.revision;
     state.completedStep = input.completedStep;
     state.enteredRecovery = state.startedBlend = false;

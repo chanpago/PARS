@@ -27,8 +27,8 @@ namespace PARS
     void CapsuleComponent::BeginPlay()
     {
 #if defined(_M_X64)
-        auto world = GetOwner().GetWorld();
-        auto physics = world ? world->GetPhysicsWorld() : nullptr;
+        PARS::World* world = GetOwner().GetWorld();
+        PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
         if (!m_PhysicsEnabled || !physics || !physics->IsInitialized() || m_QueryCapsule)
         {
             return;
@@ -38,7 +38,7 @@ namespace PARS
         {
             return;
         }
-        const auto transform = GetComponentTransform();
+        const Math::AffineTransform transform = GetComponentTransform();
         if (std::abs(float(Math::LengthSquare(transform.GetX())) - 1.0f) > 0.001f ||
             std::abs(float(Math::LengthSquare(transform.GetZ())) - 1.0f) > 0.001f ||
             float(Math::LengthSquare(transform.GetY() - Math::Vector3(Math::kYUnitVector))) > 0.000001f ||
@@ -46,7 +46,7 @@ namespace PARS
         {
             return;
         }
-        const auto position = transform.GetTranslation();
+        const Math::Vector3 position = transform.GetTranslation();
         m_QueryCapsule = physics->CreateQueryCapsule(
             physx::PxVec3(float(position.GetX()), float(position.GetY()), float(position.GetZ())), m_Radius, m_HalfHeight);
         if (m_QueryCapsule)
@@ -74,7 +74,7 @@ namespace PARS
         {
             return;
         }
-        const auto position = GetComponentTransform().GetTranslation();
+        const Math::Vector3 position = GetComponentTransform().GetTranslation();
         const physx::PxVec3 centre(float(position.GetX()), float(position.GetY()), float(position.GetZ()));
         if (centre.isFinite())
         {
@@ -90,8 +90,8 @@ namespace PARS
         {
             return result;
         }
-        auto transform = GetComponentTransform();
-        const auto current = transform.GetTranslation();
+        Math::AffineTransform transform = GetComponentTransform();
+        const Math::Vector3 current = transform.GetTranslation();
         const physx::PxVec3 requested(float(current.GetX()), float(current.GetY()), float(current.GetZ()));
         if (!requested.isFinite())
         {
@@ -105,11 +105,11 @@ namespace PARS
         // Actor를 직접 수정하면 순간이동으로 처리한다. 일반 이동은 쿼리용 형상을 스윕한 뒤
         // 충돌을 해결한 중심 위치를 컴포넌트 계층에 다시 반영한다.
         m_QueryCapsule->centre = requested;
-        const auto flags = m_PhysicsWorld->MoveQueryCapsule(*m_QueryCapsule, delta, m_HorizontalBlockingEnabled);
+        const PhysicsWorld::CapsuleMoveResult flags = m_PhysicsWorld->MoveQueryCapsule(*m_QueryCapsule, delta, m_HorizontalBlockingEnabled);
         result.grounded = flags.grounded;
         result.ceiling = flags.ceiling;
         result.wall = flags.wall;
-        const auto position = m_QueryCapsule->centre;
+        const physx::PxVec3 position = m_QueryCapsule->centre;
         transform.SetTranslation(Math::Vector3(float(position.x), float(position.y), float(position.z)));
         SetWorldTransform(transform);
 #else

@@ -5,7 +5,7 @@ namespace PARS
 {
     void LocomotionAnimInstance::NativeUpdateAnimation(float)
     {
-        auto character = dynamic_cast<Character*>(&GetOwningComponent().GetOwner());
+        PARS::Character* character = dynamic_cast<Character*>(&GetOwningComponent().GetOwner());
         if (!m_Locomotion || !character || GetAnimationCount() < 3)
         {
             return;

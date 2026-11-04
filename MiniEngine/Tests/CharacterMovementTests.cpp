@@ -118,7 +118,7 @@ namespace
         f.player->SetInputEnabled(true);
         f.player->SetMoveInput(1, 0, true);
         f.world.SetPhysicsPaused(true);
-        const auto paused = f.character->GetActorLocation();
+        const Math::Vector3 paused = f.character->GetActorLocation();
         const uint64_t steps = f.world.GetPhysicsWorld()->GetStepCount();
         f.Frames(30);
         Check(float(Length(f.character->GetActorLocation() - paused)) < .0001f && f.character->observedDelta == 0, "Pause freezes movement and animation time");
@@ -141,7 +141,7 @@ namespace
     void TestCollisionAndLifetime()
     {
         Fixture f;
-        auto physics = f.world.GetPhysicsWorld();
+        PhysicsWorld* physics = f.world.GetPhysicsWorld();
         physics->CreateStaticBox(PxTransform(PxVec3(0, 1, 2)), PxVec3(10, 1, .25f), "Wall");
         f.player->SetMoveInput(1, 0, true);
         f.Frames(120);
@@ -151,11 +151,11 @@ namespace
         f.Frames(120);
         Check(float(f.character->GetActorLocation().GetX()) < -1.0f && float(f.character->GetActorLocation().GetZ()) < 1.48f, "Diagonal movement slides along wall");
 
-        auto other = f.world.SpawnActor<TestCharacter>();
+        TestCharacter* other = f.world.SpawnActor<TestCharacter>();
         other->SetActorLocation(Vector3(3, 2, 0));
         f.Frames(60);
         Check(physics->GetQueryCapsuleCount() == 2 && other->movement->IsMovingOnGround(), "Multiple actors get independent capsules in one scene");
-        const auto oldHandle = f.character->GetHandle();
+        const PARS::ActorHandle oldHandle = f.character->GetHandle();
         f.character->Destroy();
         Check(f.player->GetPawn() == nullptr, "Possession handle stops resolving immediately on destroy");
         Check(f.player->Possess(*other), "Possess another actor before old pawn is reclaimed");
@@ -174,20 +174,22 @@ namespace
     void TestQueryCapsules()
     {
         Fixture f;
-        auto* physics = f.world.GetPhysicsWorld();
-        auto* capsule = f.character->capsule;
+        PhysicsWorld* physics = f.world.GetPhysicsWorld();
+        PARS::CapsuleComponent* capsule = f.character->capsule;
         // The line geometry is in metres, +Y-up, and must not add scene actors.
         std::vector<PxDebugLine> lines;
         physics->GetCapsuleDebugLines(lines);
         Check(!lines.empty(), "Query capsule produces debug lines");
         float minY = 100, maxY = -100, maxRadius = 0;
-        const auto centre = f.character->GetActorLocation();
-        for (const auto& line : lines)
-            for (const auto& point : {line.pos0, line.pos1})
+        const Math::Vector3 centre = f.character->GetActorLocation();
+        for (const physx::PxDebugLine& line : lines)
+        {
+            for (const physx::PxVec3& point : {line.pos0, line.pos1})
             {
                 minY = PxMin(minY, point.y); maxY = PxMax(maxY, point.y);
                 maxRadius = PxMax(maxRadius, std::sqrt(point.x * point.x + point.z * point.z));
             }
+        }
         Check(Near(maxY - minY, 1.8f, .001f) && Near((minY + maxY) * .5f, centre.GetY(), .001f) &&
             Near(maxRadius, .3f, .001f), "Wire capsule dimensions and +Y axis match collision geometry");
         physics->SetCapsuleDebugVisible(false); physics->GetCapsuleDebugLines(lines);
@@ -195,7 +197,7 @@ namespace
         physics->SetCapsuleDebugVisible(true);
 
         // A 20 cm ledge is reachable, while a tall wall remains blocking.
-        auto* ledge = physics->CreateStaticBox(PxTransform(PxVec3(0, .1f, 2)), PxVec3(2, .1f, 1), "Step");
+        physx::PxRigidStatic* ledge = physics->CreateStaticBox(PxTransform(PxVec3(0, .1f, 2)), PxVec3(2, .1f, 1), "Step");
         f.player->SetMoveInput(1, 0, false); f.Frames(90);
         Check(float(f.character->GetActorLocation().GetZ()) > 1.8f &&
             Near(f.character->GetActorLocation().GetY(), 1.12f, .015f), "Query movement climbs a low step");
@@ -204,7 +206,7 @@ namespace
             "Leaving a ledge returns to the floor");
         f.player->SetMoveInput(0, 0, false); f.Frames(30); ledge->release();
 
-        auto* ceiling = physics->CreateStaticBox(PxTransform(PxVec3(0, 2.5f, 0)), PxVec3(2, .25f, 2), "Ceiling");
+        physx::PxRigidStatic* ceiling = physics->CreateStaticBox(PxTransform(PxVec3(0, 2.5f, 0)), PxVec3(2, .25f, 2), "Ceiling");
         f.character->SetActorLocation(Vector3(0, .92f, 0));
         Check(capsule->Move(Vector3(0, 5, 0), 1.0f / 60).ceiling && float(f.character->GetActorLocation().GetY()) < 1.34f,
             "Upward query movement cannot tunnel through a ceiling");
@@ -216,7 +218,7 @@ namespace
         Check(capsule->Move(Vector3(0, -50, 0), 1.0f / 60).grounded &&
             Near(f.character->GetActorLocation().GetY(), .92f, .001f), "Long downward sweep cannot tunnel through the floor");
 
-        auto* other = f.world.SpawnActor<TestCharacter>();
+        TestCharacter* other = f.world.SpawnActor<TestCharacter>();
         other->SetActorLocation(Vector3(0, .92f, 2)); f.Frames(1);
         capsule->Move(Vector3(0, 5, 10), 1.0f / 60); // Horizontal pass must stop at the other capsule.
         Check(float(f.character->GetActorLocation().GetZ()) < 1.4f && physics->GetDynamicBodyCount() == 0,
@@ -231,12 +233,12 @@ namespace
     void TestMovementQueryOwners()
     {
         Fixture f;
-        auto* physics = f.world.GetPhysicsWorld();
-        auto* own = physics->CreateDynamicBody(PxTransform(PxVec3(0, 1, 0)), PxBoxGeometry(.2f, .6f, .2f), 10, "Own PA body");
+        PhysicsWorld* physics = f.world.GetPhysicsWorld();
+        physx::PxRigidDynamic* own = physics->CreateDynamicBody(PxTransform(PxVec3(0, 1, 0)), PxBoxGeometry(.2f, .6f, .2f), 10, "Own PA body");
         Check(own != nullptr, "Create owned query shape");
         own->userData = f.character;
         own->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-        const auto before = f.character->GetActorLocation();
+        const Math::Vector3 before = f.character->GetActorLocation();
         f.character->capsule->Move(Vector3(kZero), 1.0f / 60);
         Check(float(Length(f.character->GetActorLocation() - before)) < .001f,
             "Movement depenetration ignores overlapping bodies of the same owner");
@@ -244,7 +246,7 @@ namespace
         Check(float(f.character->GetActorLocation().GetZ()) > 1.4f &&
             std::abs(float(f.character->GetActorLocation().GetX())) < .001f,
             "Movement sweeps pass through their own PA without moving sideways");
-        auto* other = physics->CreateDynamicBody(PxTransform(PxVec3(0, 1, 3)), PxBoxGeometry(1, 1, .2f), 10, "Other PA body");
+        physx::PxRigidDynamic* other = physics->CreateDynamicBody(PxTransform(PxVec3(0, 1, 3)), PxBoxGeometry(1, 1, .2f), 10, "Other PA body");
         Check(other != nullptr, "Create foreign query shape");
         other->userData = f.player; // A different live owner must still block.
         other->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
@@ -264,8 +266,8 @@ namespace
     void TestHorizontalBlockingDisabled()
     {
         Fixture f;
-        auto* physics = f.world.GetPhysicsWorld();
-        auto* capsule = f.character->capsule;
+        PhysicsWorld* physics = f.world.GetPhysicsWorld();
+        PARS::CapsuleComponent* capsule = f.character->capsule;
         physics->CreateStaticBox(PxTransform(PxVec3(0, 1, 2)), PxVec3(10, 1, .25f), "Wall");
         capsule->SetHorizontalBlockingEnabled(false);
         f.player->SetMoveInput(1, 0, true);
@@ -285,7 +287,7 @@ namespace
         Check(Near(f.character->GetActorLocation().GetZ(), 2, .001f),
             "Overlap recovery does not push an unblocked capsule out of a wall horizontally");
 
-        auto* other = f.world.SpawnActor<TestCharacter>();
+        TestCharacter* other = f.world.SpawnActor<TestCharacter>();
         other->SetActorLocation(Vector3(0, .92f, 2));
         f.Frames(1);
         Check(Near(f.character->GetActorLocation().GetZ(), 2, .001f),
@@ -295,7 +297,7 @@ namespace
         Check(Near(f.character->GetActorLocation().GetZ(), 4, .001f),
             "Unblocked horizontal movement passes through other query capsules");
 
-        auto* ceiling = physics->CreateStaticBox(PxTransform(PxVec3(0, 2.5f, 0)), PxVec3(2, .25f, 2), "Ceiling");
+        physx::PxRigidStatic* ceiling = physics->CreateStaticBox(PxTransform(PxVec3(0, 2.5f, 0)), PxVec3(2, .25f, 2), "Ceiling");
         f.character->SetActorLocation(Vector3(0, .92f, 0));
         Check(capsule->Move(Vector3(0, 5, 0), 1.0f / 60).ceiling &&
                 float(f.character->GetActorLocation().GetY()) < 1.34f,
@@ -353,7 +355,7 @@ namespace
         to.rotation = Quaternion(Vector3(kYUnitVector), 1.57079633f);
         to.scale = XMFLOAT3(3, 3, 3);
         to.matrixIdx = 17;
-        const auto end = to;
+        const GraphNode end = to;
         BlendAnimationPoses(&from, &to, 1, .5f);
         Check(Near(to.xform.GetW().GetX(), 1) && Near(to.xform.GetW().GetY(), 2) && Near(to.scale.x, 2), "Blend translation and scale");
         Check(Near((to.rotation * Vector3(kZUnitVector)).GetX(), .70710678f) && to.staleMatrix && to.matrixIdx == 17, "Slerp rotation, preserve hierarchy, invalidate matrix");

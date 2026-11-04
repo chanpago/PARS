@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <functional>
 
 using namespace PARS;
 using namespace Math;
@@ -50,16 +51,16 @@ namespace
     {
         Actor actor("Hierarchy");
         Check(!actor.SetActorLocation(Vector3(1, 2, 3)), "Actor without root cannot store an independent location");
-        auto& root = actor.CreateDefaultSubobject<SceneComponent>("Root");
-        auto& child = actor.CreateDefaultSubobject<SceneComponent>("Child");
-        auto& leaf = actor.CreateDefaultSubobject<SceneComponent>("Leaf");
+        PARS::SceneComponent& root = actor.CreateDefaultSubobject<SceneComponent>("Root");
+        PARS::SceneComponent& child = actor.CreateDefaultSubobject<SceneComponent>("Child");
+        PARS::SceneComponent& leaf = actor.CreateDefaultSubobject<SceneComponent>("Leaf");
         Check(actor.SetRootComponent(root), "Set root");
         Check(child.AttachToComponent(root) && leaf.AttachToComponent(child), "Attach descendants");
         Check(!root.AttachToComponent(child), "Root cannot be attached below a child");
         Check(!child.AttachToComponent(leaf), "Reject cycles");
         Check(!child.AttachToComponent(child), "Reject self attachment");
         Actor other;
-        auto& foreign = other.CreateDefaultSubobject<SceneComponent>("Foreign");
+        PARS::SceneComponent& foreign = other.CreateDefaultSubobject<SceneComponent>("Foreign");
         Check(!child.AttachToComponent(foreign), "Reject foreign-owner attachment");
         Check(!actor.SetRootComponent(foreign), "Reject foreign root");
         SceneComponent external(actor, "Unowned");
@@ -94,7 +95,7 @@ namespace
         {
             Actor actor;
             actor.CreateDefaultSubobject<LifecycleProbe>("A", events);
-            auto& b = actor.CreateDefaultSubobject<LifecycleProbe>("B", events);
+            LifecycleProbe& b = actor.CreateDefaultSubobject<LifecycleProbe>("B", events);
             actor.Tick(1);
             Check(events.empty(), "No component ticks before BeginPlay");
             actor.BeginPlay();
@@ -113,8 +114,8 @@ namespace
         Check(events.size() == 5 && events[3] == "B:end" && events[4] == "A:end", "Reverse EndPlay on destruction");
         {
             Actor actor;
-            auto& child = actor.CreateDefaultSubobject<SceneComponent>("EarlyChild");
-            auto& parent = actor.CreateDefaultSubobject<SceneComponent>("LateParent");
+            PARS::SceneComponent& child = actor.CreateDefaultSubobject<SceneComponent>("EarlyChild");
+            PARS::SceneComponent& parent = actor.CreateDefaultSubobject<SceneComponent>("LateParent");
             actor.SetRootComponent(parent);
             child.AttachToComponent(parent);
         }
@@ -123,7 +124,7 @@ namespace
         pawn.AddMovementInput(Vector3(0, 0, 1));
         Check(Near(pawn.ConsumeMovementInput(), Vector3(2, 0, 1)), "Pawn accumulates movement input");
         Check(Near(pawn.ConsumeMovementInput(), Vector3(kZero)), "Pawn consumes input once");
-        auto& capsule = pawn.CreateDefaultSubobject<CapsuleComponent>("Capsule");
+        PARS::CapsuleComponent& capsule = pawn.CreateDefaultSubobject<CapsuleComponent>("Capsule");
         Check(capsule.SetCapsuleSize(0.3f, 0.9f), "Capsule dimensions");
         Check(!capsule.SetCapsuleSize(1, 0.5f) && !capsule.SetCapsuleSize(-1, 1), "Reject impossible capsule geometry");
         Check(std::abs(capsule.GetCylinderHalfHeight() - 0.6f) < 1e-6f, "Half height includes end caps");
@@ -145,7 +146,10 @@ namespace
         curve.rangeScale = 1;
         const float nan = std::numeric_limits<float>::quiet_NaN();
         float keys[] = { 0, 0, 0, 2, 4, 6, nan, nan, nan };
-        auto sample = [&](float time) { return EvaluateAnimationPose(clip, &curve, reinterpret_cast<uint8_t*>(keys), &pose, 1, time); };
+        std::function<bool(float)> sample = [&](float time) -> bool
+        {
+            return EvaluateAnimationPose(clip, &curve, reinterpret_cast<uint8_t*>(keys), &pose, 1, time);
+        };
         Check(sample(0.5f) && Near(Vector3(pose.xform.GetW()), Vector3(1, 2, 3)), "Interpolate translation");
         Check(sample(1.0f) && Near(Vector3(pose.xform.GetW()), Vector3(2, 4, 6)), "Exact last key must not read next poisoned key");
         Check(sample(2.0f) && Near(Vector3(pose.xform.GetW()), Vector3(2, 4, 6)), "Clamp after clip end");

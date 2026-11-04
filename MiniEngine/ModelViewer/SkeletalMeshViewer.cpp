@@ -27,7 +27,7 @@ bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>* models,
     {
         return false;
     }
-    auto* actor = m_World.SpawnActor<PARS::Actor>("MeshPreview");
+    PARS::Actor* actor = m_World.SpawnActor<PARS::Actor>("MeshPreview");
     m_Mesh = &actor->CreateDefaultSubobject<PARS::SkeletalMeshComponent>("SkeletalMeshComponent");
     actor->SetRootComponent(*m_Mesh);
     if (!m_Mesh->SetSkeletalMesh(models[0]))
@@ -77,7 +77,7 @@ bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>* models,
     m_Image = ImGuiOverlay::RegisterTexture(m_Display.GetSRV());
     m_Overlay.Initialize(PreviewResolution);
 
-    auto& context = GraphicsContext::Begin(L"Initialize mesh viewer");
+    GraphicsContext& context = GraphicsContext::Begin(L"Initialize mesh viewer");
     context.TransitionResource(m_AmbientOcclusion, D3D12_RESOURCE_STATE_RENDER_TARGET);
     context.TransitionResource(m_Unshadowed, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
     context.ClearColor(m_AmbientOcclusion);
@@ -134,7 +134,7 @@ void SkeletalMeshViewer::ResetCamera()
 
 void SkeletalMeshViewer::UpdateCamera(bool hovered)
 {
-    const auto& io = ImGui::GetIO();
+    const ImGuiIO& io = ImGui::GetIO();
     if (io.AppFocusLost || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
     {
         m_Flying = false;
@@ -197,7 +197,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         CancelInteraction();
         return;
     }
-    const auto display = ImGui::GetIO().DisplaySize;
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
     ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(Min(1700.0f, display.x * .94f), display.y * .9f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(Min(1180.0f, display.x * .96f), Min(620.0f, display.y * .9f)), ImVec2(FLT_MAX, FLT_MAX));
@@ -219,7 +219,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         {
             HandlePick(pickedId);
         }
-        auto& animation = m_Mesh->GetAnimInstance();
+        PARS::AnimInstance& animation = m_Mesh->GetAnimInstance();
         ImGui::TextUnformatted(u8"Mixamo 캐릭터");
         ImGui::SameLine();
         ImGui::TextDisabled(u8"| 본 %u개 | 바디 %zu개 | 관절 %zu개", m_Mesh->GetSkeletalMesh()->m_NumJoints,
@@ -267,7 +267,7 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         {
             CancelInteraction();
             animation.SetPlaying(false);
-            const auto& model = *m_Mesh->GetSkeletalMesh();
+            const Model& model = *m_Mesh->GetSkeletalMesh();
             m_EditPose.assign(model.m_SceneGraph.get(), model.m_SceneGraph.get() + model.m_NumNodes);
         }
         ImGui::SameLine();

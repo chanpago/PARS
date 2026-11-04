@@ -43,12 +43,12 @@ namespace PARS
         const PxD6Drive::Enum axes[] = {PxD6Drive::eTWIST, PxD6Drive::eSWING1, PxD6Drive::eSWING2};
         for (size_t i = 0; i < m_Joints.size(); ++i)
         {
-            const auto& data = m_Asset.constraints[i];
+            const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             m_Joints[i]->setAngularDriveConfig(data.useSlerpDrive ? PxD6AngularDriveConfig::eSLERP : PxD6AngularDriveConfig::eSWING_TWIST);
             for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
             {
-                const auto& drive = data.drives[axis];
+                const PARS::PhysicsAngularDrive& drive = data.drives[axis];
                 // 기존 PA의 힘 모드는 D6에서 유지한다. Articulation 모터는 아래에서 별도로 갱신한다.
                 const bool on = !m_Articulation && m_DrivesEnabled && Enabled(drive, motions[axis]);
                 PxD6JointDrive motor;
@@ -67,7 +67,7 @@ namespace PARS
         }
         else
         {
-            for (auto* body : m_Bodies)
+            for (physx::PxRigidBody* body : m_Bodies)
             {
                 body->is<PxRigidDynamic>()->setSolverIterationCounts(m_DrivesEnabled ? 32 : 16, m_DrivesEnabled ? 8 : 4);
             }
@@ -100,7 +100,7 @@ namespace PARS
                 return false;
             }
         }
-        auto candidate = m_Asset;
+        PARS::PhysicsAsset candidate = m_Asset;
         for (size_t i = 0; i < asset.constraints.size(); ++i)
         {
             candidate.constraints[i].useSlerpDrive = asset.constraints[i].useSlerpDrive;
@@ -115,7 +115,7 @@ namespace PARS
         {
             return false;
         }
-        const auto previous = m_Asset;
+        const PARS::PhysicsAsset previous = m_Asset;
         for (size_t i = 0; i < candidate.constraints.size(); ++i)
         {
             m_Asset.constraints[i].useSlerpDrive = candidate.constraints[i].useSlerpDrive;
@@ -205,11 +205,11 @@ namespace PARS
             // 본의 월드 행렬에서 스케일/전단을 제거하고 위치/회전으로 된 강체 좌표계를 만든다.
             // 여기에 PA의 본 기준 바디 offset/rotation을 곱해 바디의 월드 목표 자세를 구한다.
             // 예: 어깨에 있는 상완 본의 기준점에서 팔 중간에 있는 캡슐 중심으로 옮기는 변환이다.
-            const auto transform = PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform();
+            const Math::Matrix4 transform = PhysicsBoneFrame(boneWorld[node]) * m_Asset.bodies[i].GetLocalTransform();
 
             // 목표 행렬에서 월드 위치(frame.offset)와 회전(frame.rotation)을 꺼낸다.
             // PhysicsJointFrame 구조체를 사용하는 것이며, 여기서 관절을 생성하지는 않는다.
-            const auto frame = PhysicsJointFrame::FromTransform(transform);
+            const PARS::PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(transform);
 
             // 목표 회전이 PhysX에서 사용할 수 있는 정상적인 쿼터니언인지 검사한다.
             if (!ToPx(Quaternion(DirectX::XMLoadFloat4(&frame.rotation))).isSane())
@@ -240,10 +240,10 @@ namespace PARS
         std::vector<Quaternion> targets;
         targets.reserve(m_Joints.size());
         m_MaxTargetClampAngle = 0;
-        for (const auto& data : m_Asset.constraints)
+        for (const PARS::PhysicsConstraint& data : m_Asset.constraints)
         {
-            const auto& a = bodies[m_Asset.FindBody(data.parentBone)];
-            const auto& b = bodies[m_Asset.FindBody(data.childBone)];
+            const Math::Matrix4& a = bodies[m_Asset.FindBody(data.parentBone)];
+            const Math::Matrix4& b = bodies[m_Asset.FindBody(data.childBone)];
 
             // a, b에 PA의 부모/자식 관절 프레임을 반영해 두 관절 프레임 사이의 회전을 구한다.
             // D6 경로는 이 함수에서 제한을 적용하고, Articulation 경로는 아래에서 별도로 제한한다.
@@ -276,7 +276,7 @@ namespace PARS
             // 실제 골반 속도를 읽는 단계가 아니다. 첫 목표이거나 dt가 0이면 목표 속도는 0이다.
             if (m_HasSupportTarget && deltaTime > 0)
             {
-                const auto previous = m_SupportJoint->getDrivePosition();
+                const physx::PxTransform previous = m_SupportJoint->getDrivePosition();
                 // 목표가 급변할 때 속도가 과도하게 커지지 않도록 선속도를 10 m/s로 제한한다.
                 linear = LimitMagnitude((supportedPose.p - previous.p) / deltaTime, 10.0f);
                 PxQuat delta = supportedPose.q * previous.q.getConjugate();
@@ -309,7 +309,7 @@ namespace PARS
             const bool history = m_HasDriveTargets && m_DriveTargets.size() == targets.size() && deltaTime > 0;
             // 목표가 바뀌었거나 실제 자세가 목표에서 멀면 잠든 물리 객체도 다시 깨운다.
             bool changed = !history || Angle(q, ToPx(m_DriveTargets[i])) > 1e-4f;
-            const auto& data = m_Asset.constraints[i];
+            const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
             if (m_DrivesEnabled && HasEnabledAngularDrive(data))
             {
                 PxRigidActor* a;
@@ -471,7 +471,7 @@ namespace PARS
             for (size_t i = 0; i < m_Asset.bodies.size(); ++i)
             {
                 bool child = false;
-                for (const auto& joint : m_Asset.constraints)
+                for (const PARS::PhysicsConstraint& joint : m_Asset.constraints)
                 {
                     child |= joint.childBone == m_Asset.bodies[i].bone;
                 }
@@ -505,8 +505,8 @@ namespace PARS
             error.clear();
             return true;
         }
-        auto* body = m_Bodies[root];
-        auto* drive = PxD6JointCreate(body->getScene()->getPhysics(), nullptr, PxTransform(PxIdentity), body, PxTransform(PxIdentity));
+        physx::PxRigidBody* body = m_Bodies[root];
+        physx::PxD6Joint* drive = PxD6JointCreate(body->getScene()->getPhysics(), nullptr, PxTransform(PxIdentity), body, PxTransform(PxIdentity));
         if (!drive)
         {
             error = "Could not create pelvis force/torque drive.";
@@ -552,7 +552,7 @@ namespace PARS
             return;
         }
         float mass = 0;
-        for (const auto* part : m_Bodies)
+        for (const physx::PxRigidBody* part : m_Bodies)
         {
             mass += part->getMass();
         }
@@ -589,7 +589,7 @@ namespace PARS
 #if defined(_M_X64)
         if (m_SupportJoint)
         {
-            const auto error = m_SupportJoint->getDrivePosition().p - m_Bodies[m_SupportBody]->getGlobalPose().p;
+            const physx::PxVec3 error = m_SupportJoint->getDrivePosition().p - m_Bodies[m_SupportBody]->getGlobalPose().p;
             return m_SupportHorizontal ? error.magnitude() : PxAbs(error.y);
         }
 #endif
@@ -626,7 +626,7 @@ namespace PARS
 #if defined(_M_X64)
         if (m_DrivesEnabled)
         {
-            for (const auto& joint : m_Asset.constraints)
+            for (const PARS::PhysicsConstraint& joint : m_Asset.constraints)
             {
                 if (HasEnabledAngularDrive(joint))
                 {
@@ -652,7 +652,7 @@ namespace PARS
         }
         for (size_t i = 0; i < m_Joints.size(); ++i)
         {
-            const auto& data = m_Asset.constraints[i];
+            const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
             if (!HasEnabledAngularDrive(data))
             {
                 continue;
