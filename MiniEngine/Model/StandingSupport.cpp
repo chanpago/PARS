@@ -54,7 +54,11 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     float maximumHeight = PX_MAX_F32;
     float missingAmount = 0;
     bool reachable = true;
+
+    // 현재 발 목표 배치에 맞는 골반 기준 위치를 계산
+    // 처음에는 입력 목표 포즈의 골반 위치를 계산한다. 여기에 양발의 다음 차이를 절반씩 더한다
     PxVec3 desiredPelvis = input.animatedPelvis.p;
+
     for (size_t side = 0; side < input.feet.size(); ++side)
     {
         const StandingSupportFoot& foot = input.feet[side];
@@ -65,15 +69,24 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
             m_Snapshot.valid = false;
             return false;
         }
+        // 발바닥 목표가 애니메이션 기준 위치에서 옮겨진 평균만큼, 골반 기준 위치도 옮김
+        // 이렇게 desiredPelvis(애니메이션 목표 골반위치)에 물리발의 오프셋만큼 더해줌
+        // 발 목표 배치에 맞춘 골반 위치를 구해서, 뒤에서 수평 위치를 유지할 기준으로 사용
         desiredPelvis += (foot.sole.p - foot.animatedSole.p) * .5f;
         if (!foot.supporting)
         {
             m_MissingContactTime[side] = 0;
             continue;
         }
+
+        // 지지 역할을 맡은 발에 대해 실행
+        // 지지발을 기준으로 정상 골반 높이를 계산하는부분
         // 실제 접촉 판정은 바꾸지 않고 지지 예정인 발만 재접촉용 높이 목표를 낮춘다.
-        m_MissingContactTime[side] = foot.grounded ? 0 :
-            (std::min)(m_MissingContactTime[side] + input.deltaTime, settings.contactLoweringTime);
+
+        // 지지하는 발은 바닥에 붙어있어야하는데, 불가피한 경우에 지지한느 발이 뜰 경우를 상정한다.시간을 누적해서 더해준다
+        m_MissingContactTime[side] = foot.grounded ? 0 : (std::min)(m_MissingContactTime[side] + input.deltaTime, settings.contactLoweringTime);
+
+        // 
         missingAmount = (std::max)(missingAmount, m_MissingContactTime[side] / settings.contactLoweringTime);
         nominalHeight += foot.sole.p.y + input.animatedPelvis.p.y - foot.animatedSole.p.y;
         supportCount += 1;

@@ -120,10 +120,15 @@ namespace PARS
         }
     }
 
+
+    // target은 본 노드별 월드 공간 목표 행렬 배열 
+    // 참조로 받으르모 함수 마지막에서 이 배열의 다리관련 행렬을 수정
     void SkeletalMeshComponent::ApplyFootstepIKTargets(std::vector<Matrix4>& target, float deltaTime)
     {
+        // IK를 실행할 수 있는 상태인지 확인. 발 지지 정보와 발딛기 상태를 가져옴 
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const FootstepSnapshot& step = sample.footstep;
+
         if (!IsActiveRagdoll() || !m_AutomaticRootSupport || m_RootSupportRelease != RootSupportRelease::None ||
             (!m_Ragdoll.UsesFootDrivenSupport() && m_Recovery.GetSnapshot().state != RecoveryState::Recovery) ||
             !m_HasRecoverySoles)
@@ -131,6 +136,8 @@ namespace PARS
             m_FootstepIK.Reset();
             return;
         }
+
+        // toPx라는 람다함수를 정의. 위치와 쿼터니언을 분리해서 PxTransform으로 변환.
         const std::function<PxTransform(const Matrix4&)> toPx = [](const Matrix4& matrix) -> PxTransform
         {
             const PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(PhysicsBoneFrame(matrix));
@@ -143,10 +150,14 @@ namespace PARS
         {
             rigidTargets.push_back(toPx(matrix));
         }
+
+        // IK와 서있기 보정의 공통입력을 준비함
         FootstepIKInput input;
         input.enabled = true;
         input.stepFoot = step.IsInProgress() ? step.stepFoot : -1;
         input.revision = sample.contactRevision;
+
+
         const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
         StandingSupportInput standing;
         standing.enabled = m_Ragdoll.UsesFootDrivenSupport();
@@ -157,8 +168,18 @@ namespace PARS
         standing.completedStep = sample.completedPhysicsStep;
         standing.velocity = sample.hasCenterOfMassVelocity ? sample.centerOfMassVelocity : PxVec3(0);
         std::array<RagdollSupportContact, 2> contacts;
+
+		// 다리별 IK 입력을 준비하고, 서있기 보정 입력과 접촉 정보를 준비함
         for (size_t side = 0; side < input.legs.size(); ++side)
         {
+            /*
+            hipsNode : 허벅지가 시작하는 본
+			kneeNode : 무릎이 시작하는 본
+			ankleNode : 발목이 시작하는 본
+			thighLength : 허벅지 길이
+			caalfLength : 종아리 길이
+			referenceBendInHip : 허벅지 본 기준의 기준 무릎 굽힘 방향
+            */
             const FootSoleSample& foot = sample.feet[side];
             const FootLegSetup& setup = foot.leg;
             FootIKLegInput& leg = input.legs[side];
@@ -175,6 +196,7 @@ namespace PARS
             {
                 continue;
             }
+
             // 세 본의 실제 바디와 연결된 가장 가까운 물리 부모가 있어야 관절 PD로 구동할 수 있다.
             if (std::find(nodes.begin(), nodes.end(), setup.hipNode) == nodes.end() ||
                 std::find(nodes.begin(), nodes.end(), setup.kneeNode) == nodes.end() ||
@@ -182,6 +204,7 @@ namespace PARS
             {
                 continue;
             }
+            // 다리를 지탱하는 실제 물리 부모를 찾음
             for (int parent = m_PhysicsSkeleton.parents[setup.hipNode]; parent >= 0; parent = m_PhysicsSkeleton.parents[parent])
             {
                 const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), parent);
@@ -205,54 +228,98 @@ namespace PARS
                         joint.childBone == m_PhysicsSkeleton.names[child];
                 });
             };
+            // PA에 힙, 허벅지, 무릎, 발목이 연결되어 있는지 확인
             if (!linked(leg.anchorNode, setup.hipNode) || !linked(setup.hipNode, setup.kneeNode) ||
                 !linked(setup.kneeNode, setup.ankleNode))
             {
                 continue;
             }
+
+            // 다리별로 기본 발바닥목표를 설정
             leg.soleInBone = toPx(foot.soleInBone);
             // 지지발은 현재 접촉한 발바닥 자세를 목표로 삼는다. 바디를 월드에 고정하지 않는다.
             // Recovery 진입/착지 시 저장한 유효 자세를 접촉이 잠시 끊겨도 유지한다.
             leg.targetSole = m_RecoverySoles[side];
             leg.available = leg.targetSole.isSane();
+
+            // 서있기 보정에 필요한 발,골반 관계를 계산
             StandingSupportFoot& support = standing.feet[side];
             support.available = leg.available;
+
+            // 지지역할을 하는발과 실제 접지를 구분함
             support.supporting = input.stepFoot != static_cast<int>(side);
             support.grounded = foot.contact.hasSample && foot.contact.grounded;
+
+
             support.sole = leg.targetSole;
             support.soleInBone = leg.soleInBone;
+
+            // 입력 목표 포즈의 발바닥을 계산
             support.animatedSole = rigidTargets[leg.ankleNode] * leg.soleInBone;
+
+            // IK좌표 변환의 핵심
+            /*
+			일단 기본적으로 목표(애니메이션 트랙데이터) 를 실제 물리 바디의 부모 좌표계로 쉽게 변환하기 위해 쓰는 toPhysical 변환이다.
+            목표 고관절의 월드변환은 목표 루트로부터 쭉 곱해지는데 여기서 행렬의 결합법칙이 작용하므로 
+			목표 고관절의 월드변환 = 목표 루트 * ... * 목표 고관절 부모 * 목표 고관절
+			물리 고관절의 월드변환 = toPhysical * 목표 루트 * ... * 목표 고관절
+								= 물리 루트 * ... * 물리 고관절 부모 * 물리 고관절
+            그냥 목표로 적용되어있던 관절을 루트만 바꿔서 물리로 바꿔주기위한 도움 변수 행렬이다 
+            */
             const PxTransform toPhysical = leg.actualAnchor * rigidTargets[leg.anchorNode].getInverse();
+
+            // 물리 엉덩이본과 물리 골반이랑 위치차이를 구한다.
             support.hipOffset = (toPhysical * rigidTargets[leg.hipNode]).p - leg.actualAnchor.p;
             support.length = leg.thighLength + leg.calfLength;
             standing.pelvis = leg.actualAnchor;
             standing.animatedPelvis = rigidTargets[leg.anchorNode];
             const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), foot.boneNode);
+
+            // 실제 지지 접촉을 래그돌에 전달
+            // 각 발에 대해 물리 바디 인덱스, 접촉 위치 법선, 지지여부를 구성. 
             contacts[side].body = body != nodes.end() ? static_cast<int>(body - nodes.begin()) : -1;
             contacts[side].supporting = support.supporting && support.grounded;
             contacts[side].position = foot.contact.position;
             contacts[side].normal = foot.contact.normal;
         }
+
+        // 지지 역할 이면서 실제 접지한 발만 지지 접촉으로 전달
         m_Ragdoll.SetSupportContacts(contacts);
+
+        // 발 기반 지지에서는 기본 발 목표에 서 있기 보정을 더함
         if (standing.enabled)
         {
+            /*
+            m_StandingSupport.Update는 다음을 고려한다.
+            - 애니메이션이 요구하는 골반의 발 위 높이
+            - 발딛기 중 필요한 골반 낮추기
+            - 지지할 발의 접촉이 끊겼을때 재접촉을 위한 낮추기
+            - 다리 기링와 수평 거리로 결정되는 도달 범위
+            - 현재 골반의 수평 위치와 COM 속도
+            */
             if (!m_StandingSupport.Update(standing, m_StandingSupportSettings))
             {
                 m_FootstepIK.Reset();
                 return;
             }
+
+            // 이번 IK입력의 발 목표를 교체
             const StandingSupportSnapshot& support = m_StandingSupport.GetSnapshot();
             for (size_t side = 0; side < input.legs.size(); ++side)
             {
                 input.legs[side].targetSole = support.soleTargets[side];
             }
         }
+
+        // 실제 양쪽 다리 IK를 계산
         if (!m_FootstepIK.Apply(input, m_PhysicsSkeleton.parents, rigidTargets))
         {
             // IK 입력이 부족하면 기본 애니메이션 목표를 유지하고 실패 사유를 디버그에 남긴다.
             // Recovery 호출자는 이 실패를 감지해 패시브 물리로 전환하므로 Idle 목표를 구동하지 않는다.
             return;
         }
+
+		// IK 결과를 원래 target에 반영. correctedNodesd 에 있는 본만 갱신
         for (int node : m_FootstepIK.GetSnapshot().correctedNodes)
         {
             const PxTransform& frame = rigidTargets[node];

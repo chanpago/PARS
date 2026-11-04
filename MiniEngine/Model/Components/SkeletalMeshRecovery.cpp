@@ -289,34 +289,55 @@ namespace PARS
                 m_PhysicsError = "Recovery requires both physical foot sole frames.";
                 return false;
             }
+
+            // 발딛기를 시작하면 지지발의 기준을 현재 상태로 다시 잡음
+            // 이번 발딛기를 지탱할 왼발의 기본 목표
             if (step.justStarted && step.supportFoot >= 0 && step.supportFoot < 2)
             {
                 m_RecoverySoles[step.supportFoot] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[step.supportFoot]) :
                     ToRecoveryFrame(sample.feet[step.supportFoot].soleWorld);
             }
+
+            // 움직이던 발이 착지하면 실제 착지 상태를 새 기준으로 저장
+			// 예를들어 계획한 착지 X위치가 0.4m인데 실제로 0.35m에 착지했다면, 평평한 지면에서는 실제 착지한 0.35를 바탕으로 새 기본 목표를 잡음
             if (step.justLanded && step.stepFoot >= 0 && step.stepFoot < 2)
             {
                 // 착지는 회복의 종료가 아니다. 착지한 발을 유지하며 COM 안정 조건을 계속 확인한다.
                 m_RecoverySoles[step.stepFoot] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[step.stepFoot]) :
                     ToRecoveryFrame(sample.feet[step.stepFoot].soleWorld);
             }
+
+            // 착지 전에는 움직이는 발의 목표를 궤적에 따라 갱신
             else if (step.motion.valid && step.stepFoot >= 0 && step.stepFoot < 2)
             {
                 PxTransform sole(PxIdentity);
+
+                /*
+				step.motion.position : 발딛기 궤적에 따라 계산된 발바닥 위치
+				step.targetNormal : 목표 발바닥의 위 방향을 정할 지면 법선
+				animatedSoles[step.stepFoot] : 발의 전방 방향을 얻을 애니메이션 기준 자세
+                sole : 계산 결과를 받을 위치,회전 변환
+                */
                 if (MakeFootSoleTarget(step.motion.position, step.targetNormal, animatedSoles[step.stepFoot], sole))
                 {
+                    // 성공하면 이동할 발의 목표를 갱신
                     m_RecoverySoles[step.stepFoot] = sole;
                 }
             }
+
+            // 시작,착지 때 목표 변화율 계산 이력을 초기화
             if (m_Ragdoll.UsesFootDrivenSupport() && (step.justStarted || step.justLanded))
             {
                 // 이륙/착지 때 실제 발로 기준을 다시 잡는 차이를 목표 속도·가속도로 오인하지 않는다.
                 // 현재 물리 속도는 유지하므로 관절 PD의 제동은 계속 작동한다.
                 m_Ragdoll.ResetDriveTargetHistory();
             }
-            // 접촉/후보가 잠시 사라져도 마지막 유효한 양발 목표로 IK를 계속 푼다.
-            // 발딛기 목표 출력이 잠시 멈춰도 지지 다리의 높이 복구는 계속 계산한다.
+
+            // 저장한 발바닥의 목표를 다리의 본 목표로 변환함
+            // 다리 IK를 적용해서 target을 수정함
             ApplyFootstepIKTargets(target, deltaTime);
+
+            // IK목표를 정상적으로 계산했는지 확인
             if (m_FootstepIK.GetSnapshot().status != FootstepIKStatus::Applied)
             {
                 m_PhysicsError = "Recovery leg IK could not produce valid drive targets.";
