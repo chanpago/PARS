@@ -24,11 +24,24 @@ namespace
     {
     public:
         LifecycleProbe(Actor& owner, const std::string& name, std::vector<std::string>& events)
-            : ActorComponent(owner, name), m_Events(events) {}
+            : ActorComponent(owner, name), m_Events(events)
+        {
+        }
+
     protected:
-        void BeginPlay() override { m_Events.push_back(GetName() + ":begin"); }
-        void EndPlay() override { m_Events.push_back(GetName() + ":end"); }
-        void TickComponent(float) override { m_Events.push_back(GetName() + ":tick"); }
+        void BeginPlay() override
+        {
+            m_Events.push_back(GetName() + ":begin");
+        }
+        void EndPlay() override
+        {
+            m_Events.push_back(GetName() + ":end");
+        }
+        void TickComponent(float) override
+        {
+            m_Events.push_back(GetName() + ":tick");
+        }
+
     private:
         std::vector<std::string>& m_Events;
     };

@@ -26,15 +26,16 @@ void SkeletalMeshViewer::DrawOrientationAxes(float left, float top, float width,
     const ImVec2 center(left + margin + extent, top + height - margin - extent);
     struct Axis
     {
+    public:
         Vector3 world;
-        ImU32 color;
         const char* label;
+        ImU32 color;
         float depth;
     };
     Axis axes[] = {
-        {Vector3(kXUnitVector), IM_COL32(235, 70, 70, 255), "X", 0},
-        {Vector3(kYUnitVector), IM_COL32(85, 220, 90, 255), "Y", 0},
-        {Vector3(kZUnitVector), IM_COL32(75, 145, 255, 255), "Z", 0}};
+        {Vector3(kXUnitVector), "X", IM_COL32(235, 70, 70, 255), 0},
+        {Vector3(kYUnitVector), "Y", IM_COL32(85, 220, 90, 255), 0},
+        {Vector3(kZUnitVector), "Z", IM_COL32(75, 145, 255, 255), 0}};
     // 회전만 사용해 월드 방향을 카메라 기저에 투영한다.
     // PARS는 Y가 위쪽이다. 카메라 이동, FOV, 줌으로 이 위젯의 위치나 크기가 바뀌면 안 된다.
     for (auto& axis : axes)
@@ -171,14 +172,19 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
     // 선택 상태는 트리와 뷰포트가 공유한다.
     struct Node
     {
-        bool joint;
-        int index;
-        float x, y, width;
+    public:
         const char* role;
+        int index;
+        float x;
+        float y;
+        float width;
+        bool joint;
     };
     struct Link
     {
-        int a, b;
+    public:
+        int a;
+        int b;
     };
     std::vector<Node> nodes;
     std::vector<Link> links;
@@ -204,16 +210,16 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
         const int parent = m_PhysicsAsset.FindBody(joint.parentBone), child = m_PhysicsAsset.FindBody(joint.childBone);
         if (parent >= 0 && child >= 0)
         {
-            nodes = {{false, parent, 0, 0, bodyWidth, u8"부모"},
-                {true, selectedJoint, middle, 0, jointWidth, u8"관절"},
-                {false, child, right, 0, bodyWidth, u8"자식"}};
+            nodes = {{u8"부모", parent, 0, 0, bodyWidth, false},
+                {u8"관절", selectedJoint, middle, 0, jointWidth, true},
+                {u8"자식", child, right, 0, bodyWidth, false}};
             links = {{0, 1}, {1, 2}};
         }
     }
     else if (body >= 0 && body < static_cast<int>(m_PhysicsAsset.bodies.size()))
     {
         const auto& name = m_PhysicsAsset.bodies[body].bone;
-        nodes.push_back({false, body, 0, 0, bodyWidth, u8"바디"});
+        nodes.push_back({u8"바디", body, 0, 0, bodyWidth, false});
         int row = 0;
         for (int i = 0; i < static_cast<int>(m_PhysicsAsset.constraints.size()); ++i)
         {
@@ -229,8 +235,8 @@ void SkeletalMeshViewer::DrawRelationshipGraph()
                 continue;
             }
             const int jointNode = static_cast<int>(nodes.size());
-            nodes.push_back({true, i, middle, row * step, jointWidth, u8"관절"});
-            nodes.push_back({false, other, right, row * step, bodyWidth, outgoing ? u8"자식" : u8"부모"});
+            nodes.push_back({u8"관절", i, middle, row * step, jointWidth, true});
+            nodes.push_back({outgoing ? u8"자식" : u8"부모", other, right, row * step, bodyWidth, false});
             links.push_back({0, jointNode});
             links.push_back({jointNode, jointNode + 1});
             ++row;

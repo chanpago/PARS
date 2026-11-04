@@ -24,12 +24,14 @@ namespace FramePerformance
 
     struct Sample
     {
+    public:
         std::array<double, CategoryCount> milliseconds{};
         std::array<uint32_t, CategoryCount> calls{};
     };
 
     struct Statistics
     {
+    public:
         double last = 0.0;
         double average = 0.0;
         double maximum = 0.0;
@@ -43,14 +45,12 @@ namespace FramePerformance
         {
             m_Current = Sample{};
         }
-
         void AddSample(Category category, double milliseconds)
         {
             const size_t index = static_cast<size_t>(category);
             m_Current.milliseconds[index] += milliseconds;
             ++m_Current.calls[index];
         }
-
         void EndFrame()
         {
             const size_t total = static_cast<size_t>(Category::ParsTotal);
@@ -66,6 +66,7 @@ namespace FramePerformance
             }
         }
 
+    public:
         Statistics GetStatistics(Category category) const
         {
             Statistics result;
@@ -90,7 +91,6 @@ namespace FramePerformance
             result.average /= static_cast<double>(m_Count);
             return result;
         }
-
         size_t GetFrameCount() const
         {
             return m_Count;
@@ -107,6 +107,7 @@ namespace FramePerformance
 
     struct State
     {
+    public:
         Recorder recorder;
         Scope* currentScope = nullptr;
         bool enabled = false;
@@ -149,7 +150,6 @@ namespace FramePerformance
                 m_Start = std::chrono::steady_clock::now();
             }
         }
-
         ~Scope()
         {
             if (!m_Enabled)
@@ -166,15 +166,16 @@ namespace FramePerformance
                 m_Parent->m_ChildMilliseconds += milliseconds;
             }
         }
-
         Scope(const Scope&) = delete;
+
+    public:
         Scope& operator=(const Scope&) = delete;
 
     private:
         Category m_Category;
-        bool m_Enabled;
         Scope* m_Parent = nullptr;
         std::chrono::steady_clock::time_point m_Start;
         double m_ChildMilliseconds = 0.0;
+        bool m_Enabled;
     };
 }

@@ -16,20 +16,64 @@ namespace
         if (!value) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
     }
 
-    struct Record { int begins = 0, ticks = 0, prepares = 0, fixedTicks = 0, ends = 0, destroyed = 0; };
+    struct Record
+    {
+    public:
+        int begins = 0;
+        int ticks = 0;
+        int prepares = 0;
+        int fixedTicks = 0;
+        int ends = 0;
+        int destroyed = 0;
+    };
 
     class ProbeComponent : public ActorComponent
     {
     public:
         ProbeComponent(Actor& owner, const std::string& name, Record& record)
-            : ActorComponent(owner, name), m_Record(record) {}
-        std::function<void(Actor&)> onBegin, onTick, onEnd;
+            : ActorComponent(owner, name), m_Record(record)
+        {
+        }
+
     protected:
-        void BeginPlay() override { ++m_Record.begins; if (onBegin) onBegin(GetOwner()); }
-        void TickComponent(float) override { ++m_Record.ticks; if (onTick) onTick(GetOwner()); }
-        void PreparePhysics(float) override { ++m_Record.prepares; }
-        void FixedTickComponent(float) override { ++m_Record.fixedTicks; }
-        void EndPlay() override { ++m_Record.ends; if (onEnd) onEnd(GetOwner()); }
+        void BeginPlay() override
+        {
+            ++m_Record.begins;
+            if (onBegin)
+            {
+                onBegin(GetOwner());
+            }
+        }
+        void TickComponent(float) override
+        {
+            ++m_Record.ticks;
+            if (onTick)
+            {
+                onTick(GetOwner());
+            }
+        }
+        void PreparePhysics(float) override
+        {
+            ++m_Record.prepares;
+        }
+        void FixedTickComponent(float) override
+        {
+            ++m_Record.fixedTicks;
+        }
+        void EndPlay() override
+        {
+            ++m_Record.ends;
+            if (onEnd)
+            {
+                onEnd(GetOwner());
+            }
+        }
+
+    public:
+        std::function<void(Actor&)> onBegin;
+        std::function<void(Actor&)> onTick;
+        std::function<void(Actor&)> onEnd;
+
     private:
         Record& m_Record;
     };
@@ -37,13 +81,20 @@ namespace
     class ProbeActor : public Actor
     {
     public:
-        ProbeActor(const std::string& name, Record& record) : Actor(name), m_Record(record)
+        ProbeActor(const std::string& name, Record& record)
+            : Actor(name), m_Record(record)
         {
             SetRootComponent(CreateDefaultSubobject<SceneComponent>("Root"));
             probe = &CreateDefaultSubobject<ProbeComponent>("Probe", record);
         }
-        ~ProbeActor() override { ++m_Record.destroyed; }
+        ~ProbeActor() override
+        {
+            ++m_Record.destroyed;
+        }
+
+    public:
         ProbeComponent* probe;
+
     private:
         Record& m_Record;
     };

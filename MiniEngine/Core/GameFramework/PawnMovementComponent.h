@@ -8,6 +8,8 @@ namespace PARS
     {
     public:
         using MovementComponent::MovementComponent;
+
+    public:
         Pawn* GetPawnOwner() const
         {
             return dynamic_cast<Pawn*>(&GetOwner());

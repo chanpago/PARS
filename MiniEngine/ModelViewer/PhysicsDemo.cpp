@@ -66,9 +66,10 @@ namespace
     {
         struct Search
         {
-            DWORD processId;
+        public:
             HWND window;
-        } search{processId, nullptr};
+            DWORD processId;
+        } search{nullptr, processId};
         EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
             auto& result = *reinterpret_cast<Search*>(parameter);
             DWORD owner = 0;
@@ -134,6 +135,7 @@ namespace
 
     struct Vertex
     {
+    public:
         PxVec3 position;
         PxVec3 normal;
         PxVec3 color;

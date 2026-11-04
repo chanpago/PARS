@@ -164,8 +164,9 @@ void SkeletalMeshViewer::DrawPhysicsBodies()
     }
     struct VisibleBody
     {
-        int index;
+    public:
         Matrix4 world;
+        int index;
         float depth;
     };
     std::vector<VisibleBody> sorted;
@@ -178,7 +179,7 @@ void SkeletalMeshViewer::DrawPhysicsBodies()
             continue;
         }
         const Matrix4 world = PhysicsBoneFrame(m_NodeWorld[node]) * m_PhysicsAsset.bodies[i].GetLocalTransform();
-        sorted.push_back({static_cast<int>(i), world,
+        sorted.push_back({world, static_cast<int>(i),
             Dot(Vector3(world.GetW()) - m_Camera.GetPosition(), m_Camera.GetForwardVec())});
     }
     // 볼록 표면은 뒷면을 컬링한다. 알파 블렌딩을 위해 바디를 먼 순서부터 정렬한다.

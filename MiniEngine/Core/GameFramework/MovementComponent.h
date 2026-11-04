@@ -8,6 +8,8 @@ namespace PARS
     {
     public:
         using ActorComponent::ActorComponent;
+
+    public:
         bool SetUpdatedComponent(SceneComponent& component)
         {
             if (&component.GetOwner() != &GetOwner() || !GetOwner().OwnsComponent(component))
@@ -27,7 +29,7 @@ namespace PARS
         }
 
     protected:
-        SceneComponent* m_UpdatedComponent = nullptr;
         Math::Vector3 m_Velocity{Math::kZero};
+        SceneComponent* m_UpdatedComponent = nullptr;
     };
 }

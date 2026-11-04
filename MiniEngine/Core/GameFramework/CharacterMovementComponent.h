@@ -8,8 +8,19 @@ namespace PARS
     {
     public:
         using PawnMovementComponent::PawnMovementComponent;
-        static constexpr float WalkSpeed = 1.6f;
-        static constexpr float RunSpeed = 3.5f;
+
+    public:
+        void StopMovementImmediately();
+
+    protected:
+        void PreparePhysics(float deltaTime) override;
+        void FixedTickComponent(float deltaTime) override;
+        void EndPlay() override
+        {
+            StopMovementImmediately();
+        }
+
+    public:
         bool IsMovingOnGround() const
         {
             return m_Grounded;
@@ -20,25 +31,20 @@ namespace PARS
         }
         float GetGroundSpeed() const;
         float GetLocomotionSpeed() const;
-        void StopMovementImmediately();
         void SetHorizontalMoveConstraint(std::function<Math::Vector3(Math::Vector3)> constraint)
         {
             m_HorizontalMoveConstraint = std::move(constraint);
         }
 
-    protected:
-        void PreparePhysics(float deltaTime) override;
-        void FixedTickComponent(float deltaTime) override;
-        void EndPlay() override
-        {
-            StopMovementImmediately();
-        }
+    public:
+        static constexpr float WalkSpeed = 1.6f;
+        static constexpr float RunSpeed = 3.5f;
 
     private:
         Math::Vector3 m_Input{Math::kZero};
         Math::Vector3 m_LocomotionVelocity{Math::kZero};
-        bool m_Grounded = false;
-        float m_VerticalSpeed = 0;
         std::function<Math::Vector3(Math::Vector3)> m_HorizontalMoveConstraint;
+        float m_VerticalSpeed = 0;
+        bool m_Grounded = false;
     };
 }

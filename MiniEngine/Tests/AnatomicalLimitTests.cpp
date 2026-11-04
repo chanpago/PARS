@@ -14,20 +14,7 @@ namespace
 
     struct Fixture
     {
-        PhysicsSkeleton skeleton;
-        std::vector<GraphNode> pose;
-        std::vector<Vector3> positions;
-        int Add(const std::string& name, int parent, Vector3 position)
-        {
-            const int index = static_cast<int>(pose.size());
-            skeleton.names.push_back(name); skeleton.parents.push_back(parent);
-            skeleton.meshNodes.push_back(index == 0 ? -1 : 0);
-            GraphNode node{};
-            node.xform = Matrix4(Matrix3(kIdentity), position - (parent < 0 ? Vector3(kZero) : positions[parent]));
-            node.rotation = Quaternion(kIdentity); node.scale = XMFLOAT3(1, 1, 1);
-            pose.push_back(node); positions.push_back(position);
-            return index;
-        }
+    public:
         Fixture()
         {
             Add("mesh", -1, Vector3(kZero));
@@ -54,12 +41,40 @@ namespace
                 Add(p + "ToeBase", foot, Vector3(side * .08f, .01f, .13f));
             }
         }
+
+    public:
+        int Add(const std::string& name, int parent, Vector3 position)
+        {
+            const int index = static_cast<int>(pose.size());
+            skeleton.names.push_back(name);
+            skeleton.parents.push_back(parent);
+            skeleton.meshNodes.push_back(index == 0 ? -1 : 0);
+            GraphNode node{};
+            node.xform = Matrix4(Matrix3(kIdentity), position - (parent < 0 ? Vector3(kZero) : positions[parent]));
+            node.rotation = Quaternion(kIdentity);
+            node.scale = XMFLOAT3(1, 1, 1);
+            pose.push_back(node);
+            positions.push_back(position);
+            return index;
+        }
+
+    public:
         int Find(const std::string& name) const
         {
             for (int i = 0; i < static_cast<int>(skeleton.names.size()); ++i)
-                if (skeleton.names[i] == name) return i;
+            {
+                if (skeleton.names[i] == name)
+                {
+                    return i;
+                }
+            }
             return -1;
         }
+
+    public:
+        PhysicsSkeleton skeleton;
+        std::vector<GraphNode> pose;
+        std::vector<Vector3> positions;
     };
     bool Near(const Matrix4& a, const Matrix4& b)
     {

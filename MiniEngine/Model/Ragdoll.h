@@ -20,14 +20,16 @@ namespace PARS
 {
     struct RagdollSupportContact
     {
+    public:
         int body = -1;
-        bool supporting = false;
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0, 1, 0};
+        bool supporting = false;
     };
 
     struct RagdollSupportLoads
     {
+    public:
         std::array<float, 2> fractions{};
         std::array<physx::PxVec3, 2> forces{physx::PxVec3(0), physx::PxVec3(0)};
     };
@@ -40,11 +42,59 @@ namespace PARS
         Ragdoll() = default;
         ~Ragdoll();
         Ragdoll(const Ragdoll&) = delete;
-        Ragdoll& operator=(const Ragdoll&) = delete;
+
+    public:
         bool Create(PhysicsWorld& world, const PhysicsAsset& asset, const std::vector<std::string>& names,
             const std::vector<Math::Matrix4>& boneWorld, Math::Vector3 velocity, std::string& error, bool simulate = true);
         void Destroy();
         void Swap(Ragdoll& other) noexcept;
+        bool SetSimulating(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity = false);
+        // 애니메이션에서 새로 진입할 때와 달리, 드라이브 전환 시에는 동적 포즈와 속도를 유지한다.
+        void SetDrivesEnabled(bool enabled);
+        bool ApplyDriveSettings(const PhysicsAsset& asset, std::string& error);
+        bool UpdateDriveTargets(const std::vector<Math::Matrix4>& boneWorld, float deltaTime, std::string& error);
+        // 월드 공간의 힘/토크 드라이브로 동적 골반을 지지한다.
+        // 인체 관절의 각도 드라이브와 독립적이며, simulate() 전에 갱신한다.
+        bool SetRootSupported(bool supported, std::string& error);
+        // 부분 지지는 회전과 선택한 위치 모터의 강도를 조절한다. 발 지지 모드의 Y 모터는 항상 꺼진다.
+        // 가중치 0은 골반 보조 조인트를 제거하며 바디 위치를 순간 이동시키지 않는다.
+        bool SetRootSupport(float weight, bool horizontal, std::string& error);
+        // 발 지지에서는 골반 Y 모터를 끄고 지면 하중을 관절 보상 토크에 반영한다.
+        void SetFootDrivenSupport(bool enabled);
+        // 고정 스텝에서는 목표를 사용한다. 순간이동 시에는 일시정지/에디터 포즈도 즉시 갱신한다.
+        bool UpdateKinematicPose(const std::vector<Math::Matrix4>& boneWorld, bool teleport, std::string& error);
+        // 목표 생성 주체가 바뀔 때 불연속을 목표 속도/가속도로 미분하지 않는다. 실제 바디 속도는 유지한다.
+        void ResetDriveTargetHistory();
+        void AddVelocity(Math::Vector3 velocity);
+        // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
+        void SetCollisionEnabled(bool enabled);
+        // 실제 PA 형상과 애니메이션 목표를 스윕해 벽 너머로 이동 목표가 누적되지 않게 한다.
+        Math::Vector3 ConstrainHorizontalMovement(const std::vector<Math::Matrix4>& boneWorld,
+            Math::Vector3 displacement) const;
+
+    private:
+        // 활성 구성과 대기 구성은 각각 PhysX 객체를 소유하며, 하나만 씬에 등록한다.
+        bool CreateConfiguration(PhysicsWorld& world, const PhysicsAsset& asset, const std::vector<std::string>& names,
+            const std::vector<Math::Matrix4>& boneWorld, Math::Vector3 velocity, std::string& error, bool simulate);
+        bool PrepareStandby(std::string& error);
+        bool SetSceneActive(bool active, std::string& error);
+        bool ResetSimulationPose(const std::vector<Math::Matrix4>& boneWorld,
+            const std::vector<Math::Vector3>& linear, const std::vector<Math::Vector3>& angular, std::string& error);
+        void SwapConfiguration(Ragdoll& other) noexcept;
+        bool CreateArticulation(PhysicsWorld& world, const std::vector<Math::Matrix4>& boneWorld, std::string& error);
+        bool RebuildSimulation(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity);
+        void SetArticulationVelocities(const std::vector<Math::Vector3>& linear, const std::vector<Math::Vector3>& angular);
+        void UpdateArticulationDrives(float deltaTime = 0);
+        void SetArticulationTarget(size_t joint, Math::Quaternion rotation, Math::Vector3 angularVelocity);
+        void WakeBodies();
+        void ConfigureRootSupportDrives();
+        std::vector<float> ComputeSupportGeneralizedForce();
+        void InvalidateContactState();
+
+    public:
+        Ragdoll& operator=(const Ragdoll&) = delete;
+
+    public:
         bool IsActive() const
         {
             return !m_Bodies.empty();
@@ -57,23 +107,10 @@ namespace PARS
         {
             return m_Articulation != nullptr;
         }
-        bool SetSimulating(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity = false);
-        // 애니메이션에서 새로 진입할 때와 달리, 드라이브 전환 시에는 동적 포즈와 속도를 유지한다.
-        void SetDrivesEnabled(bool enabled);
         bool AreDrivesEnabled() const
         {
             return m_DrivesEnabled;
         }
-        bool ApplyDriveSettings(const PhysicsAsset& asset, std::string& error);
-        bool UpdateDriveTargets(const std::vector<Math::Matrix4>& boneWorld, float deltaTime, std::string& error);
-        // 월드 공간의 힘/토크 드라이브로 동적 골반을 지지한다.
-        // 인체 관절의 각도 드라이브와 독립적이며, simulate() 전에 갱신한다.
-        bool SetRootSupported(bool supported, std::string& error);
-        // 부분 지지는 회전과 선택한 위치 모터의 강도를 조절한다. 발 지지 모드의 Y 모터는 항상 꺼진다.
-        // 가중치 0은 골반 보조 조인트를 제거하며 바디 위치를 순간 이동시키지 않는다.
-        bool SetRootSupport(float weight, bool horizontal, std::string& error);
-        // 발 지지에서는 골반 Y 모터를 끄고 지면 하중을 관절 보상 토크에 반영한다.
-        void SetFootDrivenSupport(bool enabled);
         void SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts);
         bool UsesFootDrivenSupport() const
         {
@@ -106,8 +143,6 @@ namespace PARS
         {
             return m_MaxTargetClampAngle;
         }
-        // 고정 스텝에서는 목표를 사용한다. 순간이동 시에는 일시정지/에디터 포즈도 즉시 갱신한다.
-        bool UpdateKinematicPose(const std::vector<Math::Matrix4>& boneWorld, bool teleport, std::string& error);
         size_t GetKinematicBodyCount() const;
         size_t GetBodyCount() const
         {
@@ -129,20 +164,12 @@ namespace PARS
         bool GetCenterOfMassVelocity(Math::Vector3& velocity) const;
         bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
         float GetExternalImpactImpulse() const;
-        // 목표 생성 주체가 바뀔 때 불연속을 목표 속도/가속도로 미분하지 않는다. 실제 바디 속도는 유지한다.
-        void ResetDriveTargetHistory();
         uint64_t GetContactRevision() const
         {
             return m_ContactRevision;
         }
-        void AddVelocity(Math::Vector3 velocity);
         // PxActor::userData로 소유자를 식별해 이동 쿼리에서 자기 자신을 제외한다.
         void SetQueryOwner(void* owner);
-        // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
-        void SetCollisionEnabled(bool enabled);
-        // 실제 PA 형상과 애니메이션 목표를 스윕해 벽 너머로 이동 목표가 누적되지 않게 한다.
-        Math::Vector3 ConstrainHorizontalMovement(const std::vector<Math::Matrix4>& boneWorld,
-            Math::Vector3 displacement) const;
         // 통합 테스트와 PVD 패널에서도 사용하는 진단 정보다.
         float GetMaxAnchorError() const;
         float GetMaxAngularError(size_t* worstJoint = nullptr) const;
@@ -155,29 +182,12 @@ namespace PARS
         static constexpr float PelvisAngularFrequency = 16.0f;
         static constexpr float PelvisAngularDampingRatio = 1.0f;
 
-        // 활성 구성과 대기 구성은 각각 PhysX 객체를 소유하며, 하나만 씬에 등록한다.
-        bool CreateConfiguration(PhysicsWorld& world, const PhysicsAsset& asset, const std::vector<std::string>& names,
-            const std::vector<Math::Matrix4>& boneWorld, Math::Vector3 velocity, std::string& error, bool simulate);
-        bool PrepareStandby(std::string& error);
-        bool SetSceneActive(bool active, std::string& error);
-        bool ResetSimulationPose(const std::vector<Math::Matrix4>& boneWorld,
-            const std::vector<Math::Vector3>& linear, const std::vector<Math::Vector3>& angular, std::string& error);
-        void SwapConfiguration(Ragdoll& other) noexcept;
-        bool CreateArticulation(PhysicsWorld& world, const std::vector<Math::Matrix4>& boneWorld, std::string& error);
-        bool RebuildSimulation(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity);
-        void SetArticulationVelocities(const std::vector<Math::Vector3>& linear, const std::vector<Math::Vector3>& angular);
-        void UpdateArticulationDrives(float deltaTime = 0);
-        void SetArticulationTarget(size_t joint, Math::Quaternion rotation, Math::Vector3 angularVelocity);
-        void WakeBodies();
-        void ConfigureRootSupportDrives();
-        std::vector<float> ComputeSupportGeneralizedForce();
-        void InvalidateContactState();
+    private:
         uint64_t m_ContactRevision = 0;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
         void* m_QueryOwner = nullptr;
-        bool m_CollisionEnabled = true;
         std::vector<int> m_BoneNodes;
         std::vector<physx::PxRigidBody*> m_Bodies;
         std::vector<physx::PxD6Joint*> m_Joints;
@@ -186,21 +196,24 @@ namespace PARS
         std::vector<physx::PxArticulationJointReducedCoordinate*> m_ArticulationJoints;
         std::vector<unsigned> m_ArticulationDofOffsets;
         std::vector<float> m_PreviousArticulationTargetVelocity;
-        int m_ArticulationRoot = -1;
-        bool m_Simulating = false;
-        bool m_DrivesEnabled = false, m_HasDriveTargets = false;
-        int m_SupportBody = -1;
         physx::PxD6Joint* m_SupportJoint = nullptr;
-        bool m_HasSupportTarget = false;
-        bool m_SupportHorizontal = true;
+        std::vector<Math::Quaternion> m_DriveTargets;
+        std::vector<Math::Matrix4> m_LastKinematicTargets;
+        std::vector<Math::Vector3> m_AnimatedLinearVelocity;
+        std::vector<Math::Vector3> m_AnimatedAngularVelocity;
+        std::unique_ptr<Ragdoll> m_Standby;
+        int m_ArticulationRoot = -1;
+        int m_SupportBody = -1;
         float m_RootSupportWeight = 0;
-        bool m_FootDrivenSupport = false;
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;
         float m_MaxTargetClampAngle = 0;
-        std::vector<Math::Quaternion> m_DriveTargets;
-        std::vector<Math::Matrix4> m_LastKinematicTargets;
-        std::vector<Math::Vector3> m_AnimatedLinearVelocity, m_AnimatedAngularVelocity;
-        std::unique_ptr<Ragdoll> m_Standby;
+        bool m_CollisionEnabled = true;
+        bool m_Simulating = false;
+        bool m_DrivesEnabled = false;
+        bool m_HasDriveTargets = false;
+        bool m_HasSupportTarget = false;
+        bool m_SupportHorizontal = true;
+        bool m_FootDrivenSupport = false;
     };
 }

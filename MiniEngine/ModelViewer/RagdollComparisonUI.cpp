@@ -27,8 +27,10 @@ namespace
 
     struct PlotData
     {
+    public:
         const std::vector<ComparisonFrame>& frames;
-        int index, metric;
+        int index;
+        int metric;
     };
 
     float PlotValue(void* data, int frame)

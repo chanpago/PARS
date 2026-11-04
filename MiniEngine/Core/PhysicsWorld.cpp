@@ -567,9 +567,8 @@ namespace
             : ignoredOwner(owner)
         {
         }
-        const void* ignoredOwner;
-        PxVec3 direction{0};
-        bool verticalOnly = false;
+
+    public:
         PxQueryHitType::Enum preFilter(const PxFilterData&, const PxShape* shape,
             const PxRigidActor* actor, PxHitFlags&) override
         {
@@ -581,11 +580,17 @@ namespace
         PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit& hit,
             const PxShape*, const PxRigidActor*) override
         {
-            const auto& sweep = static_cast<const PxSweepHit&>(hit);
+            const PxSweepHit& sweep = static_cast<const PxSweepHit&>(hit);
             // 바닥과 접촉해도 접선 방향 이동이나 바닥에서 멀어지는 이동은 막지 않는다.
             return (!verticalOnly || PxAbs(sweep.normal.y) >= WalkableNormal) && sweep.normal.dot(direction) < -1e-5f
-                ? PxQueryHitType::eBLOCK : PxQueryHitType::eNONE;
+                ? PxQueryHitType::eBLOCK
+                : PxQueryHitType::eNONE;
         }
+
+    public:
+        const void* ignoredOwner;
+        PxVec3 direction{0};
+        bool verticalOnly = false;
     };
 
     // 로컬 버퍼 용량보다 충돌 결과가 많은 씬에서도 모든 겹침을 처리한다.
@@ -594,9 +599,11 @@ namespace
     public:
         CapsulePenetration(const PhysicsQueryCapsule& capsule, bool verticalOnly = false)
             : PxOverlapCallback(hits, 32),
-            geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre)), verticalOnly(verticalOnly)
+              geometry(CapsuleGeometry(capsule, CapsuleSkin)), pose(CapsulePose(capsule.centre)), verticalOnly(verticalOnly)
         {
         }
+
+    public:
         void Consider(const PxGeometry& other, const PxTransform& otherPose)
         {
             PxVec3 normal;
@@ -620,14 +627,16 @@ namespace
         {
             processTouches(touches, nbTouches);
         }
+
+    public:
         PxCapsuleGeometry geometry;
         PxTransform pose;
         float deepest = 0;
         PxVec3 direction{0};
 
     private:
-        bool verticalOnly;
         PxOverlapHit hits[32];
+        bool verticalOnly;
     };
 }
 

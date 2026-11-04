@@ -58,8 +58,12 @@ namespace PARS
 
         struct AnatomicalCone
         {
+        public:
             // 중심은 도 단위의 순수 스윙 회전 벡터이며, 오일러 각이 아니다.
-            float centerY, centerZ, halfY, halfZ;
+            float centerY;
+            float centerZ;
+            float halfY;
+            float halfZ;
         };
 
         void SetAnatomicalFrames(PhysicsConstraint& joint, const Matrix4& parentBody,
@@ -323,6 +327,7 @@ namespace PARS
             .1416f, .0433f, .0137f, .1416f, .0433f, .0137f};
         struct Part
         {
+        public:
             const char* bone;
             const char* end;
             float radius;

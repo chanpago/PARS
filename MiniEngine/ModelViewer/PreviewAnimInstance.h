@@ -7,15 +7,8 @@ class PreviewAnimInstance : public PARS::LocomotionAnimInstance
 {
 public:
     using LocomotionAnimInstance::LocomotionAnimInstance;
-    bool IsAutoCycleEnabled() const
-    {
-        return m_AutoCycle;
-    }
-    void SetAutoCycleEnabled(bool enabled)
-    {
-        m_AutoCycle = enabled;
-        m_Elapsed = 0.0f;
-    }
+
+public:
     bool SelectAnimation(uint32_t index)
     {
         const bool playing = IsPlaying();
@@ -28,10 +21,6 @@ public:
         SetPlaying(playing);
         m_Elapsed = 0.0f;
         return true;
-    }
-    float GetTimeUntilNextAnimation() const
-    {
-        return GetDisplayDuration() - m_Elapsed;
     }
 
 protected:
@@ -54,12 +43,29 @@ protected:
         }
     }
 
+public:
+    bool IsAutoCycleEnabled() const
+    {
+        return m_AutoCycle;
+    }
+    void SetAutoCycleEnabled(bool enabled)
+    {
+        m_AutoCycle = enabled;
+        m_Elapsed = 0.0f;
+    }
+    float GetTimeUntilNextAnimation() const
+    {
+        return GetDisplayDuration() - m_Elapsed;
+    }
+
 private:
     float GetDisplayDuration() const
     {
         const float duration = GetAnimationDuration(GetCurrentAnimationIndex());
         return duration > 0.0f ? duration * std::ceil(4.0f / duration) : 0.0f;
     }
-    bool m_AutoCycle = true;
+
+private:
     float m_Elapsed = 0.0f;
+    bool m_AutoCycle = true;
 };

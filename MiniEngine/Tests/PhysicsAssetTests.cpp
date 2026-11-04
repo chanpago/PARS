@@ -151,7 +151,11 @@ void RunPhysicsAssetTests()
     joint.twistMin = -.65f; joint.twistMax = .8f; joint.swingYLimit = .4f; joint.swingZLimit = .9f;
     joint.swingY = PhysicsJointMotion::Locked; joint.swingZ = PhysicsJointMotion::Free;
     joint.enableCollision = true;
-    joint.drives[0] = {true, 135.0f, 12.0f, 28.0f};
+    joint.drives[0] = PhysicsAngularDrive{};
+    joint.drives[0].enabled = true;
+    joint.drives[0].stiffness = 135.0f;
+    joint.drives[0].damping = 12.0f;
+    joint.drives[0].maxTorque = 28.0f;
     original.constraints.push_back(joint);
     Check(SameFrame(parentBody * joint.parentFrame.GetTransform(), jointWorld) &&
         SameFrame(childBody * joint.childFrame.GetTransform(), jointWorld),

@@ -20,6 +20,8 @@ class PhysicsDemo
 {
 public:
     explicit PhysicsDemo(PARS::World& world);
+
+public:
     bool Startup();
     void Cleanup();
     void Update(float deltaTime);
@@ -45,6 +47,11 @@ private:
     void ConnectPvd();
     void RestartPvd();
     void UpdatePvdConnection();
+
+private:
+    static constexpr int HistoryCapacity = 240;
+
+private:
     PARS::World& m_GameWorld;
     PhysicsWorld& m_World;
     physx::PxRigidStatic* m_Floor = nullptr;
@@ -55,16 +62,15 @@ private:
     GraphicsPSO m_OverlayLinePSO;
     ByteAddressBuffer m_RulerMesh;
     physx::PxRigidStatic* m_Walls[5] = {};
-    bool m_DropReady = true;
-    static constexpr int HistoryCapacity = 240;
-    float m_HeightHistory[HistoryCapacity] = {};
-    int m_HistoryCount = 0;
-    int m_HistoryOffset = 0;
-    bool m_PvdConnecting = false;
-    uint32_t m_PvdProcessId = 0;
-    bool m_PvdUnresponsive = false;
     uint64_t m_PvdConnectDeadline = 0;
     uint64_t m_PvdNextAttempt = 0;
     std::string m_PvdMessage;
+    float m_HeightHistory[HistoryCapacity] = {};
+    int m_HistoryCount = 0;
+    int m_HistoryOffset = 0;
+    uint32_t m_PvdProcessId = 0;
+    bool m_DropReady = true;
+    bool m_PvdConnecting = false;
+    bool m_PvdUnresponsive = false;
     bool m_PvdSceneQueries = false;
 };

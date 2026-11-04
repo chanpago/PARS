@@ -681,7 +681,11 @@ void RunActiveRagdollTests()
     hinge.SetWorldFrame(initial[0], initial[1] * child.GetLocalTransform(), initial[0]);
     hinge.swingY = hinge.swingZ = PhysicsJointMotion::Locked;
     hinge.twistMin = -.9f; hinge.twistMax = .9f;
-    hinge.drives[0] = {true, 720, 18, 25};
+    hinge.drives[0] = PhysicsAngularDrive{};
+    hinge.drives[0].enabled = true;
+    hinge.drives[0].stiffness = 720;
+    hinge.drives[0].damping = 18;
+    hinge.drives[0].maxTorque = 25;
     asset.constraints.push_back(hinge);
     const auto target = [&](float angle) {
         auto result = initial;
@@ -781,7 +785,11 @@ void RunActiveRagdollTests()
     ballJoint.useSlerpDrive = true;
     ballJoint.swingY = ballJoint.swingZ = PhysicsJointMotion::Limited;
     ballJoint.swingYLimit = ballJoint.swingZLimit = 1.2f;
-    ballJoint.drives[0] = {true, 720, 18, 25};
+    ballJoint.drives[0] = PhysicsAngularDrive{};
+    ballJoint.drives[0].enabled = true;
+    ballJoint.drives[0].stiffness = 720;
+    ballJoint.drives[0].damping = 18;
+    ballJoint.drives[0].maxTorque = 25;
     Check(ragdoll.Create(world, ball, names, initial, Vector3(kZero), error) && ragdoll.SetRootSupported(true, error),
         "Create supported three-axis SLERP joint");
     ragdoll.SetDrivesEnabled(true);

@@ -178,13 +178,10 @@ namespace
 
     struct PoseFixture
     {
-        std::vector<int32_t> parents{-1, 0, 1, 2, 3, 0, 5, 6, 7, 0};
-        std::vector<PxTransform> pose;
-        FootstepIKInput input;
-
+    public:
         PoseFixture()
         {
-            const auto leg = BentLeg();
+            const TwoBoneIKInput leg = BentLeg();
             pose.resize(parents.size(), PxTransform(PxIdentity));
             pose[0] = PxTransform(PxVec3(0, 1.1f, 0));
             pose[9] = PxTransform(PxVec3(0, 1.4f, 0));
@@ -193,7 +190,7 @@ namespace
             input.revision = 1;
             const PxTransform physical(PxVec3(.2f, 1.07f, .15f),
                 PxQuat(.3f, PxVec3(0, 1, 0)) * PxQuat(.1f, PxVec3(0, 0, 1)));
-            const auto toPhysical = physical * pose[0].getInverse();
+            const PxTransform toPhysical = physical * pose[0].getInverse();
             for (size_t side = 0; side < 2; ++side)
             {
                 const int hip = side == 0 ? 1 : 5;
@@ -202,7 +199,7 @@ namespace
                 pose[hip + 1] = offset * leg.knee;
                 pose[hip + 2] = offset * leg.ankle;
                 pose[hip + 3] = pose[hip + 2] * PxTransform(PxVec3(0, 0, .2f), PxQuat(.1f, PxVec3(1, 0, 0)));
-                auto& setup = input.legs[side];
+                FootIKLegInput& setup = input.legs[side];
                 setup.available = true;
                 setup.anchorNode = 0;
                 setup.hipNode = hip;
@@ -217,6 +214,11 @@ namespace
             }
             input.legs[1].targetSole.p += PxVec3(.15f, .12f, .2f);
         }
+
+    public:
+        std::vector<int32_t> parents{-1, 0, 1, 2, 3, 0, 5, 6, 7, 0};
+        std::vector<PxTransform> pose;
+        FootstepIKInput input;
     };
 
     void TestPoseAndPhysicalAnchor()

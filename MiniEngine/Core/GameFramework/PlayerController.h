@@ -8,6 +8,11 @@ namespace PARS
     {
     public:
         using Controller::Controller;
+
+    public:
+        void Tick(float deltaTime) override;
+
+    public:
         void SetMoveInput(float forward, float right, bool run);
         void SetControlYaw(float radians);
         void SetInputEnabled(bool enabled);
@@ -15,10 +20,12 @@ namespace PARS
         {
             return m_InputEnabled;
         }
-        void Tick(float deltaTime) override;
 
     private:
-        float m_Forward = 0, m_Right = 0, m_Yaw = 0;
-        bool m_Run = false, m_InputEnabled = true;
+        float m_Forward = 0;
+        float m_Right = 0;
+        float m_Yaw = 0;
+        bool m_Run = false;
+        bool m_InputEnabled = true;
     };
 }

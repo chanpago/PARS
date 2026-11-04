@@ -15,6 +15,7 @@ namespace
 
     struct IterationScope
     {
+    public:
         explicit IterationScope(size_t& depth)
             : m_Depth(depth)
         {
@@ -24,6 +25,8 @@ namespace
         {
             --m_Depth;
         }
+
+    public:
         size_t& m_Depth;
     };
 }

@@ -31,11 +31,13 @@ namespace
     public:
         CameraRig()
         {
-            auto& root = CreateDefaultSubobject<SceneComponent>("Root");
+            SceneComponent& root = CreateDefaultSubobject<SceneComponent>("Root");
             SetRootComponent(root);
             arm = &CreateDefaultSubobject<SpringArmComponent>("SpringArm");
             Check(arm->AttachToComponent(root), "Attach spring arm to the actor root");
         }
+
+    public:
         void FixedTick(float deltaTime) override
         {
             if (move)
@@ -44,15 +46,15 @@ namespace
             }
             Actor::FixedTick(deltaTime);
         }
+
+    public:
         SpringArmComponent* arm;
         bool move = false;
     };
 
     struct Fixture
     {
-        World world;
-        CameraRig* rig;
-        PhysicsWorld* physics;
+    public:
         Fixture()
         {
             Check(world.InitializePhysics(false), "Initialize spring arm physics scene");
@@ -66,6 +68,11 @@ namespace
         {
             Check(physics->GetErrorCount() == 0, "Spring arm queries produce no PhysX errors");
         }
+
+    public:
+        World world;
+        CameraRig* rig;
+        PhysicsWorld* physics;
     };
 
     void TestAttachmentAndInput()

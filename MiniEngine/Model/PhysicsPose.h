@@ -8,8 +8,10 @@ namespace PARS
     // -1은 스킨에 속하지 않는 노드를 뜻한다. 부모 정보는 깊이 우선 순서를 따른다.
     struct PhysicsSkeleton
     {
+    public:
         std::vector<std::string> names;
-        std::vector<int32_t> parents, meshNodes;
+        std::vector<int32_t> parents;
+        std::vector<int32_t> meshNodes;
     };
     bool EvaluatePhysicsPose(const PhysicsSkeleton& skeleton, const std::vector<GraphNode>& pose,
         const Math::Matrix4& component, std::vector<Math::Matrix4>& world, std::string& error);

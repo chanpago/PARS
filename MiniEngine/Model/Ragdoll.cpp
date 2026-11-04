@@ -59,7 +59,8 @@ namespace PARS
                 : m_Bodies(bodies), m_Owner(owner)
             {
             }
-            PxVec3 direction{0};
+
+        public:
             PxQueryHitType::Enum preFilter(const PxFilterData&, const PxShape* shape,
                 const PxRigidActor* actor, PxHitFlags&) override
             {
@@ -67,16 +68,21 @@ namespace PARS
                         shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ||
                         (m_Owner && actor->userData == m_Owner) ||
                         std::find(m_Bodies.begin(), m_Bodies.end(), actor) != m_Bodies.end()
-                    ? PxQueryHitType::eNONE : PxQueryHitType::eBLOCK;
+                    ? PxQueryHitType::eNONE
+                    : PxQueryHitType::eBLOCK;
             }
             PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit& hit,
                 const PxShape*, const PxRigidActor*) override
             {
-                const auto& sweep = static_cast<const PxSweepHit&>(hit);
+                const PxSweepHit& sweep = static_cast<const PxSweepHit&>(hit);
                 // 지면 접촉은 물리 솔버에 맡기고, 벽 안쪽으로 들어가는 수평 이동만 제한한다.
                 return sweep.normal.y < .70710678f && sweep.normal.dot(direction) < -1e-5f
-                    ? PxQueryHitType::eBLOCK : PxQueryHitType::eNONE;
+                    ? PxQueryHitType::eBLOCK
+                    : PxQueryHitType::eNONE;
             }
+
+        public:
+            PxVec3 direction{0};
 
         private:
             const std::vector<PxRigidBody*>& m_Bodies;

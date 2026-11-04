@@ -20,6 +20,10 @@ namespace PARS
     // 캡슐 원통은 PxCapsuleGeometry와 동일하게 로컬 X축을 따라 뻗는다.
     struct PhysicsBody
     {
+    public:
+        Math::Matrix4 GetLocalTransform() const;
+
+    public:
         std::string bone;
         PhysicsShapeType shape = PhysicsShapeType::Capsule;
         DirectX::XMFLOAT3 offset{0, 0, 0};
@@ -29,8 +33,6 @@ namespace PARS
         float halfLength = .1f; // 원통 부분의 반길이이며, 양 끝의 반구는 제외한다.
         float mass = 1;
         PhysicsMaterialSettings material;
-
-        Math::Matrix4 GetLocalTransform() const;
     };
 
     Math::Matrix4 PhysicsBoneFrame(const Math::Matrix4& boneWorld);
@@ -47,23 +49,32 @@ namespace PARS
     // 이전 PA의 토크 게인은 힘 모드에서만 사용한다. 최대 토크는 두 모드 모두 Nm 단위다.
     struct PhysicsAngularDrive
     {
-        bool enabled = false;
-        float stiffness = 0, damping = 0, maxTorque = 0;
-        bool useAcceleration = false;
+    public:
+        float GetStiffness() const;
+        float GetDamping() const;
+
+    public:
+        float stiffness = 0;
+        float damping = 0;
+        float maxTorque = 0;
         // 사용자가 조절하는 시작값이다. 단위는 Hz가 아닌 rad/s다.
         float naturalFrequency = 16.0f;
         float dampingRatio = 1.0f;
-
-        float GetStiffness() const;
-        float GetDamping() const;
+        bool enabled = false;
+        bool useAcceleration = false;
     };
 
     struct PhysicsJointFrame
     {
+    public:
+        static PhysicsJointFrame FromTransform(const Math::Matrix4& rigidTransform);
+
+    public:
+        Math::Matrix4 GetTransform() const;
+
+    public:
         DirectX::XMFLOAT3 offset{0, 0, 0};
         DirectX::XMFLOAT4 rotation{0, 0, 0, 1};
-        Math::Matrix4 GetTransform() const;
-        static PhysicsJointFrame FromTransform(const Math::Matrix4& rigidTransform);
     };
 
     // 평행이동을 잠그고 X/Y/Z 회전을 제어하는 관절 데이터다.
@@ -72,29 +83,31 @@ namespace PARS
     // 각도는 라디안, 위치는 미터 단위다. 축이나 좌표계의 좌우 방향은 변환하지 않는다.
     struct PhysicsConstraint
     {
-        std::string parentBone, childBone;
-        PhysicsJointFrame parentFrame, childFrame;
+    public:
+        void SetWorldFrame(const Math::Matrix4& parentBodyWorld,
+            const Math::Matrix4& childBodyWorld, const Math::Matrix4& jointWorld);
+
+    public:
+        std::string parentBone;
+        std::string childBone;
+        PhysicsJointFrame parentFrame;
+        PhysicsJointFrame childFrame;
         PhysicsJointMotion twist = PhysicsJointMotion::Limited;
         PhysicsJointMotion swingY = PhysicsJointMotion::Limited;
         PhysicsJointMotion swingZ = PhysicsJointMotion::Limited;
-        float twistMin = -DirectX::XM_PIDIV4, twistMax = DirectX::XM_PIDIV4;
-        float swingYLimit = DirectX::XM_PI / 6, swingZLimit = DirectX::XM_PI / 6;
-        bool enableCollision = false;
+        float twistMin = -DirectX::XM_PIDIV4;
+        float twistMax = DirectX::XM_PIDIV4;
+        float swingYLimit = DirectX::XM_PI / 6;
+        float swingZLimit = DirectX::XM_PI / 6;
         PhysicsAngularDrive drives[3]; // 순서대로 트위스트 X, 스윙 Y, 스윙 Z다.
+        bool enableCollision = false;
         // SLERP는 모든 회전에 drives[0]을 사용하며, 잠긴 회전축이 없어야 한다.
         bool useSlerpDrive = false;
-
-        void SetWorldFrame(const Math::Matrix4& parentBodyWorld,
-            const Math::Matrix4& childBodyWorld, const Math::Matrix4& jointWorld);
     };
 
     struct PhysicsAsset
     {
-        std::vector<PhysicsBody> bodies;
-        std::vector<PhysicsConstraint> constraints;
-        bool UsesArticulation() const;
-        int FindBody(const std::string& bone) const;
-        int FindConstraint(const std::string& boneA, const std::string& boneB) const;
+    public:
         // 같은 본의 바디를 편집하면서 연결된 관절의 본 기준 위치/방향을 유지한다.
         // 형상/크기/질량만 바뀌면 관절 좌표계는 그대로 둔다.
         bool UpdateBody(size_t index, const PhysicsBody& updated);
@@ -105,6 +118,15 @@ namespace PARS
         bool Save(const std::string& path, std::string& error) const;
         // 전체 검증에 성공해야 반영한다. 파일을 거부한 경우 기존 에셋은 그대로 유지한다.
         bool Load(const std::string& path, std::string& error);
+
+    public:
+        bool UsesArticulation() const;
+        int FindBody(const std::string& bone) const;
+        int FindConstraint(const std::string& boneA, const std::string& boneB) const;
+
+    public:
+        std::vector<PhysicsBody> bodies;
+        std::vector<PhysicsConstraint> constraints;
     };
     // 조정 가능한 초기 제어 게인이며, 실제 인체의 근력을 측정한 값은 아니다.
     void ConfigureDefaultDrives(PhysicsAsset& asset);

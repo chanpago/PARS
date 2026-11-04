@@ -32,6 +32,7 @@ namespace PARS
 
     struct RecoverySettings
     {
+    public:
         float impactVelocity = .05f;
         float maximumReturnSpeed = .15f;
         float stableDuration = .2f;
@@ -40,23 +41,45 @@ namespace PARS
 
     struct RecoveryInput
     {
-        bool enabled = false, fallen = false;
-        bool needsStep = false, stepping = false, bothGrounded = false;
-        bool hasReference = false, insideReference = false, predictionInsideReference = false;
-        bool insideSupport = false, predictionInsideSupport = false;
-        float impactVelocity = 0, horizontalSpeed = 0, deltaTime = 0;
-        uint64_t revision = 0, completedStep = 0;
+    public:
+        uint64_t revision = 0;
+        uint64_t completedStep = 0;
+        float impactVelocity = 0;
+        float horizontalSpeed = 0;
+        float deltaTime = 0;
+        bool enabled = false;
+        bool fallen = false;
+        bool needsStep = false;
+        bool stepping = false;
+        bool bothGrounded = false;
+        bool hasReference = false;
+        bool insideReference = false;
+        bool predictionInsideReference = false;
+        bool insideSupport = false;
+        bool predictionInsideSupport = false;
     };
 
     struct RecoverySnapshot
     {
+    public:
+        uint64_t revision = 0;
+        uint64_t completedStep = 0;
+        uint64_t recoveryCount = 0;
+        uint64_t returnCount = 0;
         RecoveryState state = RecoveryState::Animation;
         RecoveryReason reason = RecoveryReason::Disabled;
-        bool blending = false, enteredRecovery = false, startedBlend = false;
-        bool hasReference = false, insideReference = false, predictionInsideReference = false;
-        bool bothGrounded = false, holdingTargets = false;
-        float stableTime = 0, blendAlpha = 1, impactVelocity = 0, horizontalSpeed = 0;
-        uint64_t revision = 0, completedStep = 0, recoveryCount = 0, returnCount = 0;
+        float stableTime = 0;
+        float blendAlpha = 1;
+        float impactVelocity = 0;
+        float horizontalSpeed = 0;
+        bool blending = false;
+        bool enteredRecovery = false;
+        bool startedBlend = false;
+        bool hasReference = false;
+        bool insideReference = false;
+        bool predictionInsideReference = false;
+        bool bothGrounded = false;
+        bool holdingTargets = false;
     };
 
     class RagdollRecovery
@@ -64,6 +87,8 @@ namespace PARS
     public:
         void Reset();
         void Update(const RecoveryInput& input, const RecoverySettings& settings);
+
+    public:
         const RecoverySnapshot& GetSnapshot() const
         {
             return m_Snapshot;
@@ -71,8 +96,8 @@ namespace PARS
 
     private:
         RecoverySnapshot m_Snapshot;
-        bool m_HasSample = false;
         float m_BlendTime = 0;
+        bool m_HasSample = false;
     };
 
     const char* RecoveryReasonLabel(RecoveryReason reason);

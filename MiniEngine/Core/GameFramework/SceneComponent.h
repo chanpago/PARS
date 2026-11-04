@@ -18,9 +18,12 @@ namespace PARS
         using ActorComponent::ActorComponent;
         ~SceneComponent() override;
 
+    public:
         // 현재는 같은 Actor 안에서만 부착할 수 있다. 순환 부착과 루트의 부모 부착은 거부한다.
         bool AttachToComponent(SceneComponent& parent, AttachmentRule rule = AttachmentRule::KeepRelative);
         void DetachFromParent(AttachmentRule rule = AttachmentRule::KeepWorld);
+
+    public:
         SceneComponent* GetAttachParent() const
         {
             return m_Parent;
@@ -29,7 +32,6 @@ namespace PARS
         {
             return m_Children;
         }
-
         const Math::AffineTransform& GetRelativeTransform() const
         {
             return m_RelativeTransform;
@@ -46,8 +48,8 @@ namespace PARS
         bool SetWorldTransform(const Math::AffineTransform& transform);
 
     private:
+        Math::AffineTransform m_RelativeTransform{Math::kIdentity};
         SceneComponent* m_Parent = nullptr;
         std::vector<SceneComponent*> m_Children;
-        Math::AffineTransform m_RelativeTransform{Math::kIdentity};
     };
 }

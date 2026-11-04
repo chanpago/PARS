@@ -244,6 +244,7 @@ void SkeletonOverlay::Render(GraphicsContext& context, ColorBuffer& target)
         context.SetPipelineState(m_SurfacePSO);
         struct Constants
         {
+        public:
             Matrix4 viewProjection;
             Vector4 eye;
         } constants{m_ViewProjection, Vector4(m_Eye, 1)};

@@ -32,25 +32,32 @@ public:
     };
     struct Settings
     {
+    public:
         explicit Settings(Simulation selected = Simulation::A)
             : simulation(selected), duration(selected == Simulation::B ? 20.0f : 6.0f)
         {
         }
+
+    public:
         Simulation simulation;
         // 단일 클립 모드에서 클립/속도를 사용한다. B와 단일 클립의 측정 시간은 조절할 수 있다.
         int clip = 1;
-        float duration, speed = 1.6f, uTurnRadius = 1;
+        float duration;
+        float speed = 1.6f;
+        float uTurnRadius = 1;
         bool suspended = false;
     };
 
+public:
     RagdollComparisonRunner(PhysicsWorld& owner, const std::shared_ptr<const Model>* models,
         const char* const* names, uint32_t count);
+
+public:
     // 렌더러가 더미를 참조하지 않는 GPU 유휴 경계에서만 Start/Reset을 호출한다.
     bool Start(const PARS::PhysicsAsset& asset, const Settings& settings);
     void Reset();
     void Advance(float deltaTime);
     bool Step();
-    void SetPaused(bool paused);
     void Stop();
     void DrawUI(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character);
     void RequestLocomotionComparison(const PARS::PhysicsAsset* editor, const PARS::PhysicsAsset* character,
@@ -65,6 +72,17 @@ public:
         m_Open = true;
         m_WindowFocusRequested = true;
     }
+    bool Export(const std::string& path);
+
+private:
+    bool Capture(bool baseline);
+    void Fail(const std::string& message);
+    void DrawBodyResults();
+    void DrawJointResults();
+    void DrawSelectedSample();
+
+public:
+    void SetPaused(bool paused);
     bool IsShowingScene() const
     {
         return m_ShowScene && m_Meshes[0] && m_Meshes[1];
@@ -91,36 +109,43 @@ public:
     }
     Math::Vector3 GetViewCenter() const;
     std::string GetDescription(bool korean = false) const;
-    bool Export(const std::string& path);
 
 private:
-    bool Capture(bool baseline);
     int GetTargetClip() const;
     float GetTravelDistance(double time) const;
     Math::AffineTransform GetPathTransform(double time) const;
-    void Fail(const std::string& message);
-    void DrawBodyResults();
-    void DrawJointResults();
-    void DrawSelectedSample();
+
+private:
+    Math::Vector3 m_Placements[2]{Math::kZero, Math::kZero};
+    PARS::RagdollComparison m_Results;
     PhysicsWorld& m_Owner;
     PARS::World m_World;
     std::vector<std::shared_ptr<const Model>> m_Models;
     std::vector<std::string> m_Names;
     PARS::SkeletalMeshComponent* m_Meshes[2]{};
-    Math::Vector3 m_Placements[2]{Math::kZero, Math::kZero};
-    PARS::RagdollComparison m_Results;
-    Settings m_Settings, m_RequestedSettings;
     PARS::PhysicsAsset m_RequestedAsset;
+    double m_Accumulator = 0;
+    double m_DroppedTime = 0;
+    size_t m_Steps = 0;
+    size_t m_TargetSteps = 0;
+    std::string m_Message;
+    std::string m_SourceLabel;
+    std::string m_RequestedSource;
+    Settings m_Settings;
+    Settings m_RequestedSettings;
     State m_State = State::Empty;
-    double m_Accumulator = 0, m_DroppedTime = 0;
-    size_t m_Steps = 0, m_TargetSteps = 0;
-    std::string m_Message, m_SourceLabel, m_RequestedSource;
-    bool m_Open = false, m_ShowScene = false, m_FocusRequested = false;
+    int m_SelectedBody = 0;
+    int m_SelectedJoint = 0;
+    int m_SelectedFrame = 0;
+    bool m_Open = false;
+    bool m_ShowScene = false;
+    bool m_FocusRequested = false;
     bool m_WindowFocusRequested = false;
     bool m_PlayerControlRequested = false;
-    bool m_StartRequested = false, m_ResetRequested = false, m_UseEditor = true;
+    bool m_StartRequested = false;
+    bool m_ResetRequested = false;
+    bool m_UseEditor = true;
     bool m_FollowLatest = true;
     bool m_FollowCamera = false;
-    int m_SelectedBody = 0, m_SelectedJoint = 0, m_SelectedFrame = 0;
     char m_ReportPath[512] = "ragdoll-comparison-a.html";
 };

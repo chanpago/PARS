@@ -17,21 +17,33 @@ namespace PARS
 
     struct TwoBoneIKInput
     {
-        physx::PxTransform hip{physx::PxIdentity}, knee{physx::PxIdentity}, ankle{physx::PxIdentity};
-        physx::PxTransform targetSole{physx::PxIdentity}, soleInBone{physx::PxIdentity};
-        physx::PxVec3 referenceBend{0}, previousBend{0};
-        float thighLength = 0, calfLength = 0;
+    public:
+        physx::PxTransform hip{physx::PxIdentity};
+        physx::PxTransform knee{physx::PxIdentity};
+        physx::PxTransform ankle{physx::PxIdentity};
+        physx::PxTransform targetSole{physx::PxIdentity};
+        physx::PxTransform soleInBone{physx::PxIdentity};
+        physx::PxVec3 referenceBend{0};
+        physx::PxVec3 previousBend{0};
+        float thighLength = 0;
+        float calfLength = 0;
         bool hasPreviousBend = false;
     };
 
     struct LegIKResult
     {
-        bool valid = false, reachLimited = false;
+    public:
         KneeHintSource hintSource = KneeHintSource::Fallback;
-        physx::PxTransform hip{physx::PxIdentity}, knee{physx::PxIdentity}, ankle{physx::PxIdentity};
-        physx::PxTransform requestedSole{physx::PxIdentity}, solvedSole{physx::PxIdentity};
-        physx::PxVec3 requestedAnkle{0}, bendDirection{0};
+        physx::PxTransform hip{physx::PxIdentity};
+        physx::PxTransform knee{physx::PxIdentity};
+        physx::PxTransform ankle{physx::PxIdentity};
+        physx::PxTransform requestedSole{physx::PxIdentity};
+        physx::PxTransform solvedSole{physx::PxIdentity};
+        physx::PxVec3 requestedAnkle{0};
+        physx::PxVec3 bendDirection{0};
         float reachError = 0;
+        bool valid = false;
+        bool reachLimited = false;
     };
 
     // 발바닥의 앞 방향은 애니메이션에서, 위 방향은 지지 평면에서 얻는다.
@@ -41,21 +53,28 @@ namespace PARS
 
     struct FootIKLegInput
     {
-        bool available = false;
-        int anchorNode = -1, hipNode = -1, kneeNode = -1, ankleNode = -1;
-        float thighLength = 0, calfLength = 0;
+    public:
+        int anchorNode = -1;
+        int hipNode = -1;
+        int kneeNode = -1;
+        int ankleNode = -1;
+        float thighLength = 0;
+        float calfLength = 0;
         physx::PxVec3 referenceBendInHip{0};
         physx::PxTransform actualAnchor{physx::PxIdentity};
-        physx::PxTransform soleInBone{physx::PxIdentity}, targetSole{physx::PxIdentity};
+        physx::PxTransform soleInBone{physx::PxIdentity};
+        physx::PxTransform targetSole{physx::PxIdentity};
+        bool available = false;
     };
 
     struct FootstepIKInput
     {
-        bool enabled = false;
+    public:
+        uint64_t revision = 0;
         // -1은 새 발딛기 없이 회복 중 양발 목표를 유지하는 경우다.
         int stepFoot = -1;
-        uint64_t revision = 0;
         std::array<FootIKLegInput, 2> legs;
+        bool enabled = false;
     };
 
     enum class FootstepIKStatus
@@ -69,11 +88,12 @@ namespace PARS
 
     struct FootstepIKSnapshot
     {
-        FootstepIKStatus status = FootstepIKStatus::Inactive;
+    public:
         uint64_t revision = 0;
+        std::vector<int> correctedNodes;
+        FootstepIKStatus status = FootstepIKStatus::Inactive;
         int stepFoot = -1;
         std::array<LegIKResult, 2> legs;
-        std::vector<int> correctedNodes;
     };
 
     // 실제 부모 좌표에서 IK를 푼 뒤 애니메이션 부모 기준 목표로 되돌린다. 물리 바디는 옮기지 않는다.
@@ -83,6 +103,8 @@ namespace PARS
         void Reset();
         bool Apply(const FootstepIKInput& input, const std::vector<int32_t>& parents,
             std::vector<physx::PxTransform>& pose);
+
+    public:
         const FootstepIKSnapshot& GetSnapshot() const
         {
             return m_Snapshot;

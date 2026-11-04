@@ -14,11 +14,7 @@ namespace PARS
 
     struct PhysicsMaterialSettings
     {
-        float staticFriction = .6f;
-        float dynamicFriction = .5f;
-        float restitution = .1f;
-        PhysicsFrictionCombine frictionCombine = PhysicsFrictionCombine::Average;
-
+    public:
         bool IsValid() const
         {
             return std::isfinite(staticFriction) && staticFriction >= 0 &&
@@ -26,5 +22,11 @@ namespace PARS
                 std::isfinite(restitution) && restitution >= 0 && restitution <= 1 &&
                 frictionCombine >= PhysicsFrictionCombine::Average && frictionCombine <= PhysicsFrictionCombine::Maximum;
         }
+
+    public:
+        float staticFriction = .6f;
+        float dynamicFriction = .5f;
+        float restitution = .1f;
+        PhysicsFrictionCombine frictionCombine = PhysicsFrictionCombine::Average;
     };
 }

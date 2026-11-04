@@ -29,17 +29,21 @@ public:
         A,
         B
     };
+
+public:
     ~SkeletalMeshViewer()
     {
         Cleanup();
     }
+
+public:
     bool Initialize(const std::shared_ptr<const Model>* models, const char* const* names, uint32_t count);
     void Cleanup(); // GPU가 유휴 상태가 된 후, 렌더러/ImGui를 종료하기 전에 호출한다.
     void Update(float deltaTime);
     void RenderUI(GraphicsContext& context, bool comparisonAvailable = false, bool physicsSaveAvailable = false);
     ComparisonRequest ConsumeComparisonRequest()
     {
-        const auto requested = m_ComparisonRequested;
+        const ComparisonRequest requested = m_ComparisonRequested;
         m_ComparisonRequested = ComparisonRequest::None;
         return requested;
     }
@@ -53,16 +57,7 @@ public:
         m_Open = false;
         m_Focused = false;
     }
-    bool WantsInput() const
-    {
-        return m_Open && m_Focused;
-    }
-    const PARS::PhysicsAsset& GetPhysicsAsset() const
-    {
-        return m_PhysicsAsset;
-    }
     bool SetPhysicsAsset(const PARS::PhysicsAsset& asset, std::string& error);
-    void SetDefaultPhysicsAssetPath(const std::string& path);
     bool ConsumePhysicsSaveRequest(std::string& path);
     void CompletePhysicsSave(bool saved, const std::string& message);
 
@@ -82,14 +77,33 @@ private:
     void HandlePick(uint32_t id);
     void BeginGizmoDrag(uint32_t axis);
     void UpdateGizmoDrag(float mouseX, float mouseY);
-    void CancelInteraction();
-    float GetGizmoLength() const;
-    Math::Vector3 GetBoneAxis(int axis) const;
-    float GetDragAngle(float x, float y) const;
     void DrawPhysicsPanel();
     void CreatePhysicsBody(PARS::PhysicsShapeType shape);
     void DrawPhysicsBodies();
     void SelectBody(int index);
+    void DrawConstraintPanel();
+    void DrawConstraints();
+    void SelectConstraint(int index);
+    void CreateConstraint();
+    void ResetConstraintFrames(PARS::PhysicsConstraint& joint);
+    void MoveOtherConstraintFrame(const Math::Matrix4& previousWorld);
+
+public:
+    bool WantsInput() const
+    {
+        return m_Open && m_Focused;
+    }
+    const PARS::PhysicsAsset& GetPhysicsAsset() const
+    {
+        return m_PhysicsAsset;
+    }
+    void SetDefaultPhysicsAssetPath(const std::string& path);
+
+private:
+    void CancelInteraction();
+    float GetGizmoLength() const;
+    Math::Vector3 GetBoneAxis(int axis) const;
+    float GetDragAngle(float x, float y) const;
     bool EditingBody() const
     {
         return m_EditPhysics && !m_EditConstraints && m_SelectedBody >= 0;
@@ -98,74 +112,90 @@ private:
     {
         return m_EditPhysics && m_EditConstraints && m_SelectedConstraint >= 0;
     }
-    void DrawConstraintPanel();
-    void DrawConstraints();
     static Math::Vector3 GetTwistDisplayReference(const PARS::PhysicsConstraint& joint);
-    void SelectConstraint(int index);
-    void CreateConstraint();
-    void ResetConstraintFrames(PARS::PhysicsConstraint& joint);
-    void MoveOtherConstraintFrame(const Math::Matrix4& previousWorld);
     int FindConstraintParent() const;
     Math::Matrix4 GetConstraintBodyWorld(int frame) const;
     Math::Matrix4 GetConstraintWorld(int index, int frame) const;
     Math::Matrix4 GetGizmoWorld() const;
     Math::Matrix4 GetBodyWorld(int index) const;
     int FindBodyNode(int index) const;
-    PARS::World m_World;
-    PARS::SkeletalMeshComponent* m_Mesh = nullptr; // 미리보기 World가 소유한다.
+
+private:
     Math::Camera m_Camera;
-    float m_Radius = 1;
-    float m_Yaw = 0;
-    float m_Pitch = 0.12f;
-    bool m_Open = true;
-    ComparisonRequest m_ComparisonRequested = ComparisonRequest::None;
-    bool m_Focused = false;
-    bool m_FocusRequested = true;
-    bool m_Flying = false;
     ColorBuffer m_Color;
     ColorBuffer m_Display;
     ColorBuffer m_AmbientOcclusion{Color(1.0f, 1.0f, 1.0f, 1.0f)};
+    SkeletonOverlay m_Overlay;
+    GraphNode m_DragOriginal{};
+    Math::Vector3 m_DragLocalDirection{Math::kZero};
+    Math::Vector3 m_DragScreenAxis{Math::kZero};
+    Math::Vector3 m_DragCenter{Math::kZero};
+    Math::Vector3 m_DragU{Math::kZero};
+    Math::Vector3 m_DragV{Math::kZero};
+    PARS::World m_World;
+    PARS::SkeletalMeshComponent* m_Mesh = nullptr; // 미리보기 World가 소유한다.
     DepthBuffer m_Depth;
     DepthBuffer m_Unshadowed;
     DescriptorHandle m_Textures;
     uint64_t m_Image = 0;
     RootSignature m_PresentRoot;
     GraphicsPSO m_PresentPSO;
-    SkeletonOverlay m_Overlay;
     std::vector<std::vector<int32_t>> m_BoneChildren;
-    std::vector<int32_t> m_BoneRoots, m_BoneParents;
-    std::vector<bool> m_IsJoint, m_InSkeleton;
-    std::vector<Math::Matrix4> m_NodeWorld, m_NodeMeshWorld;
+    std::vector<int32_t> m_BoneRoots;
+    std::vector<int32_t> m_BoneParents;
+    std::vector<bool> m_IsJoint;
+    std::vector<bool> m_InSkeleton;
+    std::vector<Math::Matrix4> m_NodeWorld;
+    std::vector<Math::Matrix4> m_NodeMeshWorld;
     std::vector<GraphNode> m_EditPose;
     std::vector<GraphNode> m_PickPose; // GPU 피킹을 요청했을 때 렌더링한 포즈다.
-    bool m_ShowBones = true, m_RevealSelection = false;
-    bool m_PhysicsTreeOnly = true;
-    float m_HierarchyFraction = .57f;
-    float m_GraphZoom = 1, m_GraphPanX = 0, m_GraphPanY = 0;
-    int m_GraphSelection = -1;
-    int32_t m_SelectedBone = -1;
-    int m_GizmoMode = 0; // 0 = 이동, 1 = 회전, 2 = 스케일이며, 로컬 축을 사용한다.
-    int m_DragAxis = -1;
-    GraphNode m_DragOriginal{};
-    Math::Vector3 m_DragLocalDirection{Math::kZero};
-    Math::Vector3 m_DragScreenAxis{Math::kZero};
-    Math::Vector3 m_DragCenter{Math::kZero}, m_DragU{Math::kZero}, m_DragV{Math::kZero};
-    float m_DragLength = 1, m_DragAngle = 0, m_LastDragAngle = 0;
-    float m_ClickX = 0, m_ClickY = 0;
-    bool m_HasPickRequest = false;
-    float m_ViewportHeight = 1;
     PARS::PhysicsAsset m_PhysicsAsset;
     PARS::PhysicsBody m_DragBodyOriginal;
     std::vector<PARS::PhysicsConstraint> m_DragBodyConstraintsOriginal;
     PARS::PhysicsConstraint m_DragConstraintOriginal;
-    bool m_EditConstraints = false, m_ShowConstraints = true, m_ShowLimits = true, m_MoveBothFrames = true;
-    int m_SelectedConstraint = -1, m_ConstraintParent = -1, m_ConstraintFrame = 0;
-    bool m_EditPhysics = true, m_ShowBodies = true, m_PhysicsDirty = false, m_DragWasDirty = false;
-    int m_SelectedBody = -1;
-    float m_BodyOpacity = .28f;
     std::string m_PhysicsPath = "Mixamo.physics.json";
     std::string m_DefaultPhysicsPath;
-    bool m_PhysicsSaveAvailable = false, m_PhysicsSaveRequested = false;
     std::string m_RequestedPhysicsSavePath;
     std::string m_PhysicsMessage;
+    float m_Radius = 1;
+    float m_Yaw = 0;
+    float m_Pitch = 0.12f;
+    ComparisonRequest m_ComparisonRequested = ComparisonRequest::None;
+    float m_HierarchyFraction = .57f;
+    float m_GraphZoom = 1;
+    float m_GraphPanX = 0;
+    float m_GraphPanY = 0;
+    int m_GraphSelection = -1;
+    int32_t m_SelectedBone = -1;
+    int m_GizmoMode = 0; // 0 = 이동, 1 = 회전, 2 = 스케일이며, 로컬 축을 사용한다.
+    int m_DragAxis = -1;
+    float m_DragLength = 1;
+    float m_DragAngle = 0;
+    float m_LastDragAngle = 0;
+    float m_ClickX = 0;
+    float m_ClickY = 0;
+    float m_ViewportHeight = 1;
+    int m_SelectedConstraint = -1;
+    int m_ConstraintParent = -1;
+    int m_ConstraintFrame = 0;
+    int m_SelectedBody = -1;
+    float m_BodyOpacity = .28f;
+    bool m_Open = true;
+    bool m_Focused = false;
+    bool m_FocusRequested = true;
+    bool m_Flying = false;
+    bool m_ShowBones = true;
+    bool m_RevealSelection = false;
+    bool m_PhysicsTreeOnly = true;
+    bool m_HasPickRequest = false;
+    bool m_EditConstraints = false;
+    bool m_ShowConstraints = true;
+    bool m_ShowLimits = true;
+    bool m_MoveBothFrames = true;
+    bool m_EditPhysics = true;
+    bool m_ShowBodies = true;
+    bool m_PhysicsDirty = false;
+    bool m_DragWasDirty = false;
+    bool m_PhysicsSaveAvailable = false;
+    bool m_PhysicsSaveRequested = false;
 };

@@ -105,21 +105,24 @@ namespace PARS
 
     struct FootSupportBalance
     {
+    public:
         std::vector<physx::PxVec3> bufferHull;
         physx::PxVec3 center{0};
         float weight = 0;
-        float comDistance = 0, innerDistance = 0, outerDistance = 0;
-        bool hasDirection = false;
+        float comDistance = 0;
+        float innerDistance = 0;
+        float outerDistance = 0;
         FootSupportZone zone = FootSupportZone::Invalid;
+        bool hasDirection = false;
     };
 
     struct FootSupportCandidates
     {
-        int support = -1;           // 지지발 후보
-        int step = -1;              // 움직일 발의 후보
-
-        std::array<physx::PxVec3, 2> centers{physx::PxVec3(0), physx::PxVec3(0)};       // 각 발의 중심 위치 저장
-        std::array<float, 2> distances{};                                               // 각 발 중심과 COM까지의 거리 저장
+    public:
+        int support = -1;                                                         // 지지발 후보
+        int step = -1;                                                            // 움직일 발의 후보
+        std::array<physx::PxVec3, 2> centers{physx::PxVec3(0), physx::PxVec3(0)}; // 각 발의 중심 위치 저장
+        std::array<float, 2> distances{};                                         // 각 발 중심과 COM까지의 거리 저장
     };
 
     // 현재 COM이 A 내부 또는 A~B 사이에 있으면 지지발·움직일 발 후보를 고른다.

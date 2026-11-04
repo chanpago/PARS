@@ -10,6 +10,8 @@ namespace PARS
     {
     public:
         using SceneComponent::SceneComponent;
+
+    public:
         void SetVisibility(bool visible)
         {
             m_Visible = visible;

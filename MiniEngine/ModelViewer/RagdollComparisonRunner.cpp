@@ -15,7 +15,9 @@ namespace
 {
     struct SequenceStage
     {
-        double endTime, speed;
+    public:
+        double endTime;
+        double speed;
     };
     constexpr SequenceStage Sequence[] = {{2, 0}, {6, 1.6}, {10, 3}};
     constexpr size_t SequenceCount = sizeof(Sequence) / sizeof(Sequence[0]);

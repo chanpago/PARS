@@ -8,6 +8,7 @@ namespace PARS
 {
     struct StandingSupportSettings
     {
+    public:
         float stepLoweringScale = .25f;
         float contactLowering = .08f;
         float contactLoweringTime = .15f;
@@ -22,34 +23,35 @@ namespace PARS
 
     struct StandingSupportFoot
     {
-        bool available = false;
-        bool grounded = false;
-        bool supporting = true;
+    public:
         physx::PxTransform sole{physx::PxIdentity};
         physx::PxTransform animatedSole{physx::PxIdentity};
         physx::PxTransform soleInBone{physx::PxIdentity};
         physx::PxVec3 hipOffset{0};
         float length = 0;
+        bool available = false;
+        bool grounded = false;
+        bool supporting = true;
     };
 
     struct StandingSupportInput
     {
-        bool enabled = false;
-        bool stepping = false;
-        float stepDistance = 0;
-        float deltaTime = 0;
+    public:
         uint64_t revision = 0;
         uint64_t completedStep = 0;
+        float stepDistance = 0;
+        float deltaTime = 0;
         physx::PxTransform pelvis{physx::PxIdentity};
         physx::PxTransform animatedPelvis{physx::PxIdentity};
         physx::PxVec3 velocity{0};
         std::array<StandingSupportFoot, 2> feet;
+        bool enabled = false;
+        bool stepping = false;
     };
 
     struct StandingSupportSnapshot
     {
-        bool valid = false;
-        bool reachLimited = false;
+    public:
         float nominalHeight = 0;
         float targetHeight = 0;
         float actualHeight = 0;
@@ -60,6 +62,8 @@ namespace PARS
         physx::PxVec3 horizontalCorrection{0};
         std::array<physx::PxTransform, 2> soleTargets{
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};
+        bool valid = false;
+        bool reachLimited = false;
     };
 
     // 골반 높이 오차를 지지 다리의 상대 자세로 바꾼다. 바디 위치와 외력은 직접 바꾸지 않는다.
@@ -68,19 +72,21 @@ namespace PARS
     public:
         void Reset();
         bool Update(const StandingSupportInput& input, const StandingSupportSettings& settings);
+
+    public:
         const StandingSupportSnapshot& GetSnapshot() const
         {
             return m_Snapshot;
         }
 
     private:
+        uint64_t m_Revision = 0;
+        uint64_t m_CompletedStep = 0;
         StandingSupportSnapshot m_Snapshot;
         std::array<float, 2> m_MissingContactTime{};
         physx::PxVec3 m_HorizontalReference{0};
         physx::PxVec3 m_HorizontalTarget{0};
         physx::PxVec3 m_HorizontalVelocity{0};
-        uint64_t m_Revision = 0;
-        uint64_t m_CompletedStep = 0;
         bool m_Initialized = false;
     };
 }

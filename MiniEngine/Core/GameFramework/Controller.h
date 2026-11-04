@@ -6,19 +6,25 @@ namespace PARS
     class Pawn;
     class Controller : public Actor
     {
+    private:
+        friend class Pawn;
+
     public:
         explicit Controller(const std::string& name = "Controller")
             : Actor(name)
         {
             SetTickGroup(TickGroup::PrePhysics);
         }
+
+    public:
         bool Possess(Pawn& pawn);
         void UnPossess();
-        Pawn* GetPawn() const;
         void EndPlay() override;
 
+    public:
+        Pawn* GetPawn() const;
+
     private:
-        friend class Pawn;
         ActorHandle m_Pawn;
     };
 }

@@ -11,6 +11,18 @@ namespace PARS
     {
     public:
         explicit Character(const std::string& name = "Character");
+
+    public:
+        bool StartRagdoll(std::string& error);
+        bool SetPhysicsMode(PhysicsAnimationMode mode, std::string& error);
+        bool StopRagdoll(std::string& error);
+        void PreparePhysics(float deltaTime) override;
+        void FixedTick(float deltaTime) override;
+
+    private:
+        void SyncRagdollMovement();
+
+    public:
         CapsuleComponent& GetCapsuleComponent() const
         {
             return *m_Capsule;
@@ -23,22 +35,17 @@ namespace PARS
         {
             return *m_Mesh;
         }
-        bool StartRagdoll(std::string& error);
-        bool SetPhysicsMode(PhysicsAnimationMode mode, std::string& error);
-        bool StopRagdoll(std::string& error);
         bool IsRagdoll() const
         {
             return m_Mesh->IsRagdoll();
         }
         bool CanControlMovement() const;
-        void PreparePhysics(float deltaTime) override;
-        void FixedTick(float deltaTime) override;
 
     private:
-        void SyncRagdollMovement();
         CapsuleComponent* m_Capsule;
         CharacterMovementComponent* m_Movement;
         SkeletalMeshComponent* m_Mesh;
-        bool m_MovementWasEnabled = true, m_CapsuleWasEnabled = true;
+        bool m_MovementWasEnabled = true;
+        bool m_CapsuleWasEnabled = true;
     };
 }

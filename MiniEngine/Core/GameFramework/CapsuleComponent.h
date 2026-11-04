@@ -12,8 +12,38 @@ namespace PARS
     class CapsuleComponent : public PrimitiveComponent
     {
     public:
+        struct MoveResult
+        {
+        public:
+            bool grounded = false;
+            bool ceiling = false;
+            bool wall = false;
+        };
+
+    public:
         using PrimitiveComponent::PrimitiveComponent;
         ~CapsuleComponent() override;
+
+    public:
+        bool SetPhysicsEnabled(bool enabled);
+        MoveResult Move(Math::Vector3 displacement, float deltaTime);
+
+    protected:
+        void BeginPlay() override;
+        void EndPlay() override;
+        void PreparePhysics(float) override
+        {
+            SyncQueryPosition();
+        }
+        void TickComponent(float) override
+        {
+            SyncQueryPosition();
+        }
+
+    private:
+        void SyncQueryPosition();
+
+    public:
         bool SetCapsuleSize(float radius, float halfHeight)
         {
             if (m_QueryCapsule || !std::isfinite(radius) || !std::isfinite(halfHeight) || radius <= 0 || halfHeight <= radius)
@@ -40,7 +70,6 @@ namespace PARS
         {
             return m_QueryCapsule != nullptr;
         }
-        bool SetPhysicsEnabled(bool enabled);
         bool IsPhysicsEnabled() const
         {
             return m_PhysicsEnabled;
@@ -54,30 +83,12 @@ namespace PARS
         {
             return m_HorizontalBlockingEnabled;
         }
-        struct MoveResult
-        {
-            bool grounded = false, ceiling = false, wall = false;
-        };
-        MoveResult Move(Math::Vector3 displacement, float deltaTime);
         Math::BoundingSphere GetLocalBounds() const override
         {
             return Math::BoundingSphere(Math::Vector3(Math::kZero), m_HalfHeight);
         }
 
-    protected:
-        void BeginPlay() override;
-        void EndPlay() override;
-        void PreparePhysics(float) override
-        {
-            SyncQueryPosition();
-        }
-        void TickComponent(float) override
-        {
-            SyncQueryPosition();
-        }
-
     private:
-        void SyncQueryPosition();
         PhysicsQueryCapsule* m_QueryCapsule = nullptr;
         PhysicsWorld* m_PhysicsWorld = nullptr;
         float m_Radius = 0.3f;

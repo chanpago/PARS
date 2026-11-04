@@ -32,23 +32,25 @@ namespace
             movement = &CreateDefaultSubobject<CharacterMovementComponent>("Movement");
             movement->SetUpdatedComponent(*capsule);
         }
+
+    public:
         void Tick(float dt) override
         {
             Pawn::Tick(dt);
             observedPosition = GetActorLocation();
             observedDelta = dt;
         }
+
+    public:
+        Vector3 observedPosition = Vector3(kZero);
         CapsuleComponent* capsule;
         CharacterMovementComponent* movement;
-        Vector3 observedPosition = Vector3(kZero);
         float observedDelta = 0;
     };
 
     struct Fixture
     {
-        World world;
-        TestCharacter* character;
-        PlayerController* player;
+    public:
         Fixture()
         {
             Check(world.InitializePhysics(false), "Initialize shared physics scene");
@@ -64,11 +66,24 @@ namespace
             Check(character->movement->IsMovingOnGround(), "Gravity lands capsule on shared floor");
             Check(Near(character->GetActorLocation().GetY(), .92f, .03f), "Capsule rests at half height plus contact skin");
         }
+        ~Fixture()
+        {
+            Check(world.GetPhysicsWorld()->GetErrorCount() == 0, "PhysX reported no errors");
+        }
+
+    public:
         void Frames(int count, float dt = 1.0f / 60)
         {
-            for (int i = 0; i < count; ++i) world.Tick(dt);
+            for (int i = 0; i < count; ++i)
+            {
+                world.Tick(dt);
+            }
         }
-        ~Fixture() { Check(world.GetPhysicsWorld()->GetErrorCount() == 0, "PhysX reported no errors"); }
+
+    public:
+        World world;
+        TestCharacter* character;
+        PlayerController* player;
     };
 
     float Travel(int fps, bool run, bool diagonal)
