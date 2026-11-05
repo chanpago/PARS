@@ -688,8 +688,10 @@ namespace PARS
             const PxRigidBody* root = m_Bodies[m_ArticulationRoot];
             const PxVec3 error = RotationVector(m_SupportJoint->getDrivePosition().q * root->getGlobalPose().q.getConjugate());
             const PxVec3 velocity = root->getAngularVelocity();
-            const float stiffness = PelvisAngularFrequency * PelvisAngularFrequency * supportWeight;
-            const float damping = 2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency * supportWeight;
+            // 발 기반 지지는 A~B에서도 골반 회전의 복원과 제동을 유지한다. 지지 해제 조건은 기존 경로에서 처리한다.
+            const float rotationWeight = m_FootDrivenSupport ? 1.0f : supportWeight;
+            const float stiffness = PelvisAngularFrequency * PelvisAngularFrequency * rotationWeight;
+            const float damping = 2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency * rotationWeight;
             const float denominator = 1.0f + damping * deltaTime + stiffness * deltaTime * deltaTime; // pd식 분모
             for (unsigned axis = 0; axis < 3; ++axis)
             {
