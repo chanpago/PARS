@@ -244,6 +244,7 @@ void RagdollImpactTest::Update()
 
 void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)
 {
+    BuildBodyImpactLines(lines);
     if (PARS::Character* dummy = GetDummy())
     {
         m_FootSoles.BuildLines(dummy->GetMesh(), lines);

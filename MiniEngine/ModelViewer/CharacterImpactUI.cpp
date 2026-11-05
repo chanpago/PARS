@@ -1,6 +1,83 @@
 ﻿#include "RagdollImpactTest.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/World.h"
 #include "imgui.h"
+#include <cmath>
+
+namespace
+{
+    void AppendBodyImpactCapsule(std::vector<physx::PxDebugLine>& lines, const physx::PxTransform& pose,
+        float radius, float halfLength)
+    {
+        constexpr physx::PxU32 color = 0xff00ffff;
+        // PhysX 캡슐의 로컬 X축을 기준으로 윤곽을 만든 뒤 판정에 쓰는 자세로 변환한다.
+        for (int end : {-1, 1})
+        {
+            const float x = end * halfLength;
+            for (int segment = 0; segment < 24; ++segment)
+            {
+                const float a = segment * physx::PxTwoPi / 24;
+                const float b = (segment + 1) * physx::PxTwoPi / 24;
+                const physx::PxVec3 p(x, radius * std::cos(a), radius * std::sin(a));
+                const physx::PxVec3 q(x, radius * std::cos(b), radius * std::sin(b));
+                lines.emplace_back(pose.transform(p), pose.transform(q), color);
+            }
+            for (int plane = 0; plane < 2; ++plane)
+            {
+                for (int segment = 0; segment < 12; ++segment)
+                {
+                    const float a = segment * physx::PxPi / 12;
+                    const float b = (segment + 1) * physx::PxPi / 12;
+                    const physx::PxVec3 p(x + end * radius * std::sin(a), radius * std::cos(a), 0);
+                    const physx::PxVec3 q(x + end * radius * std::sin(b), radius * std::cos(b), 0);
+                    const physx::PxVec3 from = plane ? physx::PxVec3(p.x, 0, p.y) : p;
+                    const physx::PxVec3 to = plane ? physx::PxVec3(q.x, 0, q.y) : q;
+                    lines.emplace_back(pose.transform(from), pose.transform(to), color);
+                }
+            }
+        }
+        for (int side = 0; side < 4; ++side)
+        {
+            const float angle = side * physx::PxHalfPi;
+            const float y = radius * std::cos(angle);
+            const float z = radius * std::sin(angle);
+            lines.emplace_back(pose.transform(physx::PxVec3(-halfLength, y, z)),
+                pose.transform(physx::PxVec3(halfLength, y, z)), color);
+        }
+    }
+}
+
+void RagdollImpactTest::BuildBodyImpactLines(std::vector<physx::PxDebugLine>& lines)
+{
+    if (!m_BodyImpactCapsuleVisible)
+    {
+        return;
+    }
+    m_World.ForEachActor([&](PARS::Actor& actor) -> void
+    {
+        const PARS::Character* character = dynamic_cast<const PARS::Character*>(&actor);
+        if (!character || !character->CanControlMovement())
+        {
+            return;
+        }
+        const PARS::Ragdoll& ragdoll = character->GetMesh().GetRagdoll();
+        const PARS::CharacterImpactSettings& settings = character->GetCharacterImpact().GetSettings();
+        if (!settings.enabled || !ragdoll.UsesCharacterImpact())
+        {
+            return;
+        }
+        physx::PxTransform pose(physx::PxIdentity);
+        physx::PxVec3 targetOffset(0);
+        float radius = 0;
+        float halfLength = 0;
+        if (!ragdoll.GetCharacterImpactCapsule(settings.capsuleRadiusScale, pose, radius, halfLength, targetOffset))
+        {
+            return;
+        }
+        // 현재 실제 몸의 판정 영역을 표시한다. 이동 목표 오프셋과 재접촉 유지 여유는 포함하지 않는다.
+        AppendBodyImpactCapsule(lines, pose, radius + settings.contactSkin, halfLength);
+    });
+}
 
 void RagdollImpactTest::LoadBodyImpactSettings(PARS::Character& player, const std::string& path)
 {
@@ -20,6 +97,8 @@ void RagdollImpactTest::DrawBodyImpactUI(PARS::Character* player)
     }
     PARS::CharacterImpactComponent& component = player->GetCharacterImpact();
     PARS::CharacterImpactSettings settings = component.GetSettings();
+    ImGui::Checkbox(u8"몸통 밀침 캡슐 표시", &m_BodyImpactCapsuleVisible);
+    ImGui::TextWrapped("%s", u8"청록색 윤곽: 이동 가능한 캐릭터의 현재 몸통 밀침 영역 (접촉 여유 포함).");
     bool changed = ImGui::Checkbox(u8"캡슐 밀침 사용", &settings.enabled);
     changed |= ImGui::InputFloat(u8"기준 충격량 (N s)", &settings.referenceImpulse, 10, 100, "%.1f");
     changed |= ImGui::InputFloat(u8"기준 속도 (m/s)", &settings.referenceSpeed, .1f, 1, "%.2f");

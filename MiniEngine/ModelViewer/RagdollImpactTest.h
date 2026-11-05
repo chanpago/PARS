@@ -31,10 +31,6 @@ public:
 public:
     bool Initialize(std::shared_ptr<const Model> idle, const PARS::PhysicsAsset& asset);
     bool Reset();
-    void RememberPhysicsAsset(const PARS::PhysicsAsset& asset)
-    {
-        m_Asset = asset;
-    }
     bool SetAutomaticSupport(bool enabled);
     bool FireFrom(const PARS::Character& player);
     bool FireAimed(const PARS::Character& player, Math::Vector3 cameraPosition, Math::Vector3 cameraDirection);
@@ -46,9 +42,14 @@ public:
 
 private:
     void DrawBodyImpactUI(PARS::Character* player);
+    void BuildBodyImpactLines(std::vector<physx::PxDebugLine>& lines);
     bool FireAt(const PARS::Character& player, Math::Vector3 target, bool checkMuzzle = false);
 
 public:
+    void RememberPhysicsAsset(const PARS::PhysicsAsset& asset)
+    {
+        m_Asset = asset;
+    }
     bool UsesAutomaticSupport() const
     {
         return m_AutomaticSupport;
@@ -92,4 +93,5 @@ private:
     float m_MaxHipsDisplacement = 0;
     bool m_AutomaticSupport = true;
     bool m_RulerVisible = true;
+    bool m_BodyImpactCapsuleVisible = true;
 };
