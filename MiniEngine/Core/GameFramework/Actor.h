@@ -77,6 +77,11 @@ namespace PARS
         virtual void Tick(float deltaTime);
         virtual void PreparePhysics(float deltaTime);
         virtual void FixedTick(float deltaTime);
+        // 모든 Actor의 고정 틱이 끝난 뒤, PhysX simulate 직전에 외부 입력을 적용한다.
+        virtual void ApplyPhysicsInputs(float deltaTime)
+        {
+            (void)deltaTime;
+        }
 
     public:
         Actor& operator=(const Actor&) = delete;

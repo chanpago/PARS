@@ -137,7 +137,8 @@ namespace PARS
         if (sample.totalMass > 0)
         {
             // 충격량을 전신 질량으로 나눠 모델 크기에 덜 의존하는 속도 변화 단위로 판정한다.
-            input.impactVelocity = m_Ragdoll.GetExternalImpactImpulse() / sample.totalMass;
+            // 쿼리 밀침은 onContact가 없으므로, 같은 완료 스텝의 외부 입력을 따로 합산한다.
+            input.impactVelocity = (m_Ragdoll.GetExternalImpactImpulse() + m_Ragdoll.GetGameplayImpactImpulse()) / sample.totalMass;
         }
 
         // 현재 COM의 수평 속력 크기를 계산

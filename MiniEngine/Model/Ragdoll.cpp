@@ -55,8 +55,8 @@ namespace PARS
         class MovementQueryFilter : public PxQueryFilterCallback
         {
         public:
-            MovementQueryFilter(const std::vector<PxRigidBody*>& bodies, const void* owner)
-                : m_Bodies(bodies), m_Owner(owner)
+            MovementQueryFilter(const std::vector<PxRigidBody*>& bodies, const void* owner, bool characterImpact)
+                : m_Bodies(bodies), m_Owner(owner), m_CharacterImpact(characterImpact)
             {
             }
 
@@ -67,6 +67,7 @@ namespace PARS
                 return !shape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) ||
                         shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ||
                         (m_Owner && actor->userData == m_Owner) ||
+                        (m_CharacterImpact && (shape->getSimulationFilterData().word3 & PhysicsWorld::CharacterImpactFilterFlag)) ||
                         std::find(m_Bodies.begin(), m_Bodies.end(), actor) != m_Bodies.end()
                     ? PxQueryHitType::eNONE
                     : PxQueryHitType::eBLOCK;
@@ -87,6 +88,7 @@ namespace PARS
         private:
             const std::vector<PxRigidBody*>& m_Bodies;
             const void* m_Owner;
+            bool m_CharacterImpact;
         };
     }
 #endif
@@ -117,7 +119,7 @@ namespace PARS
             }
             targets.push_back(target);
         }
-        MovementQueryFilter filter(m_Bodies, m_QueryOwner);
+        MovementQueryFilter filter(m_Bodies, m_QueryOwner, m_CharacterImpactEnabled);
         PxVec3 moved(0), remaining = requested;
         constexpr float margin = .002f;
         for (int iteration = 0; iteration < 3 && remaining.magnitudeSquared() > 1e-12f; ++iteration)
@@ -218,6 +220,8 @@ namespace PARS
         m_BoneNames.clear();
         m_QueryOwner = nullptr;
         m_CollisionEnabled = true;
+        m_CharacterImpactEnabled = false;
+        m_CharacterImpactGroup = 0;
         m_Joints.clear();
         m_Bodies.clear();
         m_BoneNodes.clear();
@@ -260,6 +264,8 @@ namespace PARS
         m_BoneNames.swap(other.m_BoneNames);
         std::swap(m_QueryOwner, other.m_QueryOwner);
         std::swap(m_CollisionEnabled, other.m_CollisionEnabled);
+        std::swap(m_CharacterImpactEnabled, other.m_CharacterImpactEnabled);
+        std::swap(m_CharacterImpactGroup, other.m_CharacterImpactGroup);
         std::swap(m_Articulation, other.m_Articulation);
         std::swap(m_ArticulationCache, other.m_ArticulationCache);
         m_ArticulationJoints.swap(other.m_ArticulationJoints);
@@ -738,6 +744,7 @@ namespace PARS
     void Ragdoll::InvalidateContactState()
     {
         ++m_ContactRevision;
+        m_GameplayImpactImpulse = 0;
 #if defined(_M_X64)
         if (m_World)
         {

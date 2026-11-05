@@ -254,6 +254,14 @@ namespace PARS
                         actor->FixedTick(dt);
                     }
                 }
+                for (size_t i = 0; i < count; ++i)
+                {
+                    Actor* actor = m_Actors[i].get();
+                    if (!actor->IsPendingDestroy())
+                    {
+                        actor->ApplyPhysicsInputs(dt);
+                    }
+                }
             };
 
             animationDelta = m_PhysicsPaused ? 0.0f : deltaTime * m_PhysicsTimeScale;

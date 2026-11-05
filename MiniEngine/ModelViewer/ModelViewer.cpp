@@ -656,6 +656,9 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         // 초기화 직후에도 ImGui 버튼과 같은 절차로 액티브 래그돌을 시작한다.
         EnableActiveRagdoll(*character);
         m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_FootSoles);
+        const size_t impactDirectory = m_DefaultPAPath.find_last_of("/\\");
+        m_ImpactTest->LoadBodyImpactSettings(*character,
+            m_DefaultPAPath.substr(0, impactDirectory + 1) + "CharacterImpact.settings.json");
         if (!m_ImpactTest->Initialize(models[0], *mesh.GetPhysicsAsset()))
         {
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
@@ -1519,7 +1522,8 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                         movement.IsMovingOnGround() ? u8"지면 접촉" : u8"공중");
                     ImGui::Text(u8"블렌딩: %.0f%%", animation->GetBlendAlpha() * 100.0f);
                     ImGui::TextUnformatted(character->GetMesh().IsActiveRagdoll()
-                            ? u8"수평 충돌: PA 리지드바디"
+                            ? (character->GetMesh().GetRagdoll().UsesCharacterImpact()
+                                ? u8"수평 충돌: 환경 PA / 캐릭터 몸통 캡슐" : u8"수평 충돌: PA 리지드바디")
                             : character->IsRagdoll() ? u8"수평 이동 제어: 꺼짐 (패시브 래그돌)"
                                 : u8"수평 충돌: 이동 캡슐");
                 }

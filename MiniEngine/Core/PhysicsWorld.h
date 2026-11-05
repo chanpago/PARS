@@ -18,6 +18,17 @@ public:
     float halfHeight;
 };
 
+// 캐릭터 밀침 쿼리 결과다. 이 포인터는 해당 쿼리의 처리 중에만 사용한다.
+struct PhysicsCapsuleHit
+{
+public:
+    const physx::PxRigidActor* actor = nullptr;
+    const void* owner = nullptr;
+    physx::PxVec3 position{0};
+    physx::PxVec3 normal{0};
+    float distance = 0;
+};
+
 // 마지막으로 완료한 물리 스텝의 실제 지면 접촉이다. 레이 히트와 구분한다.
 struct PhysicsGroundContact
 {
@@ -87,6 +98,9 @@ public:
     void DestroyQueryCapsule(PhysicsQueryCapsule* capsule);
     CapsuleMoveResult MoveQueryCapsule(PhysicsQueryCapsule& capsule, const physx::PxVec3& displacement,
         bool blockHorizontal = true);
+    // 수신 정책이 켜진 캐릭터 PA만 수집한다. 여러 바디와 초기 겹침도 누락하지 않는다.
+    void SweepCharacterCapsule(const physx::PxTransform& pose, float radius, float halfLength,
+        const physx::PxVec3& displacement, const void* ignoredOwner, std::vector<PhysicsCapsuleHit>& hits) const;
     // 구형 프로브가 장애물에 닿기 전까지 이동할 수 있는 거리(m). 자기 Actor와 트리거는 제외한다.
     float SweepSphereDistance(const physx::PxVec3& origin, const physx::PxVec3& displacement,
         float radius, const void* ignoredOwner = nullptr) const;
@@ -174,6 +188,8 @@ public:
     }
 
 public:
+    // 캐릭터 PA는 word3의 이 비트와 word2의 소유자 번호를 사용한다.
+    static constexpr uint32_t CharacterImpactFilterFlag = 1u << 31;
     static constexpr double FixedDeltaTime = 1.0 / 60.0;
     static constexpr uint32_t MaxSubsteps = 8;
 

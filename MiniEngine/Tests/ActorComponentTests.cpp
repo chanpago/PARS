@@ -181,8 +181,15 @@ void RunRagdollComparisonTests();
 void RunSpringArmTests();
 void RunRagdollRecoveryTests();
 
+void RunCharacterImpactTests();
+
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--body-impact-only") == 0)
+    {
+        RunCharacterImpactTests();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--recovery-only") == 0)
     {
         RunRagdollRecoveryTests();
@@ -213,6 +220,7 @@ int main(int argc, char** argv)
         RunPelvisDriveTests();
         return 0;
     }
+    RunCharacterImpactTests();
     TestHierarchy();
     TestLifecycle();
     TestPoseSampling();

@@ -31,7 +31,7 @@ namespace PARS
         }
         float GetGroundSpeed() const;
         float GetLocomotionSpeed() const;
-        void SetHorizontalMoveConstraint(std::function<Math::Vector3(Math::Vector3)> constraint)
+        void SetHorizontalMoveConstraint(std::function<Math::Vector3(Math::Vector3, float)> constraint)
         {
             m_HorizontalMoveConstraint = std::move(constraint);
         }
@@ -43,7 +43,7 @@ namespace PARS
     private:
         Math::Vector3 m_Input{Math::kZero};
         Math::Vector3 m_LocomotionVelocity{Math::kZero};
-        std::function<Math::Vector3(Math::Vector3)> m_HorizontalMoveConstraint;
+        std::function<Math::Vector3(Math::Vector3, float)> m_HorizontalMoveConstraint;
         float m_VerticalSpeed = 0;
         bool m_Grounded = false;
     };

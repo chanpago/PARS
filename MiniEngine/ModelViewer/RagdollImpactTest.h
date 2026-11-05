@@ -41,9 +41,11 @@ public:
     void ClearProjectiles();
     void Update();
     void DrawUI(PARS::Character* player);
+    void LoadBodyImpactSettings(PARS::Character& player, const std::string& path);
     void BuildLines(std::vector<physx::PxDebugLine>& lines);
 
 private:
+    void DrawBodyImpactUI(PARS::Character* player);
     bool FireAt(const PARS::Character& player, Math::Vector3 target, bool checkMuzzle = false);
 
 public:
@@ -83,6 +85,8 @@ private:
     FootSoleDebug& m_FootSoles;
     std::vector<Shot> m_Shots;
     std::string m_Message;
+    std::string m_BodyImpactPath;
+    std::string m_BodyImpactMessage;
     float m_Mass = 2.0f;
     float m_Speed = 7.5f;
     float m_MaxHipsDisplacement = 0;

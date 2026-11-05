@@ -288,4 +288,7 @@
     <ClInclude Include="PreviewAnimInstance.h" />
     <ClInclude Include="ViewerLabels.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="CharacterImpactUI.cpp" />
+  </ItemGroup>
 </Project>

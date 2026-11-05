@@ -40,6 +40,7 @@ namespace PARS
     void Character::SyncRagdollMovement()
     {
         m_Capsule->SetHorizontalBlockingEnabled(!m_Mesh->IsActiveRagdoll());
+        m_Impact->RefreshCollisionPolicy();
         if (!IsRagdoll())
         {
             return;
@@ -66,9 +67,15 @@ namespace PARS
     void Character::FixedTick(float deltaTime)
     {
         SyncRagdollMovement();
+        m_Impact->BeginFixedStep(deltaTime);
         Pawn::FixedTick(deltaTime); // 이동을 먼저 처리한 다음 애니메이션과 드라이브 목표를 갱신한다.
         // 목표 계산 중 같은 서브스텝 안에서 Passive 모드로 전환될 수 있다.
         SyncRagdollMovement();
+    }
+
+    void Character::ApplyPhysicsInputs(float deltaTime)
+    {
+        m_Impact->ApplyPhysicsInputs(deltaTime);
     }
 
     bool Character::StopRagdoll(std::string& error)
@@ -101,9 +108,16 @@ namespace PARS
         m_Movement->SetUpdatedComponent(*m_Capsule);
         m_Mesh = &CreateDefaultSubobject<SkeletalMeshComponent>("SkeletalMeshComponent");
         m_Mesh->AttachToComponent(*m_Capsule);
-        m_Movement->SetHorizontalMoveConstraint([this](Math::Vector3 displacement) -> Math::Vector3
+        m_Impact = &CreateDefaultSubobject<CharacterImpactComponent>("CharacterImpactComponent");
+        m_Movement->SetHorizontalMoveConstraint([this](Math::Vector3 displacement, float deltaTime) -> Math::Vector3
+        {
+            if (!m_Mesh->IsActiveRagdoll())
             {
-            return m_Mesh->IsActiveRagdoll() ? m_Mesh->ConstrainHorizontalMovement(displacement) : displacement;
+                return displacement;
+            }
+            // 환경 장애물을 먼저 반영하고, 캐릭터 판정은 실제 몸의 속도로 수행한다.
+            const Math::Vector3 environmentMove = m_Mesh->ConstrainHorizontalMovement(displacement);
+            return m_Impact->ConstrainMovement(environmentMove, deltaTime);
         });
         // Actor 원점은 캡슐 중심이며, 가져온 메시의 원점은 발 위치에 있다.
         m_Mesh->SetRelativeLocation(Math::Vector3(0, -m_Capsule->GetHalfHeight(), 0));

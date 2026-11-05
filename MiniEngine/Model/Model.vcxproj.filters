@@ -199,4 +199,12 @@
     <ClCompile Include="LocomotionAnimInstance.cpp" />
     <ClInclude Include="LocomotionAnimInstance.h" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ClCompile Include="CharacterImpact.cpp" />
+    <ClCompile Include="RagdollImpact.cpp" />
+    <ClCompile Include="Components\CharacterImpactComponent.cpp" />
+    <ClInclude Include="CharacterImpact.h" />
+    <ClInclude Include="Components\CharacterImpactComponent.h" />
+  </ItemGroup>
 </Project>

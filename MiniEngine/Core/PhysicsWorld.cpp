@@ -27,6 +27,11 @@ namespace
         PxFilterObjectAttributes attributes1, PxFilterData data1, PxPairFlags& pairFlags,
         const void* constantBlock, PxU32 constantBlockSize)
     {
+        if ((data0.word3 & PhysicsWorld::CharacterImpactFilterFlag) &&
+            (data1.word3 & PhysicsWorld::CharacterImpactFilterFlag) && data0.word2 != data1.word2)
+        {
+            return PxFilterFlag::eSUPPRESS;
+        }
         const PxFilterFlags flags = PxDefaultSimulationFilterShader(attributes0, data0,
             attributes1, data1, pairFlags, constantBlock, constantBlockSize);
         if (!PxFilterObjectIsTrigger(attributes0) && !PxFilterObjectIsTrigger(attributes1))
@@ -36,6 +41,87 @@ namespace
         }
         return flags;
     }
+}
+
+namespace
+{
+    class CharacterCapsuleFilter : public PxQueryFilterCallback
+    {
+    public:
+        explicit CharacterCapsuleFilter(const void* owner) : m_Owner(owner)
+        {
+        }
+
+    public:
+        PxQueryHitType::Enum preFilter(const PxFilterData&, const PxShape* shape,
+            const PxRigidActor* actor, PxHitFlags&) override
+        {
+            return actor->userData && actor->userData != m_Owner &&
+                shape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) &&
+                !shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) &&
+                (shape->getSimulationFilterData().word3 & PhysicsWorld::CharacterImpactFilterFlag)
+                ? PxQueryHitType::eTOUCH : PxQueryHitType::eNONE;
+        }
+        PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit&,
+            const PxShape*, const PxRigidActor*) override
+        {
+            return PxQueryHitType::eTOUCH;
+        }
+
+    private:
+        const void* m_Owner;
+    };
+
+    class CharacterCapsuleHits : public PxSweepCallback
+    {
+    public:
+        explicit CharacterCapsuleHits(std::vector<PhysicsCapsuleHit>& hits)
+            : PxSweepCallback(m_Buffer, 32), m_Hits(hits)
+        {
+        }
+
+    public:
+        PxAgain processTouches(const PxSweepHit* buffer, PxU32 count) override
+        {
+            for (PxU32 i = 0; i < count; ++i)
+            {
+                const PxSweepHit& hit = buffer[i];
+                if (hit.actor && hit.position.isFinite() && hit.normal.isFinite() && std::isfinite(hit.distance))
+                {
+                    PhysicsCapsuleHit contact;
+                    contact.actor = hit.actor;
+                    contact.owner = hit.actor->userData;
+                    contact.position = hit.position;
+                    contact.normal = hit.normal;
+                    contact.distance = hit.distance;
+                    m_Hits.push_back(contact);
+                }
+            }
+            return true;
+        }
+
+    private:
+        std::vector<PhysicsCapsuleHit>& m_Hits;
+        PxSweepHit m_Buffer[32];
+    };
+}
+
+void PhysicsWorld::SweepCharacterCapsule(const PxTransform& pose, float radius, float halfLength,
+    const PxVec3& displacement, const void* ignoredOwner, std::vector<PhysicsCapsuleHit>& hits) const
+{
+    hits.clear();
+    if (!m_Scene || !pose.isValid() || !displacement.isFinite() ||
+        !std::isfinite(radius) || radius <= 0 || !std::isfinite(halfLength) || halfLength < 0)
+    {
+        return;
+    }
+    const float distance = displacement.magnitude();
+    const PxVec3 direction = distance > 1e-6f ? displacement / distance : PxVec3(0, 0, 1);
+    CharacterCapsuleFilter filter(ignoredOwner);
+    CharacterCapsuleHits callback(hits);
+    m_Scene->sweep(PxCapsuleGeometry(radius, halfLength), pose, direction, PxMax(distance, 1e-5f), callback,
+        PxHitFlag::eDEFAULT | PxHitFlag::eMTD,
+        PxQueryFilterData(PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::eNO_BLOCK), &filter);
 }
 
 void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactPair* pairs, PxU32 count)

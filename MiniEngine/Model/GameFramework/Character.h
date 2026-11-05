@@ -4,6 +4,7 @@
 #include "../../Core/GameFramework/CapsuleComponent.h"
 #include "../../Core/GameFramework/CharacterMovementComponent.h"
 #include "../Components/SkeletalMeshComponent.h"
+#include "../Components/CharacterImpactComponent.h"
 
 namespace PARS
 {
@@ -18,6 +19,7 @@ namespace PARS
         bool StopRagdoll(std::string& error);
         void PreparePhysics(float deltaTime) override;
         void FixedTick(float deltaTime) override;
+        void ApplyPhysicsInputs(float deltaTime) override;
 
     private:
         void SyncRagdollMovement();
@@ -35,6 +37,10 @@ namespace PARS
         {
             return *m_Mesh;
         }
+        CharacterImpactComponent& GetCharacterImpact() const
+        {
+            return *m_Impact;
+        }
         bool IsRagdoll() const
         {
             return m_Mesh->IsRagdoll();
@@ -45,6 +51,7 @@ namespace PARS
         CapsuleComponent* m_Capsule;
         CharacterMovementComponent* m_Movement;
         SkeletalMeshComponent* m_Mesh;
+        CharacterImpactComponent* m_Impact;
         bool m_MovementWasEnabled = true;
         bool m_CapsuleWasEnabled = true;
     };

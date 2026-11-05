@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "PhysicsAsset.h"
 #include <foundation/PxVec3.h>
+#include <foundation/PxTransform.h>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -10,6 +11,7 @@ struct PhysicsGroundContact;
 namespace physx
 {
     class PxRigidBody;
+    class PxRigidActor;
     class PxD6Joint;
     class PxArticulationReducedCoordinate;
     class PxArticulationJointReducedCoordinate;
@@ -18,6 +20,8 @@ namespace physx
 
 namespace PARS
 {
+    struct BodyImpactShare;
+
     struct RagdollSupportContact
     {
     public:
@@ -66,6 +70,9 @@ namespace PARS
         // 목표 생성 주체가 바뀔 때 불연속을 목표 속도/가속도로 미분하지 않는다. 실제 바디 속도는 유지한다.
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
+        // N s 입력을 한 고정 스텝의 외부 힘으로 바꾸고, 골반·척추에 총량을 나눠 적용한다.
+        bool ApplyBodyImpact(physx::PxVec3 impulse, physx::PxVec3 point, float pelvisShare,
+            float deltaTime, std::vector<BodyImpactShare>& shares);
         // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
         void SetCollisionEnabled(bool enabled);
         // 실제 PA 형상과 애니메이션 목표를 스윕해 벽 너머로 이동 목표가 누적되지 않게 한다.
@@ -164,6 +171,17 @@ namespace PARS
         bool GetCenterOfMassVelocity(Math::Vector3& velocity) const;
         bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
         float GetExternalImpactImpulse() const;
+        float GetGameplayImpactImpulse() const;
+        int GetImpactRootBody() const;
+        int FindPhysicsBody(const physx::PxRigidActor* actor) const;
+        physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
+        bool GetCharacterImpactCapsule(float radiusScale, physx::PxTransform& pose, float& radius,
+            float& halfLength, physx::PxVec3& targetOffset) const;
+        void SetCharacterImpactEnabled(bool enabled, uint32_t ownerGroup);
+        bool UsesCharacterImpact() const
+        {
+            return m_CharacterImpactEnabled;
+        }
         uint64_t GetContactRevision() const
         {
             return m_ContactRevision;
@@ -184,6 +202,8 @@ namespace PARS
 
     private:
         uint64_t m_ContactRevision = 0;
+        uint64_t m_GameplayImpactStep = 0;
+        uint64_t m_GameplayImpactClock = 0;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
@@ -208,7 +228,10 @@ namespace PARS
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;
         float m_MaxTargetClampAngle = 0;
+        float m_GameplayImpactImpulse = 0;
+        uint32_t m_CharacterImpactGroup = 0;
         bool m_CollisionEnabled = true;
+        bool m_CharacterImpactEnabled = false;
         bool m_Simulating = false;
         bool m_DrivesEnabled = false;
         bool m_HasDriveTargets = false;

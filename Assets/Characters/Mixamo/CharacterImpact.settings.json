@@ -1,0 +1,15 @@
+{
+    "version": 1,
+    "enabled": true,
+    "referenceImpulseNs": 180.0,
+    "referenceSpeedMps": 3.5,
+    "strengthMultiplier": 1.0,
+    "maximumImpulseNs": 500.0,
+    "minimumClosingSpeedMps": 0.35,
+    "pelvisShare": 0.6,
+    "separationTimeSeconds": 0.1,
+    "separationDistanceMeters": 0.08,
+    "cooldownSeconds": 0.35,
+    "capsuleRadiusScale": 0.95,
+    "contactSkinMeters": 0.02
+}

@@ -457,4 +457,7 @@
     <Error Condition="!Exists('..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\zlib-msvc-x64.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\zlib-msvc-x64.1.2.11.8900\build\native\zlib-msvc-x64.targets'))" />
     <Error Condition="!Exists('..\..\Packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\Packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets'))" />
   </Target>
+  <ItemGroup>
+    <ClCompile Include="CharacterImpactUI.cpp" />
+  </ItemGroup>
 </Project>

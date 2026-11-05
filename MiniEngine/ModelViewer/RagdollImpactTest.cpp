@@ -256,6 +256,7 @@ void RagdollImpactTest::DrawUI(Character* player)
     ImGui::SetNextWindowSize(ImVec2(440, 760), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(u8"PARS - 더미 충격 테스트"))
     {
+        DrawBodyImpactUI(player);
         ImGui::TextWrapped("%s", u8"우클릭 유지: 조준 / 조준 중 좌클릭 또는 R: 발사");
         ImGui::TextWrapped("%s", u8"조준하지 않을 때 R: 더미 골반으로 발사");
         ImGui::TextUnformatted(u8"반지름 15cm / 중력과 실제 충돌 적용");
