@@ -297,6 +297,8 @@ namespace PARS
             - 다리 기링와 수평 거리로 결정되는 도달 범위
             - 현재 골반의 수평 위치와 COM 속도
             */
+
+            // 골반이 유지할 목표 높이와 수평 보정량을 계산하고 이를 지지발의 IK목표에 반영하는함수
             if (!m_StandingSupport.Update(standing, m_StandingSupportSettings))
             {
                 m_FootstepIK.Reset();

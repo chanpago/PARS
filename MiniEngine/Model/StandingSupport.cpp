@@ -86,19 +86,38 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         // 지지하는 발은 바닥에 붙어있어야하는데, 불가피한 경우에 지지한느 발이 뜰 경우를 상정한다.시간을 누적해서 더해준다
         m_MissingContactTime[side] = foot.grounded ? 0 : (std::min)(m_MissingContactTime[side] + input.deltaTime, settings.contactLoweringTime);
 
-        // 
+        // 접촉 상실 때문에 골반을 얼마나 낮출지 정하는 비율 0~1로 설정된다.
         missingAmount = (std::max)(missingAmount, m_MissingContactTime[side] / settings.contactLoweringTime);
+
+        // 발바닥 목표 위에서 애니메이션과 같은 높이 관계를 유지하려면 골반이 어느 높이에 있어야하는지 계산하는 코드
         nominalHeight += foot.sole.p.y + input.animatedPelvis.p.y - foot.animatedSole.p.y;
         supportCount += 1;
 
+        // 발목 목표에 다리가 닿을 수 있도록 골반이 올라갈 수 있는 최대 높이를 계산하는부분
+        // 발목 목표와 고관절 위치를 구함
         const PxVec3 ankle = (foot.sole * foot.soleInBone.getInverse()).p;
         const PxVec3 hip = input.pelvis.p + foot.hipOffset;
+
+
         const float dx = ankle.x - hip.x;
         const float dz = ankle.z - hip.z;
         const float length = foot.length - settings.reachReserve;
+
+        // 수직거리의 제곱을 구함
         const float verticalSquared = length * length - dx * dx - dz * dz;
+
+        // 수직거리 여유가있는지 판단
         reachable = reachable && verticalSquared > 0;
+
+        // 가능한 수직거리를 골반의 최대 높이로 바꿈
+        /*
+        ankle.y + std::sqrt((std::max)(0.0f, verticalSquared)) 
+        이렇게만 적으면 발목부터 고관절(다리가시작하는부분) 까지의거리. 여기에 hip offset을 빼줘서 골반까지의 높이를 구한다
+        일반적으로 골반보다 다리가 시작하는 부분이 더 밑에 있기 때문에 foot.hipOffset.y는 음수
+        */
         const float allowedHeight = ankle.y + std::sqrt((std::max)(0.0f, verticalSquared)) - foot.hipOffset.y;
+
+        // 지지하는 모든 다리의 조건을 만족하는 높이를 선택
         maximumHeight = (std::min)(maximumHeight, allowedHeight);
     }
     if (supportCount == 0)
