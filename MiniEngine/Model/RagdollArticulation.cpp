@@ -331,6 +331,7 @@ namespace PARS
 #if defined(_M_X64)
         if (!active)
         {
+            RemoveCharacterCapsule();
             InvalidateContactState();
         }
         if (m_Articulation)

@@ -1,15 +1,8 @@
 {
-    "version": 1,
+    "version": 4,
     "enabled": true,
-    "referenceImpulseNs": 180.0,
-    "referenceSpeedMps": 3.5,
-    "strengthMultiplier": 1.0,
-    "maximumImpulseNs": 500.0,
-    "minimumClosingSpeedMps": 0.35,
-    "pelvisShare": 0.6,
-    "separationTimeSeconds": 0.1,
-    "separationDistanceMeters": 0.08,
-    "cooldownSeconds": 0.35,
+    "bodyMassKg": 8.154099464416504,
     "capsuleRadiusScale": 0.95,
+    "capsuleHeightScale": 1.0,
     "contactSkinMeters": 0.02
 }

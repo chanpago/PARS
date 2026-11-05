@@ -7,26 +7,18 @@
 
 namespace PARS
 {
-    // 게임플레이 밀침의 입력 단위는 N s다. 관절 PD와 PA 설정은 변경하지 않는다.
+    // 캡슐은 기존 동적 루트의 충돌 형상이며, 질량은 해당 바디의 실제 질량이다.
     struct CharacterImpactSettings
     {
     public:
         bool Validate(std::string& error) const;
         bool Save(const std::string& path, std::string& error) const;
         bool Load(const std::string& path, std::string& error);
-        float ComputeImpulse(float closingSpeed, float& requested) const;
 
     public:
-        float referenceImpulse = 180.0f;
-        float referenceSpeed = 3.5f;
-        float strengthMultiplier = 1.0f;
-        float maximumImpulse = 500.0f;
-        float minimumClosingSpeed = .35f;
-        float pelvisShare = .6f;
-        float separationTime = .1f;
-        float separationDistance = .08f;
-        float cooldown = .35f;
+        float bodyMass = 8.154099464416504f;
         float capsuleRadiusScale = .95f;
+        float capsuleHeightScale = 1.0f;
         float contactSkin = .02f;
         bool enabled = true;
     };
@@ -41,12 +33,7 @@ namespace PARS
     enum class CharacterImpactReason
     {
         NoContact,
-        BelowMinimumSpeed,
-        HeldContact,
-        Cooldown,
-        Queued,
         Applied,
-        StaleTarget,
         Disabled
     };
 
@@ -63,9 +50,7 @@ namespace PARS
         physx::PxVec3 actualVelocity{0};
         physx::PxVec3 requestedVelocity{0};
         float closingSpeed = 0;
-        float requestedImpulse = 0;
-        float commandedImpulse = 0;
+        float normalImpulse = 0;
         CharacterImpactReason reason = CharacterImpactReason::NoContact;
-        bool capped = false;
     };
 }

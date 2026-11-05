@@ -51,6 +51,8 @@
 #include "RagdollImpactTest.h"
 bool RunRagdollImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
     const std::wstring& path);
+bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
+    const std::wstring& path, uint32_t scenario, uint32_t frames);
 #include "RagdollComparisonRunner.h"
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
 bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
@@ -376,7 +378,32 @@ void ModelViewer::Startup(void)
             // 새 Actor와 컴포넌트의 BeginPlay로 물리 객체를 생성하고, 첫 포즈의 렌더 데이터까지 준비한다.
             LoadAnimationPreview(forceRebuild);
             std::wstring ragdollReport;
-            if (CommandLineArgs::GetString(L"impacttest", ragdollReport))
+            if (CommandLineArgs::GetString(L"bodyimpacttest", ragdollReport))
+            {
+                if (m_MeshViewer)
+                {
+                    m_MeshViewer->Close();
+                }
+                uint32_t scenario = 0;
+                uint32_t frames = 720;
+                CommandLineArgs::GetInteger(L"bodyimpactcase", scenario);
+                CommandLineArgs::GetInteger(L"bodyimpactframes", frames);
+                if (m_ImpactTest && GetPreviewCharacter())
+                {
+                    RunCharacterBodyImpactValidation(*m_ImpactTest, m_World, *GetPreviewCharacter(), ragdollReport, scenario, frames);
+                }
+                std::wstring capture;
+                m_RagdollTestDone = !CommandLineArgs::GetString(L"impactcapture", capture);
+                if (!m_RagdollTestDone && m_ImpactTest && m_ImpactTest->GetDummy())
+                {
+                    // 검증 종료 뒤의 정지 화면은 멀어진 플레이어 대신 충격을 받은 더미를 비춘다.
+                    const Vector3 target = m_ImpactTest->GetDummy()->GetMesh().GetRagdoll().GetPosition();
+                    m_Camera.SetEyeAtUp(target + Vector3(3, 2, 4), target, Vector3(kYUnitVector));
+                    SetFreeCamera(true);
+                    m_Camera.Update();
+                }
+            }
+            else if (CommandLineArgs::GetString(L"impacttest", ragdollReport))
             {
                 if (m_MeshViewer)
                 {

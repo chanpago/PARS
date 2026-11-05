@@ -29,8 +29,7 @@ namespace PARS
 
     bool CharacterImpactSettings::Validate(std::string& error) const
     {
-        const float values[] = {referenceImpulse, referenceSpeed, strengthMultiplier, maximumImpulse,
-            minimumClosingSpeed, pelvisShare, separationTime, separationDistance, cooldown, capsuleRadiusScale, contactSkin};
+        const float values[] = {bodyMass, capsuleRadiusScale, capsuleHeightScale, contactSkin};
         for (float value : values)
         {
             if (!std::isfinite(value) || value < 0)
@@ -39,26 +38,13 @@ namespace PARS
                 return false;
             }
         }
-        if (referenceSpeed <= 0 || pelvisShare > 1 || capsuleRadiusScale <= 0 || contactSkin > .1f)
+        if (bodyMass < .01f || bodyMass > 10000 || capsuleRadiusScale <= 0 || capsuleHeightScale <= 0 || contactSkin > .1f)
         {
-            error = u8"기준 속도·캡슐 배율은 양수, 골반 비율은 0~1, 접촉 여유는 0~0.1m여야 합니다.";
+            error = u8"질량은 0.01~10000kg, 캡슐 배율은 양수, 접촉 여유는 0~0.1m여야 합니다.";
             return false;
         }
         error.clear();
         return true;
-    }
-
-    float CharacterImpactSettings::ComputeImpulse(float closingSpeed, float& requested) const
-    {
-        requested = 0;
-        if (!enabled || !std::isfinite(closingSpeed) || closingSpeed < minimumClosingSpeed ||
-            closingSpeed <= 0 || referenceSpeed <= 0)
-        {
-            return 0;
-        }
-        const double amount = double(referenceImpulse) * strengthMultiplier * closingSpeed / referenceSpeed;
-        requested = static_cast<float>((std::min)(amount, double(FLT_MAX)));
-        return (std::min)(requested, maximumImpulse);
     }
 
     bool CharacterImpactSettings::Save(const std::string& path, std::string& error) const
@@ -69,12 +55,8 @@ namespace PARS
         }
         try
         {
-            const nlohmann::json data = {{"version", 1}, {"enabled", enabled},
-                {"referenceImpulseNs", referenceImpulse}, {"referenceSpeedMps", referenceSpeed},
-                {"strengthMultiplier", strengthMultiplier}, {"maximumImpulseNs", maximumImpulse},
-                {"minimumClosingSpeedMps", minimumClosingSpeed}, {"pelvisShare", pelvisShare},
-                {"separationTimeSeconds", separationTime}, {"separationDistanceMeters", separationDistance}, {"cooldownSeconds", cooldown},
-                {"capsuleRadiusScale", capsuleRadiusScale}, {"contactSkinMeters", contactSkin}};
+            const nlohmann::json data = {{"version", 4}, {"enabled", enabled}, {"bodyMassKg", bodyMass},
+                {"capsuleRadiusScale", capsuleRadiusScale}, {"capsuleHeightScale", capsuleHeightScale}, {"contactSkinMeters", contactSkin}};
             std::ofstream file(ImpactPath(path), std::ios::trunc);
             file << data.dump(4) << '\n';
             file.flush();
@@ -99,22 +81,23 @@ namespace PARS
             std::ifstream file(ImpactPath(path));
             nlohmann::json data;
             file >> data;
-            if (data.at("version").get<int>() != 1)
+            const int version = data.at("version").get<int>();
+            if (version < 1 || version > 4)
             {
                 throw std::runtime_error("Unsupported character impact settings version.");
             }
             CharacterImpactSettings candidate;
             candidate.enabled = data.at("enabled").get<bool>();
-            candidate.referenceImpulse = data.at("referenceImpulseNs").get<float>();
-            candidate.referenceSpeed = data.at("referenceSpeedMps").get<float>();
-            candidate.strengthMultiplier = data.at("strengthMultiplier").get<float>();
-            candidate.maximumImpulse = data.at("maximumImpulseNs").get<float>();
-            candidate.minimumClosingSpeed = data.at("minimumClosingSpeedMps").get<float>();
-            candidate.pelvisShare = data.at("pelvisShare").get<float>();
-            candidate.separationTime = data.at("separationTimeSeconds").get<float>();
-            candidate.separationDistance = data.at("separationDistanceMeters").get<float>();
-            candidate.cooldown = data.at("cooldownSeconds").get<float>();
+            // 이전 수동 밀침의 충격량·상한·쿨타임은 실제 접촉 솔버에 전달하지 않는다.
+            if (version >= 3)
+            {
+                candidate.bodyMass = data.at("bodyMassKg").get<float>();
+            }
             candidate.capsuleRadiusScale = data.at("capsuleRadiusScale").get<float>();
+            if (version >= 4)
+            {
+                candidate.capsuleHeightScale = data.at("capsuleHeightScale").get<float>();
+            }
             candidate.contactSkin = data.at("contactSkinMeters").get<float>();
             if (!candidate.Validate(error))
             {

@@ -11,6 +11,10 @@ namespace PARS
 {
     void Ragdoll::SetCollisionEnabled(bool enabled)
     {
+        if (!enabled)
+        {
+            RemoveCharacterCapsule();
+        }
         if (m_CollisionEnabled != enabled)
         {
             InvalidateContactState();
@@ -183,6 +187,7 @@ namespace PARS
     }
     void Ragdoll::Destroy()
     {
+        RemoveCharacterCapsule();
         InvalidateContactState();
         m_Standby.reset();
 #if defined(_M_X64)
@@ -266,6 +271,12 @@ namespace PARS
         std::swap(m_CollisionEnabled, other.m_CollisionEnabled);
         std::swap(m_CharacterImpactEnabled, other.m_CharacterImpactEnabled);
         std::swap(m_CharacterImpactGroup, other.m_CharacterImpactGroup);
+        std::swap(m_CharacterCapsuleShape, other.m_CharacterCapsuleShape);
+        std::swap(m_OriginalCapsuleMass, other.m_OriginalCapsuleMass);
+        std::swap(m_OriginalCapsuleInertia, other.m_OriginalCapsuleInertia);
+        std::swap(m_CapsuleRadiusScale, other.m_CapsuleRadiusScale);
+        std::swap(m_CapsuleHeightScale, other.m_CapsuleHeightScale);
+        std::swap(m_CapsuleSkin, other.m_CapsuleSkin);
         std::swap(m_Articulation, other.m_Articulation);
         std::swap(m_ArticulationCache, other.m_ArticulationCache);
         m_ArticulationJoints.swap(other.m_ArticulationJoints);
@@ -744,7 +755,6 @@ namespace PARS
     void Ragdoll::InvalidateContactState()
     {
         ++m_ContactRevision;
-        m_GameplayImpactImpulse = 0;
 #if defined(_M_X64)
         if (m_World)
         {

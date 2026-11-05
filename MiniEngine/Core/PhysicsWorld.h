@@ -29,6 +29,18 @@ public:
     float distance = 0;
 };
 
+// 실제 몸통 캡슐 접촉에서 PhysX 솔버가 상대 바디에 전달한 충격량이다.
+struct PhysicsCapsuleContact
+{
+public:
+    const physx::PxRigidActor* actor = nullptr;
+    const void* owner = nullptr;
+    physx::PxVec3 position{0};
+    physx::PxVec3 impulse{0};
+    physx::PxVec3 normal{0};
+    float normalImpulse = 0;
+};
+
 // 마지막으로 완료한 물리 스텝의 실제 지면 접촉이다. 레이 히트와 구분한다.
 struct PhysicsGroundContact
 {
@@ -142,6 +154,8 @@ public:
 public:
     bool GetGroundContact(const physx::PxRigidActor& body, PhysicsGroundContact& contact,
         const void* ignoredOwner = nullptr) const;
+    void GetCharacterCapsuleContacts(const physx::PxRigidActor& body,
+        std::vector<PhysicsCapsuleContact>& contacts) const;
     // 마지막 완료 스텝의 외부 충격량 합(N s). 자기 충돌과 위쪽 지면 지지 접촉은 제외한다.
     float GetExternalImpactImpulse(const physx::PxRigidActor& body, const void* ignoredOwner = nullptr) const;
     uint64_t GetClockRevision() const
@@ -190,6 +204,12 @@ public:
 public:
     // 캐릭터 PA는 word3의 이 비트와 word2의 소유자 번호를 사용한다.
     static constexpr uint32_t CharacterImpactFilterFlag = 1u << 31;
+    // 몸통 캡슐의 수신 대상인 루트와 상체 바디만 설정한다.
+    static constexpr uint32_t CharacterImpactTargetFilterFlag = 1u << 30;
+    // 동적 루트에 붙은 몸통 캡슐 형상을 기존 PA 형상과 구분한다.
+    static constexpr uint32_t CharacterCapsuleFilterFlag = 1u << 29;
+    // 이 PA의 소유자가 활성 몸통 캡슐을 가지고 있을 때만 설정한다.
+    static constexpr uint32_t CharacterCapsuleOwnerFilterFlag = 1u << 28;
     static constexpr double FixedDeltaTime = 1.0 / 60.0;
     static constexpr uint32_t MaxSubsteps = 8;
 

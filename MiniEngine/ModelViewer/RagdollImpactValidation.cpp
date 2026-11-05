@@ -1,10 +1,165 @@
-#include "RagdollImpactTest.h"
+﻿#include "RagdollImpactTest.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/World.h"
+#include "GameFramework/PlayerController.h"
+#include "PreviewAnimInstance.h"
+#include "Util/CommandLineArg.h"
 #include <fstream>
 #include <stdexcept>
 #include <cmath>
 #include <functional>
+
+// 기준과 후보에서 같은 바닥·애니메이션·입력을 사용하는 실제 캐릭터 검증이다.
+bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
+    const std::wstring& path, uint32_t scenario, uint32_t frames)
+{
+    using namespace PARS;
+    using namespace Math;
+    using namespace physx;
+    std::ofstream report(path);
+    std::ofstream samples(path + L".csv");
+    std::ofstream events(path + L".events.csv");
+    const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
+    {
+        report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
+        if (!condition)
+        {
+            throw std::runtime_error(message);
+        }
+    };
+    try
+    {
+        Character* dummy = test.GetDummy();
+        check(report.good() && samples.good() && events.good() && dummy && scenario <= 6 && frames > 0 && frames <= 720,
+            "Open actual-character body impact validation");
+        std::string error;
+        check(test.Reset(), "Reset grounded Idle dummy with original automatic support");
+        PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());
+        check(controller != nullptr, "Use the normal player movement controller");
+        controller->SetInputEnabled(true);
+        controller->SetMoveInput(0, 0, false);
+        check(player.StopRagdoll(error), "Reset player simulation");
+        player.GetCharacterMovement().StopMovementImmediately();
+        const float yaw = scenario == 3 || scenario == 5 ? DirectX::XM_PIDIV2 :
+            scenario == 4 ? -DirectX::XM_PIDIV2 : scenario == 6 ? DirectX::XM_PIDIV4 : 0.0f;
+        const Vector3 direction(std::sin(yaw), 0, std::cos(yaw));
+        const Vector3 origin = dummy->GetActorLocation() - direction * 2.0f;
+        player.SetActorTransform(AffineTransform(Quaternion(Vector3(kYUnitVector), yaw),
+            Vector3(origin.GetX(), player.GetCapsuleComponent().GetHalfHeight(), origin.GetZ())));
+        controller->SetControlYaw(yaw);
+        PreviewAnimInstance& animation = static_cast<PreviewAnimInstance&>(player.GetMesh().GetAnimInstance());
+        animation.SetAutoCycleEnabled(false);
+        animation.SetLocomotionEnabled(true);
+        animation.PlayAnimation(0);
+        world.Tick(0);
+        check(player.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
+            player.GetMesh().GetRagdoll().SetRootSupported(true, error), "Enable original supported player");
+        CharacterImpactSettings impactSettings = player.GetCharacterImpact().GetSettings();
+        CommandLineArgs::GetFloat(L"bodyimpactmass", impactSettings.bodyMass);
+        CommandLineArgs::GetFloat(L"bodyimpactradius", impactSettings.capsuleRadiusScale);
+        CommandLineArgs::GetFloat(L"bodyimpactheight", impactSettings.capsuleHeightScale);
+        uint32_t enabled = impactSettings.enabled ? 1 : 0;
+        CommandLineArgs::GetInteger(L"bodyimpactenabled", enabled);
+        impactSettings.enabled = enabled != 0;
+        check(player.GetCharacterImpact().SetSettings(impactSettings, error), "Configure physical capsule mass and enable state");
+        uint32_t toggle = 0;
+        CommandLineArgs::GetInteger(L"bodyimpacttoggle", toggle);
+        PhysicsSkeleton playerSkeleton;
+        PhysicsSkeleton dummySkeleton;
+        check(player.GetMesh().BuildPhysicsSkeleton(playerSkeleton, error) &&
+            dummy->GetMesh().BuildPhysicsSkeleton(dummySkeleton, error), "Load real skeletons for animation-relative measurements");
+        world.SetPhysicsPaused(false);
+        world.SetPhysicsTimeScale(1);
+        samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
+        events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
+        report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
+            << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
+            << " dummy_auto_support=" << dummy->GetMesh().UsesAutomaticRootSupport() << std::endl;
+        report << "capsule_mass_kg=" << impactSettings.bodyMass << " capsule_enabled=" << impactSettings.enabled
+            << " repeated_toggle=" << toggle << std::endl;
+        report << "capsule_radius_scale=" << impactSettings.capsuleRadiusScale
+            << " capsule_height_scale=" << impactSettings.capsuleHeightScale << std::endl;
+        uint64_t eventCount = 0;
+        for (uint32_t frame = 0; frame < frames; ++frame)
+        {
+            if (toggle && frame < 100)
+            {
+                // 기존 대기 구간에서 설정만 반복 전환해 물리 객체와 원래 질량의 복원을 확인한다.
+                impactSettings.enabled = frame % 2 != 0;
+                check(player.GetCharacterImpact().SetSettings(impactSettings, error), "Toggle physical capsule at a fixed-step boundary");
+                check(player.GetMesh().GetRagdoll().HasCharacterCapsule() == impactSettings.enabled,
+                    "Simulation shape follows the enable state");
+                const Ragdoll& ragdoll = player.GetMesh().GetRagdoll();
+                const float expectedMass = impactSettings.enabled ? impactSettings.bodyMass :
+                    player.GetMesh().GetPhysicsAsset()->bodies[ragdoll.GetImpactRootBody()].mass;
+                check(std::abs(ragdoll.GetCharacterCapsuleMass() - expectedMass) < .0001f,
+                    "Runtime toggle restores the PA mass and preserves the configured ON mass");
+            }
+            // 기본 입력: 2초 안정화, 3초 접근, 2초 후퇴, 2초 재접근, 나머지는 정지한다.
+            const float input = scenario == 0 || frame < 120 || frame >= 540 ? 0.0f :
+                frame < 300 ? 1.0f : frame < 420 ? -1.0f : 1.0f;
+            controller->SetMoveInput(input, 0, scenario != 1);
+            if (scenario == 5 && frame == 120)
+            {
+                // 토크 상한과 밀침 설정을 그대로 둔 고속 충격 시험 입력이다.
+                player.GetMesh().GetRagdoll().AddVelocity(direction * 15.0f);
+            }
+            world.Tick(1.0f / 60.0f);
+            test.Update();
+            const float time = (frame + 1) / 60.0f;
+            for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
+            {
+                ++eventCount;
+                for (const BodyImpactShare& share : impact.shares)
+                {
+                    events << frame << ',' << time << ',' << impact.eventCount << ',' << impact.hitBone << ',' << share.bone
+                        << ',' << 0 << ',' << impact.normalImpulse << ',' << impact.closingSpeed
+                        << ',' << impact.point.x << ',' << impact.point.y << ',' << impact.point.z
+                        << ',' << share.impulse.x << ',' << share.impulse.y << ',' << share.impulse.z << ',' << 0 << '\n';
+                }
+            }
+            for (Character* character : {&player, dummy})
+            {
+                SkeletalMeshComponent& mesh = character->GetMesh();
+                Ragdoll& ragdoll = mesh.GetRagdoll();
+                const PhysicsSkeleton& skeleton = character == &player ? playerSkeleton : dummySkeleton;
+                std::vector<Matrix4> targets;
+                check(ragdoll.IsFinite() && EvaluatePhysicsPose(skeleton, mesh.GetAnimInstance().GetPose(),
+                    Matrix4(mesh.GetComponentTransform()), targets, error), "Finite bodies and valid animation targets");
+                const FootSupportSnapshot& feet = mesh.GetFootSupport().GetSnapshot();
+                for (size_t body = 0; body < ragdoll.GetBodyCount(); ++body)
+                {
+                    const Matrix4 actual = ragdoll.GetBoneWorld(body);
+                    const Matrix4 target = PhysicsBoneFrame(targets[ragdoll.GetBoneNodes()[body]]);
+                    const Vector3 position(actual.GetW());
+                    DirectX::XMFLOAT4 rotation;
+                    DirectX::XMStoreFloat4(&rotation, Quaternion(actual));
+                    const float dot = std::abs(DirectX::XMVectorGetX(DirectX::XMQuaternionDot(Quaternion(actual), Quaternion(target))));
+                    const float angle = 2 * std::acos(Clamp(dot, 0.0f, 1.0f));
+                    const PxVec3 point(float(position.GetX()), float(position.GetY()), float(position.GetZ()));
+                    samples << frame << ',' << time << ',' << (character == &player ? "player" : "dummy") << ','
+                        << mesh.GetPhysicsAsset()->bodies[body].bone << ',' << point.x << ',' << point.y << ',' << point.z
+                        << ',' << rotation.x << ',' << rotation.y << ',' << rotation.z << ',' << rotation.w
+                        << ',' << float(Length(position - Vector3(target.GetW()))) << ',' << angle
+                        << ',' << ragdoll.GetBodyPointVelocity(body, point).magnitude() << ',' << ragdoll.IsRootSupported()
+                        << ',' << feet.feet[0].contact.grounded << ',' << feet.feet[1].contact.grounded
+                        << ',' << ragdoll.GetMaxDriveError() << '\n';
+                }
+            }
+        }
+        controller->SetMoveInput(0, 0, false);
+        world.SetPhysicsPaused(true);
+        report << "events=" << eventCount << std::endl;
+        check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors");
+        report << "PASS: actual-character body impact recording" << std::endl;
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        report << "FAIL: " << error.what() << std::endl;
+        return false;
+    }
+}
 
 using namespace PARS;
 using namespace Math;

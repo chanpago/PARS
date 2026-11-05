@@ -75,7 +75,8 @@ namespace PARS
 
     void Character::ApplyPhysicsInputs(float deltaTime)
     {
-        m_Impact->ApplyPhysicsInputs(deltaTime);
+        // 캐릭터 간 충격은 실제 캡슐 접촉을 통해 PhysX 솔버가 계산한다.
+        Pawn::ApplyPhysicsInputs(deltaTime);
     }
 
     bool Character::StopRagdoll(std::string& error)

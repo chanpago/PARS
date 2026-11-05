@@ -27,8 +27,24 @@ namespace
         PxFilterObjectAttributes attributes1, PxFilterData data1, PxPairFlags& pairFlags,
         const void* constantBlock, PxU32 constantBlockSize)
     {
+        const bool capsule0 = (data0.word3 & PhysicsWorld::CharacterCapsuleFilterFlag) != 0;
+        const bool capsule1 = (data1.word3 & PhysicsWorld::CharacterCapsuleFilterFlag) != 0;
+        if (capsule0 || capsule1)
+        {
+            const PxFilterData& target = capsule0 ? data1 : data0;
+            // 자기 몸, 하체, 환경과 캡슐끼리의 중복 접촉은 만들지 않는다.
+            if (capsule0 == capsule1 || data0.word2 == data1.word2 ||
+                !(target.word3 & PhysicsWorld::CharacterImpactTargetFilterFlag))
+            {
+                return PxFilterFlag::eSUPPRESS;
+            }
+            pairFlags = PxPairFlag::eCONTACT_DEFAULT | PxPairFlag::eNOTIFY_CONTACT_POINTS |
+                PxPairFlag::eNOTIFY_TOUCH_FOUND | PxPairFlag::eNOTIFY_TOUCH_PERSISTS | PxPairFlag::eNOTIFY_TOUCH_LOST;
+            return PxFilterFlag::eDEFAULT;
+        }
         if ((data0.word3 & PhysicsWorld::CharacterImpactFilterFlag) &&
-            (data1.word3 & PhysicsWorld::CharacterImpactFilterFlag) && data0.word2 != data1.word2)
+            (data1.word3 & PhysicsWorld::CharacterImpactFilterFlag) && data0.word2 != data1.word2 &&
+            ((data0.word3 | data1.word3) & PhysicsWorld::CharacterCapsuleOwnerFilterFlag))
         {
             return PxFilterFlag::eSUPPRESS;
         }
@@ -59,7 +75,7 @@ namespace
             return actor->userData && actor->userData != m_Owner &&
                 shape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) &&
                 !shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) &&
-                (shape->getSimulationFilterData().word3 & PhysicsWorld::CharacterImpactFilterFlag)
+                (shape->getSimulationFilterData().word3 & PhysicsWorld::CharacterImpactTargetFilterFlag)
                 ? PxQueryHitType::eTOUCH : PxQueryHitType::eNONE;
         }
         PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit&,
@@ -172,6 +188,43 @@ void PhysicsWorld::InvalidateContacts(const PxRigidActor& body)
         return pair.actors[0] == &body || pair.actors[1] == &body;
     }),
         m_Contacts.end());
+}
+
+void PhysicsWorld::GetCharacterCapsuleContacts(const PxRigidActor& body,
+    std::vector<PhysicsCapsuleContact>& contacts) const
+{
+    contacts.clear();
+    if (!m_Scene || body.getScene() != m_Scene)
+    {
+        return;
+    }
+    for (const ContactPair& pair : m_Contacts)
+    {
+        const int side = pair.actors[0] == &body ? 0 : pair.actors[1] == &body ? 1 : -1;
+        if (side < 0 || pair.completedStep != m_StepCount || pair.clockRevision != m_ClockRevision ||
+            !(pair.shapes[side]->getSimulationFilterData().word3 & CharacterCapsuleFilterFlag))
+        {
+            continue;
+        }
+        const PxRigidActor* other = pair.actors[1 - side]->is<PxRigidActor>();
+        if (!other || pair.points.empty())
+        {
+            continue;
+        }
+        PhysicsCapsuleContact contact;
+        contact.actor = other;
+        contact.owner = other->userData;
+        for (const PxContactPairPoint& point : pair.points)
+        {
+            contact.position += point.position;
+            contact.impulse += side == 0 ? -point.impulse : point.impulse;
+            contact.normal += side == 0 ? -point.normal : point.normal;
+            contact.normalImpulse += PxMax(0.0f, point.impulse.dot(point.normal));
+        }
+        contact.position /= static_cast<float>(pair.points.size());
+        contact.normal.normalize();
+        contacts.push_back(contact);
+    }
 }
 
 void PhysicsWorld::onRelease(const PxBase* object, void*, PxDeletionEventFlag::Enum)

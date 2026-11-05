@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <limits>
 #include <chrono>
+#include <fstream>
 
 using namespace PARS;
 using namespace Math;
@@ -44,28 +45,117 @@ namespace
         std::vector<int>& m_Order;
         int m_Value;
     };
+
+    float SolveCapsuleContact(PhysicsWorld& service, float sourceMass, bool upperBody, bool enabled = true)
+    {
+        PhysicsWorld world;
+        CheckImpact(world.InitializeScene(service), "Initialize the physical contact scene");
+        PhysicsAsset asset;
+        PhysicsBody root;
+        root.bone = "Hips";
+        root.shape = PhysicsShapeType::Sphere;
+        root.radius = .1f;
+        root.mass = 2;
+        root.material.restitution = 0;
+        root.material.staticFriction = 0;
+        root.material.dynamicFriction = 0;
+        asset.bodies.push_back(root);
+        const std::vector<std::string> names{"Hips"};
+        const std::vector<Matrix4> poses{Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 3, 0)))};
+        Ragdoll source;
+        std::string error;
+        int sourceOwner = 1;
+        int targetOwner = 2;
+        CheckImpact(source.Create(world, asset, names, poses, Vector3(kZero), error), "Create a finite-mass source body");
+        source.SetQueryOwner(&sourceOwner);
+        source.SetCharacterImpactEnabled(true, 101);
+        CheckImpact(source.ConfigureCharacterCapsule(enabled, sourceMass, 1, .01f, error), "Configure the actual simulation capsule");
+        const float activeMass = source.GetCharacterCapsuleMass();
+        PxRigidDynamic* target = world.CreateDynamicBody(PxTransform(PxVec3(.25f, 3, 0)), PxSphereGeometry(.1f),
+            1, "Contact receiver", root.material);
+        target->userData = &targetOwner;
+        PxShape* targetShape = nullptr;
+        target->getShapes(&targetShape, 1);
+        PxFilterData filter;
+        filter.word2 = 102;
+        filter.word3 = PhysicsWorld::CharacterImpactFilterFlag |
+            (upperBody ? PhysicsWorld::CharacterImpactTargetFilterFlag : 0);
+        targetShape->setSimulationFilterData(filter);
+        source.AddVelocity(Vector3(2, 0, 0));
+        float measuredImpulse = 0;
+        for (int step = 0; step < 12; ++step)
+        {
+            world.Step();
+            std::vector<PhysicsCapsuleContact> contacts;
+            source.GetCharacterCapsuleContacts(contacts);
+            for (const PhysicsCapsuleContact& contact : contacts)
+            {
+                CheckImpact(contact.actor == target, "Physical capsule contacts address the actual receiver");
+                measuredImpulse += contact.normalImpulse;
+            }
+        }
+        Vector3 sourceVelocity(kZero);
+        CheckImpact(source.GetCenterOfMassVelocity(sourceVelocity), "Measure source recoil");
+        const float targetVelocity = target->getLinearVelocity().x;
+        if (upperBody)
+        {
+            // 중심을 지나는 비탄성 충돌의 해와 비교한다. 기존 선형 감쇠의 작은 영향만 허용한다.
+            const float expectedVelocity = 2 * activeMass / (activeMass + 1);
+            CheckImpact(std::abs(targetVelocity - expectedVelocity) < .08f &&
+                float(sourceVelocity.GetX()) < 1.99f && (enabled ? measuredImpulse > .1f : measuredImpulse == 0),
+                "PhysX produces the finite-mass collision solution and source recoil without manual forces");
+            CheckImpact(std::abs(activeMass * float(sourceVelocity.GetX()) + targetVelocity - 2 * activeMass) < .12f,
+                "Both dynamic bodies exchange momentum within the existing damping loss");
+        }
+        else
+        {
+            CheckImpact(std::abs(targetVelocity) < 1e-5f && measuredImpulse == 0,
+                "Lower-body filter prevents simulation contact and momentum transfer");
+        }
+        CheckImpact(world.GetErrorCount() == 0 && source.IsFinite(), "Finite collision state with no PhysX errors");
+        std::printf("capsule mass=%.3f enabled=%d upper=%d receiver_vx=%.6f source_vx=%.6f measured_J=%.6f\n",
+            activeMass, enabled ? 1 : 0, upperBody ? 1 : 0, targetVelocity, float(sourceVelocity.GetX()), measuredImpulse);
+        target->release();
+        return targetVelocity;
+    }
 }
 
 void RunCharacterImpactTests()
 {
     CharacterImpactSettings settings;
     std::string error;
-    float requested = 0;
-    CheckImpact(settings.ComputeImpulse(3.5f, requested) == 180 && requested == 180, "Reference impulse and speed");
-    settings.strengthMultiplier = 10;
-    CheckImpact(settings.ComputeImpulse(3.5f, requested) == 500 && requested == 1800, "Command clamp preserves demand");
-    CheckImpact(settings.ComputeImpulse(-1, requested) == 0 && requested == 0, "Separating motion has no impulse");
-    CheckImpact(settings.ComputeImpulse(.1f, requested) == 0, "Subthreshold approach has no impulse");
+    settings.bodyMass = 20;
+    settings.enabled = false;
+    settings.capsuleHeightScale = 1.25f;
     const std::string profilePath = "CharacterImpactSettings." +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".test.json";
     CheckImpact(settings.Save(profilePath, error), "Save independent impact profile");
     CharacterImpactSettings loaded;
-    CheckImpact(loaded.Load(profilePath, error) && loaded.strengthMultiplier == 10,
+    CheckImpact(loaded.Load(profilePath, error) && loaded.bodyMass == 20 && !loaded.enabled && loaded.capsuleHeightScale == 1.25f,
         "Reload impact profile");
+    {
+        std::ofstream legacy(profilePath);
+        legacy << R"({"version":1,"enabled":true,"referenceImpulseNs":180,"referenceSpeedMps":3.5,
+            "strengthMultiplier":1,"maximumImpulseNs":500,"minimumClosingSpeedMps":0.35,"pelvisShare":0.1,
+            "separationTimeSeconds":0.1,"separationDistanceMeters":0.08,"cooldownSeconds":0.35,
+            "capsuleRadiusScale":0.95,"contactSkinMeters":0.02})";
+    }
+    CheckImpact(loaded.Load(profilePath, error) && loaded.bodyMass == CharacterImpactSettings().bodyMass,
+        "Legacy profile discards manual impulses and uses the new dynamic-body mass default");
+    {
+        std::ofstream legacy(profilePath);
+        legacy << R"({"version":3,"enabled":false,"bodyMassKg":20,"capsuleRadiusScale":0.8,"contactSkinMeters":0.02})";
+    }
+    CheckImpact(loaded.Load(profilePath, error) && loaded.bodyMass == 20 && !loaded.enabled &&
+        loaded.capsuleHeightScale == 1.0f && loaded.capsuleRadiusScale == .8f,
+        "Version-three profiles retain their previous capsule dimensions with height scale one");
     std::remove(profilePath.c_str());
-    settings.referenceSpeed = 0;
-    CheckImpact(!settings.Validate(error), "Reject zero reference speed");
-    settings.referenceSpeed = std::numeric_limits<float>::quiet_NaN();
+    settings.capsuleHeightScale = 0;
+    CheckImpact(!settings.Validate(error), "Reject zero capsule height scale");
+    settings.capsuleHeightScale = 1;
+    settings.bodyMass = 0;
+    CheckImpact(!settings.Validate(error), "Reject zero body mass");
+    settings.bodyMass = std::numeric_limits<float>::quiet_NaN();
     CheckImpact(!settings.Validate(error), "Reject nonfinite profile");
 
     World game;
@@ -93,13 +183,20 @@ void RunCharacterImpactTests()
         PxShape* shape = nullptr;
         body->getShapes(&shape, 1);
         PxFilterData data;
-        data.word3 = PhysicsWorld::CharacterImpactFilterFlag;
+        data.word3 = PhysicsWorld::CharacterImpactFilterFlag | PhysicsWorld::CharacterImpactTargetFilterFlag;
         data.word2 = static_cast<uint32_t>(i + 1);
         shape->setSimulationFilterData(data);
     }
     std::vector<PhysicsCapsuleHit> hits;
+    PxRigidDynamic* excluded = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, 0)), PxSphereGeometry(.1f), 1, "Excluded lower body");
+    excluded->userData = &owner;
+    PxShape* excludedShape = nullptr;
+    excluded->getShapes(&excludedShape, 1);
+    PxFilterData excludedData;
+    excludedData.word3 = PhysicsWorld::CharacterImpactFilterFlag;
+    excludedShape->setSimulationFilterData(excludedData);
     world.SweepCharacterCapsule(PxTransform(PxVec3(0, 3, 0)), .2f, .2f, PxVec3(0), nullptr, hits);
-    CheckImpact(hits.size() == 70, "Streaming capsule query retains all initial overlaps");
+    CheckImpact(hits.size() == 70, "Streaming query retains all upper overlaps and excludes non-target lower bodies");
     world.SweepCharacterCapsule(PxTransform(PxVec3(0, 3, 0)), .2f, .2f, PxVec3(0), &owner, hits);
     CheckImpact(hits.empty(), "Capsule query excludes own PA");
     world.Shutdown();
@@ -113,7 +210,7 @@ void RunCharacterImpactTests()
         body->getShapes(&shape, 1);
         PxFilterData data;
         data.word2 = group++;
-        data.word3 = PhysicsWorld::CharacterImpactFilterFlag;
+        data.word3 = PhysicsWorld::CharacterImpactFilterFlag | PhysicsWorld::CharacterCapsuleOwnerFilterFlag;
         shape->setSimulationFilterData(data);
     }
     world.Step();
@@ -140,37 +237,109 @@ void RunCharacterImpactTests()
     PhysicsBody spine = hip;
     spine.bone = "Spine";
     spine.mass = 1;
-    asset.bodies = {hip, spine};
-    const std::vector<std::string> names{"Hips", "Spine"};
-    const std::vector<Matrix4> poses{Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 3, 0))),
-        Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 3.3f, 0)))};
-    PhysicsConstraint joint;
-    joint.parentBone = "Hips";
-    joint.childBone = "Spine";
-    joint.SetWorldFrame(poses[0], poses[1], poses[1]);
-    asset.constraints = {joint};
+    const std::vector<std::string> names{"Hips", "Spine", "RightArm", "RightHand", "LeftUpLeg", "LeftFoot", "Helper", "Head"};
+    const std::vector<Vector3> positions{Vector3(0, 3, 0), Vector3(0, 3.3f, 0), Vector3(.3f, 3.3f, 0),
+        Vector3(.6f, 3.3f, 0), Vector3(0, 2.7f, 0), Vector3(0, 2.4f, 0), Vector3(0, 2.1f, 0), Vector3(0, 3.6f, 0)};
+    const int parents[] = {-1, 0, 1, 2, 0, 4, 5, 1};
+    std::vector<Matrix4> poses;
+    for (size_t i = 0; i < names.size(); ++i)
+    {
+        PhysicsBody body = i == 0 ? hip : spine;
+        body.bone = names[i];
+        asset.bodies.push_back(body);
+        poses.push_back(Matrix4(OrthogonalTransform(Quaternion(kIdentity), positions[i])));
+        if (parents[i] >= 0)
+        {
+            PhysicsConstraint joint;
+            joint.parentBone = names[parents[i]];
+            joint.childBone = names[i];
+            joint.SetWorldFrame(poses[parents[i]], poses[i], poses[i]);
+            asset.constraints.push_back(joint);
+        }
+    }
     ConfigureDefaultDrives(asset);
     Ragdoll ragdoll;
     CheckImpact(ragdoll.Create(world, asset, names, poses, Vector3(kZero), error), "Create articulated receiver");
     ragdoll.SetDrivesEnabled(false);
-    std::vector<BodyImpactShare> shares;
-    world.Step([&](float dt) -> void
+    ragdoll.SetQueryOwner(&owner);
+    ragdoll.SetCharacterImpactEnabled(true, 100);
+    for (size_t i = 0; i < names.size(); ++i)
     {
-        CheckImpact(ragdoll.ApplyBodyImpact(PxVec3(4, 0, 0), PxVec3(0, 3.2f, 0), .6f, dt, shares), "Apply distributed external force");
-    });
-    PxVec3 sum(0);
-    for (const BodyImpactShare& share : shares)
-    {
-        sum += share.impulse;
+        CheckImpact(ragdoll.IsCharacterImpactBody(i) == (i < 4 || i == 7),
+            "Root, torso, arms, hands and head are eligible; lower-body descendants are excluded");
     }
-    CheckImpact(shares.size() == 2 && (sum - PxVec3(4, 0, 0)).magnitude() < 1e-5f, "Body shares preserve total impulse");
-    Vector3 velocity(kZero);
-    CheckImpact(ragdoll.GetCenterOfMassVelocity(velocity) && std::abs(float(velocity.GetX()) - 1) < .01f,
-        "Articulation COM receives J divided by total mass");
-    CheckImpact(std::abs(ragdoll.GetGameplayImpactImpulse() - 4) < 1e-5f, "Completed step exposes gameplay input to recovery");
-    world.Step();
-    CheckImpact(ragdoll.GetGameplayImpactImpulse() == 0, "Gameplay input expires after one completed step");
-    CheckImpact(!ragdoll.ApplyBodyImpact(PxVec3(1, 0, 0), PxVec3(0), .6f, 0, shares), "Reject zero time step");
+    world.SweepCharacterCapsule(PxTransform(PxVec3(0, 3, 0)), 2, .1f, PxVec3(0), nullptr, hits);
+    CheckImpact(hits.size() == 5, "Ragdoll query flags expose exactly the five eligible upper bodies");
+    const PxRigidBody* rootBody = nullptr;
+    for (const PhysicsCapsuleHit& hit : hits)
+    {
+        if (ragdoll.FindPhysicsBody(hit.actor) == 0)
+        {
+            rootBody = hit.actor->is<PxRigidBody>();
+        }
+    }
+    CheckImpact(rootBody != nullptr, "Locate the root mass and inertia for restoration checks");
+    const PxVec3 originalInertia = rootBody->getMassSpaceInertiaTensor();
+    const uint32_t bodyCount = world.GetDynamicBodyCount();
+    CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error), "Attach a simulation capsule to the dynamic root");
+    Vector3 center(kZero);
+    float totalMass = 0;
+    CheckImpact(ragdoll.HasCharacterCapsule() && ragdoll.GetCharacterCapsuleMass() == 6 &&
+        ragdoll.GetCenterOfMass(center, totalMass) && std::abs(totalMass - 13) < 1e-4f,
+        "Capsule mass replaces the three-kg root mass instead of adding another rigid body");
+    CheckImpact(world.GetDynamicBodyCount() == bodyCount, "Capsule adds no duplicate rigid-body mass");
+    CheckImpact((rootBody->getMassSpaceInertiaTensor() - originalInertia * 2).magnitude() < 1e-6f,
+        "Changing root mass scales its existing inertia distribution consistently");
+    PxTransform capsulePose(PxIdentity);
+    PxVec3 targetOffset(0);
+    float initialRadius = 0;
+    float initialHalfLength = 0;
+    CheckImpact(ragdoll.GetCharacterImpactCapsule(.95f, capsulePose, initialRadius, initialHalfLength, targetOffset),
+        "Read the physical capsule size used by the debug outline");
+    CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error, 1.5f), "Resize capsule height at runtime");
+    float changedRadius = 0;
+    float changedHalfLength = 0;
+    CheckImpact(ragdoll.GetCharacterImpactCapsule(.95f, capsulePose, changedRadius, changedHalfLength, targetOffset) &&
+        std::abs(changedRadius - initialRadius) < 1e-6f &&
+        std::abs((changedRadius + changedHalfLength) - (initialRadius + initialHalfLength) * 1.5f) < 1e-5f &&
+        rootBody->getNbShapes() == 2 && ragdoll.GetCharacterCapsuleMass() == 6,
+        "Height control changes the simulation shape while preserving radius, shape count and mass");
+    CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, 3, .02f, error, .1f), "Allow a short, wide capsule");
+    CheckImpact(ragdoll.GetCharacterImpactCapsule(3, capsulePose, changedRadius, changedHalfLength, targetOffset) &&
+        changedHalfLength == 0 && changedRadius > initialRadius,
+        "A requested height smaller than the diameter becomes a valid spherical capsule");
+    CheckImpact(!ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error, 0) && rootBody->getNbShapes() == 2,
+        "Invalid resize leaves the current simulation shape intact");
+    CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error), "Restore default capsule size");
+    for (int cycle = 0; cycle < 20; ++cycle)
+    {
+        CheckImpact(ragdoll.ConfigureCharacterCapsule(false, 6, .95f, .02f, error) &&
+            !ragdoll.HasCharacterCapsule() && rootBody->getNbShapes() == 1 && ragdoll.GetCharacterCapsuleMass() == 3 &&
+            (rootBody->getMassSpaceInertiaTensor() - originalInertia).magnitude() < 1e-6f,
+            "Turning the capsule off restores original root mass");
+        CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error), "Re-enable without recreating the articulation");
+        CheckImpact(rootBody->getNbShapes() == 2, "Repeated toggles retain exactly one additional capsule shape");
+    }
+    CheckImpact(!ragdoll.ConfigureCharacterCapsule(true, 0, .95f, .02f, error) && ragdoll.HasCharacterCapsule(),
+        "Invalid runtime mass leaves the existing capsule intact");
+    CheckImpact(ragdoll.SetSimulating(false, Vector3(kZero), error) && !ragdoll.HasCharacterCapsule(),
+        "Leaving simulation removes the capsule before storing a standby articulation");
+    CheckImpact(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.GetCharacterCapsuleMass() == 3,
+        "Reactivating the articulation restores its original mass without a stale capsule");
+    ragdoll.SetCharacterImpactEnabled(true, 100);
+    CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error),
+        "A capsule can be enabled again after switching physics configurations");
+    ragdoll.SetCharacterImpactEnabled(false, 100);
+    world.SweepCharacterCapsule(PxTransform(PxVec3(0, 3, 0)), 2, .1f, PxVec3(0), nullptr, hits);
+    CheckImpact(hits.empty(), "Disabling body impact clears upper-body query flags");
+    CheckImpact(!ragdoll.HasCharacterCapsule() && ragdoll.GetCharacterCapsuleMass() == 3,
+        "Disabling collision policy removes the physical capsule and restores root mass");
     CheckImpact(world.GetErrorCount() == 0 && ragdoll.IsFinite(), "No PhysX validation errors or nonfinite state");
-    std::puts("PASS: character impact settings, phase ordering, pause, streaming query, impulse distribution and recovery lifetime");
+    const float lightResponse = SolveCapsuleContact(world, .5f, true);
+    const float heavyResponse = SolveCapsuleContact(world, 5, true);
+    CheckImpact(heavyResponse > lightResponse + .5f, "A heavier capsule transfers more impulse at the same approach speed");
+    SolveCapsuleContact(world, 5, false);
+    CheckImpact(SolveCapsuleContact(world, 5, true, false) > .5f,
+        "Characters without an active capsule retain their ordinary PA-to-PA collision response");
+    std::puts("PASS: physical capsule settings, phase ordering, upper-body queries, mass replacement and repeated on/off restoration");
 }

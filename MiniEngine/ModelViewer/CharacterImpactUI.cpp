@@ -56,13 +56,13 @@ void RagdollImpactTest::BuildBodyImpactLines(std::vector<physx::PxDebugLine>& li
     m_World.ForEachActor([&](PARS::Actor& actor) -> void
     {
         const PARS::Character* character = dynamic_cast<const PARS::Character*>(&actor);
-        if (!character || !character->CanControlMovement())
+        if (!character)
         {
             return;
         }
         const PARS::Ragdoll& ragdoll = character->GetMesh().GetRagdoll();
         const PARS::CharacterImpactSettings& settings = character->GetCharacterImpact().GetSettings();
-        if (!settings.enabled || !ragdoll.UsesCharacterImpact())
+        if (!settings.enabled || !ragdoll.HasCharacterCapsule())
         {
             return;
         }
@@ -74,8 +74,8 @@ void RagdollImpactTest::BuildBodyImpactLines(std::vector<physx::PxDebugLine>& li
         {
             return;
         }
-        // 현재 실제 몸의 판정 영역을 표시한다. 이동 목표 오프셋과 재접촉 유지 여유는 포함하지 않는다.
-        AppendBodyImpactCapsule(lines, pose, radius + settings.contactSkin, halfLength);
+        // 실제 시뮬레이션 형상의 자세와 크기를 표시한다.
+        AppendBodyImpactCapsule(lines, pose, radius, halfLength);
     });
 }
 
@@ -85,33 +85,38 @@ void RagdollImpactTest::LoadBodyImpactSettings(PARS::Character& player, const st
     PARS::CharacterImpactSettings settings;
     if (settings.Load(path, m_BodyImpactMessage))
     {
-        player.GetCharacterImpact().SetSettings(settings, m_BodyImpactMessage);
+        if (player.GetCharacterImpact().SetSettings(settings, m_BodyImpactMessage))
+        {
+            m_BodyImpactMessage = u8"저장된 캡슐 설정을 불러왔습니다.";
+        }
     }
 }
 
 void RagdollImpactTest::DrawBodyImpactUI(PARS::Character* player)
 {
-    if (!player || !ImGui::CollapsingHeader(u8"캐릭터 몸통 밀침", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!player || !ImGui::CollapsingHeader(u8"캐릭터 몸통 충돌", ImGuiTreeNodeFlags_DefaultOpen))
     {
         return;
     }
     PARS::CharacterImpactComponent& component = player->GetCharacterImpact();
     PARS::CharacterImpactSettings settings = component.GetSettings();
-    ImGui::Checkbox(u8"몸통 밀침 캡슐 표시", &m_BodyImpactCapsuleVisible);
-    ImGui::TextWrapped("%s", u8"청록색 윤곽: 이동 가능한 캐릭터의 현재 몸통 밀침 영역 (접촉 여유 포함).");
-    bool changed = ImGui::Checkbox(u8"캡슐 밀침 사용", &settings.enabled);
-    changed |= ImGui::InputFloat(u8"기준 충격량 (N s)", &settings.referenceImpulse, 10, 100, "%.1f");
-    changed |= ImGui::InputFloat(u8"기준 속도 (m/s)", &settings.referenceSpeed, .1f, 1, "%.2f");
-    changed |= ImGui::InputFloat(u8"충격 배율", &settings.strengthMultiplier, .1f, 1, "%.2f");
-    changed |= ImGui::InputFloat(u8"충격량 상한 (N s)", &settings.maximumImpulse, 50, 200, "%.1f");
-    changed |= ImGui::InputFloat(u8"최소 접근 속도 (m/s)", &settings.minimumClosingSpeed, .05f, .1f, "%.2f");
-    changed |= ImGui::SliderFloat(u8"골반 분배 비율", &settings.pelvisShare, 0, 1, "%.2f");
-    if (ImGui::TreeNode(u8"접촉·재발동 설정"))
+    ImGui::Checkbox(u8"몸통 충돌 캡슐 표시", &m_BodyImpactCapsuleVisible);
+    ImGui::TextWrapped("%s", u8"청록색 윤곽: 기존 동적 골반 바디에 붙은 실제 몸통 충돌체.");
+    bool changed = ImGui::Checkbox(u8"몸통 캡슐 충돌 사용", &settings.enabled);
+    changed |= ImGui::InputFloat(u8"캡슐 바디 질량 (kg)", &settings.bodyMass, 1, 10, "%.3f");
+    ImGui::Separator();
+    ImGui::TextUnformatted(u8"캡슐 크기");
+    changed |= ImGui::SliderFloat(u8"반경 배율", &settings.capsuleRadiusScale, .1f, 3.0f, u8"%.2f 배", ImGuiSliderFlags_AlwaysClamp);
+    changed |= ImGui::SliderFloat(u8"높이 배율", &settings.capsuleHeightScale, .1f, 3.0f, u8"%.2f 배", ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::Button(u8"캡슐 크기 초기화"))
     {
-        changed |= ImGui::InputFloat(u8"분리 유지 시간 (s)", &settings.separationTime, .05f, .1f, "%.2f");
-        changed |= ImGui::InputFloat(u8"재발동 분리 거리 (m)", &settings.separationDistance, .01f, .05f, "%.2f");
-        changed |= ImGui::InputFloat(u8"재발동 대기 (s)", &settings.cooldown, .05f, .1f, "%.2f");
-        changed |= ImGui::InputFloat(u8"몸통 캡슐 반경 배율", &settings.capsuleRadiusScale, .05f, .1f, "%.2f");
+        settings.capsuleRadiusScale = .95f;
+        settings.capsuleHeightScale = 1.0f;
+        changed = true;
+    }
+    ImGui::TextWrapped("%s", u8"상체 범위에 대한 배율입니다. 전체 높이는 지름보다 작아질 수 없습니다.");
+    if (ImGui::TreeNode(u8"접촉 설정"))
+    {
         changed |= ImGui::InputFloat(u8"접촉 여유 (m)", &settings.contactSkin, .005f, .01f, "%.3f");
         ImGui::TreePop();
     }
@@ -119,41 +124,61 @@ void RagdollImpactTest::DrawBodyImpactUI(PARS::Character* player)
     {
         component.SetSettings(settings, m_BodyImpactMessage);
     }
-    if (ImGui::Button(u8"밀침 설정 저장"))
+    physx::PxTransform capsulePose(physx::PxIdentity);
+    physx::PxVec3 targetOffset(0);
+    float capsuleRadius = 0;
+    float capsuleHalfLength = 0;
+    const PARS::CharacterImpactSettings& applied = component.GetSettings();
+    if (player->GetMesh().GetRagdoll().GetCharacterImpactCapsule(applied.capsuleRadiusScale, capsulePose,
+        capsuleRadius, capsuleHalfLength, targetOffset, applied.capsuleHeightScale))
+    {
+        ImGui::Text(u8"크기: 반경 %.1f cm / 전체 높이 %.1f cm", capsuleRadius * 100, (capsuleHalfLength + capsuleRadius) * 200);
+    }
+    ImGui::Separator();
+    if (ImGui::Button(u8"캡슐 설정 저장"))
     {
         if (component.GetSettings().Save(m_BodyImpactPath, m_BodyImpactMessage))
         {
-            m_BodyImpactMessage = u8"밀침 설정을 저장했습니다.";
+            m_BodyImpactMessage = u8"캡슐 설정을 저장했습니다. 다음 실행부터 자동으로 불러옵니다.";
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button(u8"밀침 설정 불러오기"))
+    if (ImGui::Button(u8"캡슐 설정 불러오기"))
     {
         LoadBodyImpactSettings(*player, m_BodyImpactPath);
     }
-    ImGui::TextWrapped("%s", u8"변경값은 다음 충돌부터 적용됩니다. 골반 외 나머지 충격량은 척추 바디에 나눕니다.");
+    ImGui::TextWrapped("%s", u8"크기·질량·충돌 사용 여부를 함께 저장하며, 다음 실행 시 자동으로 적용합니다.");
+    ImGui::TextWrapped("%s", u8"루트 포함 상체와의 충격·마찰·관절 반응을 PhysX가 계산합니다. 끄면 캡슐을 제거하고 원래 질량과 PA 충돌로 복원합니다.");
+    const PARS::Ragdoll& ragdoll = player->GetMesh().GetRagdoll();
+    Math::Vector3 center(Math::kZero);
+    float totalMass = 0;
+    ragdoll.GetCenterOfMass(center, totalMass);
+    ImGui::Text(u8"현재 캡슐 바디 %.3f kg / 캐릭터 전체 %.3f kg", ragdoll.GetCharacterCapsuleMass(), totalMass);
+    ImGui::TextWrapped("%s", u8"설정 질량은 골반 바디의 질량을 교체합니다. 별도의 캡슐 무게를 추가하지 않습니다.");
     const PARS::CharacterImpactSnapshot& current = component.GetSnapshot();
     const PARS::CharacterImpactSnapshot& last = component.GetLastImpact();
-    const char* reasons[] = {u8"접촉 없음", u8"최소 속도 미달", u8"접촉 유지 중", u8"재발동 대기",
-        u8"적용 예약", u8"적용", u8"대상 상태 변경으로 취소", u8"비활성"};
-    ImGui::Text(u8"현재: %s / 접근 %.2f m/s", reasons[static_cast<int>(current.reason)], current.closingSpeed);
-    ImGui::Text(u8"발동 %llu회 / 최근 충격: 요구 %.1f → 적용 입력 %.1f N s%s",
-        static_cast<unsigned long long>(last.eventCount), last.requestedImpulse, last.commandedImpulse,
-        last.capped ? u8" (상한 도달)" : "");
+    const char* reasons[] = {u8"접촉 없음", u8"실제 접촉", u8"비활성"};
+    ImGui::Text(u8"현재: %s", reasons[static_cast<int>(current.reason)]);
+    ImGui::Text(u8"접촉 기록 %llu / 최근 법선 충격량 %.3f N s",
+        static_cast<unsigned long long>(last.eventCount), last.normalImpulse);
     ImGui::Text(u8"접촉 바디: %s", last.hitBone.c_str());
     ImGui::Text(u8"방향: (%.2f, %.2f, %.2f)", last.direction.x, last.direction.y, last.direction.z);
-    if (ImGui::TreeNode(u8"최근 바디별 입력"))
+    if (ImGui::TreeNode(u8"최근 바디별 접촉 측정"))
     {
         for (const PARS::BodyImpactShare& share : last.shares)
         {
             ImGui::Text("%s: %.2f N s", share.bone.c_str(), share.impulse.magnitude());
         }
-        ImGui::TextWrapped("%s", u8"표시량은 솔버에 전달한 외부 입력입니다. 실제 운동량 변화는 접촉과 관절 제어에도 영향을 받습니다.");
+        ImGui::TextWrapped("%s", u8"표시량은 완료된 물리 스텝에서 PhysX 솔버가 계산한 접촉 충격량입니다.");
         ImGui::TreePop();
     }
     if (!m_BodyImpactMessage.empty())
     {
         ImGui::TextWrapped("%s", m_BodyImpactMessage.c_str());
+    }
+    if (!component.GetPhysicsError().empty())
+    {
+        ImGui::TextWrapped("%s", component.GetPhysicsError().c_str());
     }
     ImGui::Separator();
 }

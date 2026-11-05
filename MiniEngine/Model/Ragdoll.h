@@ -8,6 +8,7 @@
 
 class PhysicsWorld;
 struct PhysicsGroundContact;
+struct PhysicsCapsuleContact;
 namespace physx
 {
     class PxRigidBody;
@@ -16,12 +17,11 @@ namespace physx
     class PxArticulationReducedCoordinate;
     class PxArticulationJointReducedCoordinate;
     class PxArticulationCache;
+    class PxShape;
 }
 
 namespace PARS
 {
-    struct BodyImpactShare;
-
     struct RagdollSupportContact
     {
     public:
@@ -70,9 +70,10 @@ namespace PARS
         // 목표 생성 주체가 바뀔 때 불연속을 목표 속도/가속도로 미분하지 않는다. 실제 바디 속도는 유지한다.
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
-        // N s 입력을 한 고정 스텝의 외부 힘으로 바꾸고, 골반·척추에 총량을 나눠 적용한다.
-        bool ApplyBodyImpact(physx::PxVec3 impulse, physx::PxVec3 point, float pelvisShare,
-            float deltaTime, std::vector<BodyImpactShare>& shares);
+        // 동적 루트에 실제 충돌 형상을 붙이고, 해당 바디의 질량과 관성을 함께 갱신한다.
+        bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
+            float heightScale = 1.0f);
+        void RemoveCharacterCapsule();
         // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
         void SetCollisionEnabled(bool enabled);
         // 실제 PA 형상과 애니메이션 목표를 스윕해 벽 너머로 이동 목표가 누적되지 않게 한다.
@@ -97,6 +98,7 @@ namespace PARS
         void ConfigureRootSupportDrives();
         std::vector<float> ComputeSupportGeneralizedForce();
         void InvalidateContactState();
+        void RefreshCharacterImpactFilters();
 
     public:
         Ragdoll& operator=(const Ragdoll&) = delete;
@@ -171,12 +173,18 @@ namespace PARS
         bool GetCenterOfMassVelocity(Math::Vector3& velocity) const;
         bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
         float GetExternalImpactImpulse() const;
-        float GetGameplayImpactImpulse() const;
         int GetImpactRootBody() const;
+        bool IsCharacterImpactBody(size_t body) const;
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;
         physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
+        float GetCharacterCapsuleMass() const;
+        void GetCharacterCapsuleContacts(std::vector<PhysicsCapsuleContact>& contacts) const;
+        bool HasCharacterCapsule() const
+        {
+            return m_CharacterCapsuleShape != nullptr;
+        }
         bool GetCharacterImpactCapsule(float radiusScale, physx::PxTransform& pose, float& radius,
-            float& halfLength, physx::PxVec3& targetOffset) const;
+            float& halfLength, physx::PxVec3& targetOffset, float heightScale = 1.0f) const;
         void SetCharacterImpactEnabled(bool enabled, uint32_t ownerGroup);
         bool UsesCharacterImpact() const
         {
@@ -202,8 +210,6 @@ namespace PARS
 
     private:
         uint64_t m_ContactRevision = 0;
-        uint64_t m_GameplayImpactStep = 0;
-        uint64_t m_GameplayImpactClock = 0;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
@@ -222,13 +228,18 @@ namespace PARS
         std::vector<Math::Vector3> m_AnimatedLinearVelocity;
         std::vector<Math::Vector3> m_AnimatedAngularVelocity;
         std::unique_ptr<Ragdoll> m_Standby;
+        physx::PxShape* m_CharacterCapsuleShape = nullptr;
         int m_ArticulationRoot = -1;
         int m_SupportBody = -1;
         float m_RootSupportWeight = 0;
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;
         float m_MaxTargetClampAngle = 0;
-        float m_GameplayImpactImpulse = 0;
+        physx::PxVec3 m_OriginalCapsuleInertia{0};
+        float m_OriginalCapsuleMass = 0;
+        float m_CapsuleRadiusScale = 0;
+        float m_CapsuleHeightScale = 0;
+        float m_CapsuleSkin = 0;
         uint32_t m_CharacterImpactGroup = 0;
         bool m_CollisionEnabled = true;
         bool m_CharacterImpactEnabled = false;
