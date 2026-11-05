@@ -656,9 +656,11 @@ namespace PARS
             // 이전 각속도와 이번 각속도의 차이를 경과시간 만큼 나누어서 목표 각가속도를 채운다
             if (deltaTime > 0 && m_PreviousArticulationTargetVelocity.size() == count)
             {
+                // 발 기반 지지 중에는 목표 가속도 보상을 지지 계수로 줄이지 않는다.
+                const float accelerationWeight = m_FootDrivenSupport ? 1.0f : supportWeight;
                 for (unsigned axis = 0; axis < count; ++axis)
                 {
-                    targetAcceleration[axis] = supportWeight *
+                    targetAcceleration[axis] = accelerationWeight *
                         (targetVelocity[axis] - m_PreviousArticulationTargetVelocity[axis]) / deltaTime;
                 }
             }
