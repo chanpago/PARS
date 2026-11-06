@@ -271,9 +271,9 @@ namespace PARS
         std::swap(m_CollisionEnabled, other.m_CollisionEnabled);
         std::swap(m_CharacterImpactEnabled, other.m_CharacterImpactEnabled);
         std::swap(m_CharacterImpactGroup, other.m_CharacterImpactGroup);
+        std::swap(m_CharacterCapsuleBody, other.m_CharacterCapsuleBody);
         std::swap(m_CharacterCapsuleShape, other.m_CharacterCapsuleShape);
-        std::swap(m_OriginalCapsuleMass, other.m_OriginalCapsuleMass);
-        std::swap(m_OriginalCapsuleInertia, other.m_OriginalCapsuleInertia);
+        std::swap(m_CapsuleRootPose, other.m_CapsuleRootPose);
         std::swap(m_CapsuleRadiusScale, other.m_CapsuleRadiusScale);
         std::swap(m_CapsuleHeightScale, other.m_CapsuleHeightScale);
         std::swap(m_CapsuleSkin, other.m_CapsuleSkin);
@@ -758,6 +758,10 @@ namespace PARS
 #if defined(_M_X64)
         if (m_World)
         {
+            if (m_CharacterCapsuleBody)
+            {
+                m_World->InvalidateContacts(*m_CharacterCapsuleBody);
+            }
             for (const physx::PxRigidBody* body : m_Bodies)
             {
                 m_World->InvalidateContacts(*body);
@@ -798,6 +802,10 @@ namespace PARS
     {
         m_QueryOwner = owner;
 #if defined(_M_X64)
+        if (m_CharacterCapsuleBody)
+        {
+            m_CharacterCapsuleBody->userData = owner;
+        }
         for (physx::PxRigidBody* body : m_Bodies)
         {
             body->userData = owner;
@@ -920,6 +928,11 @@ namespace PARS
     bool Ragdoll::IsFinite() const
     {
 #if defined(_M_X64)
+        if (m_CharacterCapsuleBody && (!m_CharacterCapsuleBody->getGlobalPose().isValid() ||
+            !m_CharacterCapsuleBody->getLinearVelocity().isFinite() || !m_CharacterCapsuleBody->getAngularVelocity().isFinite()))
+        {
+            return false;
+        }
         for (physx::PxRigidBody* body : m_Bodies)
         {
             if (!body->getGlobalPose().isValid() || !body->getLinearVelocity().isFinite() || !body->getAngularVelocity().isFinite())

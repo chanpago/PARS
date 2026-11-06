@@ -7,7 +7,7 @@
 
 namespace PARS
 {
-    // 캡슐은 기존 동적 루트의 충돌 형상이며, 질량은 해당 바디의 실제 질량이다.
+    // 충돌용 동적 캡슐의 질량은 캐릭터 PA의 질량·관성·PD와 분리한다.
     struct CharacterImpactSettings
     {
     public:
@@ -16,7 +16,7 @@ namespace PARS
         bool Load(const std::string& path, std::string& error);
 
     public:
-        float bodyMass = 8.154099464416504f;
+        float collisionMass = 8.154099464416504f;
         float capsuleRadiusScale = .95f;
         float capsuleHeightScale = 1.0f;
         float contactSkin = .02f;

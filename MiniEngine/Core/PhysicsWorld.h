@@ -206,7 +206,7 @@ public:
     static constexpr uint32_t CharacterImpactFilterFlag = 1u << 31;
     // 몸통 캡슐의 수신 대상인 루트와 상체 바디만 설정한다.
     static constexpr uint32_t CharacterImpactTargetFilterFlag = 1u << 30;
-    // 동적 루트에 붙은 몸통 캡슐 형상을 기존 PA 형상과 구분한다.
+    // 질량·PD에서 분리된 독립 동적 몸통 캡슐을 기존 PA 형상과 구분한다.
     static constexpr uint32_t CharacterCapsuleFilterFlag = 1u << 29;
     // 이 PA의 소유자가 활성 몸통 캡슐을 가지고 있을 때만 설정한다.
     static constexpr uint32_t CharacterCapsuleOwnerFilterFlag = 1u << 28;

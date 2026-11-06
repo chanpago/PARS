@@ -55,13 +55,18 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         check(player.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
             player.GetMesh().GetRagdoll().SetRootSupported(true, error), "Enable original supported player");
         CharacterImpactSettings impactSettings = player.GetCharacterImpact().GetSettings();
-        CommandLineArgs::GetFloat(L"bodyimpactmass", impactSettings.bodyMass);
+        CommandLineArgs::GetFloat(L"bodyimpactmass", impactSettings.collisionMass);
         CommandLineArgs::GetFloat(L"bodyimpactradius", impactSettings.capsuleRadiusScale);
         CommandLineArgs::GetFloat(L"bodyimpactheight", impactSettings.capsuleHeightScale);
         uint32_t enabled = impactSettings.enabled ? 1 : 0;
         CommandLineArgs::GetInteger(L"bodyimpactenabled", enabled);
         impactSettings.enabled = enabled != 0;
-        check(player.GetCharacterImpact().SetSettings(impactSettings, error), "Configure physical capsule mass and enable state");
+        check(player.GetCharacterImpact().SetSettings(impactSettings, error), "Configure independent capsule mass, geometry and enable state");
+        float expectedTotalMass = 0;
+        for (const PhysicsBody& body : player.GetMesh().GetPhysicsAsset()->bodies)
+        {
+            expectedTotalMass += body.mass;
+        }
         uint32_t toggle = 0;
         CommandLineArgs::GetInteger(L"bodyimpacttoggle", toggle);
         PhysicsSkeleton playerSkeleton;
@@ -75,7 +80,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
             << " dummy_auto_support=" << dummy->GetMesh().UsesAutomaticRootSupport() << std::endl;
-        report << "capsule_mass_kg=" << impactSettings.bodyMass << " capsule_enabled=" << impactSettings.enabled
+        report << "pa_root_mass_kg=" << player.GetMesh().GetRagdoll().GetImpactRootMass()
+            << " pa_total_mass_kg=" << expectedTotalMass << " capsule_collision_mass_kg=" << impactSettings.collisionMass
+            << " capsule_added_pa_mass_kg=0 capsule_enabled=" << impactSettings.enabled
             << " repeated_toggle=" << toggle << std::endl;
         report << "capsule_radius_scale=" << impactSettings.capsuleRadiusScale
             << " capsule_height_scale=" << impactSettings.capsuleHeightScale << std::endl;
@@ -84,16 +91,17 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         {
             if (toggle && frame < 100)
             {
-                // 기존 대기 구간에서 설정만 반복 전환해 물리 객체와 원래 질량의 복원을 확인한다.
+                // 기존 대기 구간에서 설정만 반복 전환해 충돌 형상과 PA 질량 보존을 확인한다.
                 impactSettings.enabled = frame % 2 != 0;
                 check(player.GetCharacterImpact().SetSettings(impactSettings, error), "Toggle physical capsule at a fixed-step boundary");
                 check(player.GetMesh().GetRagdoll().HasCharacterCapsule() == impactSettings.enabled,
                     "Simulation shape follows the enable state");
                 const Ragdoll& ragdoll = player.GetMesh().GetRagdoll();
-                const float expectedMass = impactSettings.enabled ? impactSettings.bodyMass :
-                    player.GetMesh().GetPhysicsAsset()->bodies[ragdoll.GetImpactRootBody()].mass;
-                check(std::abs(ragdoll.GetCharacterCapsuleMass() - expectedMass) < .0001f,
-                    "Runtime toggle restores the PA mass and preserves the configured ON mass");
+                const float expectedMass = player.GetMesh().GetPhysicsAsset()->bodies[ragdoll.GetImpactRootBody()].mass;
+                check(std::abs(ragdoll.GetImpactRootMass() - expectedMass) < .0001f,
+                    "Runtime toggle preserves the PA root mass in both enable states");
+                check(std::abs(ragdoll.GetCharacterCapsuleMass() - (impactSettings.enabled ? impactSettings.collisionMass : 0)) < .0001f,
+                    "Runtime toggle changes only the independent collision mass");
             }
             // 기본 입력: 2초 안정화, 3초 접근, 2초 후퇴, 2초 재접근, 나머지는 정지한다.
             const float input = scenario == 0 || frame < 120 || frame >= 540 ? 0.0f :
@@ -106,6 +114,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             }
             world.Tick(1.0f / 60.0f);
             test.Update();
+            Vector3 center(kZero);
+            float totalMass = 0;
+            check(player.GetMesh().GetRagdoll().GetCenterOfMass(center, totalMass) &&
+                std::abs(totalMass - expectedTotalMass) < .0001f,
+                "Independent collision mass is excluded from total PA mass throughout actual-character simulation");
             const float time = (frame + 1) / 60.0f;
             for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
             {

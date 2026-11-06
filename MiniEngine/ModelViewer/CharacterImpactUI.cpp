@@ -101,9 +101,10 @@ void RagdollImpactTest::DrawBodyImpactUI(PARS::Character* player)
     PARS::CharacterImpactComponent& component = player->GetCharacterImpact();
     PARS::CharacterImpactSettings settings = component.GetSettings();
     ImGui::Checkbox(u8"몸통 충돌 캡슐 표시", &m_BodyImpactCapsuleVisible);
-    ImGui::TextWrapped("%s", u8"청록색 윤곽: 기존 동적 골반 바디에 붙은 실제 몸통 충돌체.");
+    ImGui::TextWrapped("%s", u8"청록색 윤곽: 몸통을 따라가는 독립 동적 충돌 캡슐.");
     bool changed = ImGui::Checkbox(u8"몸통 캡슐 충돌 사용", &settings.enabled);
-    changed |= ImGui::InputFloat(u8"캡슐 바디 질량 (kg)", &settings.bodyMass, 1, 10, "%.3f");
+    changed |= ImGui::InputFloat(u8"충돌용 캡슐 질량 (kg)", &settings.collisionMass, 1, 10, "%.3f");
+    ImGui::TextWrapped("%s", u8"이 질량은 상대 상체와의 충돌에 사용하며, 본인 캐릭터의 총무게와 PD에는 포함하지 않습니다.");
     ImGui::Separator();
     ImGui::TextUnformatted(u8"캡슐 크기");
     changed |= ImGui::SliderFloat(u8"반경 배율", &settings.capsuleRadiusScale, .1f, 3.0f, u8"%.2f 배", ImGuiSliderFlags_AlwaysClamp);
@@ -147,14 +148,15 @@ void RagdollImpactTest::DrawBodyImpactUI(PARS::Character* player)
     {
         LoadBodyImpactSettings(*player, m_BodyImpactPath);
     }
-    ImGui::TextWrapped("%s", u8"크기·질량·충돌 사용 여부를 함께 저장하며, 다음 실행 시 자동으로 적용합니다.");
-    ImGui::TextWrapped("%s", u8"루트 포함 상체와의 충격·마찰·관절 반응을 PhysX가 계산합니다. 끄면 캡슐을 제거하고 원래 질량과 PA 충돌로 복원합니다.");
+    ImGui::TextWrapped("%s", u8"충돌 질량·크기·접촉 여유·충돌 사용 여부를 저장하며, 다음 실행 시 자동으로 적용합니다.");
+    ImGui::TextWrapped("%s", u8"루트 포함 상체와의 충격·마찰·관절 반응을 PhysX가 계산합니다. 끄면 캡슐을 제거하고 PA 충돌로 복원합니다.");
     const PARS::Ragdoll& ragdoll = player->GetMesh().GetRagdoll();
     Math::Vector3 center(Math::kZero);
     float totalMass = 0;
     ragdoll.GetCenterOfMass(center, totalMass);
-    ImGui::Text(u8"현재 캡슐 바디 %.3f kg / 캐릭터 전체 %.3f kg", ragdoll.GetCharacterCapsuleMass(), totalMass);
-    ImGui::TextWrapped("%s", u8"설정 질량은 골반 바디의 질량을 교체합니다. 별도의 캡슐 무게를 추가하지 않습니다.");
+    ImGui::Text(u8"PA 골반 %.3f kg / 캐릭터 전체 %.3f kg", ragdoll.GetImpactRootMass(), totalMass);
+    ImGui::Text(u8"독립 캡슐 충돌 질량 %.3f kg", ragdoll.GetCharacterCapsuleMass());
+    ImGui::TextWrapped("%s", u8"캡슐의 충돌 반작용은 본인 골반으로 전달하지 않습니다. PA의 질량·질량중심·관성을 유지합니다.");
     const PARS::CharacterImpactSnapshot& current = component.GetSnapshot();
     const PARS::CharacterImpactSnapshot& last = component.GetLastImpact();
     const char* reasons[] = {u8"접촉 없음", u8"실제 접촉", u8"비활성"};

@@ -12,6 +12,7 @@ struct PhysicsCapsuleContact;
 namespace physx
 {
     class PxRigidBody;
+    class PxRigidDynamic;
     class PxRigidActor;
     class PxD6Joint;
     class PxArticulationReducedCoordinate;
@@ -70,9 +71,11 @@ namespace PARS
         // 목표 생성 주체가 바뀔 때 불연속을 목표 속도/가속도로 미분하지 않는다. 실제 바디 속도는 유지한다.
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
-        // 동적 루트에 실제 충돌 형상을 붙이고, 해당 바디의 질량과 관성을 함께 갱신한다.
+        // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
             float heightScale = 1.0f);
+        // simulate() 직전에 몸통에서 캡슐로 자세·속도를 복사한다. 반작용은 몸통에 되돌리지 않는다.
+        void SyncCharacterCapsule();
         void RemoveCharacterCapsule();
         // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
         void SetCollisionEnabled(bool enabled);
@@ -177,6 +180,7 @@ namespace PARS
         bool IsCharacterImpactBody(size_t body) const;
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;
         physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
+        float GetImpactRootMass() const;
         float GetCharacterCapsuleMass() const;
         void GetCharacterCapsuleContacts(std::vector<PhysicsCapsuleContact>& contacts) const;
         bool HasCharacterCapsule() const
@@ -228,6 +232,7 @@ namespace PARS
         std::vector<Math::Vector3> m_AnimatedLinearVelocity;
         std::vector<Math::Vector3> m_AnimatedAngularVelocity;
         std::unique_ptr<Ragdoll> m_Standby;
+        physx::PxRigidDynamic* m_CharacterCapsuleBody = nullptr;
         physx::PxShape* m_CharacterCapsuleShape = nullptr;
         int m_ArticulationRoot = -1;
         int m_SupportBody = -1;
@@ -235,8 +240,7 @@ namespace PARS
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;
         float m_MaxTargetClampAngle = 0;
-        physx::PxVec3 m_OriginalCapsuleInertia{0};
-        float m_OriginalCapsuleMass = 0;
+        physx::PxTransform m_CapsuleRootPose{physx::PxIdentity};
         float m_CapsuleRadiusScale = 0;
         float m_CapsuleHeightScale = 0;
         float m_CapsuleSkin = 0;

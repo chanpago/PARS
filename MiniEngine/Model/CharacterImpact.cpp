@@ -29,7 +29,7 @@ namespace PARS
 
     bool CharacterImpactSettings::Validate(std::string& error) const
     {
-        const float values[] = {bodyMass, capsuleRadiusScale, capsuleHeightScale, contactSkin};
+        const float values[] = {collisionMass, capsuleRadiusScale, capsuleHeightScale, contactSkin};
         for (float value : values)
         {
             if (!std::isfinite(value) || value < 0)
@@ -38,9 +38,9 @@ namespace PARS
                 return false;
             }
         }
-        if (bodyMass < .01f || bodyMass > 10000 || capsuleRadiusScale <= 0 || capsuleHeightScale <= 0 || contactSkin > .1f)
+        if (collisionMass < .01f || collisionMass > 10000 || capsuleRadiusScale <= 0 || capsuleHeightScale <= 0 || contactSkin > .1f)
         {
-            error = u8"질량은 0.01~10000kg, 캡슐 배율은 양수, 접촉 여유는 0~0.1m여야 합니다.";
+            error = u8"충돌 질량은 0.01~10000kg, 캡슐 배율은 양수, 접촉 여유는 0~0.1m여야 합니다.";
             return false;
         }
         error.clear();
@@ -55,7 +55,7 @@ namespace PARS
         }
         try
         {
-            const nlohmann::json data = {{"version", 4}, {"enabled", enabled}, {"bodyMassKg", bodyMass},
+            const nlohmann::json data = {{"version", 6}, {"enabled", enabled}, {"collisionMassKg", collisionMass},
                 {"capsuleRadiusScale", capsuleRadiusScale}, {"capsuleHeightScale", capsuleHeightScale}, {"contactSkinMeters", contactSkin}};
             std::ofstream file(ImpactPath(path), std::ios::trunc);
             file << data.dump(4) << '\n';
@@ -82,16 +82,20 @@ namespace PARS
             nlohmann::json data;
             file >> data;
             const int version = data.at("version").get<int>();
-            if (version < 1 || version > 4)
+            if (version < 1 || version > 6)
             {
                 throw std::runtime_error("Unsupported character impact settings version.");
             }
             CharacterImpactSettings candidate;
             candidate.enabled = data.at("enabled").get<bool>();
-            // 이전 수동 밀침의 충격량·상한·쿨타임은 실제 접촉 솔버에 전달하지 않는다.
-            if (version >= 3)
+            // 이전 골반 질량 설정은 독립 충돌체의 질량으로만 이전한다. 질량이 없는 버전은 기본값을 쓴다.
+            if (version >= 6)
             {
-                candidate.bodyMass = data.at("bodyMassKg").get<float>();
+                candidate.collisionMass = data.at("collisionMassKg").get<float>();
+            }
+            else if (version == 3 || version == 4)
+            {
+                candidate.collisionMass = data.at("bodyMassKg").get<float>();
             }
             candidate.capsuleRadiusScale = data.at("capsuleRadiusScale").get<float>();
             if (version >= 4)

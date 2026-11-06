@@ -137,7 +137,7 @@ namespace PARS
         if (sample.totalMass > 0)
         {
             // 충격량을 전신 질량으로 나눠 모델 크기에 덜 의존하는 속도 변화 단위로 판정한다.
-            // 몸통 캡슐도 실제 접촉이므로 PhysX가 측정한 충격량에 이미 포함된다.
+            // 상대 캡슐이 PA에 가한 충격은 포함하고, 본인 독립 캡슐에 생긴 반작용은 제외한다.
             input.impactVelocity = m_Ragdoll.GetExternalImpactImpulse() / sample.totalMass;
         }
 

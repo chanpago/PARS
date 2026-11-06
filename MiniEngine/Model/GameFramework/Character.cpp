@@ -75,8 +75,9 @@ namespace PARS
 
     void Character::ApplyPhysicsInputs(float deltaTime)
     {
-        // 캐릭터 간 충격은 실제 캡슐 접촉을 통해 PhysX 솔버가 계산한다.
         Pawn::ApplyPhysicsInputs(deltaTime);
+        // 모든 캐릭터의 이동·PD 목표 갱신 뒤, 독립 캡슐에 몸통의 현재 자세와 속도만 복사한다.
+        m_Mesh->GetRagdoll().SyncCharacterCapsule();
     }
 
     bool Character::StopRagdoll(std::string& error)

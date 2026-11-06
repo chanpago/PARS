@@ -130,10 +130,14 @@ namespace PARS
         if (m_CharacterCapsuleShape)
         {
             const PxCapsuleGeometry& geometry = static_cast<const PxCapsuleGeometry&>(m_CharacterCapsuleShape->getGeometry());
-            pose = m_Bodies[root]->getGlobalPose() * m_CharacterCapsuleShape->getLocalPose();
+            pose = m_CharacterCapsuleBody->getGlobalPose();
             radius = geometry.radius;
             halfLength = geometry.halfHeight;
-            targetOffset = m_SupportJoint ? m_SupportJoint->getDrivePosition().p - m_Bodies[root]->getGlobalPose().p : PxVec3(0);
+            targetOffset = (m_Bodies[root]->getGlobalPose() * m_CapsuleRootPose).p - pose.p;
+            if (m_SupportJoint)
+            {
+                targetOffset += m_SupportJoint->getDrivePosition().p - m_Bodies[root]->getGlobalPose().p;
+            }
             targetOffset.y = 0;
             return pose.isValid();
         }
@@ -193,14 +197,6 @@ namespace PARS
             body->getShapes(shapes.data(), static_cast<PxU32>(shapes.size()));
             for (PxShape* shape : shapes)
             {
-                if (shape == m_CharacterCapsuleShape)
-                {
-                    PxFilterData capsuleData;
-                    capsuleData.word2 = m_CharacterImpactGroup;
-                    capsuleData.word3 = PhysicsWorld::CharacterCapsuleFilterFlag;
-                    shape->setSimulationFilterData(capsuleData);
-                    continue;
-                }
                 PxFilterData data = shape->getSimulationFilterData();
                 data.word2 = m_CharacterImpactGroup;
                 data.word3 &= ~(PhysicsWorld::CharacterImpactFilterFlag | PhysicsWorld::CharacterImpactTargetFilterFlag |
@@ -224,6 +220,17 @@ namespace PARS
                 body->getScene()->resetFiltering(*body);
             }
         }
+        if (m_CharacterCapsuleShape)
+        {
+            PxFilterData capsuleData;
+            capsuleData.word2 = m_CharacterImpactGroup;
+            capsuleData.word3 = PhysicsWorld::CharacterCapsuleFilterFlag;
+            m_CharacterCapsuleShape->setSimulationFilterData(capsuleData);
+            if (m_CharacterCapsuleBody->getScene())
+            {
+                m_CharacterCapsuleBody->getScene()->resetFiltering(*m_CharacterCapsuleBody);
+            }
+        }
     }
 
     bool Ragdoll::ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
@@ -236,17 +243,17 @@ namespace PARS
             return true;
         }
         const int root = GetImpactRootBody();
-        if (!IsSimulating() || !m_CollisionEnabled || root < 0 || !std::isfinite(mass) || mass < .01f || mass > 10000 ||
+        if (!m_World || !IsSimulating() || !m_CollisionEnabled || root < 0 || !std::isfinite(mass) || mass < .01f || mass > 10000 ||
             !std::isfinite(radiusScale) || radiusScale <= 0 || !std::isfinite(heightScale) || heightScale <= 0 ||
             !std::isfinite(skin) || skin < 0 || skin > .1f)
         {
-            error = u8"몸통 캡슐에는 동적 바디와 유효한 질량·형상 설정이 필요합니다.";
+            error = u8"몸통 캡슐에는 동적 바디와 유효한 충돌 질량·형상 설정이 필요합니다.";
             return false;
         }
         PxRigidBody& body = *m_Bodies[root];
-        if (body.getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC))
+        if (!body.getScene() || body.getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC))
         {
-            error = u8"키네마틱 바디에는 몸통 충돌 질량을 설정할 수 없습니다.";
+            error = u8"씬에 등록된 동적 몸통에만 독립 충돌 캡슐을 사용할 수 있습니다.";
             return false;
         }
         if (m_CharacterCapsuleShape && (m_CapsuleRadiusScale != radiusScale || m_CapsuleHeightScale != heightScale || m_CapsuleSkin != skin))
@@ -259,82 +266,104 @@ namespace PARS
             PxVec3 targetOffset(0);
             float radius = 0;
             float halfLength = 0;
-            PxShape* original = nullptr;
-            PxMaterial* material = nullptr;
-            body.getShapes(&original, 1);
-            if (!original || original->getMaterials(&material, 1) == 0 ||
-                !GetCharacterImpactCapsule(radiusScale, pose, radius, halfLength, targetOffset, heightScale))
+            if (!GetCharacterImpactCapsule(radiusScale, pose, radius, halfLength, targetOffset, heightScale))
             {
-                error = u8"몸통 캡슐 형상과 재질을 준비하지 못했습니다.";
+                error = u8"몸통 캡슐 형상을 준비하지 못했습니다.";
                 return false;
             }
-            m_CharacterCapsuleShape = PxRigidActorExt::createExclusiveShape(body, PxCapsuleGeometry(radius, halfLength), *material);
-            if (!m_CharacterCapsuleShape)
+            // PA 바디 목록과 Articulation에 넣지 않는다. 유한 질량은 이 독립 바디의 접촉 솔버에만 사용한다.
+            m_CharacterCapsuleBody = m_World->CreateDynamicBody(pose, PxCapsuleGeometry(radius, halfLength), mass,
+                "Character collision capsule", m_Asset.bodies[root].material);
+            if (!m_CharacterCapsuleBody)
             {
-                error = u8"몸통 캡슐 충돌체를 만들지 못했습니다.";
+                error = u8"독립 동적 몸통 캡슐을 만들지 못했습니다.";
                 return false;
             }
-            m_OriginalCapsuleMass = body.getMass();
-            m_OriginalCapsuleInertia = body.getMassSpaceInertiaTensor();
+            m_CharacterCapsuleBody->getShapes(&m_CharacterCapsuleShape, 1);
+            m_CharacterCapsuleBody->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+            m_CharacterCapsuleBody->userData = m_QueryOwner;
+            // 이동·카메라 쿼리는 PA를 사용한다. 보조 캡슐은 다른 상체와의 실제 접촉에만 참여한다.
+            m_CharacterCapsuleShape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, false);
+            m_CapsuleRootPose = body.getGlobalPose().getInverse() * pose;
             m_CapsuleRadiusScale = radiusScale;
             m_CapsuleHeightScale = heightScale;
             m_CapsuleSkin = skin;
-            m_CharacterCapsuleShape->setLocalPose(body.getGlobalPose().getInverse() * pose);
             m_CharacterCapsuleShape->setContactOffset(PxMax(.001f, skin));
             m_CharacterCapsuleShape->setRestOffset(0);
-            PxFilterData filter;
-            filter.word2 = m_CharacterImpactGroup;
-            filter.word3 = PhysicsWorld::CharacterCapsuleFilterFlag;
-            m_CharacterCapsuleShape->setSimulationFilterData(filter);
             InvalidateContactState();
             RefreshCharacterImpactFilters();
+            SyncCharacterCapsule();
         }
-        if (body.getMass() != mass)
+        if (m_CharacterCapsuleBody->getMass() != mass)
         {
-            // 기존 질량중심과 질량 분포를 유지하고, 질량 배율에 맞춰 관성을 함께 바꾼다.
-            body.setMass(mass);
-            body.setMassSpaceInertiaTensor(m_OriginalCapsuleInertia * (mass / m_OriginalCapsuleMass));
-            InvalidateContactState();
-            WakeBodies();
+            if (!PxRigidBodyExt::setMassAndUpdateInertia(*m_CharacterCapsuleBody, mass))
+            {
+                error = u8"독립 캡슐의 충돌 질량·관성을 갱신하지 못했습니다.";
+                return false;
+            }
+            m_World->InvalidateContacts(*m_CharacterCapsuleBody);
+            m_CharacterCapsuleBody->wakeUp();
         }
         error.clear();
         return true;
     }
 
-    void Ragdoll::RemoveCharacterCapsule()
+    void Ragdoll::SyncCharacterCapsule()
     {
-        if (!m_CharacterCapsuleShape)
+        const int root = GetImpactRootBody();
+        if (!m_CharacterCapsuleBody || !IsSimulating() || root < 0)
         {
             return;
         }
-        const int root = GetImpactRootBody();
+        const PxRigidBody& body = *m_Bodies[root];
+        const PxTransform pose = body.getGlobalPose() * m_CapsuleRootPose;
+        const PxVec3 linear = GetBodyPointVelocity(static_cast<size_t>(root), pose.p);
+        const PxVec3 angular = body.getAngularVelocity();
+        if (!pose.isValid() || !linear.isFinite() || !angular.isFinite())
+        {
+            return;
+        }
+        // 몸통에서 보조 바디로만 복사한다. 직전 접촉의 반작용을 PA나 PD에 전달하지 않는다.
+        m_World->InvalidateContacts(*m_CharacterCapsuleBody);
+        m_CharacterCapsuleBody->setGlobalPose(pose);
+        m_CharacterCapsuleBody->setLinearVelocity(linear);
+        m_CharacterCapsuleBody->setAngularVelocity(angular);
+    }
+
+    void Ragdoll::RemoveCharacterCapsule()
+    {
+        if (!m_CharacterCapsuleBody)
+        {
+            return;
+        }
         InvalidateContactState();
-        PxRigidBody& body = *m_Bodies[root];
-        body.detachShape(*m_CharacterCapsuleShape);
+        m_CharacterCapsuleBody->release();
+        m_CharacterCapsuleBody = nullptr;
         m_CharacterCapsuleShape = nullptr;
-        body.setMass(m_OriginalCapsuleMass);
-        body.setMassSpaceInertiaTensor(m_OriginalCapsuleInertia);
-        m_OriginalCapsuleMass = 0;
-        m_OriginalCapsuleInertia = PxVec3(0);
+        m_CapsuleRootPose = PxTransform(PxIdentity);
         m_CapsuleRadiusScale = 0;
         m_CapsuleHeightScale = 0;
         m_CapsuleSkin = 0;
         RefreshCharacterImpactFilters();
-        WakeBodies();
     }
 
-    float Ragdoll::GetCharacterCapsuleMass() const
+    float Ragdoll::GetImpactRootMass() const
     {
         const int root = GetImpactRootBody();
         return root >= 0 && static_cast<size_t>(root) < m_Bodies.size() ? m_Bodies[root]->getMass() : 0;
     }
 
+    float Ragdoll::GetCharacterCapsuleMass() const
+    {
+        return m_CharacterCapsuleBody ? m_CharacterCapsuleBody->getMass() : 0;
+    }
+
     void Ragdoll::GetCharacterCapsuleContacts(std::vector<PhysicsCapsuleContact>& contacts) const
     {
         contacts.clear();
-        if (m_World && m_CharacterCapsuleShape)
+        if (m_World && m_CharacterCapsuleBody)
         {
-            m_World->GetCharacterCapsuleContacts(*m_Bodies[GetImpactRootBody()], contacts);
+            m_World->GetCharacterCapsuleContacts(*m_CharacterCapsuleBody, contacts);
         }
     }
 }

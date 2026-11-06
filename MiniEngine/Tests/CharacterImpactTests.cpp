@@ -8,6 +8,7 @@
 #include <limits>
 #include <chrono>
 #include <fstream>
+#include <iterator>
 
 using namespace PARS;
 using namespace Math;
@@ -46,7 +47,7 @@ namespace
         int m_Value;
     };
 
-    float SolveCapsuleContact(PhysicsWorld& service, float sourceMass, bool upperBody, bool enabled = true)
+    float SolveCapsuleContact(PhysicsWorld& service, float collisionMass, bool upperBody, bool enabled = true)
     {
         PhysicsWorld world;
         CheckImpact(world.InitializeScene(service), "Initialize the physical contact scene");
@@ -66,11 +67,15 @@ namespace
         std::string error;
         int sourceOwner = 1;
         int targetOwner = 2;
-        CheckImpact(source.Create(world, asset, names, poses, Vector3(kZero), error), "Create a finite-mass source body");
+        CheckImpact(source.Create(world, asset, names, poses, Vector3(2, 0, 0), error), "Create a finite-mass source body");
         source.SetQueryOwner(&sourceOwner);
         source.SetCharacterImpactEnabled(true, 101);
-        CheckImpact(source.ConfigureCharacterCapsule(enabled, sourceMass, 1, .01f, error), "Configure the actual simulation capsule");
-        const float activeMass = source.GetCharacterCapsuleMass();
+        CheckImpact(source.ConfigureCharacterCapsule(enabled, collisionMass, 1, .01f, error), "Configure an independent dynamic capsule");
+        const float activeMass = enabled ? source.GetCharacterCapsuleMass() : source.GetImpactRootMass();
+        Vector3 center(kZero);
+        float totalMass = 0;
+        CheckImpact(source.GetImpactRootMass() == 2 && source.GetCenterOfMass(center, totalMass) && totalMass == 2,
+            "Collision mass does not change the source PA mass or total weight");
         PxRigidDynamic* target = world.CreateDynamicBody(PxTransform(PxVec3(.25f, 3, 0)), PxSphereGeometry(.1f),
             1, "Contact receiver", root.material);
         target->userData = &targetOwner;
@@ -81,7 +86,8 @@ namespace
         filter.word3 = PhysicsWorld::CharacterImpactFilterFlag |
             (upperBody ? PhysicsWorld::CharacterImpactTargetFilterFlag : 0);
         targetShape->setSimulationFilterData(filter);
-        source.AddVelocity(Vector3(2, 0, 0));
+        // 한 번만 동기화한 뒤 두 동적 바디의 유한 질량 충돌을 검사한다.
+        source.SyncCharacterCapsule();
         float measuredImpulse = 0;
         for (int step = 0; step < 12; ++step)
         {
@@ -95,17 +101,24 @@ namespace
             }
         }
         Vector3 sourceVelocity(kZero);
-        CheckImpact(source.GetCenterOfMassVelocity(sourceVelocity), "Measure source recoil");
+        CheckImpact(source.GetCenterOfMassVelocity(sourceVelocity), "Measure the source PA velocity separately from its capsule");
         const float targetVelocity = target->getLinearVelocity().x;
         if (upperBody)
         {
             // 중심을 지나는 비탄성 충돌의 해와 비교한다. 기존 선형 감쇠의 작은 영향만 허용한다.
             const float expectedVelocity = 2 * activeMass / (activeMass + 1);
-            CheckImpact(std::abs(targetVelocity - expectedVelocity) < .08f &&
-                float(sourceVelocity.GetX()) < 1.99f && (enabled ? measuredImpulse > .1f : measuredImpulse == 0),
-                "PhysX produces the finite-mass collision solution and source recoil without manual forces");
-            CheckImpact(std::abs(activeMass * float(sourceVelocity.GetX()) + targetVelocity - 2 * activeMass) < .12f,
-                "Both dynamic bodies exchange momentum within the existing damping loss");
+            CheckImpact(std::abs(targetVelocity - expectedVelocity) < .08f && (enabled ? measuredImpulse > .1f : measuredImpulse == 0),
+                "PhysX uses the configured finite collision mass without manual forces");
+            if (enabled)
+            {
+                CheckImpact(float(sourceVelocity.GetX()) > 1.97f && source.GetExternalImpactImpulse() == 0,
+                    "Capsule recoil does not feed back into the source PA velocity or recovery input");
+            }
+            else
+            {
+                CheckImpact(std::abs(activeMass * float(sourceVelocity.GetX()) + targetVelocity - 2 * activeMass) < .12f,
+                    "Ordinary PA collision still exchanges momentum when the capsule is disabled");
+            }
         }
         else
         {
@@ -113,10 +126,37 @@ namespace
                 "Lower-body filter prevents simulation contact and momentum transfer");
         }
         CheckImpact(world.GetErrorCount() == 0 && source.IsFinite(), "Finite collision state with no PhysX errors");
-        std::printf("capsule mass=%.3f enabled=%d upper=%d receiver_vx=%.6f source_vx=%.6f measured_J=%.6f\n",
+        source.SyncCharacterCapsule();
+        CheckImpact(source.GetCenterOfMass(center, totalMass) && totalMass == 2 && source.GetImpactRootMass() == 2,
+            "Following the source again after collision preserves PA mass");
+        if (enabled)
+        {
+            PxTransform capsulePose(PxIdentity);
+            PxVec3 targetOffset(0);
+            float radius = 0;
+            float halfLength = 0;
+            CheckImpact(source.GetCharacterImpactCapsule(1, capsulePose, radius, halfLength, targetOffset) &&
+                float(Length(Vector3(capsulePose.p.x, capsulePose.p.y, capsulePose.p.z) - source.GetPosition())) < 1e-5f,
+                "The independent capsule follows the root again after receiving solver recoil");
+        }
+        std::printf("collision mass=%.3f enabled=%d upper=%d receiver_vx=%.6f source_PA_vx=%.6f measured_J=%.6f\n",
             activeMass, enabled ? 1 : 0, upperBody ? 1 : 0, targetVelocity, float(sourceVelocity.GetX()), measuredImpulse);
         target->release();
         return targetVelocity;
+    }
+
+    void CheckCapsuleMassProperties(const Ragdoll& ragdoll, const PxRigidBody& rootBody,
+        const PxVec3& inertia, const PxTransform& localCenter, Vector3 center, float mass)
+    {
+        Vector3 currentCenter(kZero);
+        float currentMass = 0;
+        const PxTransform currentLocalCenter = rootBody.getCMassLocalPose();
+        CheckImpact(ragdoll.GetImpactRootMass() == 3 && ragdoll.GetCenterOfMass(currentCenter, currentMass) &&
+            std::abs(currentMass - mass) < 1e-6f && float(Length(currentCenter - center)) < 1e-6f &&
+            (rootBody.getMassSpaceInertiaTensor() - inertia).magnitude() < 1e-6f &&
+            (currentLocalCenter.p - localCenter.p).magnitude() < 1e-6f &&
+            std::abs(currentLocalCenter.q.dot(localCenter.q)) > .999999f,
+            "Independent capsule creation, mass changes, resize and removal preserve PA mass, inertia and center of mass");
     }
 }
 
@@ -124,15 +164,21 @@ void RunCharacterImpactTests()
 {
     CharacterImpactSettings settings;
     std::string error;
-    settings.bodyMass = 20;
+    settings.collisionMass = 20;
     settings.enabled = false;
     settings.capsuleHeightScale = 1.25f;
     const std::string profilePath = "CharacterImpactSettings." +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".test.json";
     CheckImpact(settings.Save(profilePath, error), "Save independent impact profile");
     CharacterImpactSettings loaded;
-    CheckImpact(loaded.Load(profilePath, error) && loaded.bodyMass == 20 && !loaded.enabled && loaded.capsuleHeightScale == 1.25f,
+    CheckImpact(loaded.Load(profilePath, error) && loaded.collisionMass == 20 && !loaded.enabled && loaded.capsuleHeightScale == 1.25f,
         "Reload impact profile");
+    {
+        std::ifstream saved(profilePath);
+        const std::string content((std::istreambuf_iterator<char>(saved)), std::istreambuf_iterator<char>());
+        CheckImpact(content.find("bodyMassKg") == std::string::npos && content.find("collisionMassKg") != std::string::npos,
+            "Profiles explicitly store collision mass instead of a character mass override");
+    }
     {
         std::ofstream legacy(profilePath);
         legacy << R"({"version":1,"enabled":true,"referenceImpulseNs":180,"referenceSpeedMps":3.5,
@@ -140,23 +186,43 @@ void RunCharacterImpactTests()
             "separationTimeSeconds":0.1,"separationDistanceMeters":0.08,"cooldownSeconds":0.35,
             "capsuleRadiusScale":0.95,"contactSkinMeters":0.02})";
     }
-    CheckImpact(loaded.Load(profilePath, error) && loaded.bodyMass == CharacterImpactSettings().bodyMass,
-        "Legacy profile discards manual impulses and uses the new dynamic-body mass default");
+    CheckImpact(loaded.Load(profilePath, error) && loaded.enabled && loaded.capsuleHeightScale == 1.0f &&
+        loaded.collisionMass == CharacterImpactSettings().collisionMass,
+        "Legacy profile discards manual impulses and retains collision settings");
     {
         std::ofstream legacy(profilePath);
         legacy << R"({"version":3,"enabled":false,"bodyMassKg":20,"capsuleRadiusScale":0.8,"contactSkinMeters":0.02})";
     }
-    CheckImpact(loaded.Load(profilePath, error) && loaded.bodyMass == 20 && !loaded.enabled &&
+    CheckImpact(loaded.Load(profilePath, error) && loaded.collisionMass == 20 && !loaded.enabled &&
         loaded.capsuleHeightScale == 1.0f && loaded.capsuleRadiusScale == .8f,
         "Version-three profiles retain their previous capsule dimensions with height scale one");
+    {
+        std::ofstream legacy(profilePath);
+        legacy << R"({"version":4,"enabled":true,"bodyMassKg":9999,"capsuleRadiusScale":0.7,
+            "capsuleHeightScale":1.5,"contactSkinMeters":0.02})";
+    }
+    CheckImpact(loaded.Load(profilePath, error) && loaded.collisionMass == 9999 && loaded.enabled && loaded.capsuleRadiusScale == .7f &&
+        loaded.capsuleHeightScale == 1.5f && loaded.Save(profilePath, error),
+        "Version-four profiles migrate their configured mass to the independent collision body");
+    {
+        std::ifstream saved(profilePath);
+        const std::string content((std::istreambuf_iterator<char>(saved)), std::istreambuf_iterator<char>());
+        CheckImpact(content.find("bodyMassKg") == std::string::npos && content.find("collisionMassKg") != std::string::npos,
+            "Migrated profiles name the independent collision mass explicitly");
+    }
     std::remove(profilePath.c_str());
     settings.capsuleHeightScale = 0;
     CheckImpact(!settings.Validate(error), "Reject zero capsule height scale");
     settings.capsuleHeightScale = 1;
-    settings.bodyMass = 0;
-    CheckImpact(!settings.Validate(error), "Reject zero body mass");
-    settings.bodyMass = std::numeric_limits<float>::quiet_NaN();
+    settings.capsuleRadiusScale = 0;
+    CheckImpact(!settings.Validate(error), "Reject zero capsule radius scale");
+    settings.capsuleRadiusScale = std::numeric_limits<float>::quiet_NaN();
     CheckImpact(!settings.Validate(error), "Reject nonfinite profile");
+    settings.capsuleRadiusScale = .95f;
+    settings.collisionMass = 0;
+    CheckImpact(!settings.Validate(error), "Reject zero collision mass for a finite dynamic body");
+    settings.collisionMass = std::numeric_limits<float>::quiet_NaN();
+    CheckImpact(!settings.Validate(error), "Reject nonfinite collision mass");
 
     World game;
     CheckImpact(game.InitializePhysics(false), "Initialize phase test world");
@@ -278,18 +344,23 @@ void RunCharacterImpactTests()
             rootBody = hit.actor->is<PxRigidBody>();
         }
     }
-    CheckImpact(rootBody != nullptr, "Locate the root mass and inertia for restoration checks");
+    CheckImpact(rootBody != nullptr, "Locate the root mass and inertia for preservation checks");
     const PxVec3 originalInertia = rootBody->getMassSpaceInertiaTensor();
+    const PxTransform originalLocalCenter = rootBody->getCMassLocalPose();
+    Vector3 originalCenter(kZero);
+    float originalMass = 0;
+    CheckImpact(ragdoll.GetCenterOfMass(originalCenter, originalMass) && std::abs(originalMass - 10) < 1e-4f,
+        "Record the ten-kg PA mass and center of mass before attaching the capsule");
     const uint32_t bodyCount = world.GetDynamicBodyCount();
-    CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error), "Attach a simulation capsule to the dynamic root");
-    Vector3 center(kZero);
-    float totalMass = 0;
-    CheckImpact(ragdoll.HasCharacterCapsule() && ragdoll.GetCharacterCapsuleMass() == 6 &&
-        ragdoll.GetCenterOfMass(center, totalMass) && std::abs(totalMass - 13) < 1e-4f,
-        "Capsule mass replaces the three-kg root mass instead of adding another rigid body");
-    CheckImpact(world.GetDynamicBodyCount() == bodyCount, "Capsule adds no duplicate rigid-body mass");
-    CheckImpact((rootBody->getMassSpaceInertiaTensor() - originalInertia * 2).magnitude() < 1e-6f,
-        "Changing root mass scales its existing inertia distribution consistently");
+    CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error), "Create an independent six-kg dynamic capsule");
+    CheckImpact(ragdoll.HasCharacterCapsule() && ragdoll.GetCharacterCapsuleMass() == 6,
+        "Independent capsule has the requested collision mass");
+    CheckCapsuleMassProperties(ragdoll, *rootBody, originalInertia, originalLocalCenter, originalCenter, originalMass);
+    CheckImpact(world.GetDynamicBodyCount() == bodyCount + 1 && rootBody->getNbShapes() == 1 && ragdoll.GetBodyCount() == names.size(),
+        "Capsule uses a separate dynamic actor and never attaches a shape to the PA root");
+    CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 40, .95f, .02f, error) && ragdoll.GetCharacterCapsuleMass() == 40,
+        "Change collision mass without rebuilding the character");
+    CheckCapsuleMassProperties(ragdoll, *rootBody, originalInertia, originalLocalCenter, originalCenter, originalMass);
     PxTransform capsulePose(PxIdentity);
     PxVec3 targetOffset(0);
     float initialRadius = 0;
@@ -302,44 +373,55 @@ void RunCharacterImpactTests()
     CheckImpact(ragdoll.GetCharacterImpactCapsule(.95f, capsulePose, changedRadius, changedHalfLength, targetOffset) &&
         std::abs(changedRadius - initialRadius) < 1e-6f &&
         std::abs((changedRadius + changedHalfLength) - (initialRadius + initialHalfLength) * 1.5f) < 1e-5f &&
-        rootBody->getNbShapes() == 2 && ragdoll.GetCharacterCapsuleMass() == 6,
+        rootBody->getNbShapes() == 1 && ragdoll.GetImpactRootMass() == 3 && ragdoll.GetCharacterCapsuleMass() == 6,
         "Height control changes the simulation shape while preserving radius, shape count and mass");
+    CheckCapsuleMassProperties(ragdoll, *rootBody, originalInertia, originalLocalCenter, originalCenter, originalMass);
     CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, 3, .02f, error, .1f), "Allow a short, wide capsule");
     CheckImpact(ragdoll.GetCharacterImpactCapsule(3, capsulePose, changedRadius, changedHalfLength, targetOffset) &&
         changedHalfLength == 0 && changedRadius > initialRadius,
         "A requested height smaller than the diameter becomes a valid spherical capsule");
-    CheckImpact(!ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error, 0) && rootBody->getNbShapes() == 2,
+    CheckCapsuleMassProperties(ragdoll, *rootBody, originalInertia, originalLocalCenter, originalCenter, originalMass);
+    CheckImpact(!ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error, 0) && rootBody->getNbShapes() == 1 &&
+        world.GetDynamicBodyCount() == bodyCount + 1,
         "Invalid resize leaves the current simulation shape intact");
+    CheckImpact(ragdoll.ConfigureCharacterCapsule(loaded.enabled, loaded.collisionMass, loaded.capsuleRadiusScale, loaded.contactSkin,
+        error, loaded.capsuleHeightScale) && ragdoll.GetCharacterCapsuleMass() == 9999,
+        "Apply migrated 9999-kg setting only to the independent collision body");
+    CheckCapsuleMassProperties(ragdoll, *rootBody, originalInertia, originalLocalCenter, originalCenter, originalMass);
     CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error), "Restore default capsule size");
     for (int cycle = 0; cycle < 20; ++cycle)
     {
         CheckImpact(ragdoll.ConfigureCharacterCapsule(false, 6, .95f, .02f, error) &&
-            !ragdoll.HasCharacterCapsule() && rootBody->getNbShapes() == 1 && ragdoll.GetCharacterCapsuleMass() == 3 &&
-            (rootBody->getMassSpaceInertiaTensor() - originalInertia).magnitude() < 1e-6f,
-            "Turning the capsule off restores original root mass");
+            !ragdoll.HasCharacterCapsule() && rootBody->getNbShapes() == 1 && world.GetDynamicBodyCount() == bodyCount,
+            "Turning the capsule off removes only the independent actor");
+        CheckCapsuleMassProperties(ragdoll, *rootBody, originalInertia, originalLocalCenter, originalCenter, originalMass);
         CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error), "Re-enable without recreating the articulation");
-        CheckImpact(rootBody->getNbShapes() == 2, "Repeated toggles retain exactly one additional capsule shape");
+        CheckImpact(rootBody->getNbShapes() == 1 && world.GetDynamicBodyCount() == bodyCount + 1,
+            "Repeated toggles retain exactly one independent capsule actor");
+        CheckCapsuleMassProperties(ragdoll, *rootBody, originalInertia, originalLocalCenter, originalCenter, originalMass);
     }
-    CheckImpact(!ragdoll.ConfigureCharacterCapsule(true, 0, .95f, .02f, error) && ragdoll.HasCharacterCapsule(),
-        "Invalid runtime mass leaves the existing capsule intact");
+    CheckImpact(!ragdoll.ConfigureCharacterCapsule(true, 6, 0, .02f, error) && ragdoll.HasCharacterCapsule(),
+        "Invalid runtime geometry leaves the existing capsule intact");
+    CheckImpact(!ragdoll.ConfigureCharacterCapsule(true, 0, .95f, .02f, error) && ragdoll.GetCharacterCapsuleMass() == 6,
+        "Invalid runtime collision mass preserves the existing actor and mass");
     CheckImpact(ragdoll.SetSimulating(false, Vector3(kZero), error) && !ragdoll.HasCharacterCapsule(),
         "Leaving simulation removes the capsule before storing a standby articulation");
-    CheckImpact(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.GetCharacterCapsuleMass() == 3,
-        "Reactivating the articulation restores its original mass without a stale capsule");
+    CheckImpact(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.GetImpactRootMass() == 3,
+        "Reactivating the articulation preserves its PA mass without a stale capsule");
     ragdoll.SetCharacterImpactEnabled(true, 100);
     CheckImpact(ragdoll.ConfigureCharacterCapsule(true, 6, .95f, .02f, error),
         "A capsule can be enabled again after switching physics configurations");
     ragdoll.SetCharacterImpactEnabled(false, 100);
     world.SweepCharacterCapsule(PxTransform(PxVec3(0, 3, 0)), 2, .1f, PxVec3(0), nullptr, hits);
     CheckImpact(hits.empty(), "Disabling body impact clears upper-body query flags");
-    CheckImpact(!ragdoll.HasCharacterCapsule() && ragdoll.GetCharacterCapsuleMass() == 3,
-        "Disabling collision policy removes the physical capsule and restores root mass");
+    CheckImpact(!ragdoll.HasCharacterCapsule() && ragdoll.GetImpactRootMass() == 3,
+        "Disabling collision policy removes the physical capsule and preserves PA mass");
     CheckImpact(world.GetErrorCount() == 0 && ragdoll.IsFinite(), "No PhysX validation errors or nonfinite state");
     const float lightResponse = SolveCapsuleContact(world, .5f, true);
     const float heavyResponse = SolveCapsuleContact(world, 5, true);
-    CheckImpact(heavyResponse > lightResponse + .5f, "A heavier capsule transfers more impulse at the same approach speed");
+    CheckImpact(heavyResponse > lightResponse + .5f, "A heavier independent capsule transfers more impulse with the same PA mass");
     SolveCapsuleContact(world, 5, false);
-    CheckImpact(SolveCapsuleContact(world, 5, true, false) > .5f,
+    CheckImpact(SolveCapsuleContact(world, 2, true, false) > .5f,
         "Characters without an active capsule retain their ordinary PA-to-PA collision response");
-    std::puts("PASS: physical capsule settings, phase ordering, upper-body queries, mass replacement and repeated on/off restoration");
+    std::puts("PASS: independent capsule mass, actual solver contacts, isolated recoil, PA mass/COM/inertia and repeated on/off");
 }
