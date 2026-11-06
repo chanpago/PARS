@@ -17,7 +17,7 @@ namespace PARS
         // 착지 예측 시간과 별개인 발 이동 시간(s)과 궤적의 최소 최고 높이(m)다.
         float liftHeightScale = .15f;   // 발 이동 거리에 비례해 들어 올리는 높이를 정하는 비율
         float stepDuration = .15f;       // 발 이동 목표 궤적의 진행시간
-        float minimumLiftHeight = .08f; // 발을 들어 올리는 최고 높이를 계산할 때 사용하는 최소값
+        float minimumLiftHeight = .03f; // 발을 들어 올리는 최고 높이를 계산할 때 사용하는 최소값
         float supportLoadRatio = .5f;   // 착지 후 다음 지지발에 필요한 수직 하중 / 전신 체중
         float supportConfirmationTime = .05f; // 착지 충격 피크를 제외하기 위한 연속 하중 확인 시간(s)
         float supportSwitchDistance = .02f; // 예측 COM 거리 차이가 작으면 기존 지지발을 유지하는 여유(m)
