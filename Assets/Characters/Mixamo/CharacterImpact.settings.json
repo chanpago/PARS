@@ -1,8 +1,8 @@
 {
-    "version": 4,
+    "bodyMassKg": 20.0,
+    "capsuleHeightScale": 1.159999966621399,
+    "capsuleRadiusScale": 1.2300000190734863,
+    "contactSkinMeters": 0.019999999552965164,
     "enabled": true,
-    "bodyMassKg": 8.154099464416504,
-    "capsuleRadiusScale": 0.95,
-    "capsuleHeightScale": 1.0,
-    "contactSkinMeters": 0.02
+    "version": 4
 }
