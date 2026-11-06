@@ -25,6 +25,25 @@ namespace
         return std::abs(a - b) < 1e-5f;
     }
 
+    FootstepSettings TestSettings()
+    {
+        // 궤적 검증의 시간 조건을 고정해 기본 튜닝 값의 변경과 분리한다.
+        FootstepSettings settings;
+        settings.startPredictionTime = .3f;
+        settings.landingPredictionTime = .3f;
+        settings.stepDuration = .3f;
+        return settings;
+    }
+
+    void Advance(FootstepPlanner& planner, FootstepInput& input, const FootstepSettings& settings, unsigned count)
+    {
+        for (unsigned sample = 0; sample < count; ++sample)
+        {
+            ++input.completedStep;
+            planner.Update(input, settings);
+        }
+    }
+
     FootstepInput Standing()
     {
         FootstepInput input;
@@ -37,6 +56,7 @@ namespace
         input.zone = FootSupportZone::Inside;
         input.projectionHeight = .4f;
         input.fixedDeltaTime = 1.0f / 60;
+        input.bodyWeight = 1000;
         input.blueFoot = 1;
         input.completedStep = 10;
         input.revision = 1;
@@ -49,6 +69,7 @@ namespace
             foot.normal = PxVec3(0, 1, 0);
             foot.stanceOffset = PxVec3(x, 0, 0);
             foot.calfLength = .45f;
+            foot.normalImpulse = input.bodyWeight * .5f * input.fixedDeltaTime;
         }
         return input;
     }
@@ -56,7 +77,7 @@ namespace
     void TestStartConditions()
     {
         FootstepPlanner planner;
-        FootstepSettings settings{.3f, .3f};
+        FootstepSettings settings = TestSettings();
         PARS::FootstepInput input = Standing();
         input.velocity = PxVec3(0);
         planner.Update(input, settings);
@@ -180,7 +201,7 @@ namespace
     void TestStepLifecycle()
     {
         FootstepPlanner planner;
-        const FootstepSettings settings{.3f, .3f};
+        const FootstepSettings settings = TestSettings();
         PARS::FootstepInput input = Standing();
         planner.Update(input, settings);
         const PARS::FootstepSnapshot start = planner.GetSnapshot();
@@ -226,16 +247,20 @@ namespace
             "Recontact after takeoff completes once and does not start again in the same step");
         input.zone = FootSupportZone::Inside;
         input.com.z = 0;
+        input.com.x = input.feet[1].position.x;
         input.blueFoot = 0;
         ++input.completedStep;
         planner.Update(input, settings);
+        Check(!planner.GetSnapshot().justStarted && planner.GetSnapshot().reason == FootstepReason::WaitingSupportLoad,
+            "The first post-landing sample waits for sustained load");
+        Advance(planner, input, settings, 2);
         Check(planner.GetSnapshot().justStarted && planner.GetSnapshot().startCount == 2 &&
-            planner.GetSnapshot().stepFoot == 0, "The following physics step evaluates the latest blue foot");
+            planner.GetSnapshot().stepFoot == 0, "Sustained predicted-side support permits the next step");
     }
 
     void TestFootRolesFollowCommittedStep()
     {
-        const FootstepSettings settings{.3f, .3f};
+        const FootstepSettings settings = TestSettings();
         for (const int movingFoot : {0, 1})
         {
             FootstepPlanner planner;
@@ -308,9 +333,12 @@ namespace
                 "The landing event retains the roles used by recovery in that same physics tick");
             ++input.completedStep;
             planner.Update(input, settings);
+            Check(!planner.GetSnapshot().justStarted && planner.GetSnapshot().GetRoles().movableFoot == movingFoot,
+                "The landing impulse alone cannot swap the committed support roles");
+            Advance(planner, input, settings, 2);
             roles = planner.GetSnapshot().GetRoles();
             Check(planner.GetSnapshot().justStarted && roles.movableFoot == supportFoot && roles.supportFoot == movingFoot,
-                "Only the next step can adopt the new geometric roles after landing");
+                "Sustained support after landing permits the predicted role change");
 
             input.zone = FootSupportZone::Outside;
             ++input.completedStep;
@@ -353,7 +381,7 @@ namespace
     void TestAbortAndInvalidInputs()
     {
         FootstepPlanner planner;
-        const FootstepSettings settings{.3f, .3f};
+        const FootstepSettings settings = TestSettings();
         PARS::FootstepInput input = Standing();
         planner.Update(input, settings);
         input.feet[1].grounded = false;
@@ -404,7 +432,7 @@ namespace
     void TestTargetGeometry()
     {
         FootstepPlanner planner;
-        FootstepSettings settings{.3f, .3f};
+        FootstepSettings settings = TestSettings();
         PARS::FootstepInput input = Standing();
         input.velocity = PxVec3(100, 100, 0);
         input.feet[1].position.x = 10;
@@ -442,7 +470,7 @@ namespace
 
         planner.Reset();
         input = Standing();
-        settings = {.3f, .3f};
+        settings = TestSettings();
         // 기준 방향을 90도 돌려도 발 간격 보정이 월드 X축에 고정되지 않아야 한다.
         input.supportRight = PxVec3(0, 0, 1);
         input.feet[0].stanceOffset = PxVec3(0, 0, -.12f);
@@ -460,7 +488,7 @@ namespace
     void TestMotionHeightAndProgress()
     {
         FootstepPlanner planner;
-        const FootstepSettings settings{.3f, .3f};
+        const FootstepSettings settings = TestSettings();
         FootstepInput input = Standing();
         planner.Update(input, settings);
         const FootstepSnapshot start = planner.GetSnapshot();
@@ -503,8 +531,7 @@ namespace
             Near(planner.GetSnapshot().motion.landingError, 0),
             "Contact after the duration finishes the step and records landing error");
         input.blueFoot = 0;
-        ++input.completedStep;
-        planner.Update(input, settings);
+        Advance(planner, input, settings, 3);
         Check(planner.GetSnapshot().justStarted && Near(planner.GetSnapshot().motion.elapsedTime, 0),
             "A subsequent step starts a fresh clock");
 
@@ -526,7 +553,7 @@ namespace
     void TestMotionLimitsAndRetargeting()
     {
         FootstepPlanner planner;
-        FootstepSettings settings{.3f, .3f};
+        FootstepSettings settings = TestSettings();
         FootstepInput input = Standing();
         input.velocity.z = 100;
         input.feet[1].calfLength = .18f;
@@ -589,7 +616,7 @@ namespace
 
         // ?? ??? ?? ?? ????? ??? ??? ???.
         planner.Reset();
-        settings = {.3f, .3f};
+        settings = TestSettings();
         input = Standing();
         planner.Update(input, settings);
         input.feet[1].grounded = false;
@@ -618,7 +645,7 @@ namespace
         {
             planner.Reset();
             input = Standing();
-            settings = {.3f, .3f};
+            settings = TestSettings();
             if (invalid == 0)
             {
                 settings.stepDuration = 0;
@@ -637,12 +664,130 @@ namespace
         }
         planner.Reset();
         input = Standing();
-        settings = {.3f, .3f};
+        settings = TestSettings();
         planner.Update(input, settings);
         input.completedStep += 18;
         planner.Update(input, settings);
         Check(planner.GetSnapshot().justLanded && planner.GetSnapshot().motion.landingError > .29f,
             "A foot that never lifted cannot stay stuck after the trajectory duration");
+    }
+
+    void TestSupportTransfer()
+    {
+        const FootstepSettings settings;
+        Check(Near(settings.stepDuration, .15f) && Near(settings.landingPredictionTime, .3f),
+            "The tuned movement and landing prediction defaults remain unchanged");
+        for (const float dt : {1.0f / 60, 1.0f / 120})
+        {
+            FootstepPlanner planner;
+            FootstepInput input = Standing();
+            input.fixedDeltaTime = dt;
+            planner.Update(input, settings);
+            input.feet[1].grounded = false;
+            Advance(planner, input, settings, 1);
+            // 현재 COM은 왼발에 가깝지만 다음 이동 시간 뒤에는 오른발에 더 가깝다.
+            input.com.x = -.06f;
+            input.velocity.x = 1;
+            input.blueFoot = 1;
+            input.feet[1].grounded = true;
+            input.feet[1].normalImpulse = input.bodyWeight * dt * 12;
+            input.completedStep += static_cast<uint64_t>(std::ceil(settings.stepDuration / dt));
+            planner.Update(input, settings);
+            Check(planner.GetSnapshot().justLanded && Near(planner.GetSnapshot().transfer.confirmationTime, 0),
+                "Landing spikes are excluded from transfer confirmation");
+            Advance(planner, input, settings, 1);
+            Check(planner.GetSnapshot().transfer.candidateFoot == 1 && !planner.GetSnapshot().justStarted,
+                "Predicted COM selects the future support but a single peak cannot release the old foot");
+            planner.Update(input, settings);
+            Check(Near(planner.GetSnapshot().transfer.confirmationTime, dt),
+                "Duplicate observations do not accumulate support time");
+            input.feet[1].normalImpulse = 0;
+            Advance(planner, input, settings, 1);
+            Check(Near(planner.GetSnapshot().transfer.confirmationTime, 0) && !planner.GetSnapshot().transfer.ready,
+                "A landing spike followed by unloaded contact cannot transfer support");
+            input.feet[1].normalImpulse = input.bodyWeight * dt * .6f;
+            const unsigned samples = static_cast<unsigned>(std::ceil(settings.supportConfirmationTime / dt - 1e-5f));
+            Advance(planner, input, settings, samples - 1);
+            Check(!planner.GetSnapshot().justStarted, "Support remains locked until the full confirmation time");
+            Advance(planner, input, settings, 1);
+            Check(planner.GetSnapshot().justStarted && planner.GetSnapshot().stepFoot == 0 &&
+                planner.GetSnapshot().supportFoot == 1 && planner.GetSnapshot().rawBlueFoot == 1,
+                "Predicted COM with sustained actual load overrides the old instantaneous COM candidate");
+            input.velocity.x = -10;
+            input.feet[1].normalImpulse = 0;
+            Advance(planner, input, settings, 1);
+            Check(planner.GetSnapshot().stepFoot == 0 && planner.GetSnapshot().supportFoot == 1,
+                "Prediction and load changes cannot swap roles during the committed swing");
+        }
+
+        for (unsigned interruption = 0; interruption < 8; ++interruption)
+        {
+            FootstepPlanner planner;
+            FootstepInput input = Standing();
+            planner.Update(input, settings);
+            input.completedStep += 9;
+            planner.Update(input, settings);
+            input.com.x = .1f;
+            input.feet[1].normalImpulse = input.bodyWeight * input.fixedDeltaTime * .6f;
+            Advance(planner, input, settings, 2);
+            const FootstepInput valid = input;
+            if (interruption == 0)
+            {
+                input.feet[1].grounded = false;
+            }
+            else if (interruption == 1)
+            {
+                input.feet[1].hasContactSample = false;
+            }
+            else if (interruption == 2)
+            {
+                input.feet[1].normal = PxVec3(1, 0, 0);
+            }
+            else if (interruption == 3)
+            {
+                input.feet[1].normalImpulse = std::numeric_limits<float>::quiet_NaN();
+            }
+            else if (interruption == 4)
+            {
+                input.bodyWeight = 0;
+            }
+            else if (interruption == 5)
+            {
+                ++input.completedStep;
+            }
+            else if (interruption == 6)
+            {
+                input.hasVelocity = false;
+            }
+            else
+            {
+                input.com.x = -.1f;
+            }
+            Advance(planner, input, settings, 1);
+            Check(!planner.GetSnapshot().justStarted && !planner.GetSnapshot().transfer.ready,
+                "Invalid contact, missing samples, changed candidate or missing input breaks confirmation");
+            const uint64_t completedStep = input.completedStep;
+            input = valid;
+            input.completedStep = completedStep;
+            // 샘플 누락은 현재의 유효 샘플부터 다시 센다. 나머지 중단은 다음 입력부터 확인한다.
+            Advance(planner, input, settings, interruption == 5 ? 2 : 3);
+            Check(planner.GetSnapshot().justStarted && planner.GetSnapshot().stepFoot == 0,
+                "A fresh uninterrupted load interval recovers from a rejected transfer");
+        }
+
+        FootstepPlanner planner;
+        FootstepInput input = Standing();
+        input.com.x = -.1f;
+        planner.Update(input, settings);
+        input.completedStep += 9;
+        planner.Update(input, settings);
+        Advance(planner, input, settings, 3);
+        Check(planner.GetSnapshot().justStarted && planner.GetSnapshot().stepFoot == 1,
+            "Repeated use of the same swing foot remains possible when prediction and support load justify it");
+        ++input.revision;
+        planner.Update(input, settings);
+        Check(!planner.GetSnapshot().transfer.active,
+            "A contact revision clears post-landing load history");
     }
 
 }
@@ -657,5 +802,6 @@ void TestFootstepPlanner()
     TestTargetGeometry();
     TestMotionHeightAndProgress();
     TestMotionLimitsAndRetargeting();
+    TestSupportTransfer();
     std::printf("PASS: %u procedural footstep checks (no PhysX simulation)\n", checks);
 }

@@ -18,7 +18,10 @@ namespace
             settings.crossingOffset <= settings.maximumStepLength &&
             std::isfinite(settings.liftHeightScale) && settings.liftHeightScale > 0 &&
             std::isfinite(settings.stepDuration) && settings.stepDuration > 0 &&
-            std::isfinite(settings.minimumLiftHeight) && settings.minimumLiftHeight > 0;
+            std::isfinite(settings.minimumLiftHeight) && settings.minimumLiftHeight > 0 &&
+            std::isfinite(settings.supportLoadRatio) && settings.supportLoadRatio > 0 && settings.supportLoadRatio <= 1 &&
+            std::isfinite(settings.supportConfirmationTime) && settings.supportConfirmationTime > 0 &&
+            std::isfinite(settings.supportSwitchDistance) && settings.supportSwitchDistance >= 0;
     }
 
     float HorizontalDistance(const PxVec3& a, const PxVec3& b)
@@ -132,6 +135,11 @@ FootstepRoles FootstepSnapshot::GetRoles() const
         const FootstepRoles roles{supportFoot, stepFoot, true};
         return roles.IsValid() ? roles : FootstepRoles{};
     }
+    if ((phase == FootstepPhase::Landed || phase == FootstepPhase::Idle) && transfer.active)
+    {
+        const FootstepRoles roles{transfer.supportFoot, 1 - transfer.supportFoot, !transfer.ready};
+        return roles.IsValid() ? roles : FootstepRoles{};
+    }
     if (phase == FootstepPhase::Idle && rawBlueFoot >= 0 && rawBlueFoot < 2 && candidates[rawBlueFoot].valid)
     {
         // 대기 중에는 반대 발의 실제 지지를 확인한 이동 후보만 역할로 표시한다.
@@ -158,6 +166,7 @@ void FootstepPlanner::Abort(FootstepReason reason)
     m_Snapshot.hasTarget = false;
     m_Snapshot.motion.valid = false;
     m_Snapshot.candidates = {};
+    m_Snapshot.transfer = {};
     for (PARS::FootstepTarget& candidate : m_Snapshot.candidates)
     {
         candidate.reason = reason;
@@ -217,6 +226,68 @@ void FootstepPlanner::UpdateMotionTarget(const FootstepFootInput& foot)
     motion.valid = motion.position.isFinite() && std::isfinite(motion.height);
 }
 
+void FootstepPlanner::UpdateSupportTransfer(const FootstepInput& input, const FootstepSettings& settings)
+{
+    FootstepSupportTransfer& transfer = m_Snapshot.transfer;
+    // 다음 발 이동이 끝날 때의 COM으로 후보만 고른다. 실제 지지는 아래의 접촉 하중으로 확인한다.
+    transfer.predictedCom = PxVec3(input.com.x + input.velocity.x * settings.stepDuration,
+        input.projectionHeight, input.com.z + input.velocity.z * settings.stepDuration);
+    transfer.loadRatios = {};
+    transfer.ready = false;
+    const int previousCandidate = transfer.candidateFoot;
+    transfer.candidateFoot = -1;
+    float closestDistance = PX_MAX_F32;
+    std::array<float, 2> distances{PX_MAX_F32, PX_MAX_F32};
+    for (size_t side = 0; side < input.feet.size(); ++side)
+    {
+        const FootstepFootInput& foot = input.feet[side];
+        if (foot.available && foot.position.isFinite() && transfer.predictedCom.isFinite())
+        {
+            distances[side] = HorizontalDistance(transfer.predictedCom, foot.position);
+            if (distances[side] < closestDistance)
+            {
+                closestDistance = distances[side];
+                transfer.candidateFoot = static_cast<int>(side);
+            }
+        }
+        PxVec3 normal = foot.normal;
+        if (foot.available && foot.hasContactSample && foot.grounded &&
+            normal.isFinite() && normal.normalize() > 1e-6f && normal.y >= .70710678f &&
+            std::isfinite(foot.normalImpulse) && foot.normalImpulse >= 0 &&
+            std::isfinite(input.bodyWeight) && input.bodyWeight > 0)
+        {
+            const float ratio = foot.normalImpulse * normal.y / (input.fixedDeltaTime * input.bodyWeight);
+            transfer.loadRatios[side] = std::isfinite(ratio) ? ratio : 0;
+        }
+    }
+    if (transfer.candidateFoot >= 0 && transfer.supportFoot >= 0 && transfer.supportFoot < 2 &&
+        distances[transfer.supportFoot] <= closestDistance + settings.supportSwitchDistance)
+    {
+        transfer.candidateFoot = transfer.supportFoot;
+    }
+    if (transfer.candidateFoot != previousCandidate)
+    {
+        transfer.confirmationTime = 0;
+        transfer.consecutiveSamples = 0;
+    }
+    if (transfer.candidateFoot < 0 || transfer.loadRatios[transfer.candidateFoot] < settings.supportLoadRatio)
+    {
+        transfer.confirmationTime = 0;
+        transfer.consecutiveSamples = 0;
+        return;
+    }
+    // 평균 하중만 사용하면 착지 피크의 잔상이 남는다. 매 샘플의 유효 접촉과 최소 하중을 연속 확인한다.
+    transfer.confirmationTime = (std::min)(transfer.confirmationTime + input.fixedDeltaTime,
+        settings.supportConfirmationTime);
+    transfer.consecutiveSamples = (std::min)(transfer.consecutiveSamples + 1, uint32_t(2));
+    transfer.ready = transfer.consecutiveSamples >= 2 &&
+        transfer.confirmationTime + 1e-6f >= settings.supportConfirmationTime;
+    if (transfer.ready)
+    {
+        transfer.supportFoot = transfer.candidateFoot;
+    }
+}
+
 void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings& settings)
 {
     if (m_HasSample && input.revision != m_Snapshot.revision)
@@ -230,8 +301,9 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     }
 
     // 이번 입력 번호를 저장하고, 이번 계산에서 새로 만들 결과를 비움 
-    m_HasSample = true;
     FootstepSnapshot& state = m_Snapshot;
+    const bool consecutiveSample = m_HasSample && input.completedStep == state.completedStep + 1;
+    m_HasSample = true;
     state.completedStep = input.completedStep;
     state.revision = input.revision;
     state.rawBlueFoot = input.blueFoot;
@@ -241,6 +313,15 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.motion.position = PxVec3(0);
     state.motion.height = 0;
     state.candidates = {};
+    if (!state.IsInProgress() && state.transfer.active)
+    {
+        state.transfer.ready = false;
+        if (!consecutiveSample)
+        {
+            state.transfer.confirmationTime = 0;
+            state.transfer.consecutiveSamples = 0;
+        }
+    }
 
     // 실제 COM의 B 이탈 및 기존 해제 래치를 착지 처리보다 먼저 검사한다.
     // 액티브 래그돌·자동 지지 상태에서 현재 COM이 B 밖이거나, 이미 B 이탈로 지지가 해제됐다면 중단
@@ -268,6 +349,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.phase = FootstepPhase::Idle;
         state.stepFoot = state.supportFoot = -1;
         state.motion = {};
+        state.transfer = {};
         state.reason = !input.active ? FootstepReason::Inactive : !input.automaticSupport
             ? FootstepReason::AutomaticSupportRequired : FootstepReason::IdleRequired;
         return;
@@ -275,6 +357,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
 
     if (!std::isfinite(input.fixedDeltaTime) || input.fixedDeltaTime <= 0)
     {
+        state.transfer.confirmationTime = 0;
+        state.transfer.consecutiveSamples = 0;
         state.reason = FootstepReason::InvalidSettings;
         return;
     }
@@ -315,6 +399,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             state.phase = FootstepPhase::Landed;
             state.reason = FootstepReason::Landed;
             state.justLanded = true;
+            // 착지한 틱의 충격량은 인계 확인 시간에 포함하지 않는다. 양발 접지 상태에서 다음 틱부터 확인한다.
+            state.transfer = {};
+            state.transfer.active = true;
+            state.transfer.supportFoot = state.supportFoot;
             // 재접촉만으로 목표 도달까지 성공했다고 판단하지 않도록 마지막 착지 목표와의 오차를 남긴다.
             state.motion.landingError = HorizontalDistance(foot.position, state.target);
             state.motion.hasLandingError = std::isfinite(state.motion.landingError);
@@ -327,16 +415,22 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     // 예측 계산에 필요한 설정과 입력이 유효한지 확인
     if (!ValidSettings(settings))
     {
+        state.transfer.confirmationTime = 0;
+        state.transfer.consecutiveSamples = 0;
         state.reason = FootstepReason::InvalidSettings;
         return;
     }
     if (!input.hasCom || !input.hasVelocity || !input.com.isFinite() || !input.velocity.isFinite())
     {
+        state.transfer.confirmationTime = 0;
+        state.transfer.consecutiveSamples = 0;
         state.reason = FootstepReason::InvalidCom;
         return;
     }
     if (input.zone == FootSupportZone::Invalid || input.hull.size() < 3 || !std::isfinite(input.projectionHeight))
     {
+        state.transfer.confirmationTime = 0;
+        state.transfer.consecutiveSamples = 0;
         state.reason = FootstepReason::NoSupportArea;
         return;
     }
@@ -349,6 +443,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
 
     if (!state.hasPrediction)
     {
+        state.transfer.confirmationTime = 0;
+        state.transfer.consecutiveSamples = 0;
         state.reason = FootstepReason::InvalidCom;
         return;
     }
@@ -368,6 +464,17 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     // 진행 중인 발딛기가 없을 때만 새 발딛기의 시작 조건을 검사
     if (!state.IsInProgress())
     {
+        int movingFoot = input.blueFoot;
+        if (state.transfer.active)
+        {
+            UpdateSupportTransfer(input, settings);
+            if (!state.transfer.ready)
+            {
+                state.reason = FootstepReason::WaitingSupportLoad;
+                return;
+            }
+            movingFoot = 1 - state.transfer.supportFoot;
+        }
         state.phase = FootstepPhase::Idle;
         state.stepFoot = state.supportFoot = -1;
         if (!state.needsStep)
@@ -375,18 +482,18 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             state.reason = FootstepReason::PredictedInside;
             return;
         }
-        if (input.blueFoot < 0 || input.blueFoot > 1)
+        if (movingFoot < 0 || movingFoot > 1)
         {
             state.reason = FootstepReason::NoBlueFoot;
             return;
         }
-        const FootstepTarget& candidate = state.candidates[input.blueFoot];
+        const FootstepTarget& candidate = state.candidates[movingFoot];
         if (!candidate.valid)
         {
             state.reason = candidate.reason;
             return;
         }
-        const FootstepFootInput& foot = input.feet[input.blueFoot];
+        const FootstepFootInput& foot = input.feet[movingFoot];
         if (!foot.hasContactSample)
         {
             state.reason = FootstepReason::NoContactSample;
@@ -404,8 +511,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
 
         // 검사를 통과하면 움직일 발과 시작 정보를 확정
-        state.stepFoot = input.blueFoot;
-        state.supportFoot = 1 - input.blueFoot;
+        state.stepFoot = movingFoot;
+        state.supportFoot = 1 - movingFoot;
         state.phase = foot.grounded ? FootstepPhase::AwaitingTakeoff : FootstepPhase::Airborne;
         state.startPosition = foot.position;
         state.initialTarget = candidate.position;
@@ -500,7 +607,9 @@ const char* PARS::FootstepReasonLabel(FootstepReason reason)
     case FootstepReason::InFlight:
         return u8"저장한 발의 실제 재접촉 대기";
     case FootstepReason::Landed:
-        return u8"이륙 후 재접촉 확인 / 다음 스텝에 재평가";
+        return u8"이동 시간 종료 및 접촉 확인 / 지지 하중 확인 시작";
+    case FootstepReason::WaitingSupportLoad:
+        return u8"착지 후 예측 지지발의 지속 접촉·하중 대기";
     case FootstepReason::OutsideBuffer:
         return u8"실제 COM의 B 이탈 / 재진입해도 재개하지 않음";
     case FootstepReason::RootSupportReleased:

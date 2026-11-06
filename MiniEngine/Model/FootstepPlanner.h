@@ -18,6 +18,9 @@ namespace PARS
         float liftHeightScale = .15f;   // 발 이동 거리에 비례해 들어 올리는 높이를 정하는 비율
         float stepDuration = .15f;       // 발 이동 목표 궤적의 진행시간
         float minimumLiftHeight = .08f; // 발을 들어 올리는 최고 높이를 계산할 때 사용하는 최소값
+        float supportLoadRatio = .5f;   // 착지 후 다음 지지발에 필요한 수직 하중 / 전신 체중
+        float supportConfirmationTime = .05f; // 착지 충격 피크를 제외하기 위한 연속 하중 확인 시간(s)
+        float supportSwitchDistance = .02f; // 예측 COM 거리 차이가 작으면 기존 지지발을 유지하는 여유(m)
         bool preventCrossing = false;   // 움직이는 발이 반대편으로 교차하는 것을 제한할지
     };
 
@@ -52,7 +55,8 @@ namespace PARS
         InFlight,
         Landed,
         OutsideBuffer,
-        RootSupportReleased
+        RootSupportReleased,
+        WaitingSupportLoad
     };
 
     struct FootstepFootInput
@@ -62,6 +66,7 @@ namespace PARS
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
         float calfLength = 0;
+        float normalImpulse = 0;
         bool available = false;
         bool hasContactSample = false;
         bool grounded = false;
@@ -80,6 +85,7 @@ namespace PARS
         FootSupportZone zone = FootSupportZone::Invalid;
         float projectionHeight = 0;
         float fixedDeltaTime = 0;
+        float bodyWeight = 0;
         int blueFoot = -1;
         bool active = false;
         bool automaticSupport = false;
@@ -138,6 +144,20 @@ namespace PARS
         bool locked = false;
     };
 
+    // 착지 뒤 다음 지지발의 선택과 실제 하중 확인을 분리해 기록한다.
+    struct FootstepSupportTransfer
+    {
+    public:
+        physx::PxVec3 predictedCom{0};
+        std::array<float, 2> loadRatios{};
+        float confirmationTime = 0;
+        uint32_t consecutiveSamples = 0;
+        int candidateFoot = -1;
+        int supportFoot = -1;
+        bool active = false;
+        bool ready = false;
+    };
+
     // 발딛기 플래너의 현재 판단과 진행 상태
     struct FootstepSnapshot
     {
@@ -169,6 +189,7 @@ namespace PARS
         float initialDistance = 0;                        // 시작 위치에서 최초 착지 목표까지의 수평 거리(m). 발 들기 높이와 골반 낮추기 계산에 사용
         FootstepMotion motion;                            // 현재 발 이동 궤적의 목표 위치, 경과 시간, 시간 및 실측 진행률과 착지 오차
         std::array<FootstepTarget, 2> candidates;         // 양발 각각의 착지 목표 후보. 위치, 유효성, 거리 및 교차 제한 여부와 실패 사유를 저장
+        FootstepSupportTransfer transfer;                 // 착지 후 예측 후보와 지속 하중을 확인한 지지발
         bool hasPrediction = false;                       // 미래 COM 위치를 유효하게 계산했는지. predictedCom을 사용할 때 확인
         bool needsStep = false;                           // 예측 COM이 현재 지지 영역 A 밖이어서 발딛기가 필요한지
         bool hasTarget = false;                           // 이번 완료 물리 스텝에서 선택한 발의 유효한 착지 목표를 출력했는지
@@ -187,6 +208,7 @@ namespace PARS
         void Abort(FootstepReason reason);
         bool UpdateMotionProgress(const FootstepFootInput& foot);
         void UpdateMotionTarget(const FootstepFootInput& foot);
+        void UpdateSupportTransfer(const FootstepInput& input, const FootstepSettings& settings);
 
     public:
         const FootstepSnapshot& GetSnapshot() const

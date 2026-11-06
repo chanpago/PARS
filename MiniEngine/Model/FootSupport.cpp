@@ -360,6 +360,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.zone = m_Snapshot.balance.zone;
     input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
     input.fixedDeltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+    // PhysicsWorld의 고정 중력 크기와 전신 질량으로 접촉 하중을 체중 비율로 환산한다.
+    input.bodyWeight = m_Snapshot.totalMass * 9.81f;
     input.blueFoot = m_Snapshot.candidates.step;
     input.completedStep = m_Snapshot.completedPhysicsStep;
     input.revision = m_Snapshot.contactRevision;
@@ -396,6 +398,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.grounded = foot.contact.grounded;
         target.position = ToPx(Vector3(foot.soleWorld.GetW()));
         target.normal = foot.contact.normal;
+        target.normalImpulse = foot.contact.normalImpulse;
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
         const PxVec3 offset = referenceFeet[side] - midpoint;
         target.stanceOffset = input.supportRight * offset.x + forward * offset.z;

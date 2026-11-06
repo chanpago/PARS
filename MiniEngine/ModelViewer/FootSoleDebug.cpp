@@ -394,6 +394,14 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         ImGui::Text(u8"빨강 지지발: %s / 파랑 이동 가능 발: %s",
             FootLabel(displayRoles.supportFoot), FootLabel(displayRoles.movableFoot));
         ImGui::Text(u8"발딛기 역할 고정: %s / 거리 기준 이동 후보: %s", roles.locked ? "ON" : "OFF", FootLabel(step.rawBlueFoot));
+        if (step.transfer.active && !step.IsInProgress())
+        {
+            ImGui::Text(u8"착지 후 예측 지지 후보: %s / 하중 확인: %.3f / %.3f초",
+                FootLabel(step.transfer.candidateFoot), step.transfer.confirmationTime, settings.supportConfirmationTime);
+            ImGui::Text(u8"수직 하중 / 체중: 왼발 %.2f · 오른발 %.2f / 필요 %.2f",
+                step.transfer.loadRatios[0], step.transfer.loadRatios[1], settings.supportLoadRatio);
+            ImGui::Text(u8"다음 발 이동 허용: %s / 지지 후보 예측 %.2f초", step.transfer.ready ? "ON" : "OFF", settings.stepDuration);
+        }
         ImGui::Text(u8"시작 %llu / 착지 %llu / 중단 %llu",
             static_cast<unsigned long long>(step.startCount), static_cast<unsigned long long>(step.landingCount),
             static_cast<unsigned long long>(step.abortCount));
