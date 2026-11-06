@@ -32,6 +32,7 @@ namespace PARS
         bool available = false;
         bool grounded = false;
         bool supporting = true;
+        bool contactGraceActive = false;
     };
 
     struct StandingSupportInput

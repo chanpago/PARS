@@ -1,4 +1,5 @@
 #include "../Model/StandingSupport.h"
+#include "../Model/FootSupport.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -142,6 +143,113 @@ namespace
         Check(controller.Update(input, settings) && controller.GetSnapshot().targetHeight < .85f,
             "A physics revision initializes from the new pelvis rather than stale height");
     }
+
+    void TestSupportContactGrace()
+    {
+        FootSupportContact contact;
+        const PxVec3 position(.1f, 0, .2f);
+        const PxVec3 normal(0, 1, 0);
+        contact.Update(100, true, false, PxVec3(0), PxVec3(0));
+        Check(!contact.IsValid(), "Grace cannot create support before a real contact");
+        contact.Update(100, true, true, position, normal);
+        for (uint64_t step = 101; step <= 103; ++step)
+        {
+            contact.Update(step, true, false, PxVec3(0), PxVec3(0));
+            contact.Update(step, true, false, PxVec3(0), PxVec3(0));
+            Check(contact.IsValid() && contact.GetLastContactStep() == 100 &&
+                    (contact.GetPosition() - position).magnitude() < 1e-6f &&
+                    (contact.GetNormal() - normal).magnitude() < 1e-6f,
+                "Three missing physics steps retain the support plane without duplicate-query aging");
+        }
+        contact.Update(104, true, false, PxVec3(0), PxVec3(0));
+        Check(!contact.IsValid(), "The fourth missing step expires support");
+        contact.Update(105, true, true, position, normal);
+        contact.Update(108, true, false, PxVec3(0), PxVec3(0));
+        Check(contact.IsValid() && contact.GetLastContactStep() == 105,
+            "A real recontact refreshes the three-step deadline");
+        contact.Update(110, true, false, PxVec3(0), PxVec3(0));
+        Check(!contact.IsValid(), "Skipped physics steps still consume the grace interval");
+        contact.Update(111, true, true, position, normal);
+        contact.Update(112, false, false, PxVec3(0), PxVec3(0));
+        Check(!contact.IsValid(), "An unavailable contact sample invalidates support immediately");
+        contact.Update(113, true, true, position, normal);
+        contact.Update(114, true, true, position, PxVec3(1, 0, 0));
+        Check(!contact.IsValid(), "A non-supporting contact normal cannot retain the old floor");
+        contact.Update(115, true, true, position, normal);
+        contact.Update(1, true, false, PxVec3(0), PxVec3(0));
+        Check(!contact.IsValid(), "A rewound clock cannot reuse the previous support plane");
+        contact.Update(116, true, true, position, normal);
+        contact.Reset();
+        Check(!contact.IsValid(), "Reset removes the retained support plane");
+    }
+
+    void TestGracePreservesStandingCorrection()
+    {
+        StandingSupport held;
+        StandingSupport continuous;
+        FootSupportContact contact;
+        const StandingSupportSettings settings;
+        StandingSupportInput input = StandingPose();
+        input.deltaTime = 1.0f / 60.0f;
+        input.stepping = true;
+        input.stepDistance = .4f;
+        input.feet[1].supporting = false;
+        input.feet[1].grounded = false;
+        contact.Update(1, true, true, input.feet[0].sole.p, PxVec3(0, 1, 0));
+        Check(held.Update(input, settings) && continuous.Update(input, settings),
+            "Initialize the same single-support correction");
+        input.feet[0].grounded = false;
+        for (uint64_t step = 2; step <= 4; ++step)
+        {
+            input.completedStep = step;
+            contact.Update(step, true, false, PxVec3(0), PxVec3(0));
+            input.feet[0].contactGraceActive = contact.IsValid();
+            StandingSupportInput reference = input;
+            reference.feet[0].grounded = true;
+            reference.feet[0].contactGraceActive = false;
+            Check(held.Update(input, settings) && continuous.Update(reference, settings),
+                "Temporary loss keeps a valid standing correction");
+            Check(!input.feet[0].grounded && held.GetSnapshot().contactLowering == 0 &&
+                    (held.GetSnapshot().soleTargets[0].p - continuous.GetSnapshot().soleTargets[0].p).magnitude() < 1e-6f,
+                "Grace preserves the correction without changing the raw contact result");
+        }
+        input.completedStep = 5;
+        contact.Update(5, true, false, PxVec3(0), PxVec3(0));
+        input.feet[0].contactGraceActive = contact.IsValid();
+        Check(held.Update(input, settings) && held.GetSnapshot().contactLowering > 0 &&
+                (held.GetSnapshot().soleTargets[0].p - input.feet[0].sole.p).magnitude() < 1e-6f,
+            "Persistent loss resumes floor seeking after the third missing step");
+        Check((held.GetSnapshot().soleTargets[1].p - input.feet[1].sole.p).magnitude() < 1e-6f,
+            "Support grace never changes the swing-foot target");
+    }
+
+    void TestDisplayContactGrace()
+    {
+        FootSupportSnapshot sample;
+        sample.footstep.phase = FootstepPhase::AwaitingTakeoff;
+        sample.footstep.supportFoot = 0;
+        sample.footstep.stepFoot = 1;
+        sample.feet[0].available = true;
+        FootContactSample& contact = sample.feet[0].contact;
+        contact.hasSample = true;
+        contact.grounded = true;
+        contact.normal = PxVec3(0, 1, 0);
+        contact.support.Update(10, contact.hasSample, contact.grounded, contact.position, contact.normal);
+        Check(sample.GetDisplayRoles().IsValid(), "A real stance contact enables role colors");
+        contact.grounded = false;
+        contact.normal = PxVec3(0);
+        for (uint64_t step = 11; step <= 13; ++step)
+        {
+            contact.support.Update(step, contact.hasSample, contact.grounded, contact.position, contact.normal);
+            Check(sample.GetDisplayRoles().supportFoot == 0 && sample.GetDisplayRoles().movableFoot == 1,
+                "Role colors retain the committed feet during three missing contact steps");
+        }
+        sample.footstep.phase = FootstepPhase::Aborted;
+        Check(!sample.GetDisplayRoles().IsValid(), "Aborting stepping still hides roles during the grace interval");
+        sample.footstep.phase = FootstepPhase::Airborne;
+        contact.support.Update(14, contact.hasSample, contact.grounded, contact.position, contact.normal);
+        Check(!sample.GetDisplayRoles().IsValid(), "Role colors hide after support grace expires");
+    }
 }
 
 void TestStandingSupport()
@@ -149,5 +257,8 @@ void TestStandingSupport()
     TestHeightAndSwing();
     TestContactLossAndRecovery();
     TestReachAndReset();
+    TestSupportContactGrace();
+    TestGracePreservesStandingCorrection();
+    TestDisplayContactGrace();
     std::puts("PASS: standing height, swing isolation, contact loss, reach and reset");
 }

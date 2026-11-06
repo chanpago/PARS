@@ -249,6 +249,7 @@ namespace PARS
             // 지지역할을 하는발과 실제 접지를 구분함
             support.supporting = input.stepFoot != static_cast<int>(side);
             support.grounded = foot.contact.hasSample && foot.contact.grounded;
+            support.contactGraceActive = foot.contact.hasSample && !support.grounded && foot.contact.support.IsValid();
 
 
             support.sole = leg.targetSole;
@@ -275,15 +276,14 @@ namespace PARS
             standing.animatedPelvis = rigidTargets[leg.anchorNode];
             const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), foot.boneNode);
 
-            // 실제 지지 접촉을 래그돌에 전달
-            // 각 발에 대해 물리 바디 인덱스, 접촉 위치 법선, 지지여부를 구성. 
+            // 지지 보정에는 유예 중인 마지막 지지면을 함께 사용한다. 측정 충격량은 재사용하지 않는다.
             contacts[side].body = body != nodes.end() ? static_cast<int>(body - nodes.begin()) : -1;
-            contacts[side].supporting = support.supporting && support.grounded;
-            contacts[side].position = foot.contact.position;
-            contacts[side].normal = foot.contact.normal;
+            contacts[side].supporting = support.supporting && foot.contact.support.IsValid();
+            contacts[side].position = foot.contact.support.GetPosition();
+            contacts[side].normal = foot.contact.support.GetNormal();
         }
 
-        // 지지 역할 이면서 실제 접지한 발만 지지 접촉으로 전달
+        // 이동 중인 발은 제외하고 지지 역할의 현재 또는 유예 접촉만 전달한다.
         m_Ragdoll.SetSupportContacts(contacts);
 
         // 발 기반 지지에서는 기본 발 목표에 서 있기 보정을 더함

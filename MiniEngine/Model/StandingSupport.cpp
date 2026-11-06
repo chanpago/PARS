@@ -83,8 +83,10 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         // 지지발을 기준으로 정상 골반 높이를 계산하는부분
         // 실제 접촉 판정은 바꾸지 않고 지지 예정인 발만 재접촉용 높이 목표를 낮춘다.
 
-        // 지지하는 발은 바닥에 붙어있어야하는데, 불가피한 경우에 지지한느 발이 뜰 경우를 상정한다.시간을 누적해서 더해준다
-        m_MissingContactTime[side] = foot.grounded ? 0 : (std::min)(m_MissingContactTime[side] + input.deltaTime, settings.contactLoweringTime);
+        // 지지 접촉 유예가 끝난 뒤부터 재접촉을 위한 낮추기를 누적한다.
+        const bool hasSupportContact = foot.grounded || foot.contactGraceActive;
+        m_MissingContactTime[side] = hasSupportContact ? 0 :
+            (std::min)(m_MissingContactTime[side] + input.deltaTime, settings.contactLoweringTime);
 
         // 접촉 상실 때문에 골반을 얼마나 낮출지 정하는 비율 0~1로 설정된다.
         missingAmount = (std::max)(missingAmount, m_MissingContactTime[side] / settings.contactLoweringTime);
@@ -179,8 +181,8 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     for (size_t side = 0; side < input.feet.size(); ++side)
     {
         m_Snapshot.soleTargets[side] = input.feet[side].sole;
-        // 접촉을 잃은 다리는 골반 낮추기에 맞춰 발을 위로 빼지 않고 바닥을 계속 찾는다.
-        if (input.feet[side].supporting && input.feet[side].grounded)
+        // 짧은 접촉 상실에는 보정을 이어가고, 유예가 끝난 다리는 바닥을 다시 찾는다.
+        if (input.feet[side].supporting && (input.feet[side].grounded || input.feet[side].contactGraceActive))
         {
             // 실제 골반이 낮으면 제어용 발 목표를 아래로 보내 다리가 바닥을 밀도록 한다.
             m_Snapshot.soleTargets[side].p.y += input.pelvis.p.y - m_Snapshot.targetHeight;

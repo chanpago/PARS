@@ -95,8 +95,9 @@ namespace
             "Predictive exit starts the blue foot while actual COM is still inside A");
         Check(Near(started.predictedCom.z, .3f) && Near(started.predictedCom.y, .4f),
             "Start prediction uses 0.3 seconds and support projection height");
-        Check(Near(started.target.x, .096f) && Near(started.target.z, .3f) && Near(started.target.y, .4f),
-            "Target adds 0.8 times the reference foot offset at the ground plane height");
+        Check(Near(settings.stanceScale, 1.0f) && Near(started.target.x, .12f) &&
+                Near(started.target.z, .3f) && Near(started.target.y, .4f),
+            "Target adds the full reference foot offset at the ground plane height");
         Check(started.phase == FootstepPhase::AwaitingTakeoff && started.landingCount == 0,
             "Initial standing contact is not a completed landing");
 
@@ -476,7 +477,7 @@ namespace
         input.feet[0].stanceOffset = PxVec3(0, 0, -.12f);
         input.feet[1].stanceOffset = PxVec3(0, 0, .12f);
         planner.Update(input, settings);
-        Check(Near(planner.GetSnapshot().target.x, 0) && Near(planner.GetSnapshot().target.z, .396f),
+        Check(Near(planner.GetSnapshot().target.x, 0) && Near(planner.GetSnapshot().target.z, .42f),
             "Reference stance offset follows the supplied support heading");
         settings.maximumStepLength = -1;
         ++input.completedStep;
@@ -495,7 +496,8 @@ namespace
         Check(start.motion.valid && (start.motion.position - start.startPosition).magnitude() < 1e-6f &&
             Near(start.motion.height, 0) && Near(start.motion.elapsedTime, 0),
             "Movement begins at the actual foot instead of jumping to the landing target");
-        Check(Near(start.motion.duration, .3f) && start.motion.initialHeight >= .08f,
+        Check(Near(start.motion.duration, .3f) && Near(settings.minimumLiftHeight, .03f) &&
+                start.motion.initialHeight >= settings.minimumLiftHeight,
             "Movement has its own duration and minimum peak clearance");
         planner.Update(input, settings);
         Check(Near(planner.GetSnapshot().motion.elapsedTime, 0),
@@ -560,14 +562,14 @@ namespace
         planner.Update(input, settings);
         Check(Near(planner.GetSnapshot().motion.initialHeight, .18f),
             "Long movement caps the peak at the reference calf length");
-        for (const float length : {.04f, .45f})
+        for (const float length : {.02f, .04f, .45f})
         {
             planner.Reset();
             input = Standing();
-            input.feet[1].position = PxVec3(.096f, .4f, .29f);
+            input.feet[1].position = PxVec3(.12f, .4f, .29f);
             input.feet[1].calfLength = length;
             planner.Update(input, settings);
-            Check(Near(planner.GetSnapshot().motion.initialHeight, (std::min)(.08f, length)),
+            Check(Near(planner.GetSnapshot().motion.initialHeight, (std::min)(settings.minimumLiftHeight, length)),
                 "Short steps get minimum clearance without exceeding the calf cap");
         }
         for (const float length : {0.0f, -1.0f, std::numeric_limits<float>::quiet_NaN()})
@@ -581,7 +583,7 @@ namespace
         }
         planner.Reset();
         input = Standing();
-        input.feet[1].position = PxVec3(.096f, .4f, .3f);
+        input.feet[1].position = PxVec3(.12f, .4f, .3f);
         planner.Update(input, settings);
         Check(planner.GetSnapshot().reason == FootstepReason::NoStepDistance,
             "A zero-distance target still does not start a step");

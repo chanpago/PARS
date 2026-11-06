@@ -279,6 +279,8 @@ void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorl
         current.normal = ground.normal;
         current.pointCount = ground.pointCount;
         current.normalImpulse = ground.normalImpulse;
+        // 실제 접촉과 이륙·착지 이력은 유지하고, 기존 지지 상태에만 유예를 적용한다.
+        current.support.Update(step, current.hasSample, current.grounded, current.position, current.normal);
         if (previous.hasSample && current.hasSample)
         {
             current.leftGround = previous.grounded && !current.grounded;

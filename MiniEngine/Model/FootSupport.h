@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "PhysicsAsset.h"
+#include "FootSupportContact.h"
 #include "FootSupportHull.h"
 #include "FootstepPlanner.h"
 #include <array>
@@ -44,6 +45,7 @@ namespace PARS
         uint64_t landingCount = 0;    // 누적 착지횟수
         uint64_t lastTakeoffStep = 0; // 마지막 이륙이 발생한 물리 스텝 번호
         uint64_t lastLandingStep = 0; // 마지막 착지가 발생한 물리 스텝 번호
+        FootSupportContact support; // 보정과 표시에만 쓰는 3틱 접촉 유예
         // 접촉 위치와 접촉면 법선
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0};
@@ -90,11 +92,9 @@ namespace PARS
                 return {};
             }
             const FootSoleSample& support = feet[roles.supportFoot];
-            physx::PxVec3 normal = support.contact.normal;
-            if (!support.available || !support.contact.hasSample || !support.contact.grounded ||
-                !normal.isFinite() || normal.normalize() < 1e-6f || normal.y < .70710678f)
+            if (!support.available || !support.contact.hasSample || !support.contact.support.IsValid())
             {
-                // 진행 중에도 지지 접촉이 무효면 색상 표시만 숨긴다. 확정한 제어 역할은 유지한다.
+                // 짧은 접촉 상실은 유예하고, 만료되면 확정한 제어 역할을 유지한 채 색만 숨긴다.
                 return {};
             }
             return roles;
