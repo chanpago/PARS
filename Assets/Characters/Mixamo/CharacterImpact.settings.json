@@ -1,7 +1,7 @@
 {
     "capsuleHeightScale": 1.1399999856948853,
     "capsuleRadiusScale": 1.149999976158142,
-    "collisionMassKg": 200.0,
+    "collisionMassKg": 100.0,
     "contactSkinMeters": 0.019999999552965164,
     "enabled": true,
     "version": 6

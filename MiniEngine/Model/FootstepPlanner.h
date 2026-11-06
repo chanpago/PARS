@@ -16,7 +16,7 @@ namespace PARS
         float crossingOffset = .1f;        // 교차 제한을 켰을 때 지지발 바깥 방향으로 확보할 최소거리
         // 착지 예측 시간과 별개인 발 이동 시간(s)과 궤적의 최소 최고 높이(m)다.
         float liftHeightScale = .15f;   // 발 이동 거리에 비례해 들어 올리는 높이를 정하는 비율
-        float stepDuration = .3f;       // 발 이동 목표 궤적의 진행시간
+        float stepDuration = .15f;       // 발 이동 목표 궤적의 진행시간
         float minimumLiftHeight = .08f; // 발을 들어 올리는 최고 높이를 계산할 때 사용하는 최소값
         bool preventCrossing = false;   // 움직이는 발이 반대편으로 교차하는 것을 제한할지
     };
