@@ -191,6 +191,8 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
     };
     try
     {
+        // 저장된 사용자 설정과 관계없이 기존 충격 시험의 초기 조건을 유지한다.
+        check(test.SetProjectileSettings(2.0f, 7.5f), "Use the original 2 kg / 7.5 m/s fixture independently of saved UI settings");
         check(test.SetAutomaticSupport(false), "Use manual support for the existing projection and projectile baseline");
         PARS::Character* dummy = test.GetDummy();
         check(dummy && dummy != &player && dummy->GetController() == nullptr,

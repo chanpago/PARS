@@ -2,12 +2,40 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/World.h"
 #include "imgui.h"
+#pragma warning(push)
+#pragma warning(disable : 4100)
+#include "json.hpp"
+#pragma warning(pop)
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <stdexcept>
+#include <Windows.h>
 
 using namespace Math;
 using namespace PARS;
 using namespace physx;
+
+namespace
+{
+    bool ValidProjectileSettings(float mass, float speed)
+    {
+        return std::isfinite(mass) && std::isfinite(speed) && mass >= .1f && mass <= 100 && speed >= 1 && speed <= 100;
+    }
+
+    std::wstring ProjectileSettingsPath(const std::string& path)
+    {
+        const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
+        if (count <= 1)
+        {
+            throw std::runtime_error(u8"구 설정 파일 경로가 올바르지 않습니다.");
+        }
+        std::wstring result(count, L'\0');
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, &result[0], count);
+        result.resize(count - 1);
+        return result;
+    }
+}
 
 RagdollImpactTest::~RagdollImpactTest()
 {
@@ -107,13 +135,72 @@ bool RagdollImpactTest::SetAutomaticSupport(bool enabled)
 
 bool RagdollImpactTest::SetProjectileSettings(float mass, float speed)
 {
-    if (!std::isfinite(mass) || !std::isfinite(speed) || mass < .1f || mass > 100 || speed < 1 || speed > 100)
+    if (!ValidProjectileSettings(mass, speed))
     {
         return false;
     }
     m_Mass = mass;
     m_Speed = speed;
     return true;
+}
+
+bool RagdollImpactTest::LoadProjectileSettings(const std::string& path)
+{
+    m_ProjectileSettingsPath = path;
+    try
+    {
+        std::ifstream file(ProjectileSettingsPath(path));
+        if (!file)
+        {
+            throw std::runtime_error(u8"구 설정 파일을 열 수 없습니다. 현재 설정을 유지합니다.");
+        }
+        nlohmann::json data;
+        file >> data;
+        if (data.at("version") != 1)
+        {
+            throw std::runtime_error(u8"지원하지 않는 구 설정 파일 버전입니다.");
+        }
+        const float mass = data.at("massKg").get<float>();
+        const float speed = data.at("speedMetersPerSecond").get<float>();
+        // 두 값을 모두 검증한 뒤 적용해 불러오기 실패 시 현재 설정을 유지한다.
+        if (!SetProjectileSettings(mass, speed))
+        {
+            throw std::runtime_error(u8"구 질량은 0.1~100kg, 발사 속도는 1~100m/s여야 합니다.");
+        }
+        m_ProjectileSettingsMessage = u8"저장된 구 설정을 불러왔습니다.";
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        m_ProjectileSettingsMessage = u8"구 설정 불러오기 실패: " + std::string(exception.what());
+        return false;
+    }
+}
+
+bool RagdollImpactTest::SaveProjectileSettings()
+{
+    try
+    {
+        if (!ValidProjectileSettings(m_Mass, m_Speed))
+        {
+            throw std::runtime_error(u8"구 질량은 0.1~100kg, 발사 속도는 1~100m/s여야 합니다.");
+        }
+        const nlohmann::json data = {{"version", 1}, {"massKg", m_Mass}, {"speedMetersPerSecond", m_Speed}};
+        std::ofstream file(ProjectileSettingsPath(m_ProjectileSettingsPath), std::ios::trunc);
+        file << data.dump(4) << '\n';
+        file.flush();
+        if (!file)
+        {
+            throw std::runtime_error(u8"구 설정 파일에 저장할 수 없습니다.");
+        }
+        m_ProjectileSettingsMessage = u8"구 설정을 저장했습니다. 다음 실행부터 자동으로 불러옵니다.";
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        m_ProjectileSettingsMessage = u8"구 설정 저장 실패: " + std::string(exception.what());
+        return false;
+    }
 }
 
 bool RagdollImpactTest::FireFrom(const Character& player)
@@ -265,6 +352,22 @@ void RagdollImpactTest::DrawUI(Character* player)
         ImGui::TextUnformatted(u8"눈금자: 1cm 눈금 / 10cm 숫자 / 주황색 8cm 표시");
         ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::BeginDisabled(m_ProjectileSettingsPath.empty());
+        if (ImGui::Button(u8"구 설정 저장"))
+        {
+            SaveProjectileSettings();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(u8"구 설정 불러오기"))
+        {
+            LoadProjectileSettings(m_ProjectileSettingsPath);
+        }
+        ImGui::EndDisabled();
+        ImGui::TextWrapped("%s", u8"구 질량과 발사 속도를 저장하면 다음 실행 시 자동으로 적용합니다.");
+        if (!m_ProjectileSettingsMessage.empty())
+        {
+            ImGui::TextWrapped("%s", m_ProjectileSettingsMessage.c_str());
+        }
         ImGui::BeginDisabled(!player);
         if (ImGui::Button(u8"더미로 구 발사") && player)
         {

@@ -37,6 +37,8 @@ public:
     void ClearProjectiles();
     void Update();
     void DrawUI(PARS::Character* player);
+    bool LoadProjectileSettings(const std::string& path);
+    bool SaveProjectileSettings();
     void LoadBodyImpactSettings(PARS::Character& player, const std::string& path);
     void BuildLines(std::vector<physx::PxDebugLine>& lines);
 
@@ -86,6 +88,8 @@ private:
     FootSoleDebug& m_FootSoles;
     std::vector<Shot> m_Shots;
     std::string m_Message;
+    std::string m_ProjectileSettingsPath;
+    std::string m_ProjectileSettingsMessage;
     std::string m_BodyImpactPath;
     std::string m_BodyImpactMessage;
     float m_Mass = 2.0f;
