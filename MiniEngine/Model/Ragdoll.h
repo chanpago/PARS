@@ -23,6 +23,14 @@ namespace physx
 
 namespace PARS
 {
+    struct RagdollBodyImpulse
+    {
+    public:
+        size_t body = 0;
+        physx::PxVec3 position{0};
+        physx::PxVec3 impulse{0};
+    };
+
     struct RagdollSupportContact
     {
     public:
@@ -71,6 +79,7 @@ namespace PARS
         // 목표 생성 주체가 바뀔 때 불연속을 목표 속도/가속도로 미분하지 않는다. 실제 바디 속도는 유지한다.
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
+        void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
         // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
             float heightScale = 1.0f);
@@ -176,6 +185,8 @@ namespace PARS
         bool GetCenterOfMassVelocity(Math::Vector3& velocity) const;
         bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
         float GetExternalImpactImpulse() const;
+        void CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const;
+        bool HasApproachingImpact(float minimumDeltaVelocity) const;
         int GetImpactRootBody() const;
         bool IsCharacterImpactBody(size_t body) const;
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;

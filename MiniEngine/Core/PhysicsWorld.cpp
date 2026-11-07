@@ -289,9 +289,14 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
     return true;
 }
 
-float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const void* ignoredOwner) const
+float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const void* ignoredOwner,
+    std::vector<PhysicsContactImpulse>* contacts) const
 {
     float impulse = 0;
+    if (contacts)
+    {
+        contacts->clear();
+    }
     if (!m_Scene || body.getScene() != m_Scene)
     {
         return impulse;
@@ -320,10 +325,81 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
             if (normal.isFinite() && normal.y < .70710678f && point.impulse.isFinite())
             {
                 impulse += point.impulse.magnitude();
+                if (contacts && point.position.isFinite())
+                {
+                    PhysicsContactImpulse contact;
+                    contact.position = point.position;
+                    contact.impulse = side == 0 ? point.impulse : -point.impulse;
+                    contacts->push_back(contact);
+                }
             }
         }
     }
     return impulse;
+}
+
+bool PhysicsWorld::HasApproachingImpact(const PxRigidBody& body, float totalMass, float minimumDeltaVelocity,
+    const void* ignoredOwner) const
+{
+    if (!m_Scene || body.getScene() != m_Scene || !std::isfinite(totalMass) || totalMass <= 0 ||
+        !std::isfinite(minimumDeltaVelocity) || minimumDeltaVelocity <= 0)
+    {
+        return false;
+    }
+    std::vector<PxActor*> actors(m_Scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC));
+    m_Scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC, actors.data(), static_cast<PxU32>(actors.size()));
+    std::vector<PxShape*> targetShapes(body.getNbShapes());
+    body.getShapes(targetShapes.data(), static_cast<PxU32>(targetShapes.size()));
+    for (PxActor* actor : actors)
+    {
+        PxRigidDynamic* source = actor->is<PxRigidDynamic>();
+        if (!source || source == &body || (ignoredOwner && source->userData == ignoredOwner) ||
+            source->getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC))
+        {
+            continue;
+        }
+        const PxVec3 velocity = source->getLinearVelocity() - body.getLinearVelocity();
+        const float speed = velocity.magnitude();
+        const float massRatio = source->getMass() / (source->getMass() + totalMass);
+        if (!velocity.isFinite() || speed * massRatio < minimumDeltaVelocity || speed < 1e-6f)
+        {
+            continue;
+        }
+        std::vector<PxShape*> sourceShapes(source->getNbShapes());
+        source->getShapes(sourceShapes.data(), static_cast<PxU32>(sourceShapes.size()));
+        for (const PxShape* sourceShape : sourceShapes)
+        {
+            if (!sourceShape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE))
+            {
+                continue;
+            }
+            for (const PxShape* targetShape : targetShapes)
+            {
+                if (!targetShape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE))
+                {
+                    continue;
+                }
+                PxPairFlags pairFlags;
+                const PxFilterFlags filter = ContactFilter(PxFilterObjectType::eRIGID_DYNAMIC, sourceShape->getSimulationFilterData(),
+                    PxFilterObjectType::eRIGID_DYNAMIC | PxFilterObjectFlag::eKINEMATIC, targetShape->getSimulationFilterData(),
+                    pairFlags, nullptr, 0);
+                if (filter.isSet(PxFilterFlag::eSUPPRESS) || filter.isSet(PxFilterFlag::eKILL))
+                {
+                    continue;
+                }
+                PxSweepHit hit;
+                const bool collision = PxGeometryQuery::sweep(velocity / speed, speed * static_cast<float>(FixedDeltaTime),
+                    sourceShape->getGeometry(), source->getGlobalPose() * sourceShape->getLocalPose(),
+                    targetShape->getGeometry(), body.getGlobalPose() * targetShape->getLocalPose(), hit,
+                    PxHitFlag::eDEFAULT, sourceShape->getContactOffset() + targetShape->getContactOffset());
+                if (collision && -velocity.dot(hit.normal) * massRatio >= minimumDeltaVelocity)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 void PhysicsWorld::onConstraintBreak(PxConstraintInfo*, PxU32)

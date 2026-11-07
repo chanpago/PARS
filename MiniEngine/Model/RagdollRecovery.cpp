@@ -4,6 +4,38 @@
 
 using namespace PARS;
 
+void KinematicRecoveryTimer::Reset()
+{
+    m_Revision = 0;
+    m_Step = 0;
+    m_StableTime = 0;
+    m_HasSample = false;
+}
+
+bool KinematicRecoveryTimer::Update(uint64_t revision, uint64_t step, float deltaTime,
+    bool insideA, bool impact, float duration)
+{
+    if (m_HasSample && revision != m_Revision)
+    {
+        Reset();
+    }
+    if (m_HasSample && step == m_Step)
+    {
+        return false;
+    }
+    m_Revision = revision;
+    m_Step = step;
+    m_HasSample = true;
+    if (!insideA || impact || !std::isfinite(deltaTime) || deltaTime <= 0 ||
+        !std::isfinite(duration) || duration <= 0)
+    {
+        m_StableTime = 0;
+        return false;
+    }
+    m_StableTime += static_cast<double>(deltaTime);
+    return m_StableTime >= static_cast<double>(duration);
+}
+
 void RagdollRecovery::Reset()
 {
     m_Snapshot = {};
@@ -44,7 +76,7 @@ void RagdollRecovery::Update(const RecoveryInput& input, const RecoverySettings&
         std::isfinite(settings.stableDuration) && settings.stableDuration > 0 &&
         std::isfinite(settings.blendDuration) && settings.blendDuration > 0;
 
-    const bool impact = valid && input.impactVelocity >= settings.impactVelocity;
+    const bool impact = valid && (input.impactTriggered || input.impactVelocity >= settings.impactVelocity);
 
     const bool recoveryNeeded = input.fallen || impact || input.needsStep || input.stepping;
 

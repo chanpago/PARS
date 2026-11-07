@@ -358,7 +358,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         PARS::FootstepSettings& settings = support.GetFootstepSettings();
         const PARS::RecoverySnapshot& recovery = mesh.GetRecoverySnapshot();
         const PARS::RecoverySettings& recoverySettings = mesh.GetRecoverySettings();
-        ImGui::Text(u8"제어 상태: %s%s", recovery.state == PARS::RecoveryState::Recovery ? "Recovery" : "Animation",
+        ImGui::Text(u8"액티브 내부 목표 제어: %s%s", recovery.state == PARS::RecoveryState::Recovery ? "Recovery" : "Animation",
             recovery.blending ? u8" (복귀 블렌드)" : "");
         ImGui::TextWrapped(u8"전환 판단: %s", PARS::RecoveryReasonLabel(recovery.reason));
         ImGui::Text(u8"외부 충격 / 질량 %.3f m/s (진입 %.2f) · COM 수평 속도 %.3f m/s (복귀 %.2f)",

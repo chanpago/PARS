@@ -1,11 +1,143 @@
 ﻿#include "SkeletalMeshComponent.h"
 #include <cmath>
+#include "../GameFramework/Character.h"
 
 using namespace Math;
 using namespace physx;
 
 namespace PARS
 {
+    void SkeletalMeshComponent::SetAutomaticRagdoll(bool enabled)
+    {
+        m_AutomaticRagdoll = enabled;
+        m_KinematicRecoveryTimer.Reset();
+        m_KinematicBlendSource.clear();
+        m_KinematicBlendPose.clear();
+        m_KinematicBlendTime = 0;
+        m_PendingRecoveryImpact = false;
+    }
+
+    void SkeletalMeshComponent::SetKinematicStableDuration(float duration)
+    {
+        if (std::isfinite(duration) && duration > 0)
+        {
+            m_KinematicStableDuration = duration;
+            m_KinematicRecoveryTimer.Reset();
+        }
+    }
+
+    bool SkeletalMeshComponent::UpdateAutomaticRagdoll(float deltaTime)
+    {
+        if (!m_AutomaticRagdoll)
+        {
+            return true;
+        }
+        const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
+        const float impactVelocity = sample.totalMass > 0 ? m_Ragdoll.GetExternalImpactImpulse() / sample.totalMass : 0;
+        const bool impact = impactVelocity >= m_RecoverySettings.impactVelocity;
+        if (!IsRagdoll())
+        {
+            const bool approaching = m_Ragdoll.HasApproachingImpact(m_RecoverySettings.impactVelocity);
+            if (!impact && !approaching)
+            {
+                return true;
+            }
+            // 모드 전환은 접촉 캐시를 비우므로 충격점과 바디별 충격량을 먼저 복사한다.
+            std::vector<RagdollBodyImpulse> impacts;
+            m_Ragdoll.CaptureExternalImpacts(impacts);
+            Character* character = dynamic_cast<Character*>(&GetOwner());
+            const bool activated = character ? character->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_PhysicsError) :
+                SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, Vector3(kZero), m_PhysicsError);
+            if (!activated)
+            {
+                return false;
+            }
+            m_RootSupportRelease = RootSupportRelease::None;
+            m_FootSupport.ResetFootstep();
+            ResetRecovery();
+            m_KinematicRecoveryTimer.Reset();
+            m_PendingRecoveryImpact = true;
+            m_Ragdoll.ApplyExternalImpacts(impacts);
+            return m_Ragdoll.SetRootSupported(true, m_PhysicsError);
+        }
+        if (!IsActiveRagdoll())
+        {
+            m_KinematicRecoveryTimer.Reset();
+            return true;
+        }
+        const bool insideA = sample.hasComProjection && sample.balance.zone == FootSupportZone::Inside;
+        if (m_KinematicRecoveryTimer.Update(sample.contactRevision, sample.completedPhysicsStep,
+            deltaTime, insideA, impact, m_KinematicStableDuration))
+        {
+            return BeginKinematicRecovery();
+        }
+        return true;
+    }
+
+    bool SkeletalMeshComponent::BeginKinematicRecovery()
+    {
+        std::vector<Matrix4> targets;
+        const int root = m_Ragdoll.GetImpactRootBody();
+        if (root < 0 || !EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, targets, m_PhysicsError))
+        {
+            return false;
+        }
+        // 충격 전 원점으로 되돌리지 않고 현재 골반의 수평 위치에서 애니메이션을 시작한다.
+        const Vector3 actual(m_Ragdoll.GetBoneWorld(static_cast<size_t>(root)).GetW());
+        const Vector3 target(targets[m_Ragdoll.GetBoneNodes()[root]].GetW());
+        const Vector3 previousLocation = GetOwner().GetActorLocation();
+        GetOwner().SetActorLocation(previousLocation + Vector3(actual.GetX() - target.GetX(), 0, actual.GetZ() - target.GetZ()));
+        if (!CaptureRecoveryBlendSource())
+        {
+            GetOwner().SetActorLocation(previousLocation);
+            m_PhysicsError = "Cannot capture the physical pose for kinematic recovery.";
+            return false;
+        }
+        m_KinematicBlendSource = m_RecoveryBlendSource;
+        m_KinematicBlendPose = m_KinematicBlendSource;
+        m_KinematicBlendTime = 0;
+        // 첫 키네마틱 포즈도 캡처한 실제 자세를 사용해 모드 전환 순간의 튐을 막는다.
+        Character* character = dynamic_cast<Character*>(&GetOwner());
+        if (character)
+        {
+            if (!character->StopRagdoll(m_PhysicsError))
+            {
+                GetOwner().SetActorLocation(previousLocation);
+                m_KinematicBlendSource.clear();
+                m_KinematicBlendPose.clear();
+                return false;
+            }
+        }
+        else
+        {
+            StopRagdoll();
+        }
+        return !IsRagdoll();
+    }
+
+    bool SkeletalMeshComponent::UpdateKinematicRecoveryPose(float deltaTime)
+    {
+        if (m_KinematicBlendPose.empty())
+        {
+            return true;
+        }
+        m_KinematicBlendTime += deltaTime;
+        if (m_KinematicBlendTime >= m_RecoverySettings.blendDuration)
+        {
+            m_KinematicBlendSource.clear();
+            m_KinematicBlendPose.clear();
+            return true;
+        }
+        const float t = m_KinematicBlendTime / m_RecoverySettings.blendDuration;
+        m_KinematicBlendPose = m_AnimInstance->GetPose();
+        if (!BlendRecoveryPose(m_KinematicBlendSource, m_KinematicBlendPose, t * t * (3 - 2 * t)))
+        {
+            m_PhysicsError = "Invalid kinematic recovery blend pose.";
+            return false;
+        }
+        return true;
+    }
+
     namespace
     {
         PxTransform ToRecoveryFrame(const Matrix4& matrix)
@@ -140,6 +272,8 @@ namespace PARS
             // 상대 캡슐이 PA에 가한 충격은 포함하고, 본인 독립 캡슐에 생긴 반작용은 제외한다.
             input.impactVelocity = m_Ragdoll.GetExternalImpactImpulse() / sample.totalMass;
         }
+        input.impactTriggered = m_PendingRecoveryImpact;
+        m_PendingRecoveryImpact = false;
 
         // 현재 COM의 수평 속력 크기를 계산
         if (sample.hasCenterOfMassVelocity)

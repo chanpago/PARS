@@ -45,7 +45,7 @@ namespace PARS
         // 조인트 이름을 기준으로 드라이브 값만 복사한다. 다음 고정 스텝 전에 적용된다.
         bool QueueDriveSettings(const PhysicsAsset& source, std::string& error);
         void StopRagdoll();
-        // Explicit mode changes rearm the controller. The dummy changes mode only through Reset().
+        // 명시적인 지지 모드 변경은 제어기를 다시 준비한다.
         bool SetAutomaticRootSupport(bool enabled, std::string& error);
         Math::Vector3 ConstrainHorizontalMovement(Math::Vector3 displacement) const;
         // 선택적으로 최종 포즈를 덮어쓴다. 해당 포즈는 호출자(예: 에디터 미리보기)가 소유한다.
@@ -74,6 +74,9 @@ namespace PARS
         bool CaptureRecoveryBlendSource();
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
+        bool UpdateAutomaticRagdoll(float deltaTime);
+        bool BeginKinematicRecovery();
+        bool UpdateKinematicRecoveryPose(float deltaTime);
 
     public:
         AnimInstance& GetAnimInstance() const
@@ -124,6 +127,24 @@ namespace PARS
         {
             return m_RecoverySettings;
         }
+        bool UsesAutomaticRagdoll() const
+        {
+            return m_AutomaticRagdoll;
+        }
+        void SetAutomaticRagdoll(bool enabled);
+        float GetKinematicStableTime() const
+        {
+            return m_KinematicRecoveryTimer.GetStableTime();
+        }
+        float GetKinematicStableDuration() const
+        {
+            return m_KinematicStableDuration;
+        }
+        void SetKinematicStableDuration(float duration);
+        bool IsBlendingToKinematic() const
+        {
+            return !m_KinematicBlendPose.empty();
+        }
         const StandingSupportSnapshot& GetStandingSupportSnapshot() const
         {
             return m_StandingSupport.GetSnapshot();
@@ -154,7 +175,7 @@ namespace PARS
         }
         const std::vector<GraphNode>& GetFinalPose() const
         {
-            return IsRagdoll() ? m_PhysicsPose : m_AnimInstance->GetPose();
+            return IsRagdoll() ? m_PhysicsPose : IsBlendingToKinematic() ? m_KinematicBlendPose : m_AnimInstance->GetPose();
         }
         const ModelInstance& GetModelInstance() const
         {
@@ -169,9 +190,12 @@ namespace PARS
         Ragdoll m_Ragdoll;
         FootstepIK m_FootstepIK;
         RagdollRecovery m_Recovery;
+        KinematicRecoveryTimer m_KinematicRecoveryTimer;
         StandingSupport m_StandingSupport;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
+        std::vector<GraphNode> m_KinematicBlendSource;
+        std::vector<GraphNode> m_KinematicBlendPose;
         PhysicsSkeleton m_PhysicsSkeleton;
         std::vector<GraphNode> m_RagdollSourcePose;
         std::vector<GraphNode> m_PhysicsPose;
@@ -184,8 +208,12 @@ namespace PARS
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};
         RootSupportRelease m_RootSupportRelease = RootSupportRelease::None;
         PhysicsAnimationMode m_PhysicsMode = PhysicsAnimationMode::Animation;
+        float m_KinematicStableDuration = 2.0f;
+        float m_KinematicBlendTime = 0;
         bool m_HasRecoverySoles = false;
         bool m_FootCandidateDebugVisible = false;
         bool m_AutomaticRootSupport = false;
+        bool m_AutomaticRagdoll = false;
+        bool m_PendingRecoveryImpact = false;
     };
 }

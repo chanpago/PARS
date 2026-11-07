@@ -169,6 +169,10 @@ namespace PARS
         UpdateFootSupport();
 
         //
+        if (!UpdateAutomaticRagdoll(deltaTime))
+        {
+            return;
+        }
         if (!UpdateAutomaticRootSupport(m_PhysicsError))
         {
             return;
@@ -220,6 +224,10 @@ namespace PARS
         }
         else
         {
+            if (!UpdateKinematicRecoveryPose(deltaTime))
+            {
+                return;
+            }
             UpdateKinematicPose(false);
         }
     }
@@ -233,8 +241,8 @@ namespace PARS
         }
         UpdateFootCandidateDebugColors();
         m_ModelInstance.SetTransform(GetComponentTransform());
-        return m_ModelInstance.UpdatePose(context, IsRagdoll() ? m_PhysicsPose : poseOverride ? *poseOverride
-                                                                                              : m_AnimInstance->GetPose());
+        return m_ModelInstance.UpdatePose(context, IsRagdoll() || IsBlendingToKinematic() ? GetFinalPose() :
+            poseOverride ? *poseOverride : m_AnimInstance->GetPose());
     }
 
     void SkeletalMeshComponent::Render(Renderer::MeshSorter& sorter) const

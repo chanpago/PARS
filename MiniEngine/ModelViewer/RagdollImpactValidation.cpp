@@ -10,15 +10,153 @@
 #include <functional>
 
 // 기준과 후보에서 같은 바닥·애니메이션·입력을 사용하는 실제 캐릭터 검증이다.
+bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
+    const std::wstring& path, uint32_t scenario)
+{
+    using namespace PARS;
+    using namespace Math;
+    std::ofstream report(path);
+    std::ofstream samples(path + L".csv");
+    const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
+    {
+        report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
+        if (!condition)
+        {
+            throw std::runtime_error(message);
+        }
+    };
+    try
+    {
+        check(report.good() && samples.good() && scenario <= 5 && test.SetAutomaticSupport(true),
+            "Prepare grounded automatic kinematic dummy");
+        SkeletalMeshComponent& mesh = test.GetDummy()->GetMesh();
+        check(!mesh.IsRagdoll() && mesh.GetRagdoll().GetKinematicBodyCount() == mesh.GetRagdoll().GetBodyCount(),
+            "Idle starts with every PA body kinematic");
+        check(mesh.GetKinematicStableDuration() == 2.0f, "Default recovery duration is exactly two seconds");
+        std::string error;
+        check(player.StopRagdoll(error), "Place projectile source away from the dummy");
+        player.SetActorLocation(Vector3(3.5f, player.GetCapsuleComponent().GetHalfHeight(), -5.0f));
+        PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());
+        if (controller)
+        {
+            controller->SetMoveInput(0, 0, false);
+            controller->SetInputEnabled(false);
+        }
+        check(test.SetProjectileSettings(scenario == 3 ? 20.0f : 2.0f, 7.5f), "Set explicit projectile test input");
+        PhysicsSkeleton skeleton;
+        check(mesh.BuildPhysicsSkeleton(skeleton, error), "Read actual dummy skeleton");
+        world.SetPhysicsPaused(false);
+        world.SetPhysicsTimeScale(1);
+        samples << "frame,time,mode,blending,zone,stable_time,impact,step_count,bone,x,y,z,position_error,rotation_error\n";
+        report << "fixed_dt=" << PhysicsWorld::FixedDeltaTime << " stable_duration=2 blend_duration="
+            << mesh.GetRecoverySettings().blendDuration << " scenario=" << scenario << std::endl;
+        bool seenActive = false;
+        bool seenReturn = false;
+        bool secondShot = false;
+        unsigned entries = 0;
+        unsigned returns = 0;
+        PhysicsAnimationMode previousMode = mesh.GetPhysicsMode();
+        for (uint32_t frame = 0; frame < 900; ++frame)
+        {
+            if ((scenario != 0 && frame == 120) ||
+                (scenario == 2 && seenReturn && !secondShot && !mesh.IsBlendingToKinematic()) ||
+                (scenario == 4 && seenReturn && !secondShot && mesh.IsBlendingToKinematic()) ||
+                (scenario == 5 && seenActive && !secondShot && mesh.GetKinematicStableTime() >= .8f))
+            {
+                check(test.FireFrom(player), "Fire a real colliding projectile");
+                secondShot = seenActive;
+            }
+            const float beforeTimer = mesh.GetKinematicStableTime();
+            world.Tick(1.0f / 60.0f);
+            test.Update();
+            check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");
+            if (mesh.GetPhysicsMode() != previousMode)
+            {
+                report << "transition_frame=" << frame << " from=" << static_cast<int>(previousMode)
+                    << " to=" << static_cast<int>(mesh.GetPhysicsMode()) << " previous_stable=" << beforeTimer
+                    << " stable=" << mesh.GetKinematicStableTime() << std::endl;
+                if (mesh.IsActiveRagdoll())
+                {
+                    ++entries;
+                    seenActive = true;
+                }
+                else if (!mesh.IsRagdoll())
+                {
+                    ++returns;
+                    seenReturn = true;
+                    check(beforeTimer >= 2.0f - 1.0f / 60.0f - .00001f, "Return requires the complete two-second interval");
+                }
+                previousMode = mesh.GetPhysicsMode();
+            }
+            if (frame == 180)
+            {
+                const float stable = mesh.GetKinematicStableTime();
+                const uint64_t step = world.GetPhysicsWorld()->GetStepCount();
+                world.SetPhysicsPaused(true);
+                for (int pauseFrame = 0; pauseFrame < 120; ++pauseFrame)
+                {
+                    world.Tick(1.0f / 60.0f);
+                }
+                check(mesh.GetKinematicStableTime() == stable && world.GetPhysicsWorld()->GetStepCount() == step,
+                    "Paused wall-clock time does not advance recovery");
+                world.SetPhysicsPaused(false);
+            }
+            const FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
+            std::vector<Matrix4> targets;
+            check(EvaluatePhysicsPose(skeleton, mesh.GetAnimInstance().GetPose(), Matrix4(mesh.GetComponentTransform()), targets, error),
+                "Evaluate animation targets for measured bone errors");
+            for (size_t body = 0; body < mesh.GetRagdoll().GetBodyCount(); ++body)
+            {
+                const Matrix4 actual = mesh.GetRagdoll().GetBoneWorld(body);
+                const Matrix4 target = PhysicsBoneFrame(targets[mesh.GetRagdoll().GetBoneNodes()[body]]);
+                const Vector3 position(actual.GetW());
+                const float dot = std::abs(DirectX::XMVectorGetX(DirectX::XMQuaternionDot(Quaternion(actual), Quaternion(target))));
+                samples << frame << ',' << (frame + 1) / 60.0f << ',' << static_cast<int>(mesh.GetPhysicsMode())
+                    << ',' << mesh.IsBlendingToKinematic() << ',' << static_cast<int>(support.balance.zone)
+                    << ',' << mesh.GetKinematicStableTime() << ',' << mesh.GetRagdoll().GetExternalImpactImpulse()
+                    << ',' << support.footstep.startCount << ',' << mesh.GetPhysicsAsset()->bodies[body].bone
+                    << ',' << float(position.GetX()) << ',' << float(position.GetY()) << ',' << float(position.GetZ())
+                    << ',' << float(Length(position - Vector3(target.GetW())))
+                    << ',' << 2 * std::acos(Clamp(dot, 0.0f, 1.0f)) << '\n';
+            }
+        }
+        world.SetPhysicsPaused(true);
+        report << "entries=" << entries << " returns=" << returns << std::endl;
+        check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors");
+        check(scenario == 0 ? !seenActive : seenActive, "Impact is required to enter active ragdoll");
+        if (scenario == 1 || scenario == 2 || scenario == 4 || scenario == 5)
+        {
+            check(seenReturn, "Grounded projectile recovery returns to kinematic mode");
+        }
+        if (scenario == 2 || scenario == 4)
+        {
+            check(entries >= 2 && returns >= 2, "A second collision can activate and recover the same dummy again");
+        }
+        report << "PASS: kinematic recovery validation" << std::endl;
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        report << "FAIL: " << error.what() << std::endl;
+        return false;
+    }
+}
+
 bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
     const std::wstring& path, uint32_t scenario, uint32_t frames)
 {
     using namespace PARS;
     using namespace Math;
     using namespace physx;
+    uint32_t kinematicCase = 0;
+    if (CommandLineArgs::GetInteger(L"kinematiccase", kinematicCase))
+    {
+        return RunKinematicRecoveryValidation(test, world, player, path, kinematicCase);
+    }
     std::ofstream report(path);
     std::ofstream samples(path + L".csv");
     std::ofstream events(path + L".events.csv");
+    std::ofstream states(path + L".states.csv");
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -77,6 +215,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         world.SetPhysicsTimeScale(1);
         samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
         events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
+        states << "frame,mode,blending,zone,stable_time,step_count,impact\n";
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
             << " dummy_auto_support=" << dummy->GetMesh().UsesAutomaticRootSupport() << std::endl;
@@ -120,6 +259,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 std::abs(totalMass - expectedTotalMass) < .0001f,
                 "Independent collision mass is excluded from total PA mass throughout actual-character simulation");
             const float time = (frame + 1) / 60.0f;
+            const SkeletalMeshComponent& dummyMesh = dummy->GetMesh();
+            const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
+            states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()
+                << ',' << static_cast<int>(dummySupport.balance.zone) << ',' << dummyMesh.GetKinematicStableTime()
+                << ',' << dummySupport.footstep.startCount << ',' << dummy->GetMesh().GetRagdoll().GetExternalImpactImpulse() << '\n';
             for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
             {
                 ++eventCount;
@@ -372,6 +516,23 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 !player.GetMesh().UsesAutomaticRootSupport(),
             "Enable COM support on the dummy only");
         Ragdoll& ragdoll = dummy->GetMesh().GetRagdoll();
+        check(!dummy->GetMesh().IsRagdoll() && dummy->GetMesh().UsesAutomaticRagdoll(),
+            "Automatic dummy now waits in kinematic mode before an impact");
+        // 아래 기존 검증은 항상 동적인 다리 지지 제어의 계약을 같은 입력으로 검사한다.
+        // 새 자동 모드의 기본 동작과 복귀는 별도의 실제 캐릭터 전환 검증에서 확인한다.
+        const std::function<bool()> resetActive = [&]() -> bool
+        {
+            if (!test.Reset())
+            {
+                return false;
+            }
+            SkeletalMeshComponent& mesh = dummy->GetMesh();
+            mesh.SetAutomaticRagdoll(false);
+            std::string error;
+            return dummy->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
+                ragdoll.SetRootSupported(true, error) && mesh.SetAutomaticRootSupport(true, error);
+        };
+        check(resetActive(), "Select continuous active mode for the original support-controller regression");
         check(ragdoll.UsesFootDrivenSupport() && !ragdoll.IsRootAxisSupported(0) && !ragdoll.IsRootAxisSupported(1) &&
                 !ragdoll.IsRootAxisSupported(2) && ragdoll.IsRootAxisSupported(3),
             "Automatic Idle uses leg support, frees root translation and keeps rotation assistance");
@@ -400,7 +561,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         std::string supportError;
         check(dummy->GetMesh().SetAutomaticRootSupport(true, supportError) && !ragdoll.IsRootSupported(),
             "Repeating automatic mode enable does not clear the release latch");
-        check(test.Reset() && ragdoll.GetRootSupportWeight() == 1 &&
+        check(resetActive() && ragdoll.GetRootSupportWeight() == 1 &&
                 dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::None,
             "Dummy reset rearms support from its newly sampled grounded pose");
         support.GetSoleSettings(0).offset.y += 1;
@@ -410,7 +571,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             "Invalid foot support fully releases Y/rotation support");
         support.GetSoleSettings(0) = originalLeft;
         support.GetSoleSettings(1) = originalRight;
-        check(test.Reset(), "Restore the automatic impact fixture");
+        check(resetActive(), "Restore the automatic impact fixture");
         world.SetPhysicsPaused(false);
 
         float idleMinimumWeight = 1;
@@ -438,7 +599,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         bool sawBand = false, sawFall = false;
         for (int trial = 0; trial < 3; ++trial)
         {
-            check(test.Reset() && test.SetProjectileSettings(masses[trial], speeds[trial]), "Prepare a reproducible automatic impact");
+            check(resetActive() && test.SetProjectileSettings(masses[trial], speeds[trial]), "Prepare a reproducible automatic impact");
             for (int frame = 0; frame < 120; ++frame)
             {
                 tick();
@@ -483,7 +644,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             sawFall |= releaseFrame >= 0 && minimumHeight < initialHeight - .35f;
         }
         check(sawBand && sawFall, "Physical impacts exercise gradual support loss and a subsequent fall");
-        check(test.SetProjectileSettings(.5f, 7.5f) && test.Reset() && ragdoll.GetRootSupportWeight() == 1,
+        check(test.SetProjectileSettings(.5f, 7.5f) && resetActive() && ragdoll.GetRootSupportWeight() == 1,
             "Restore the 0.5 kg capture fixture and clear the fallen state");
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors in the impact test");
         check(test.FireFrom(player), "Leave one sphere visible for the optional GPU capture");

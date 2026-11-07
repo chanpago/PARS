@@ -384,7 +384,7 @@ namespace PARS
 
     bool SkeletalMeshComponent::UpdateAutomaticRootSupport(std::string& error)
     {
-        if (!m_AutomaticRootSupport)
+        if (!m_AutomaticRootSupport || (m_AutomaticRagdoll && !IsRagdoll()))
         {
             return true;
         }
@@ -424,6 +424,7 @@ namespace PARS
         m_FootSupport.Reset();
         ResetRecovery();
         m_AutomaticRootSupport = false;
+        SetAutomaticRagdoll(false);
         m_RootSupportRelease = RootSupportRelease::None;
         m_PhysicsSkeleton = {};
         m_PhysicsPose.clear();
@@ -442,7 +443,10 @@ namespace PARS
             return;
         }
         std::vector<Matrix4> worldPose;
-        if (EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, worldPose, m_PhysicsError))
+        const bool evaluated = IsBlendingToKinematic() ?
+            EvaluatePhysicsPose(m_PhysicsSkeleton, GetFinalPose(), Matrix4(GetComponentTransform()), worldPose, m_PhysicsError) :
+            EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, worldPose, m_PhysicsError);
+        if (evaluated)
         {
             m_Ragdoll.UpdateKinematicPose(worldPose, teleport, m_PhysicsError);
         }
@@ -579,7 +583,9 @@ namespace PARS
         }
         if (!IsRagdoll())
         {
-            if (!m_Ragdoll.UpdateKinematicPose(worldPose, true, error) || !m_Ragdoll.SetSimulating(true, velocity, error, active))
+            std::vector<Matrix4> physicalPose;
+            if (!EvaluatePhysicsPose(m_PhysicsSkeleton, GetFinalPose(), Matrix4(GetComponentTransform()), physicalPose, error) ||
+                !m_Ragdoll.UpdateKinematicPose(physicalPose, true, error) || !m_Ragdoll.SetSimulating(true, velocity, error, active))
             {
                 return false;
             }
@@ -596,6 +602,8 @@ namespace PARS
             return false;
         }
         m_RagdollSourcePose = m_AnimInstance->GetPose();
+        m_KinematicBlendSource.clear();
+        m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
         m_Ragdoll.SetDrivesEnabled(active);
         UpdatePhysicsPose();

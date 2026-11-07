@@ -7,6 +7,26 @@ struct GraphNode;
 
 namespace PARS
 {
+    // 완료한 물리 스텝마다 현재 COM의 A영역 연속 유지 시간만 계산한다.
+    class KinematicRecoveryTimer
+    {
+    public:
+        void Reset();
+        bool Update(uint64_t revision, uint64_t step, float deltaTime, bool insideA, bool impact, float duration);
+
+    public:
+        float GetStableTime() const
+        {
+            return static_cast<float>(m_StableTime);
+        }
+
+    private:
+        uint64_t m_Revision = 0;
+        uint64_t m_Step = 0;
+        double m_StableTime = 0;
+        bool m_HasSample = false;
+    };
+
     // 물리 모드와 별개인 목표 제어 상태다. 두 상태 모두 액티브 래그돌을 유지한다.
     enum class RecoveryState
     {
@@ -48,6 +68,7 @@ namespace PARS
         float horizontalSpeed = 0;
         float deltaTime = 0;
         bool enabled = false;
+        bool impactTriggered = false;
         bool fallen = false;
         bool needsStep = false;
         bool stepping = false;

@@ -129,6 +129,42 @@ namespace
             "Return completes after the configured blend duration");
     }
 
+    void TestKinematicRecoveryTimer()
+    {
+        KinematicRecoveryTimer timer;
+        uint64_t step = 0;
+        const float deltaTime = 1.0f / 60.0f;
+        for (int frame = 0; frame < 119; ++frame)
+        {
+            Check(!timer.Update(1, ++step, deltaTime, true, false, 2.0f),
+                "Kinematic return cannot begin before 120 consecutive fixed steps");
+        }
+        Check(!timer.Update(1, step, deltaTime, true, false, 2.0f),
+            "Duplicate reads and paused frames cannot advance the return timer");
+        Check(timer.Update(1, ++step, deltaTime, true, false, 2.0f),
+            "Kinematic return begins at two seconds of continuous A occupancy");
+        Check(!timer.Update(1, ++step, deltaTime, false, false, 2.0f) && timer.GetStableTime() == 0,
+            "A to buffer transition resets the full return timer");
+        for (int frame = 0; frame < 90; ++frame)
+        {
+            timer.Update(1, ++step, deltaTime, true, false, 2.0f);
+        }
+        Check(!timer.Update(1, ++step, deltaTime, true, true, 2.0f) && timer.GetStableTime() == 0,
+            "A new impact resets the timer even while COM remains inside A");
+        for (int frame = 0; frame < 119; ++frame)
+        {
+            Check(!timer.Update(1, ++step, deltaTime, true, false, 2.0f),
+                "Recovery waits another complete two seconds after the new impact");
+        }
+        Check(timer.Update(1, ++step, deltaTime, true, false, 2.0f), "Repeated recovery reaches the same deadline");
+        Check(!timer.Update(2, step, deltaTime, true, false, 2.0f) && Near(timer.GetStableTime(), deltaTime),
+            "A new contact revision discards accumulated recovery time");
+        Check(!timer.Update(2, ++step, std::numeric_limits<float>::quiet_NaN(), true, false, 2.0f) &&
+            timer.GetStableTime() == 0, "Invalid simulation time cannot trigger return");
+        timer.Reset();
+        Check(timer.GetStableTime() == 0, "Explicit reset clears the timer");
+    }
+
     void TestInterruptsAndReset()
     {
         RagdollRecovery control;
@@ -223,6 +259,7 @@ namespace
 void RunRagdollRecoveryTests()
 {
     TestTransitions();
+    TestKinematicRecoveryTimer();
     TestInterruptsAndReset();
     TestPhysicalPoseBlend();
     std::printf("PASS: %u recovery state and physical-pose blend checks (no simulation)\n", checks);

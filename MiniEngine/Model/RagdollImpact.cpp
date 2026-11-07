@@ -9,6 +9,64 @@ using namespace physx;
 
 namespace PARS
 {
+    bool Ragdoll::HasApproachingImpact(float minimumDeltaVelocity) const
+    {
+        Math::Vector3 center(Math::kZero);
+        float mass = 0;
+        if (!m_World || IsSimulating() || !m_CollisionEnabled || !GetCenterOfMass(center, mass))
+        {
+            return false;
+        }
+        for (const PxRigidBody* body : m_Bodies)
+        {
+            if (m_World->HasApproachingImpact(*body, mass, minimumDeltaVelocity, m_QueryOwner))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void Ragdoll::CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const
+    {
+        impacts.clear();
+        if (!m_World || !m_CollisionEnabled)
+        {
+            return;
+        }
+        for (size_t index = 0; index < m_Bodies.size(); ++index)
+        {
+            std::vector<PhysicsContactImpulse> contacts;
+            m_World->GetExternalImpactImpulse(*m_Bodies[index], m_QueryOwner, &contacts);
+            for (const PhysicsContactImpulse& contact : contacts)
+            {
+                RagdollBodyImpulse impact;
+                impact.body = index;
+                impact.position = contact.position;
+                impact.impulse = contact.impulse;
+                impacts.push_back(impact);
+            }
+        }
+    }
+
+    void Ragdoll::ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts)
+    {
+        if (!IsSimulating())
+        {
+            return;
+        }
+        // 키네마틱 바디가 받지 못했던 충격만 전환 직후 동일한 접촉점에 한 번 적용한다.
+        for (const RagdollBodyImpulse& impact : impacts)
+        {
+            if (impact.body < m_Bodies.size() && impact.position.isFinite() && impact.impulse.isFinite())
+            {
+                // 관절 링크는 충격 모드를 지원하지 않으므로 한 고정 스텝의 힘으로 적분한다.
+                const PxVec3 force = impact.impulse / static_cast<float>(PhysicsWorld::FixedDeltaTime);
+                PxRigidBodyExt::addForceAtPos(*m_Bodies[impact.body], force, impact.position, PxForceMode::eFORCE);
+            }
+        }
+    }
+
     namespace
     {
         bool IsSpine(const std::string& name)
@@ -173,7 +231,7 @@ namespace PARS
 
     void Ragdoll::SetCharacterImpactEnabled(bool enabled, uint32_t ownerGroup)
     {
-        enabled = enabled && IsSimulating() && m_CollisionEnabled;
+        enabled = enabled && IsActive() && m_CollisionEnabled;
         if (!enabled)
         {
             RemoveCharacterCapsule();

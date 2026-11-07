@@ -54,6 +54,49 @@ namespace
         std::puts("PASS: foot projection raycast range, platform edge and owner filtering");
     }
 
+    void TestApproachingImpact()
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize collision activation scene");
+        PxRigidDynamic* target = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, 0)), PxSphereGeometry(.1f), 73, "Kinematic target");
+        PxRigidDynamic* source = world.CreateDynamicBody(PxTransform(PxVec3(-.3f, 3, 0)), PxSphereGeometry(.1f), 2, "Incoming source");
+        Check(target && source, "Create collision activation bodies");
+        target->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+        source->setLinearVelocity(PxVec3(7.5f, 0, 0));
+        Check(world.HasApproachingImpact(*target, 73, .05f, nullptr), "An approaching impact activates before the solver treats the receiver as infinite mass");
+        Check(!world.HasApproachingImpact(*target, 73, 10.0f, nullptr), "Subthreshold incoming momentum does not activate");
+        source->setLinearVelocity(PxVec3(-7.5f, 0, 0));
+        Check(!world.HasApproachingImpact(*target, 73, .05f, nullptr), "A departing projectile does not activate");
+        source->setLinearVelocity(PxVec3(7.5f, 0, 0));
+        source->setGlobalPose(PxTransform(PxVec3(-.3f, 4, 0)));
+        Check(!world.HasApproachingImpact(*target, 73, .05f, nullptr), "An incoming path that misses the body does not activate");
+        source->setGlobalPose(PxTransform(PxVec3(-.3f, 3, 0)));
+        int owner = 0;
+        source->userData = &owner;
+        Check(!world.HasApproachingImpact(*target, 73, .05f, &owner), "Self-owned bodies cannot trigger recovery");
+        source->userData = nullptr;
+        PxShape* shape = nullptr;
+        source->getShapes(&shape, 1);
+        shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, false);
+        Check(!world.HasApproachingImpact(*target, 73, .05f, nullptr), "Non-colliding shapes cannot trigger recovery");
+        Check(world.GetStepCount() == 0 && world.GetErrorCount() == 0, "Prediction does not simulate or introduce PhysX errors");
+        shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, true);
+        std::vector<PhysicsContactImpulse> contacts;
+        for (int step = 0; step < 6 && contacts.empty(); ++step)
+        {
+            world.Step();
+            world.GetExternalImpactImpulse(*target, nullptr, &contacts);
+        }
+        Check(!contacts.empty(), "Fallback captures a real kinematic contact");
+        PxVec3 impulse(0);
+        for (const PhysicsContactImpulse& contact : contacts)
+        {
+            impulse += contact.impulse;
+        }
+        Check(impulse.x > 0 && impulse.isFinite(), "Captured fallback impulse points into the receiver");
+        std::puts("PASS: approaching collision, threshold, departing/missing source, ownership and collision policy");
+    }
+
     void TestFootSupportHull()
     {
         const std::vector<PxVec3> left = {
@@ -298,6 +341,7 @@ int main(int argc, char** argv)
         return 0;
     }
     TestFootProjectionRaycast();
+    TestApproachingImpact();
     TestFootSupportHull();
     TestFootSupportBalance();
     TestFootSupportCandidates();

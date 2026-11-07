@@ -95,6 +95,7 @@ bool RagdollImpactTest::Reset()
     {
         return false;
     }
+    dummy->GetMesh().SetAutomaticRagdoll(false);
     if (!dummy->StopRagdoll(m_Message))
     {
         return false;
@@ -115,6 +116,11 @@ bool RagdollImpactTest::Reset()
         return false;
     }
     if (!mesh.SetAutomaticRootSupport(m_AutomaticSupport, m_Message))
+    {
+        return false;
+    }
+    mesh.SetAutomaticRagdoll(m_AutomaticSupport);
+    if (m_AutomaticSupport && !dummy->StopRagdoll(m_Message))
     {
         return false;
     }
@@ -394,6 +400,15 @@ void RagdollImpactTest::DrawUI(Character* player)
                 SetAutomaticSupport(automatic);
             }
             ImGui::TextUnformatted(u8"모드 변경 시 더미를 초기화합니다.");
+            SkeletalMeshComponent& mesh = dummy->GetMesh();
+            ImGui::Text(u8"물리 모드: %s", mesh.IsActiveRagdoll() ? u8"액티브 래그돌" :
+                mesh.IsRagdoll() ? u8"패시브 래그돌" : mesh.IsBlendingToKinematic() ? u8"키네마틱 복귀 보간" : u8"키네마틱");
+            float stableDuration = mesh.GetKinematicStableDuration();
+            if (ImGui::DragFloat(u8"A영역 복귀 대기 시간", &stableDuration, .1f, .1f, 10.0f, "%.1f s", ImGuiSliderFlags_AlwaysClamp))
+            {
+                mesh.SetKinematicStableDuration(stableDuration);
+            }
+            ImGui::Text(u8"A영역 연속 유지: %.2f / %.2f s", mesh.GetKinematicStableTime(), stableDuration);
             bool supported = ragdoll.IsRootSupported();
             ImGui::BeginDisabled(m_AutomaticSupport);
             if (ImGui::Checkbox(u8"더미 골반 지지", &supported))

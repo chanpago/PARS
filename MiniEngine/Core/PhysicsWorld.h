@@ -52,6 +52,14 @@ public:
     float normalImpulse = 0;
 };
 
+// 키네마틱 상태에서 받은 접촉 충격을 동적 전환 후 이어받는다.
+struct PhysicsContactImpulse
+{
+public:
+    physx::PxVec3 position{0};
+    physx::PxVec3 impulse{0};
+};
+
 // 미터, 킬로그램, 초 단위의 CPU 물리이며 +Y가 위쪽이다. 게임 스레드에서 사용한다.
 // Create*가 반환한 Actor는 명시적으로 해제하거나 Shutdown()을 호출할 때까지 씬이 소유한다.
 // Update()/Step()을 호출하기 전에 모든 읽기와 쓰기를 끝내야 한다.
@@ -157,7 +165,11 @@ public:
     void GetCharacterCapsuleContacts(const physx::PxRigidActor& body,
         std::vector<PhysicsCapsuleContact>& contacts) const;
     // 마지막 완료 스텝의 외부 충격량 합(N s). 자기 충돌과 위쪽 지면 지지 접촉은 제외한다.
-    float GetExternalImpactImpulse(const physx::PxRigidActor& body, const void* ignoredOwner = nullptr) const;
+    float GetExternalImpactImpulse(const physx::PxRigidActor& body, const void* ignoredOwner = nullptr,
+        std::vector<PhysicsContactImpulse>* contacts = nullptr) const;
+    // 다음 고정 스텝에 접근 충돌이 예상되면 솔버 실행 전에 동적으로 전환할 수 있다.
+    bool HasApproachingImpact(const physx::PxRigidBody& body, float totalMass, float minimumDeltaVelocity,
+        const void* ignoredOwner) const;
     uint64_t GetClockRevision() const
     {
         return m_ClockRevision;
