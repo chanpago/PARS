@@ -136,33 +136,49 @@ namespace
         const float deltaTime = 1.0f / 60.0f;
         for (int frame = 0; frame < 119; ++frame)
         {
-            Check(!timer.Update(1, ++step, deltaTime, true, false, 2.0f),
+            Check(!timer.Update(1, ++step, deltaTime, true, true, false, 2.0f),
                 "Kinematic return cannot begin before 120 consecutive fixed steps");
         }
-        Check(!timer.Update(1, step, deltaTime, true, false, 2.0f),
+        Check(!timer.Update(1, step, deltaTime, true, true, false, 2.0f),
             "Duplicate reads and paused frames cannot advance the return timer");
-        Check(timer.Update(1, ++step, deltaTime, true, false, 2.0f),
+        Check(timer.Update(1, ++step, deltaTime, true, true, false, 2.0f),
             "Kinematic return begins at two seconds of continuous A occupancy");
-        Check(!timer.Update(1, ++step, deltaTime, false, false, 2.0f) && timer.GetStableTime() == 0,
+        Check(!timer.Update(1, ++step, deltaTime, false, true, false, 2.0f) && timer.GetStableTime() == 0,
             "A to buffer transition resets the full return timer");
         for (int frame = 0; frame < 90; ++frame)
         {
-            timer.Update(1, ++step, deltaTime, true, false, 2.0f);
+            timer.Update(1, ++step, deltaTime, true, true, false, 2.0f);
         }
-        Check(!timer.Update(1, ++step, deltaTime, true, true, 2.0f) && timer.GetStableTime() == 0,
+        Check(!timer.Update(1, ++step, deltaTime, true, true, true, 2.0f) && timer.GetStableTime() == 0,
             "A new impact resets the timer even while COM remains inside A");
         for (int frame = 0; frame < 119; ++frame)
         {
-            Check(!timer.Update(1, ++step, deltaTime, true, false, 2.0f),
+            Check(!timer.Update(1, ++step, deltaTime, true, true, false, 2.0f),
                 "Recovery waits another complete two seconds after the new impact");
         }
-        Check(timer.Update(1, ++step, deltaTime, true, false, 2.0f), "Repeated recovery reaches the same deadline");
-        Check(!timer.Update(2, step, deltaTime, true, false, 2.0f) && Near(timer.GetStableTime(), deltaTime),
+        Check(timer.Update(1, ++step, deltaTime, true, true, false, 2.0f), "Repeated recovery reaches the same deadline");
+        Check(!timer.Update(2, step, deltaTime, true, true, false, 2.0f) && Near(timer.GetStableTime(), deltaTime),
             "A new contact revision discards accumulated recovery time");
-        Check(!timer.Update(2, ++step, std::numeric_limits<float>::quiet_NaN(), true, false, 2.0f) &&
+        Check(!timer.Update(2, ++step, std::numeric_limits<float>::quiet_NaN(), true, true, false, 2.0f) &&
             timer.GetStableTime() == 0, "Invalid simulation time cannot trigger return");
         timer.Reset();
         Check(timer.GetStableTime() == 0, "Explicit reset clears the timer");
+
+        bool returnedWithoutContact = false;
+        for (int frame = 0; frame < 120; ++frame)
+        {
+            returnedWithoutContact = timer.Update(3, ++step, deltaTime, true, false, false, 2.0f) || returnedWithoutContact;
+        }
+        Check(!returnedWithoutContact && Near(timer.GetStableTime(), 2.0f),
+            "Two seconds in A alone cannot return with one or both feet ungrounded");
+        Check(!timer.Update(3, ++step, deltaTime, true, false, false, 2.0f) && timer.GetStableTime() > 2.0f,
+            "Expired A timer waits for contact without restarting A occupancy");
+        Check(!timer.Update(3, step, deltaTime, true, true, false, 2.0f),
+            "Contact cannot authorize return from a duplicate completed step");
+        Check(timer.Update(3, ++step, deltaTime, true, true, false, 2.0f),
+            "Both contacts on the next completed step authorize the pending return");
+        Check(!timer.Update(3, ++step, deltaTime, false, false, false, 2.0f) && timer.GetStableTime() == 0,
+            "Leaving A while waiting for contact still resets the timer");
     }
 
     void TestInterruptsAndReset()

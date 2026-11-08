@@ -66,8 +66,12 @@ namespace PARS
             return true;
         }
         const bool insideA = sample.hasComProjection && sample.balance.zone == FootSupportZone::Inside;
+        const bool bothGrounded = sample.feet[0].available && sample.feet[0].contact.hasSample &&
+            sample.feet[0].contact.grounded && sample.feet[1].available &&
+            sample.feet[1].contact.hasSample && sample.feet[1].contact.grounded;
+        // A영역 유지 시간은 그대로 누적하되, 실제 양발 접지가 확인될 때만 전환한다.
         if (m_KinematicRecoveryTimer.Update(sample.contactRevision, sample.completedPhysicsStep,
-            deltaTime, insideA, impact, m_KinematicStableDuration))
+            deltaTime, insideA, bothGrounded, impact, m_KinematicStableDuration))
         {
             return BeginKinematicRecovery();
         }
@@ -77,16 +81,33 @@ namespace PARS
     bool SkeletalMeshComponent::BeginKinematicRecovery()
     {
         std::vector<Matrix4> targets;
-        const int root = m_Ragdoll.GetImpactRootBody();
-        if (root < 0 || !EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, targets, m_PhysicsError))
+        if (!EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, targets, m_PhysicsError))
         {
             return false;
         }
-        // 충격 전 원점으로 되돌리지 않고 현재 골반의 수평 위치에서 애니메이션을 시작한다.
-        const Vector3 actual(m_Ragdoll.GetBoneWorld(static_cast<size_t>(root)).GetW());
-        const Vector3 target(targets[m_Ragdoll.GetBoneNodes()[root]].GetW());
+        Vector3 actualMidpoint(kZero);
+        Vector3 animationMidpoint(kZero);
+        for (const FootSoleSample& foot : m_FootSupport.GetSnapshot().feet)
+        {
+            if (!foot.available || foot.boneNode < 0 || static_cast<size_t>(foot.boneNode) >= targets.size())
+            {
+                m_PhysicsError = "Kinematic recovery requires both foot sole frames.";
+                return false;
+            }
+            // PA와 같은 강체 본 좌표계를 사용해 발목이 아닌 발바닥 중심을 비교한다.
+            const Matrix4 animatedSole = PhysicsBoneFrame(targets[foot.boneNode]) * foot.soleInBone;
+            actualMidpoint += Vector3(foot.soleWorld.GetW()) * .5f;
+            animationMidpoint += Vector3(animatedSole.GetW()) * .5f;
+        }
+        const Vector3 offset = actualMidpoint - animationMidpoint;
+        if (!std::isfinite(float(Length(offset))))
+        {
+            m_PhysicsError = "Invalid foot sole position in kinematic recovery.";
+            return false;
+        }
+        // 현재 양발 중점에 애니메이션 양발 중점을 맞추며 높이 차이도 루트에 반영한다.
         const Vector3 previousLocation = GetOwner().GetActorLocation();
-        GetOwner().SetActorLocation(previousLocation + Vector3(actual.GetX() - target.GetX(), 0, actual.GetZ() - target.GetZ()));
+        GetOwner().SetActorLocation(previousLocation + offset);
         if (!CaptureRecoveryBlendSource())
         {
             GetOwner().SetActorLocation(previousLocation);

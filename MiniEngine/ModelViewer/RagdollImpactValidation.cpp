@@ -17,6 +17,9 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
     using namespace Math;
     std::ofstream report(path);
     std::ofstream samples(path + L".csv");
+    std::ofstream feet(path + L".feet.csv");
+    uint32_t validateFootAlignment = 0;
+    CommandLineArgs::GetInteger(L"validatefootalignment", validateFootAlignment);
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -27,7 +30,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
     };
     try
     {
-        check(report.good() && samples.good() && scenario <= 5 && test.SetAutomaticSupport(true),
+        check(report.good() && samples.good() && feet.good() && scenario <= 5 && test.SetAutomaticSupport(true),
             "Prepare grounded automatic kinematic dummy");
         SkeletalMeshComponent& mesh = test.GetDummy()->GetMesh();
         check(!mesh.IsRagdoll() && mesh.GetRagdoll().GetKinematicBodyCount() == mesh.GetRagdoll().GetBodyCount(),
@@ -48,6 +51,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         world.SetPhysicsPaused(false);
         world.SetPhysicsTimeScale(1);
         samples << "frame,time,mode,blending,zone,stable_time,impact,step_count,bone,x,y,z,position_error,rotation_error\n";
+        feet << "frame,time,mode,blending,side,grounded,root_x,root_y,root_z,sole_x,sole_y,sole_z,target_x,target_y,target_z\n";
         report << "fixed_dt=" << PhysicsWorld::FixedDeltaTime << " stable_duration=2 blend_duration="
             << mesh.GetRecoverySettings().blendDuration << " scenario=" << scenario << std::endl;
         bool seenActive = false;
@@ -67,6 +71,31 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 secondShot = seenActive;
             }
             const float beforeTimer = mesh.GetKinematicStableTime();
+            const Vector3 beforeRoot = test.GetDummy()->GetActorLocation();
+            Vector3 expectedRootOffset(kZero);
+            bool beforeBothGrounded = true;
+            if (mesh.IsActiveRagdoll())
+            {
+                // 전환 전에 마지막 완료 물리 스텝의 실제 발과 현재 애니메이션을 함께 기록한다.
+                std::vector<Matrix4> beforeTargets;
+                check(EvaluatePhysicsPose(skeleton, mesh.GetAnimInstance().GetPose(),
+                    Matrix4(mesh.GetComponentTransform()), beforeTargets, error), "Evaluate pre-return animation");
+                for (const FootSoleSample& foot : mesh.GetFootSupport().GetSnapshot().feet)
+                {
+                    const std::vector<int>& nodes = mesh.GetRagdoll().GetBoneNodes();
+                    size_t body = 0;
+                    while (body < nodes.size() && nodes[body] != foot.boneNode)
+                    {
+                        ++body;
+                    }
+                    check(foot.available && foot.boneNode >= 0 && body < nodes.size(), "Resolve physical foot body");
+                    PhysicsGroundContact contact;
+                    beforeBothGrounded = mesh.GetRagdoll().GetBodyGroundContact(body, contact) && beforeBothGrounded;
+                    const Matrix4 actualSole = mesh.GetRagdoll().GetBoneWorld(body) * foot.soleInBone;
+                    const Matrix4 targetSole = PhysicsBoneFrame(beforeTargets[foot.boneNode]) * foot.soleInBone;
+                    expectedRootOffset += (Vector3(actualSole.GetW()) - Vector3(targetSole.GetW())) * .5f;
+                }
+            }
             world.Tick(1.0f / 60.0f);
             test.Update();
             check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");
@@ -85,6 +114,16 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                     ++returns;
                     seenReturn = true;
                     check(beforeTimer >= 2.0f - 1.0f / 60.0f - .00001f, "Return requires the complete two-second interval");
+                    const Vector3 rootOffset = test.GetDummy()->GetActorLocation() - beforeRoot;
+                    const float alignmentError = float(Length(rootOffset - expectedRootOffset));
+                    report << "return_both_grounded=" << beforeBothGrounded
+                        << " root_dx=" << float(rootOffset.GetX()) << " root_dy=" << float(rootOffset.GetY())
+                        << " root_dz=" << float(rootOffset.GetZ()) << " sole_alignment_error=" << alignmentError << std::endl;
+                    if (validateFootAlignment)
+                    {
+                        check(beforeBothGrounded, "Kinematic handoff requires both actual ground contacts");
+                        check(alignmentError < .0001f, "Root translation matches both sole midpoints on all three axes");
+                    }
                 }
                 previousMode = mesh.GetPhysicsMode();
             }
@@ -105,6 +144,29 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             std::vector<Matrix4> targets;
             check(EvaluatePhysicsPose(skeleton, mesh.GetAnimInstance().GetPose(), Matrix4(mesh.GetComponentTransform()), targets, error),
                 "Evaluate animation targets for measured bone errors");
+            for (size_t side = 0; side < support.feet.size(); ++side)
+            {
+                const FootSoleSample& foot = support.feet[side];
+                const std::vector<int>& nodes = mesh.GetRagdoll().GetBoneNodes();
+                size_t body = 0;
+                while (body < nodes.size() && nodes[body] != foot.boneNode)
+                {
+                    ++body;
+                }
+                check(foot.available && foot.boneNode >= 0 && body < nodes.size(), "Measure actual foot sole");
+                PhysicsGroundContact contact;
+                const bool grounded = mesh.GetRagdoll().GetBodyGroundContact(body, contact);
+                const Matrix4 actualSole = mesh.GetRagdoll().GetBoneWorld(body) * foot.soleInBone;
+                const Matrix4 targetSole = PhysicsBoneFrame(targets[foot.boneNode]) * foot.soleInBone;
+                const Vector3 actualPosition(actualSole.GetW());
+                const Vector3 targetPosition(targetSole.GetW());
+                const Vector3 rootPosition = test.GetDummy()->GetActorLocation();
+                feet << frame << ',' << (frame + 1) / 60.0f << ',' << static_cast<int>(mesh.GetPhysicsMode())
+                    << ',' << mesh.IsBlendingToKinematic() << ',' << side << ',' << grounded
+                    << ',' << float(rootPosition.GetX()) << ',' << float(rootPosition.GetY()) << ',' << float(rootPosition.GetZ())
+                    << ',' << float(actualPosition.GetX()) << ',' << float(actualPosition.GetY()) << ',' << float(actualPosition.GetZ())
+                    << ',' << float(targetPosition.GetX()) << ',' << float(targetPosition.GetY()) << ',' << float(targetPosition.GetZ()) << '\n';
+            }
             for (size_t body = 0; body < mesh.GetRagdoll().GetBodyCount(); ++body)
             {
                 const Matrix4 actual = mesh.GetRagdoll().GetBoneWorld(body);

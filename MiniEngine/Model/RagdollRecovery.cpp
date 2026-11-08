@@ -13,7 +13,7 @@ void KinematicRecoveryTimer::Reset()
 }
 
 bool KinematicRecoveryTimer::Update(uint64_t revision, uint64_t step, float deltaTime,
-    bool insideA, bool impact, float duration)
+    bool insideA, bool bothGrounded, bool impact, float duration)
 {
     if (m_HasSample && revision != m_Revision)
     {
@@ -33,7 +33,7 @@ bool KinematicRecoveryTimer::Update(uint64_t revision, uint64_t step, float delt
         return false;
     }
     m_StableTime += static_cast<double>(deltaTime);
-    return m_StableTime >= static_cast<double>(duration);
+    return bothGrounded && m_StableTime >= static_cast<double>(duration);
 }
 
 void RagdollRecovery::Reset()

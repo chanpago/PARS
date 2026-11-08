@@ -7,12 +7,13 @@ struct GraphNode;
 
 namespace PARS
 {
-    // 완료한 물리 스텝마다 현재 COM의 A영역 연속 유지 시간만 계산한다.
+    // A영역 연속 유지 시간을 누적하고, 양발이 실제 접지한 스텝에서 복귀를 허용한다.
     class KinematicRecoveryTimer
     {
     public:
         void Reset();
-        bool Update(uint64_t revision, uint64_t step, float deltaTime, bool insideA, bool impact, float duration);
+        bool Update(uint64_t revision, uint64_t step, float deltaTime, bool insideA,
+            bool bothGrounded, bool impact, float duration);
 
     public:
         float GetStableTime() const
