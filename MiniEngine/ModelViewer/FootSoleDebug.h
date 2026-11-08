@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "PhysicsWorld.h"
+#include <functional>
 
 namespace PARS
 {
@@ -11,7 +12,7 @@ namespace PARS
 class FootSoleDebug
 {
 public:
-    void DrawUI(PARS::SkeletalMeshComponent& mesh);
+    void DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings = {});
     void BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
 
 public:

@@ -693,6 +693,11 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
             m_ImpactTest.reset();
         }
+        else
+        {
+            m_ImpactTest->LoadDummySupportSettings(
+                m_DefaultPAPath.substr(0, impactDirectory + 1) + "DummySupport.settings.json");
+        }
     }
 #endif
     SetFootCandidateDebugVisible(m_FootCandidateDebugVisible);

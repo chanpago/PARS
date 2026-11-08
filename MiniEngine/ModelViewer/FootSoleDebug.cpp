@@ -269,7 +269,7 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     }
 }
 
-void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
+void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings)
 {
     if (!ImGui::CollapsingHeader(u8"발바닥 / 지면 투영", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -328,6 +328,10 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh)
         support.SetBufferScale(scale);
     }
     ImGui::TextWrapped(u8"B는 A의 면적 중심 기준 확장입니다. 거리 2배 = 면적 4배.");
+    if (drawBufferSettings)
+    {
+        drawBufferSettings();
+    }
     ImGui::Text(u8"물리 스냅샷: %llu / 완료 스텝: %llu",
         static_cast<unsigned long long>(sample.sampleNumber), static_cast<unsigned long long>(sample.completedPhysicsStep));
     ImGui::TextWrapped(u8"표시를 꺼도 고정 틱에서 계산합니다. 설정 변경은 다음 물리 스텝에 반영됩니다.");

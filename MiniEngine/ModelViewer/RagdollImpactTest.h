@@ -40,10 +40,13 @@ public:
     bool LoadProjectileSettings(const std::string& path);
     bool SaveProjectileSettings();
     void LoadBodyImpactSettings(PARS::Character& player, const std::string& path);
+    bool LoadDummySupportSettings(const std::string& path);
+    bool SaveDummySupportSettings();
     void BuildLines(std::vector<physx::PxDebugLine>& lines);
 
 private:
     void DrawBodyImpactUI(PARS::Character* player);
+    void DrawDummySupportSettingsUI();
     void BuildBodyImpactLines(std::vector<physx::PxDebugLine>& lines);
     bool FireAt(const PARS::Character& player, Math::Vector3 target, bool checkMuzzle = false);
 
@@ -92,6 +95,8 @@ private:
     std::string m_ProjectileSettingsMessage;
     std::string m_BodyImpactPath;
     std::string m_BodyImpactMessage;
+    std::string m_DummySupportSettingsPath;
+    std::string m_DummySupportSettingsMessage;
     float m_Mass = 2.0f;
     float m_Speed = 7.5f;
     float m_MaxHipsDisplacement = 0;

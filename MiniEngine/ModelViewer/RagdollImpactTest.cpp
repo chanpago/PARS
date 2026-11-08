@@ -23,12 +23,12 @@ namespace
         return std::isfinite(mass) && std::isfinite(speed) && mass >= .1f && mass <= 100 && speed >= 1 && speed <= 100;
     }
 
-    std::wstring ProjectileSettingsPath(const std::string& path)
+    std::wstring ImpactSettingsPath(const std::string& path)
     {
         const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, nullptr, 0);
         if (count <= 1)
         {
-            throw std::runtime_error(u8"구 설정 파일 경로가 올바르지 않습니다.");
+            throw std::runtime_error(u8"설정 파일 경로가 올바르지 않습니다.");
         }
         std::wstring result(count, L'\0');
         MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.c_str(), -1, &result[0], count);
@@ -155,7 +155,7 @@ bool RagdollImpactTest::LoadProjectileSettings(const std::string& path)
     m_ProjectileSettingsPath = path;
     try
     {
-        std::ifstream file(ProjectileSettingsPath(path));
+        std::ifstream file(ImpactSettingsPath(path));
         if (!file)
         {
             throw std::runtime_error(u8"구 설정 파일을 열 수 없습니다. 현재 설정을 유지합니다.");
@@ -192,7 +192,7 @@ bool RagdollImpactTest::SaveProjectileSettings()
             throw std::runtime_error(u8"구 질량은 0.1~100kg, 발사 속도는 1~100m/s여야 합니다.");
         }
         const nlohmann::json data = {{"version", 1}, {"massKg", m_Mass}, {"speedMetersPerSecond", m_Speed}};
-        std::ofstream file(ProjectileSettingsPath(m_ProjectileSettingsPath), std::ios::trunc);
+        std::ofstream file(ImpactSettingsPath(m_ProjectileSettingsPath), std::ios::trunc);
         file << data.dump(4) << '\n';
         file.flush();
         if (!file)
@@ -206,6 +206,91 @@ bool RagdollImpactTest::SaveProjectileSettings()
     {
         m_ProjectileSettingsMessage = u8"구 설정 저장 실패: " + std::string(exception.what());
         return false;
+    }
+}
+
+bool RagdollImpactTest::LoadDummySupportSettings(const std::string& path)
+{
+    m_DummySupportSettingsPath = path;
+    try
+    {
+        PARS::Character* dummy = GetDummy();
+        if (!dummy)
+        {
+            throw std::runtime_error(u8"설정을 적용할 더미가 없습니다.");
+        }
+        std::ifstream file(ImpactSettingsPath(path));
+        if (!file)
+        {
+            throw std::runtime_error(u8"더미 지지 설정 파일을 열 수 없습니다. 현재 배율을 유지합니다.");
+        }
+        nlohmann::json data;
+        file >> data;
+        if (data.at("version") != 1)
+        {
+            throw std::runtime_error(u8"지원하지 않는 더미 지지 설정 파일 버전입니다.");
+        }
+        const float scale = data.at("bufferDistanceScale").get<float>();
+        // 기존 범위 검증을 통과한 값만 적용해 불러오기 실패 시 현재 배율을 유지한다.
+        if (!dummy->GetMesh().GetFootSupport().SetBufferScale(scale))
+        {
+            throw std::runtime_error(u8"B 거리 배율은 1.01~10이어야 합니다.");
+        }
+        m_DummySupportSettingsMessage = u8"저장된 더미 B 배율을 불러왔습니다.";
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        m_DummySupportSettingsMessage = u8"B 배율 불러오기 실패: " + std::string(exception.what());
+        return false;
+    }
+}
+
+bool RagdollImpactTest::SaveDummySupportSettings()
+{
+    try
+    {
+        const PARS::Character* dummy = GetDummy();
+        if (!dummy)
+        {
+            throw std::runtime_error(u8"설정을 저장할 더미가 없습니다.");
+        }
+        const float scale = dummy->GetMesh().GetFootSupport().GetBufferScale();
+        const nlohmann::json data = {{"version", 1}, {"bufferDistanceScale", scale}};
+        std::ofstream file(ImpactSettingsPath(m_DummySupportSettingsPath), std::ios::trunc);
+        file << data.dump(4) << '\n';
+        file.close();
+        if (!file)
+        {
+            throw std::runtime_error(u8"더미 지지 설정 파일에 저장할 수 없습니다.");
+        }
+        m_DummySupportSettingsMessage = u8"더미 B 배율을 저장했습니다. 다음 실행부터 자동으로 불러옵니다.";
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        m_DummySupportSettingsMessage = u8"B 배율 저장 실패: " + std::string(exception.what());
+        return false;
+    }
+}
+
+void RagdollImpactTest::DrawDummySupportSettingsUI()
+{
+    ImGui::BeginDisabled(m_DummySupportSettingsPath.empty());
+    if (ImGui::Button(u8"B 배율 저장"))
+    {
+        SaveDummySupportSettings();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(u8"B 배율 불러오기"))
+    {
+        LoadDummySupportSettings(m_DummySupportSettingsPath);
+    }
+    ImGui::EndDisabled();
+    ImGui::TextWrapped("%s", u8"저장한 B 거리 배율은 다음 실행 시 더미에 자동 적용합니다.");
+    if (!m_DummySupportSettingsMessage.empty())
+    {
+        ImGui::TextWrapped("%s", m_DummySupportSettingsMessage.c_str());
     }
 }
 
@@ -430,7 +515,10 @@ void RagdollImpactTest::DrawUI(Character* player)
             }
             ImGui::TextUnformatted(u8"기준은 초기화 또는 마지막 발사 시점입니다.");
             ImGui::PushID("ImpactDummy");
-            m_FootSoles.DrawUI(dummy->GetMesh());
+            m_FootSoles.DrawUI(dummy->GetMesh(), [this]() -> void
+            {
+                DrawDummySupportSettingsUI();
+            });
             ImGui::PopID();
         }
         if (!m_Message.empty())
