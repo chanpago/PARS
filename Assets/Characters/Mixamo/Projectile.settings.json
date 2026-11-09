@@ -1,5 +1,5 @@
 {
-    "massKg": 6.0,
-    "speedMetersPerSecond": 10.0,
+    "massKg": 0.5,
+    "speedMetersPerSecond": 100.0,
     "version": 1
 }
