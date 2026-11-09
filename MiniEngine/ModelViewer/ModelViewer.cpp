@@ -120,6 +120,27 @@ namespace
         }
         return L"";
     }
+
+#if defined(_M_X64)
+    bool IsAutomatedViewerRun()
+    {
+        const wchar_t* const reportOptions[] =
+        {
+            L"bodyimpacttest", L"impacttest", L"pelvistest", L"patransitiontest", L"pawalltest",
+            L"ragdolltest", L"comparisontest", L"comparisonreturncapture", L"comparisoncapture", L"impactcapture"
+        };
+        std::wstring path;
+        for (const wchar_t* option : reportOptions)
+        {
+            if (CommandLineArgs::GetString(option, path))
+            {
+                return true;
+            }
+        }
+        uint32_t preview = 0;
+        return CommandLineArgs::GetInteger(L"comparisonpreview", preview) && preview != 0;
+    }
+#endif
 }
 
 class ModelViewer : public GameCore::IGameApp
@@ -129,16 +150,13 @@ public:
     {
     }
 
+public:
     virtual void Startup(void) override;
     virtual void Cleanup(void) override;
 
     virtual void Update(float deltaT) override;
     virtual void RenderScene(void) override;
     virtual void RenderUI(GraphicsContext&) override;
-    virtual bool UsesImGui() const override
-    {
-        return true;
-    }
     virtual bool IsDone() override
     {
         if (m_RagdollTestDone)
@@ -191,11 +209,28 @@ public:
 private:
     void LoadAnimationPreview(bool forceRebuild);
     void SelectPreview(uint32_t index);
-    void SetFootCandidateDebugVisible(bool visible);
     void ResetPreviewCamera();
     void UpdateCharacterInput(float deltaTime);
     void UpdateFollowCamera(float deltaTime = 0);
     void SetFreeCamera(bool freeCamera);
+    void RenderModels(Renderer::MeshSorter& sorter);
+    void DrawRagdollPanel(PARS::Character& character);
+    void EnableActiveRagdoll(PARS::Character& character);
+    void ApplyPendingPhysicsAssetSave();
+#if defined(_M_X64)
+    bool EnterMap(PhysicsDemo::MapId map);
+    void DrawMapSelection();
+    bool ResetMapCharacter(bool restoreActive = false);
+#endif
+
+public:
+    virtual bool UsesImGui() const override
+    {
+        return true;
+    }
+
+private:
+    void SetFootCandidateDebugVisible(bool visible);
     PARS::PlayerController* GetPlayerController() const
     {
         return m_World.FindActor<PARS::PlayerController>(m_PlayerController);
@@ -205,49 +240,53 @@ private:
         return m_World.FindActor<PARS::Character>(m_PreviewCharacter);
     }
     PreviewAnimInstance* GetPreviewAnimation() const;
-    void RenderModels(Renderer::MeshSorter& sorter);
-    void DrawRagdollPanel(PARS::Character& character);
-    void EnableActiveRagdoll(PARS::Character& character);
-    void ApplyPendingPhysicsAssetSave();
 
+private:
     Camera m_Camera;
-    unique_ptr<CameraController> m_CameraController;
-
-    D3D12_VIEWPORT m_MainViewport;
-    D3D12_RECT m_MainScissor;
-
     ModelInstance m_ModelInst;
+    ShadowCamera m_SunShadowCamera;
+    unique_ptr<CameraController> m_CameraController;
     PARS::World m_World;
     PARS::ActorHandle m_PreviewCharacter; // 참조만 보관하며, Actor의 소유자는 World다.
     PARS::ActorHandle m_PlayerController;
     PARS::SpringArmComponent* m_SpringArm = nullptr; // 캐릭터 Actor가 소유한다.
-    bool m_FreeCamera = false;
-    float m_ControlYaw = XM_PI;
-    float m_ControlPitch = 0.28f;
-    bool m_PreviewMode = false;
-    bool m_PreviewReady = false;
     std::string m_PreviewError;
     std::string m_RagdollMessage;
-    bool m_ActiveSupport = true;
-    bool m_FootCandidateDebugVisible = true;
     std::string m_CharacterPAPath = "Mixamo.physics.json";
     std::string m_DefaultPAPath;
     std::unique_ptr<PARS::PhysicsAsset> m_PendingSavedPA;
     std::string m_PendingPASavePath;
-    bool m_RagdollTestDone = false;
     unique_ptr<SkeletalMeshViewer> m_MeshViewer;
-    ShadowCamera m_SunShadowCamera;
-    bool m_SponzaStarted = false;
 #if defined(_M_X64)
     unique_ptr<PhysicsDemo> m_PhysicsDemo;
+    // 더미가 보관하는 참조의 수명이 정렬 순서보다 우선한다.
     FootSoleDebug m_FootSoles;
     unique_ptr<RagdollImpactTest> m_ImpactTest;
-    bool m_IsAiming = false;
-    uint32_t m_ImpactCaptureFrames = 0;
     unique_ptr<RagdollComparisonRunner> m_Comparison;
+    std::string m_MapError;
+#endif
+    D3D12_VIEWPORT m_MainViewport{};
+    D3D12_RECT m_MainScissor{};
+    float m_ControlYaw = XM_PI;
+    float m_ControlPitch = 0.28f;
+#if defined(_M_X64)
+    uint32_t m_ImpactCaptureFrames = 0;
+    uint32_t m_ComparisonCaptureFrames = 0;
+#endif
+    bool m_FreeCamera = false;
+    bool m_PreviewMode = false;
+    bool m_PreviewReady = false;
+    bool m_ActiveSupport = true;
+    bool m_FootCandidateDebugVisible = true;
+    bool m_RagdollTestDone = false;
+    bool m_SponzaStarted = false;
+#if defined(_M_X64)
+    bool m_IsAiming = false;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
-    uint32_t m_ComparisonCaptureFrames = 0;
+    bool m_MapSelectionVisible = false;
+    bool m_ForceMapRebuild = false;
+    PhysicsDemo::MapId m_PendingMap = PhysicsDemo::MapId::Count;
 #endif
 };
 
@@ -346,7 +385,7 @@ void ModelViewer::Startup(void)
     Renderer::Initialize();
     m_World.BeginPlay();
 
-    // 기본 씬은 물리 맵과 애니메이션 캐릭터를 함께 사용한다.
+    // 일반 실행은 맵 선택 화면에서 시작하고, 자동 검증은 기존 테스트장으로 진입한다.
     // -physics 0은 Sponza를 선택하며, -model은 기존처럼 단일 모델을 선택한다.
     uint32_t physicsMode = 1;
     const bool hasPhysicsOption = CommandLineArgs::GetInteger(L"physics", physicsMode);
@@ -359,6 +398,16 @@ void ModelViewer::Startup(void)
         forceRebuild = rebuildValue != 0;
     }
 #if defined(_M_X64)
+    if (physicsMode && !hasModel && !IsAutomatedViewerRun())
+    {
+        m_MapSelectionVisible = true;
+        m_ForceMapRebuild = forceRebuild;
+        MotionBlur::Enable = false;
+        TemporalEffects::EnableTAA = false;
+        PostEffects::EnableAdaptation = false;
+        SSAO::Enable = false;
+        return;
+    }
     if (physicsMode && !hasModel)
     {
         if (m_World.InitializePhysics())
@@ -509,6 +558,214 @@ void ModelViewer::Startup(void)
     }
 }
 
+#if defined(_M_X64)
+bool ModelViewer::EnterMap(PhysicsDemo::MapId map)
+{
+    // UI 콜백 밖에서 이전 프레임의 렌더 참조를 끝낸 뒤 지형을 교체한다.
+    g_CommandManager.IdleGPU();
+    m_MapError.clear();
+    if (!m_PhysicsDemo)
+    {
+        if (!m_World.InitializePhysics())
+        {
+            m_MapError = u8"물리 월드를 초기화하지 못했습니다. 다시 선택해 주세요.";
+            return false;
+        }
+        m_PhysicsDemo = std::make_unique<PhysicsDemo>(m_World);
+        if (!m_PhysicsDemo->Startup(map))
+        {
+            m_PhysicsDemo->Cleanup();
+            m_PhysicsDemo.reset();
+            m_MapError = u8"맵을 생성하지 못했습니다. 다시 선택해 주세요.";
+            return false;
+        }
+        LoadIBLTextures();
+        m_World.BeginPlay();
+        LoadAnimationPreview(m_ForceMapRebuild);
+        if (!m_PreviewReady)
+        {
+            m_MapError = m_PreviewError.empty() ? u8"캐릭터를 불러오지 못했습니다." : m_PreviewError;
+            m_MeshViewer.reset();
+            m_Comparison.reset();
+            m_ImpactTest.reset();
+            m_PreviewCharacter = {};
+            m_PlayerController = {};
+            m_SpringArm = nullptr;
+            m_World.Clear();
+            m_PhysicsDemo->Cleanup();
+            m_PhysicsDemo.reset();
+            m_PreviewMode = false;
+            return false;
+        }
+    }
+    else
+    {
+        PARS::Character* character = GetPreviewCharacter();
+        if (!character || !character->StopRagdoll(m_RagdollMessage))
+        {
+            m_MapError = u8"캐릭터 상태를 초기화하지 못했습니다. " + m_RagdollMessage;
+            return false;
+        }
+        if (!m_PhysicsDemo->LoadMap(map))
+        {
+            EnableActiveRagdoll(*character);
+            m_MapError = u8"새 맵을 생성하지 못했습니다. 기존 맵을 유지합니다.";
+            return false;
+        }
+        if (m_Comparison)
+        {
+            m_Comparison->ReturnToPlayer();
+            m_Comparison->Reset();
+        }
+        m_WasComparing = false;
+        if (m_ImpactTest && !m_ImpactTest->Reset())
+        {
+            m_MapError = m_ImpactTest->GetStatusMessage();
+            return false;
+        }
+        if (!ResetMapCharacter(true))
+        {
+            m_MapError = m_RagdollMessage;
+            return false;
+        }
+    }
+    if (m_MeshViewer)
+    {
+        m_MeshViewer->Close();
+    }
+    m_ControlYaw = XM_PI;
+    m_ControlPitch = .28f;
+    SetFreeCamera(false);
+    m_World.SetPhysicsPaused(false);
+    m_World.SetPhysicsTimeScale(1.0f);
+    ResetPreviewCamera();
+    m_MapSelectionVisible = false;
+    Utility::Printf("Map selected: %u\n", static_cast<uint32_t>(map));
+    return true;
+}
+
+bool ModelViewer::ResetMapCharacter(bool restoreActive)
+{
+    PARS::Character* character = GetPreviewCharacter();
+    if (!character || !m_PhysicsDemo || !character->StopRagdoll(m_RagdollMessage))
+    {
+        return false;
+    }
+    character->SetActorLocation(m_PhysicsDemo->GetSpawnLocation(character->GetCapsuleComponent().GetHalfHeight()));
+    character->GetCharacterMovement().StopMovementImmediately();
+    if (restoreActive)
+    {
+        if (PreviewAnimInstance* animation = GetPreviewAnimation())
+        {
+            animation->SetLocomotionEnabled(true);
+            animation->PlayAnimation(0);
+        }
+        EnableActiveRagdoll(*character);
+        if (!character->GetMesh().IsActiveRagdoll())
+        {
+            return false;
+        }
+    }
+    if (m_SpringArm)
+    {
+        m_SpringArm->ResetLagState();
+    }
+    return true;
+}
+
+void ModelViewer::DrawMapSelection()
+{
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(.055f, .075f, .11f, 1));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28, 28));
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoDocking;
+    if (ImGui::Begin("PARS Map Selection", nullptr, flags))
+    {
+        const float width = (std::min)(960.0f, ImGui::GetContentRegionAvail().x);
+        const float left = (std::max)(28.0f, (viewport->Size.x - width) * .5f);
+        ImGui::SetCursorPosX(left);
+        ImGui::BeginGroup();
+        ImGui::TextColored(ImVec4(.45f, .75f, .9f, 1), "PARS / PHYSICS PLAYGROUND");
+        ImGui::Dummy(ImVec2(0, 12));
+        ImGui::TextUnformatted(u8"어디에서 시작할까요?");
+        ImGui::TextDisabled(u8"맵을 클릭하면 입장합니다. 입장 후에도 상단 '맵' 메뉴에서 다시 선택할 수 있습니다.");
+        ImGui::Dummy(ImVec2(0, 22));
+        const int columns = width >= 640.0f ? 2 : 1;
+        if (ImGui::BeginTable("Map choices", columns, ImGuiTableFlags_SizingStretchSame, ImVec2(width, 0)))
+        {
+            for (uint32_t index = 0; index < static_cast<uint32_t>(PhysicsDemo::MapId::Count); ++index)
+            {
+                const PhysicsDemo::MapId map = static_cast<PhysicsDemo::MapId>(index);
+                ImGui::TableNextColumn();
+                ImGui::PushID(static_cast<int>(index));
+                const ImVec2 start = ImGui::GetCursorScreenPos();
+                const ImVec2 size(ImGui::GetContentRegionAvail().x, 166);
+                ImGui::BeginDisabled(m_PendingMap != PhysicsDemo::MapId::Count);
+                if (ImGui::InvisibleButton("Enter map", size))
+                {
+                    m_MapError.clear();
+                    m_PendingMap = map;
+                }
+                const bool hovered = ImGui::IsItemHovered();
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                const ImU32 accents[] =
+                {
+                    IM_COL32(103, 174, 211, 255), IM_COL32(118, 196, 166, 255),
+                    IM_COL32(202, 179, 110, 255), IM_COL32(224, 145, 110, 255)
+                };
+                draw->AddRectFilled(start, ImVec2(start.x + size.x, start.y + size.y),
+                    hovered ? IM_COL32(38, 57, 78, 255) : IM_COL32(25, 37, 53, 255), 10);
+                draw->AddRect(start, ImVec2(start.x + size.x, start.y + size.y),
+                    hovered ? accents[index] : IM_COL32(49, 65, 85, 255), 10);
+                draw->AddRectFilled(ImVec2(start.x + 18, start.y + 21),
+                    ImVec2(start.x + 22, start.y + 42), accents[index], 2);
+                draw->AddText(ImVec2(start.x + 34, start.y + 22), IM_COL32(237, 243, 250, 255),
+                    PhysicsDemo::GetMapName(map));
+                draw->AddText(nullptr, 0, ImVec2(start.x + 20, start.y + 62), IM_COL32(173, 190, 210, 255),
+                    PhysicsDemo::GetMapDescription(map), nullptr, size.x - 40);
+                draw->AddText(ImVec2(start.x + 20, start.y + 132), accents[index], u8"클릭하여 입장  >");
+                if (hovered)
+                {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                }
+                ImGui::EndDisabled();
+                ImGui::Dummy(ImVec2(0, 12));
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Dummy(ImVec2(0, 14));
+        if (m_PendingMap != PhysicsDemo::MapId::Count)
+        {
+            ImGui::Text(u8"%s 불러오는 중...", PhysicsDemo::GetMapName(m_PendingMap));
+        }
+        else if (!m_MapError.empty())
+        {
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+            ImGui::TextColored(ImVec4(1, .55f, .45f, 1), "%s", m_MapError.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        if (m_PhysicsDemo && m_PreviewReady)
+        {
+            ImGui::TextDisabled(u8"새 맵에 입장하면 캐릭터, 더미와 발사체가 초기화됩니다.");
+            if (ImGui::Button(u8"현재 맵으로 돌아가기", ImVec2(240, 36)))
+            {
+                m_MapSelectionVisible = false;
+                m_MapError.clear();
+            }
+        }
+        ImGui::EndGroup();
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+}
+#endif
+
 void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 {
     m_PreviewMode = true;
@@ -595,6 +852,10 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     const float halfHeight = character->GetCapsuleComponent().GetHalfHeight();
     character->SetActorLocation(Vector3(2.0f, halfHeight, 0.0f));
 #if defined(_M_X64)
+    if (m_PhysicsDemo)
+    {
+        character->SetActorLocation(m_PhysicsDemo->GetSpawnLocation(halfHeight));
+    }
     if (!m_PhysicsDemo)
 #endif
     {
@@ -955,6 +1216,24 @@ namespace Graphics
 
 void ModelViewer::Update(float deltaT)
 {
+#if defined(_M_X64)
+    if (m_PendingMap != PhysicsDemo::MapId::Count)
+    {
+        const PhysicsDemo::MapId requested = m_PendingMap;
+        m_PendingMap = PhysicsDemo::MapId::Count;
+        EnterMap(requested);
+        deltaT = 0.0f;
+    }
+    if (m_MapSelectionVisible)
+    {
+        m_IsAiming = false;
+        if (PARS::PlayerController* player = GetPlayerController())
+        {
+            player->SetInputEnabled(false);
+        }
+        return;
+    }
+#endif
     // deltaT는 이번 프레임의 경과 시간(초)이다. 이 Update 구간의 실행 시간을 프로파일러에 기록한다.
     ScopedTimer _prof(L"Update State");
     if (m_PendingSavedPA)
@@ -1398,6 +1677,11 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
 void ModelViewer::RenderUI(GraphicsContext& context)
 {
 #if defined(_M_X64)
+    if (m_MapSelectionVisible)
+    {
+        DrawMapSelection();
+        return;
+    }
     if (m_IsAiming)
     {
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1434,6 +1718,18 @@ void ModelViewer::RenderUI(GraphicsContext& context)
     {
         if (ImGui::BeginMainMenuBar())
         {
+#if defined(_M_X64)
+            if (m_PhysicsDemo && ImGui::BeginMenu(u8"맵"))
+            {
+                ImGui::TextDisabled("%s", PhysicsDemo::GetMapName(m_PhysicsDemo->GetMap()));
+                if (ImGui::MenuItem(u8"맵 선택 화면으로"))
+                {
+                    m_MapError.clear();
+                    m_MapSelectionVisible = true;
+                }
+                ImGui::EndMenu();
+            }
+#endif
             if (ImGui::BeginMenu(u8"창"))
             {
                 if (ImGui::MenuItem(u8"스켈레탈 메시 뷰어", nullptr, false, m_MeshViewer != nullptr))
@@ -1635,18 +1931,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 {
                     if (ImGui::Button(u8"캐릭터 초기화"))
                     {
-                        if (PARS::Character* character = GetPreviewCharacter())
-                        {
-                            if (character->StopRagdoll(m_RagdollMessage))
-                            {
-                                character->SetActorLocation(Vector3(2, 0.95f, 0));
-                                character->GetCharacterMovement().StopMovementImmediately();
-                                if (m_SpringArm)
-                                {
-                                    m_SpringArm->ResetLagState();
-                                }
-                            }
-                        }
+                        ResetMapCharacter();
                     }
                     ImGui::TextWrapped(m_FreeCamera ? u8"자유 카메라: WASD + Q/E 이동. Tab: 캐릭터 조작." : u8"캐릭터: WASD 이동, Shift 달리기. Tab: 자유 카메라.");
                     ImGui::TextWrapped(u8"우클릭 유지로 시점 이동·조준, 조준 중 좌클릭 또는 R로 구를 발사합니다. 애니메이션 버튼으로 수동 미리보기를 시작합니다.");
@@ -1734,6 +2019,16 @@ void ModelViewer::RenderUI(GraphicsContext& context)
 void ModelViewer::RenderScene(void)
 {
     GraphicsContext& gfxContext = GraphicsContext::Begin(L"Scene Render");
+#if defined(_M_X64)
+    if (m_MapSelectionVisible)
+    {
+        gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
+        float background[] = {.018f, .025f, .04f, 1.0f};
+        gfxContext.ClearColor(g_SceneColorBuffer, background);
+        gfxContext.Finish();
+        return;
+    }
+#endif
 
     uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
     const D3D12_VIEWPORT& viewport = m_MainViewport;

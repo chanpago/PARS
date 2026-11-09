@@ -286,25 +286,13 @@ PhysicsDemo::PhysicsDemo(PARS::World& world)
 {
 }
 
-bool PhysicsDemo::Startup()
+bool PhysicsDemo::Startup(MapId map)
 {
-    if (!m_World.IsInitialized())
+    if (!m_World.IsInitialized() || !LoadMap(map))
     {
         return false;
     }
-    m_Floor = m_World.CreateStaticBox(PxTransform(PxVec3(0, -0.25f, 0)), FloorHalfExtents, "Ground",
-        {.9f, .7f, 0.0f});
-    ResetBox();
-    for (size_t i = 0; i < _countof(m_Walls); ++i)
-    {
-        m_Walls[i] = m_World.CreateStaticBox(PxTransform(WallCentres[i]), WallExtents[i], "Wall");
-        if (!m_Walls[i])
-        {
-            Cleanup();
-            return false;
-        }
-    }
-    if (!m_Floor || !m_Box)
+    if (!m_Box)
     {
         Cleanup();
         return false;
@@ -346,24 +334,154 @@ void PhysicsDemo::Cleanup()
 {
     m_RulerMesh.Destroy();
     m_PvdConnecting = false;
+    ReleaseMap();
+}
+
+void PhysicsDemo::ReleaseMap()
+{
     if (m_Box)
     {
         m_Box->release();
     }
-    if (m_Floor)
+    for (const MapBox& box : m_MapBoxes)
     {
-        m_Floor->release();
+        box.body->release();
     }
-    for (physx::PxRigidStatic*& wall : m_Walls)
-    {
-        if (wall)
-        {
-            wall->release();
-        }
-        wall = nullptr;
-    }
+    m_MapBoxes.clear();
     m_Box = nullptr;
-    m_Floor = nullptr;
+}
+
+bool PhysicsDemo::AddMapBox(std::vector<MapBox>& boxes, const PxTransform& pose,
+    const PxVec3& halfExtents, const PxVec3& color, const char* name,
+    const PARS::PhysicsMaterialSettings& material)
+{
+    PxRigidStatic* body = m_World.CreateStaticBox(pose, halfExtents, name, material);
+    if (!body)
+    {
+        return false;
+    }
+    boxes.push_back({body, halfExtents, color});
+    return true;
+}
+
+bool PhysicsDemo::LoadMap(MapId map)
+{
+    if (!m_World.IsInitialized() || map >= MapId::Count)
+    {
+        return false;
+    }
+    // 새 지형을 모두 준비한 뒤 교체하여 생성 실패 시 기존 맵을 유지한다.
+    std::vector<MapBox> boxes;
+    const PxVec3 groundColor(.24f, .34f, .42f);
+    const PARS::PhysicsMaterialSettings groundMaterial{.9f, .7f, 0.0f};
+    bool ready = true;
+    if (map == MapId::Cliff)
+    {
+        ready = AddMapBox(boxes, PxTransform(PxVec3(0, -1, 0)), PxVec3(6, 1, 6),
+            PxVec3(.48f, .32f, .20f), "Cliff platform", groundMaterial);
+        ready = ready && AddMapBox(boxes, PxTransform(PxVec3(0, -6.25f, 0)), PxVec3(30, .25f, 30),
+            groundColor, "Lower ground", groundMaterial);
+    }
+    else
+    {
+        ready = AddMapBox(boxes, PxTransform(PxVec3(0, -.25f, 0)), FloorHalfExtents,
+            groundColor, "Ground", groundMaterial);
+    }
+    // 기존 테스트장은 바닥, 낙하 상자, 벽의 생성 순서까지 유지한다.
+    PxRigidDynamic* dropBox = ready
+        ? m_World.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), BoxHalfExtents, 10.0f, "Falling box")
+        : nullptr;
+    ready = ready && dropBox != nullptr;
+    if (dropBox)
+    {
+        dropBox->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+    }
+    if (map == MapId::TestYard)
+    {
+        for (size_t index = 0; index < _countof(WallCentres) && ready; ++index)
+        {
+            ready = AddMapBox(boxes, PxTransform(WallCentres[index]), WallExtents[index],
+                PxVec3(.35f, .47f, .5f), "Wall");
+        }
+    }
+    else if (map == MapId::Stairs)
+    {
+        for (uint32_t step = 0; step < 8 && ready; ++step)
+        {
+            const float height = .18f * static_cast<float>(step + 1);
+            ready = AddMapBox(boxes, PxTransform(PxVec3(-3, height * .5f, -3 - .6f * step)),
+                PxVec3(1.4f, height * .5f, .3f), PxVec3(.30f, .49f, .62f), "Step", groundMaterial);
+        }
+        const float angle = std::atan2(1.44f, 6.0f);
+        const float length = std::sqrt(3.0f * 3.0f + .72f * .72f);
+        ready = ready && AddMapBox(boxes,
+            PxTransform(PxVec3(3, .72f - .15f * std::cos(angle), -5.8f), PxQuat(angle, PxVec3(1, 0, 0))),
+            PxVec3(1.4f, .15f, length), PxVec3(.55f, .43f, .22f), "Ramp", groundMaterial);
+        ready = ready && AddMapBox(boxes, PxTransform(PxVec3(-3, .72f, -8.5f)),
+            PxVec3(1.4f, .72f, 1), PxVec3(.30f, .49f, .62f), "Stair landing", groundMaterial);
+        ready = ready && AddMapBox(boxes, PxTransform(PxVec3(3, .72f, -9.7f)),
+            PxVec3(1.4f, .72f, 1), PxVec3(.55f, .43f, .22f), "Ramp landing", groundMaterial);
+    }
+    if (!ready)
+    {
+        if (dropBox)
+        {
+            dropBox->release();
+        }
+        for (const MapBox& box : boxes)
+        {
+            box.body->release();
+        }
+        return false;
+    }
+    ReleaseMap();
+    m_MapBoxes = std::move(boxes);
+    m_Map = map;
+    m_Box = dropBox;
+    m_DropReady = true;
+    m_HistoryCount = 0;
+    m_HistoryOffset = 0;
+    RecordHeight();
+    return true;
+}
+
+const char* PhysicsDemo::GetMapName(MapId map)
+{
+    switch (map)
+    {
+    case MapId::TestYard:
+        return u8"기존 테스트장";
+    case MapId::Flat:
+        return u8"평지";
+    case MapId::Stairs:
+        return u8"계단 · 경사로";
+    case MapId::Cliff:
+        return u8"절벽 낙하장";
+    default:
+        return u8"맵 선택";
+    }
+}
+
+const char* PhysicsDemo::GetMapDescription(MapId map)
+{
+    switch (map)
+    {
+    case MapId::TestYard:
+        return u8"외곽 벽과 장애물이 있는 기존 공간.\n더미 충격과 균형 복구를 확인합니다.";
+    case MapId::Flat:
+        return u8"장애물이 없는 넓은 바닥.\n기본 이동과 발 디딤을 확인합니다.";
+    case MapId::Stairs:
+        return u8"왼쪽은 계단, 오른쪽은 경사로.\n높이가 달라지는 지형을 이동합니다.";
+    case MapId::Cliff:
+        return u8"아래 바닥까지 6m 높이의 발판.\n가장자리에서의 지지 상실과 낙하를 확인합니다.";
+    default:
+        return "";
+    }
+}
+
+Math::Vector3 PhysicsDemo::GetSpawnLocation(float halfHeight) const
+{
+    return Math::Vector3(2, halfHeight, m_Map == MapId::Cliff ? 2.0f : 0.0f);
 }
 
 void PhysicsDemo::ResetBox()
@@ -574,31 +692,27 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
     context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
 
     // fetchResults() 이후 PhysX의 실제 위치와 회전을 모두 복사한다.
-    alignas(16) Vertex vertices[36 * 7];
-    Vertex* output = vertices;
+    std::vector<Vertex> vertices(36 * (m_MapBoxes.size() + 1));
+    Vertex* output = vertices.data();
     if (comparisonScene)
     {
         AppendBox(output, PxTransform(PxVec3(0, -.5f, 0)), PxVec3(250, .5f, 250), PxVec3(.24f, .34f, .42f));
     }
-    else if (m_Floor)
+    else
     {
-        AppendBox(output, m_Floor->getGlobalPose(), FloorHalfExtents, PxVec3(0.24f, 0.34f, 0.42f));
+        for (const MapBox& box : m_MapBoxes)
+        {
+            AppendBox(output, box.body->getGlobalPose(), box.halfExtents, box.color);
+        }
     }
     if (m_Box && !comparisonScene)
     {
         AppendBox(output, m_Box->getGlobalPose(), BoxHalfExtents, PxVec3(1.0f, 0.38f, 0.06f));
     }
-    for (size_t i = 0; i < _countof(m_Walls); ++i)
-    {
-        if (m_Walls[i] && !comparisonScene)
-        {
-            AppendBox(output, m_Walls[i]->getGlobalPose(), WallExtents[i], PxVec3(.35f, .47f, .5f));
-        }
-    }
-    const UINT count = static_cast<UINT>(output - vertices);
+    const UINT count = static_cast<UINT>(output - vertices.data());
     if (count)
     {
-        context.SetDynamicVB(0, count, sizeof(Vertex), vertices);
+        context.SetDynamicVB(0, count, sizeof(Vertex), vertices.data());
         context.Draw(count);
     }
 }
