@@ -57,17 +57,20 @@ namespace
             return result;
         }
         PxVec3 normal = stance.normal;
-        if (!normal.isFinite() || normal.normalize() < 1e-6f || normal.y < .70710678f)
+        if (!stance.contactPosition.isFinite() || !normal.isFinite() ||
+            normal.normalize() < 1e-6f || normal.y < .70710678f)
         {
             return result;
         }
 
-        // 지지발 높이의 수평면을 거친 뒤 접촉 법선 평면에 투영한다.
-        // COM의 높이를 발 목표 높이로 쓰거나 후보 위치에서 새 레이를 쏘지 않는다.
+        // 기울어진 지지발 중심의 높이를 지면 높이로 쓰지 않는다.
+        // 중심의 수평 위치는 유지하고 실제 접촉 위치와 법선으로 착지면의 기준 높이를 구한다.
+        PxVec3 stanceOnGround = stance.position;
+        stanceOnGround.y -= normal.dot(stance.position - stance.contactPosition) / normal.y;
         result.raw = PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime,
-            stance.position.y, input.com.z + input.velocity.z * settings.landingPredictionTime);
+            stanceOnGround.y, input.com.z + input.velocity.z * settings.landingPredictionTime);
         result.raw += PxVec3(foot.stanceOffset.x, 0, foot.stanceOffset.z) * settings.stanceScale;
-        PxVec3 delta = result.raw - stance.position;
+        PxVec3 delta = result.raw - stanceOnGround;
         delta -= normal * delta.dot(normal);
         const float distance = delta.magnitude();
         if (!result.raw.isFinite() || !std::isfinite(distance))
@@ -114,7 +117,7 @@ namespace
                 result.crossingLimited = true;
             }
         }
-        result.position = stance.position + delta;
+        result.position = stanceOnGround + delta;
         result.normal = normal;
         result.travelDistance = HorizontalDistance(foot.position, result.position);
         result.stanceDistance = delta.magnitude();

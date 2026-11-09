@@ -399,6 +399,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.hasContactSample = foot.contact.hasSample;
         target.grounded = foot.contact.grounded;
         target.position = ToPx(Vector3(foot.soleWorld.GetW()));
+        target.contactPosition = foot.contact.position;
         target.normal = foot.contact.normal;
         target.normalImpulse = foot.contact.normalImpulse;
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;

@@ -66,6 +66,7 @@ namespace
             foot.available = foot.hasContactSample = foot.grounded = true;
             const float x = side == 0 ? -.12f : .12f;
             foot.position = PxVec3(x, .4f, 0);
+            foot.contactPosition = foot.position;
             foot.normal = PxVec3(0, 1, 0);
             foot.stanceOffset = PxVec3(x, 0, 0);
             foot.calfLength = .45f;
@@ -448,8 +449,8 @@ namespace
         input.feet[0].normal = PxVec3(0, .8f, .6f);
         planner.Update(input, settings);
         const PARS::FootstepTarget slope = planner.GetSnapshot().candidates[1];
-        Check(slope.valid && std::abs((slope.position - input.feet[0].position).dot(input.feet[0].normal)) < 1e-5f,
-            "Landing lies on the actual stance-normal plane through the stance sole");
+        Check(slope.valid && std::abs((slope.position - input.feet[0].contactPosition).dot(input.feet[0].normal)) < 1e-5f,
+            "Landing lies on the actual ground-contact plane");
         input.feet[0].normal = PxVec3(1, 0, 0);
         ++input.completedStep;
         planner.Update(input, settings);
@@ -484,6 +485,69 @@ namespace
         planner.Update(input, settings);
         Check(!planner.GetSnapshot().hasTarget && planner.GetSnapshot().reason == FootstepReason::InvalidSettings,
             "Invalid settings clear output rather than retaining a stale target");
+    }
+
+    void TestLandingContactPlane()
+    {
+        FootstepPlanner planner;
+        const FootstepSettings settings = TestSettings();
+        FootstepInput input = Standing();
+        planner.Update(input, settings);
+        const PxVec3 flatTarget = planner.GetSnapshot().target;
+
+        // 뒤꿈치 접촉은 그대로 두고 지지발 중심과 이동발의 실제 시작 위치만 올린다.
+        planner.Reset();
+        input.feet[0].position.y += .08f;
+        input.feet[0].contactPosition.z -= .1f;
+        input.feet[1].position.y += .06f;
+        input.feet[1].grounded = false;
+        planner.Update(input, settings);
+        const FootstepSnapshot started = planner.GetSnapshot();
+        Check(started.justStarted && started.hasTarget &&
+                (started.target - flatTarget).magnitude() < 1e-5f,
+            "A raised stance sole and heel-only contact do not raise or shift the landing target");
+        Check((started.startPosition - input.feet[1].position).magnitude() < 1e-5f &&
+                (started.motion.position - input.feet[1].position).magnitude() < 1e-5f,
+            "Ground-plane correction preserves the actual swing-foot start position");
+        input.feet[0].position.y += .04f;
+        Advance(planner, input, settings, 1);
+        Check((planner.GetSnapshot().target - flatTarget).magnitude() < 1e-5f,
+            "Retargeting remains on the contact plane as the stance sole tilts further");
+        Advance(planner, input, settings, 17);
+        Check(Near(planner.GetSnapshot().motion.position.y, .4f) &&
+                planner.GetSnapshot().phase == FootstepPhase::Airborne,
+            "The timed swing reaches ground height and still requires actual landing contact");
+
+        input.feet[0].contactPosition.y += .03f;
+        Advance(planner, input, settings, 1);
+        Check(Near(planner.GetSnapshot().target.y, .43f),
+            "The landing plane follows measured ground-height changes");
+
+        // 경사면에서는 접촉점의 Y만 복사하지 않고 접촉점과 법선이 만드는 평면을 사용한다.
+        planner.Reset();
+        input = Standing();
+        input.feet[0].normal = PxVec3(0, .8f, .6f);
+        input.feet[0].contactPosition += PxVec3(.03f, 0, -.1f);
+        input.feet[0].position.y += .08f;
+        planner.Update(input, settings);
+        const PxVec3 slopeTarget = planner.GetSnapshot().target;
+        Check(planner.GetSnapshot().hasTarget &&
+                std::abs((slopeTarget - input.feet[0].contactPosition).dot(input.feet[0].normal)) < 1e-5f,
+            "A lifted sole on a slope targets the measured contact plane");
+        input.feet[0].contactPosition += PxVec3(.05f, -.06f, .08f);
+        Advance(planner, input, settings, 1);
+        Check((planner.GetSnapshot().target - slopeTarget).magnitude() < 1e-5f,
+            "Contact-point movement within the same plane does not move the landing target");
+
+        input.feet[0].contactPosition.x = std::numeric_limits<float>::quiet_NaN();
+        Advance(planner, input, settings, 1);
+        Check(!planner.GetSnapshot().hasTarget && planner.GetSnapshot().reason == FootstepReason::InvalidTarget,
+            "A nonfinite contact position cannot create a landing plane");
+        input.feet[0].contactPosition = PxVec3(-.12f, .4f, 0);
+        input.feet[0].grounded = false;
+        Advance(planner, input, settings, 1);
+        Check(!planner.GetSnapshot().hasTarget && planner.GetSnapshot().reason == FootstepReason::NoStanceContact,
+            "A stale contact point does not substitute for actual stance contact");
     }
 
     void TestMotionHeightAndProgress()
@@ -802,6 +866,7 @@ void TestFootstepPlanner()
     TestFootRolesFollowCommittedStep();
     TestAbortAndInvalidInputs();
     TestTargetGeometry();
+    TestLandingContactPlane();
     TestMotionHeightAndProgress();
     TestMotionLimitsAndRetargeting();
     TestSupportTransfer();

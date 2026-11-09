@@ -62,7 +62,9 @@ namespace PARS
     struct FootstepFootInput
     {
     public:
+        // 실제 발바닥 중심은 이동 궤적에, 접촉 위치는 착지면 계산에 사용한다.
         physx::PxVec3 position{0};
+        physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
         float calfLength = 0;
