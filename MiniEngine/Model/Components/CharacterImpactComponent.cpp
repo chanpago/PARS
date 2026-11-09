@@ -32,13 +32,16 @@ namespace PARS
     {
         Character& character = static_cast<Character&>(GetOwner());
         Ragdoll& ragdoll = character.GetMesh().GetRagdoll();
+        const bool controlled = character.GetController() != nullptr;
         // 컨트롤러가 있는 캐릭터에는 PA와 독립된 동적 충돌 캡슐을 만든다.
         ragdoll.SetCharacterImpactEnabled(m_Settings.enabled &&
-            (ragdoll.IsSimulating() || character.GetMesh().UsesAutomaticRagdoll()),
+            (controlled || ragdoll.IsSimulating() || character.GetMesh().UsesAutomaticRagdoll()),
             static_cast<uint32_t>(character.GetHandle().id));
-        const bool enabled = ragdoll.IsSimulating() && ragdoll.UsesCharacterImpact() && character.GetController() != nullptr;
+        const bool enabled = ragdoll.UsesCharacterImpact() && controlled;
         ragdoll.ConfigureCharacterCapsule(enabled, m_Settings.collisionMass, m_Settings.capsuleRadiusScale,
             m_Settings.contactSkin, m_PhysicsError, m_Settings.capsuleHeightScale);
+        // 키네마틱 본체가 이동 쿼리의 겹침 해소로 밀리지 않도록 캐릭터 접촉은 몸통 캡슐에 맡긴다.
+        character.GetCapsuleComponent().SetCharacterBlockingEnabled(ragdoll.IsSimulating() || !ragdoll.HasCharacterCapsule());
     }
 
     void CharacterImpactComponent::BeginFixedStep(float deltaTime)

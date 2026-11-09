@@ -145,6 +145,105 @@ namespace
         return targetVelocity;
     }
 
+    void TestKinematicCapsule(PhysicsWorld& service)
+    {
+        PhysicsWorld world;
+        CheckImpact(world.InitializeScene(service), "Initialize kinematic capsule contact scene");
+        PhysicsAsset asset;
+        PhysicsBody root;
+        root.bone = "Hips";
+        root.shape = PhysicsShapeType::Box;
+        root.halfExtents = DirectX::XMFLOAT3(.1f, .3f, .1f);
+        root.mass = 2;
+        root.material.restitution = 0;
+        root.material.staticFriction = 0;
+        root.material.dynamicFriction = 0;
+        asset.bodies.push_back(root);
+        const std::vector<std::string> names{"Hips"};
+        std::vector<Matrix4> poses{Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 3, 0)))};
+        Ragdoll source;
+        std::string error;
+        int sourceOwner = 1;
+        int targetOwner = 2;
+        CheckImpact(source.Create(world, asset, names, poses, Vector3(kZero), error, false), "Create kinematic PA source");
+        source.SetQueryOwner(&sourceOwner);
+        source.SetCharacterImpactEnabled(true, 101);
+        CheckImpact(source.ConfigureCharacterCapsule(true, 30, 1.15f, .02f, error, 1.14f),
+            "Kinematic player accepts the same collision mass and size settings as ragdoll");
+        std::printf("kinematic setup bodies=%zu capsule_mass=%.9f PA_mass=%.9f\n",
+            source.GetKinematicBodyCount(), source.GetCharacterCapsuleMass(), source.GetImpactRootMass());
+        CheckImpact(source.GetKinematicBodyCount() == 1 && std::abs(source.GetCharacterCapsuleMass() - 30) < .0001f &&
+            std::abs(source.GetImpactRootMass() - 2) < .00001f,
+            "Thirty-kg capsule preserves the kinematic PA and its original mass");
+        PxTransform capsulePose(PxIdentity);
+        PxVec3 targetOffset(0);
+        float radius = 0;
+        float halfLength = 0;
+        CheckImpact(source.GetCharacterImpactCapsule(1.15f, capsulePose, radius, halfLength, targetOffset, 1.14f) &&
+            std::abs(radius - .115f) < 1e-5f && std::abs(radius + halfLength - .342f) < 1e-5f,
+            "Kinematic debug geometry matches the configured simulation dimensions");
+        PxRigidDynamic* target = world.CreateDynamicBody(PxTransform(PxVec3(.28f, 3, 0)), PxSphereGeometry(.1f),
+            5, "Kinematic capsule receiver", root.material);
+        CheckImpact(target != nullptr, "Create dynamic capsule receiver");
+        target->userData = &targetOwner;
+        target->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+        PxShape* targetShape = nullptr;
+        target->getShapes(&targetShape, 1);
+        PxFilterData filter;
+        filter.word2 = 102;
+        filter.word3 = PhysicsWorld::CharacterImpactFilterFlag | PhysicsWorld::CharacterImpactTargetFilterFlag;
+        targetShape->setSimulationFilterData(filter);
+        float measuredImpulse = 0;
+        for (int step = 0; step < 12; ++step)
+        {
+            const Vector3 destination((step + 1) * .04f, 3, 0);
+            poses[0] = Matrix4(OrthogonalTransform(Quaternion(Vector3(kYUnitVector), (step + 1) * .02f), destination));
+            CheckImpact(source.UpdateKinematicPose(poses, false, error), "Update animation position and rotation targets");
+            source.SyncCharacterCapsule();
+            world.Step();
+            if (step == 0)
+            {
+                const PxQuat expectedRotation = PxQuat(.02f, PxVec3(0, 1, 0)) * PxQuat(PxHalfPi, PxVec3(0, 0, 1));
+                CheckImpact(source.GetCharacterImpactCapsule(1.15f, capsulePose, radius, halfLength, targetOffset, 1.14f) &&
+                    (capsulePose.p - PxVec3(.04f, 3, 0)).magnitude() < .0001f &&
+                    PxAbs(capsulePose.q.dot(expectedRotation)) > .999999f,
+                    "Capsule translation and rotation use the current target without a one-step delay");
+            }
+            CheckImpact(float(Length(source.GetPosition() - destination)) < 1e-5f && source.GetKinematicBodyCount() == 1,
+                "Real solver contact never displaces the kinematic player from its animation target");
+            std::vector<PhysicsCapsuleContact> contacts;
+            source.GetCharacterCapsuleContacts(contacts);
+            for (const PhysicsCapsuleContact& contact : contacts)
+            {
+                measuredImpulse += contact.normalImpulse;
+            }
+        }
+        CheckImpact(measuredImpulse > 1 && target->getLinearVelocity().x > .5f,
+            "Current-step animation motion drives actual finite-mass capsule contacts");
+        std::printf("kinematic capsule mass=30 receiver_vx=%.6f measured_J=%.6f player_target_error=%.9f\n",
+            target->getLinearVelocity().x, measuredImpulse, float(Length(source.GetPosition() - Vector3(.48f, 3, 0))));
+        const Vector3 teleport(5, 4, 2);
+        poses[0] = Matrix4(OrthogonalTransform(Quaternion(kIdentity), teleport));
+        CheckImpact(source.UpdateKinematicPose(poses, true, error) &&
+            source.GetCharacterImpactCapsule(1.15f, capsulePose, radius, halfLength, targetOffset, 1.14f) &&
+            (capsulePose.p - PxVec3(5, 4, 2)).magnitude() < 1e-5f,
+            "Paused teleport immediately moves the physical capsule and debug outline");
+        source.SyncCharacterCapsule();
+        world.Step();
+        CheckImpact(source.GetCharacterImpactCapsule(1.15f, capsulePose, radius, halfLength, targetOffset, 1.14f) &&
+            (capsulePose.p - PxVec3(5, 4, 2)).magnitude() < 1e-5f,
+            "Teleport does not leave stale capsule velocity");
+        CheckImpact(source.ConfigureCharacterCapsule(true, 45, 1.4f, .02f, error, 1.6f) &&
+            source.GetCharacterImpactCapsule(1.4f, capsulePose, radius, halfLength, targetOffset, 1.6f) &&
+            source.GetCharacterCapsuleMass() == 45 && std::abs(radius - .14f) < 1e-5f &&
+            std::abs(radius + halfLength - .48f) < 1e-5f,
+            "Kinematic mass and size edits update the existing shared settings path");
+        CheckImpact(source.ConfigureCharacterCapsule(false, 45, 1.4f, .02f, error, 1.6f) && !source.HasCharacterCapsule(),
+            "Kinematic capsule can be removed without enabling simulation");
+        CheckImpact(world.GetErrorCount() == 0 && source.IsFinite(), "Kinematic capsule has finite state and no PhysX errors");
+        target->release();
+    }
+
     void CheckCapsuleMassProperties(const Ragdoll& ragdoll, const PxRigidBody& rootBody,
         const PxVec3& inertia, const PxTransform& localCenter, Vector3 center, float mass)
     {
@@ -423,5 +522,6 @@ void RunCharacterImpactTests()
     SolveCapsuleContact(world, 5, false);
     CheckImpact(SolveCapsuleContact(world, 2, true, false) > .5f,
         "Characters without an active capsule retain their ordinary PA-to-PA collision response");
+    TestKinematicCapsule(world);
     std::puts("PASS: independent capsule mass, actual solver contacts, isolated recoil, PA mass/COM/inertia and repeated on/off");
 }

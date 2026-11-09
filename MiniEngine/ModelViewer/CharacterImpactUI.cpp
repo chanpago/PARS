@@ -102,6 +102,7 @@ void RagdollImpactTest::DrawBodyImpactUI(PARS::Character* player)
     PARS::CharacterImpactSettings settings = component.GetSettings();
     ImGui::Checkbox(u8"몸통 충돌 캡슐 표시", &m_BodyImpactCapsuleVisible);
     ImGui::TextWrapped("%s", u8"청록색 윤곽: 몸통을 따라가는 독립 동적 충돌 캡슐.");
+    ImGui::TextWrapped("%s", u8"키네마틱과 래그돌에서 같은 질량·크기 설정을 사용합니다. 키네마틱 플레이어는 충돌 반작용으로 밀려나지 않습니다.");
     bool changed = ImGui::Checkbox(u8"몸통 캡슐 충돌 사용", &settings.enabled);
     changed |= ImGui::InputFloat(u8"충돌용 캡슐 질량 (kg)", &settings.collisionMass, 1, 10, "%.3f");
     ImGui::TextWrapped("%s", u8"이 질량은 상대 상체와의 충돌에 사용하며, 본인 캐릭터의 총무게와 PD에는 포함하지 않습니다.");

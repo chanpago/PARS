@@ -97,6 +97,7 @@ namespace PARS
         m_Capsule->SetHorizontalBlockingEnabled(true);
         m_Movement->StopMovementImmediately();
         m_Movement->SetTickEnabled(m_MovementWasEnabled);
+        m_Impact->RefreshCollisionPolicy();
         error.clear();
         return true;
     }

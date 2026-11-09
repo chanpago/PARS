@@ -83,6 +83,15 @@ namespace PARS
         {
             return m_HorizontalBlockingEnabled;
         }
+        // 몸통 충돌을 별도 처리할 때도 환경의 벽·바닥 차단은 유지한다.
+        void SetCharacterBlockingEnabled(bool enabled)
+        {
+            m_CharacterBlockingEnabled = enabled;
+        }
+        bool IsCharacterBlockingEnabled() const
+        {
+            return m_CharacterBlockingEnabled;
+        }
         Math::BoundingSphere GetLocalBounds() const override
         {
             return Math::BoundingSphere(Math::Vector3(Math::kZero), m_HalfHeight);
@@ -95,5 +104,6 @@ namespace PARS
         float m_HalfHeight = 0.9f;
         bool m_PhysicsEnabled = true;
         bool m_HorizontalBlockingEnabled = true;
+        bool m_CharacterBlockingEnabled = true;
     };
 }

@@ -549,6 +549,7 @@ namespace PARS
             }
             poses.push_back(pose);
         }
+        bool poseChanged = false;
         if (teleport)
         {
             for (size_t i = 0; i < poses.size(); ++i)
@@ -556,6 +557,7 @@ namespace PARS
                 const PxTransform current = m_Bodies[i]->getGlobalPose();
                 if ((poses[i].p - current.p).magnitudeSquared() > 1e-8f || PxAbs(poses[i].q.dot(current.q)) < .999999f)
                 {
+                    poseChanged = true;
                     InvalidateContactState();
                     break;
                 }
@@ -602,6 +604,11 @@ namespace PARS
         for (size_t i = 0; i < poses.size(); ++i)
         {
             m_LastKinematicTargets[i] = FromPx(poses[i]);
+        }
+        if (poseChanged)
+        {
+            // 일시정지 중 순간이동에도 몸통 캡슐과 디버그 윤곽이 즉시 따라간다.
+            SyncCharacterCapsule();
         }
         error.clear();
         return true;

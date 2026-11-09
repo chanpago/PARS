@@ -117,7 +117,7 @@ public:
         float radius, float halfHeight);
     void DestroyQueryCapsule(PhysicsQueryCapsule* capsule);
     CapsuleMoveResult MoveQueryCapsule(PhysicsQueryCapsule& capsule, const physx::PxVec3& displacement,
-        bool blockHorizontal = true);
+        bool blockHorizontal = true, bool blockCharacters = true);
     // 수신 정책이 켜진 캐릭터 PA만 수집한다. 여러 바디와 초기 겹침도 누락하지 않는다.
     void SweepCharacterCapsule(const physx::PxTransform& pose, float radius, float halfLength,
         const physx::PxVec3& displacement, const void* ignoredOwner, std::vector<PhysicsCapsuleHit>& hits) const;

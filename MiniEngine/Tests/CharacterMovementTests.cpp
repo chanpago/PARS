@@ -263,6 +263,42 @@ namespace
         std::puts("PASS: movement queries exclude only their own PA, preserving foreign and untagged collision");
     }
 
+    void TestIndependentCharacterCollision()
+    {
+        Fixture fixture;
+        PhysicsWorld* physics = fixture.world.GetPhysicsWorld();
+        CapsuleComponent& capsule = *fixture.character->capsule;
+        const Vector3 origin = fixture.character->GetActorLocation();
+        PxRigidDynamic* other = physics->CreateDynamicBody(PxTransform(PxVec3(.2f, 1, 0)),
+            PxBoxGeometry(.3f, .6f, .3f), 10, "Other character PA");
+        Check(other != nullptr, "Create overlapping character PA for movement policy test");
+        PxShape* shape = nullptr;
+        other->getShapes(&shape, 1);
+        PxFilterData filter;
+        filter.word3 = PhysicsWorld::CharacterImpactFilterFlag;
+        shape->setSimulationFilterData(filter);
+        capsule.SetCharacterBlockingEnabled(false);
+        capsule.Move(Vector3(kZero), 1.0f / 60);
+        Check(float(Length(fixture.character->GetActorLocation() - origin)) < .001f,
+            "An overlapping character cannot depenetrate a player using an independent body capsule");
+        capsule.SetCharacterBlockingEnabled(true);
+        capsule.Move(Vector3(kZero), 1.0f / 60);
+        Check(float(Length(fixture.character->GetActorLocation() - origin)) > .1f,
+            "Disabling the independent capsule can restore ordinary character overlap handling");
+        fixture.character->SetActorLocation(origin);
+        capsule.SetCharacterBlockingEnabled(false);
+        PhysicsQueryCapsule* otherCapsule = physics->CreateQueryCapsule(PxVec3(0, .92f, 1), .3f, .9f);
+        Check(otherCapsule != nullptr && physics->CreateStaticBox(PxTransform(PxVec3(0, 1, 2)),
+            PxVec3(5, 1, .25f), "Environment wall") != nullptr, "Create another movement capsule and an environment wall");
+        Check(capsule.Move(Vector3(0, 0, 5), 1.0f / 60).wall &&
+            Near(float(fixture.character->GetActorLocation().GetZ()), 1.43f, .01f) &&
+            Near(float(fixture.character->GetActorLocation().GetY()), .92f, .001f),
+            "Independent character collisions preserve the original environment wall radius and floor contact");
+        physics->DestroyQueryCapsule(otherCapsule);
+        other->release();
+        std::puts("PASS: independent character collision policy, no depenetration recoil, original wall and ground queries");
+    }
+
     void TestHorizontalBlockingDisabled()
     {
         Fixture f;
@@ -375,6 +411,7 @@ void RunCharacterMovementTests()
     TestCollisionAndLifetime();
     TestQueryCapsules();
     TestMovementQueryOwners();
+    TestIndependentCharacterCollision();
     TestHorizontalBlockingDisabled();
     TestPoseBlending();
     TestSkeletonHierarchy();

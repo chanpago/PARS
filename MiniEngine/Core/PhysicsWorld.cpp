@@ -792,7 +792,8 @@ namespace
             const PxRigidActor* actor, PxHitFlags&) override
         {
             return shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ||
-                    (ignoredOwner && actor->userData == ignoredOwner)
+                    (ignoredOwner && actor->userData == ignoredOwner) ||
+                    (ignoreCharacters && (shape->getSimulationFilterData().word3 & PhysicsWorld::CharacterImpactFilterFlag))
                 ? PxQueryHitType::eNONE
                 : PxQueryHitType::eBLOCK;
         }
@@ -810,6 +811,7 @@ namespace
         const void* ignoredOwner;
         PxVec3 direction{0};
         bool verticalOnly = false;
+        bool ignoreCharacters = false;
     };
 
     // 로컬 버퍼 용량보다 충돌 결과가 많은 씬에서도 모든 겹침을 처리한다.
@@ -920,7 +922,7 @@ bool PhysicsWorld::Raycast(const PxVec3& origin, const PxVec3& displacement,
 }
 
 PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsule& capsule, const PxVec3& displacement,
-    bool blockHorizontal)
+    bool blockHorizontal, bool blockCharacters)
 {
     CapsuleMoveResult result;
     if (!m_Scene || !capsule.centre.isFinite() || !displacement.isFinite())
@@ -929,6 +931,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
     }
     OwnerQueryFilter filter(capsule.owner);
     filter.verticalOnly = !blockHorizontal;
+    filter.ignoreCharacters = !blockCharacters;
     if (!blockHorizontal)
     {
         // 수평 입력은 그대로 적용하고, 새 위치에서 지면/천장과의 수직 충돌만 해결한다.
@@ -942,7 +945,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
             PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER | PxQueryFlag::eNO_BLOCK), &filter);
         for (const std::unique_ptr<PhysicsQueryCapsule>& other : m_QueryCapsules)
         {
-            if (blockHorizontal && other.get() != &capsule)
+            if (blockHorizontal && blockCharacters && other.get() != &capsule)
             {
                 overlaps.Consider(CapsuleGeometry(*other), CapsulePose(other->centre));
             }
@@ -984,7 +987,7 @@ PhysicsWorld::CapsuleMoveResult PhysicsWorld::MoveQueryCapsule(PhysicsQueryCapsu
         // 다른 캐릭터도 프록시 바디를 등록하지 않고 쿼리 형상으로만 처리한다.
         for (const std::unique_ptr<PhysicsQueryCapsule>& other : m_QueryCapsules)
         {
-            if (!blockHorizontal || other.get() == &capsule)
+            if (!blockHorizontal || !blockCharacters || other.get() == &capsule)
             {
                 continue;
             }

@@ -219,6 +219,13 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     std::ofstream samples(path + L".csv");
     std::ofstream events(path + L".events.csv");
     std::ofstream states(path + L".states.csv");
+    std::ofstream capsules(path + L".capsules.csv");
+    uint32_t kinematicPlayer = 0;
+    uint32_t modeCycles = 0;
+    uint32_t incoming = 0;
+    CommandLineArgs::GetInteger(L"bodyimpactkinematic", kinematicPlayer);
+    CommandLineArgs::GetInteger(L"bodyimpactmodes", modeCycles);
+    CommandLineArgs::GetInteger(L"bodyimpactincoming", incoming);
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -252,8 +259,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         animation.SetLocomotionEnabled(true);
         animation.PlayAnimation(0);
         world.Tick(0);
-        check(player.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
-            player.GetMesh().GetRagdoll().SetRootSupported(true, error), "Enable original supported player");
+        if (!kinematicPlayer)
+        {
+            check(player.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
+                player.GetMesh().GetRagdoll().SetRootSupported(true, error), "Enable original supported player");
+        }
         CharacterImpactSettings impactSettings = player.GetCharacterImpact().GetSettings();
         CommandLineArgs::GetFloat(L"bodyimpactmass", impactSettings.collisionMass);
         CommandLineArgs::GetFloat(L"bodyimpactradius", impactSettings.capsuleRadiusScale);
@@ -278,9 +288,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
         events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
         states << "frame,mode,blending,zone,stable_time,step_count,impact\n";
+        capsules << "frame,time,mode,root_x,root_y,root_z,present,mass,radius,half_length,x,y,z,cyan_lines\n";
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
-            << " dummy_auto_support=" << dummy->GetMesh().UsesAutomaticRootSupport() << std::endl;
+            << " dummy_auto_support=" << dummy->GetMesh().UsesAutomaticRootSupport()
+            << " kinematic_player=" << kinematicPlayer << " mode_cycles=" << modeCycles << " incoming=" << incoming << std::endl;
         report << "pa_root_mass_kg=" << player.GetMesh().GetRagdoll().GetImpactRootMass()
             << " pa_total_mass_kg=" << expectedTotalMass << " capsule_collision_mass_kg=" << impactSettings.collisionMass
             << " capsule_added_pa_mass_kg=0 capsule_enabled=" << impactSettings.enabled
@@ -290,6 +302,12 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         uint64_t eventCount = 0;
         for (uint32_t frame = 0; frame < frames; ++frame)
         {
+            if (modeCycles && frame % 60 == 0)
+            {
+                const PhysicsAnimationMode mode = frame / 60 % 3 == 0 ? PhysicsAnimationMode::Animation :
+                    frame / 60 % 3 == 1 ? PhysicsAnimationMode::ActiveRagdoll : PhysicsAnimationMode::PassiveRagdoll;
+                check(player.SetPhysicsMode(mode, error), "Cycle kinematic, active and passive player configurations");
+            }
             if (toggle && frame < 100)
             {
                 // 기존 대기 구간에서 설정만 반복 전환해 충돌 형상과 PA 질량 보존을 확인한다.
@@ -313,8 +331,38 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 // 토크 상한과 밀침 설정을 그대로 둔 고속 충격 시험 입력이다.
                 player.GetMesh().GetRagdoll().AddVelocity(direction * 15.0f);
             }
+            if (incoming && frame == 120)
+            {
+                // 플레이어 입력을 주지 않고 실제 더미가 다가와 충돌하는 조건을 검사한다.
+                dummy->GetMesh().SetAutomaticRagdoll(false);
+                check(dummy->SetPhysicsMode(PhysicsAnimationMode::PassiveRagdoll, error), "Launch passive receiver toward stationary player");
+                dummy->GetMesh().GetRagdoll().AddVelocity(-direction * 6.0f);
+            }
             world.Tick(1.0f / 60.0f);
             test.Update();
+            const Ragdoll& playerRagdoll = player.GetMesh().GetRagdoll();
+            const Vector3 playerRoot = player.GetActorLocation();
+            PxTransform capsulePose(PxIdentity);
+            PxVec3 targetOffset(0);
+            float radius = 0;
+            float halfLength = 0;
+            playerRagdoll.GetCharacterImpactCapsule(impactSettings.capsuleRadiusScale, capsulePose, radius,
+                halfLength, targetOffset, impactSettings.capsuleHeightScale);
+            std::vector<PxDebugLine> debugLines;
+            test.BuildLines(debugLines);
+            size_t cyanLines = 0;
+            for (const PxDebugLine& line : debugLines)
+            {
+                if (line.color0 == 0xff00ffff && line.color1 == 0xff00ffff)
+                {
+                    ++cyanLines;
+                }
+            }
+            capsules << frame << ',' << (frame + 1) / 60.0f << ',' << static_cast<int>(player.GetMesh().GetPhysicsMode())
+                << ',' << float(playerRoot.GetX()) << ',' << float(playerRoot.GetY()) << ',' << float(playerRoot.GetZ())
+                << ',' << playerRagdoll.HasCharacterCapsule() << ',' << playerRagdoll.GetCharacterCapsuleMass()
+                << ',' << radius << ',' << halfLength << ',' << capsulePose.p.x << ',' << capsulePose.p.y << ',' << capsulePose.p.z
+                << ',' << cyanLines << '\n';
             Vector3 center(kZero);
             float totalMass = 0;
             check(player.GetMesh().GetRagdoll().GetCenterOfMass(center, totalMass) &&

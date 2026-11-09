@@ -180,7 +180,7 @@ namespace PARS
         float& halfLength, PxVec3& targetOffset, float heightScale) const
     {
         const int root = GetImpactRootBody();
-        if (!IsSimulating() || !m_CollisionEnabled || root < 0 || !std::isfinite(radiusScale) || radiusScale <= 0 ||
+        if (!IsActive() || !m_CollisionEnabled || root < 0 || !std::isfinite(radiusScale) || radiusScale <= 0 ||
             !std::isfinite(heightScale) || heightScale <= 0)
         {
             return false;
@@ -301,17 +301,17 @@ namespace PARS
             return true;
         }
         const int root = GetImpactRootBody();
-        if (!m_World || !IsSimulating() || !m_CollisionEnabled || root < 0 || !std::isfinite(mass) || mass < .01f || mass > 10000 ||
+        if (!m_World || !IsActive() || !m_CollisionEnabled || root < 0 || !std::isfinite(mass) || mass < .01f || mass > 10000 ||
             !std::isfinite(radiusScale) || radiusScale <= 0 || !std::isfinite(heightScale) || heightScale <= 0 ||
             !std::isfinite(skin) || skin < 0 || skin > .1f)
         {
-            error = u8"몸통 캡슐에는 동적 바디와 유효한 충돌 질량·형상 설정이 필요합니다.";
+            error = u8"몸통 캡슐에는 PA 바디와 유효한 충돌 질량·형상 설정이 필요합니다.";
             return false;
         }
         PxRigidBody& body = *m_Bodies[root];
-        if (!body.getScene() || body.getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC))
+        if (!body.getScene())
         {
-            error = u8"씬에 등록된 동적 몸통에만 독립 충돌 캡슐을 사용할 수 있습니다.";
+            error = u8"씬에 등록된 몸통에만 독립 충돌 캡슐을 사용할 수 있습니다.";
             return false;
         }
         if (m_CharacterCapsuleShape && (m_CapsuleRadiusScale != radiusScale || m_CapsuleHeightScale != heightScale || m_CapsuleSkin != skin))
@@ -369,14 +369,38 @@ namespace PARS
     void Ragdoll::SyncCharacterCapsule()
     {
         const int root = GetImpactRootBody();
-        if (!m_CharacterCapsuleBody || !IsSimulating() || root < 0)
+        if (!m_CharacterCapsuleBody || !IsActive() || root < 0)
         {
             return;
         }
         const PxRigidBody& body = *m_Bodies[root];
         const PxTransform pose = body.getGlobalPose() * m_CapsuleRootPose;
-        const PxVec3 linear = GetBodyPointVelocity(static_cast<size_t>(root), pose.p);
-        const PxVec3 angular = body.getAngularVelocity();
+        PxVec3 linear = GetBodyPointVelocity(static_cast<size_t>(root), pose.p);
+        PxVec3 angular = body.getAngularVelocity();
+        if (!IsSimulating())
+        {
+            // 키네마틱 속도는 simulate()에서 갱신되므로 현재 스텝의 목표로 직접 계산한다.
+            // 캡슐 중심의 회전 이동도 포함하되, 충돌 반작용은 애니메이션 본체로 돌려주지 않는다.
+            linear = PxVec3(0);
+            angular = PxVec3(0);
+            PxTransform target(PxIdentity);
+            const PxRigidDynamic* kinematic = body.is<PxRigidDynamic>();
+            if (kinematic && kinematic->getKinematicTarget(target))
+            {
+                const PxTransform capsuleTarget = target * m_CapsuleRootPose;
+                const float deltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+                linear = (capsuleTarget.p - pose.p) / deltaTime;
+                PxQuat delta = capsuleTarget.q * pose.q.getConjugate();
+                if (delta.w < 0)
+                {
+                    delta = -delta;
+                }
+                float angle = 0;
+                PxVec3 axis(0);
+                delta.toRadiansAndUnitAxis(angle, axis);
+                angular = axis * (angle / deltaTime);
+            }
+        }
         if (!pose.isValid() || !linear.isFinite() || !angular.isFinite())
         {
             return;
