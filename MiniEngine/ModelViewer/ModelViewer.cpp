@@ -220,7 +220,7 @@ private:
 #if defined(_M_X64)
     bool EnterMap(PhysicsDemo::MapId map);
     void DrawMapSelection();
-    bool ResetMapCharacter(bool restoreActive = false);
+    bool ResetMapCharacter(bool resetAnimation = false);
 #endif
 
 public:
@@ -608,7 +608,6 @@ bool ModelViewer::EnterMap(PhysicsDemo::MapId map)
         }
         if (!m_PhysicsDemo->LoadMap(map))
         {
-            EnableActiveRagdoll(*character);
             m_MapError = u8"새 맵을 생성하지 못했습니다. 기존 맵을 유지합니다.";
             return false;
         }
@@ -648,7 +647,7 @@ bool ModelViewer::EnterMap(PhysicsDemo::MapId map)
     return true;
 }
 
-bool ModelViewer::ResetMapCharacter(bool restoreActive)
+bool ModelViewer::ResetMapCharacter(bool resetAnimation)
 {
     PARS::Character* character = GetPreviewCharacter();
     if (!character || !m_PhysicsDemo || !character->StopRagdoll(m_RagdollMessage))
@@ -657,17 +656,12 @@ bool ModelViewer::ResetMapCharacter(bool restoreActive)
     }
     character->SetActorLocation(m_PhysicsDemo->GetSpawnLocation(character->GetCapsuleComponent().GetHalfHeight()));
     character->GetCharacterMovement().StopMovementImmediately();
-    if (restoreActive)
+    if (resetAnimation)
     {
         if (PreviewAnimInstance* animation = GetPreviewAnimation())
         {
             animation->SetLocomotionEnabled(true);
             animation->PlayAnimation(0);
-        }
-        EnableActiveRagdoll(*character);
-        if (!character->GetMesh().IsActiveRagdoll())
-        {
-            return false;
         }
     }
     if (m_SpringArm)
@@ -924,6 +918,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     animation->SetLocomotionEnabled(characterControl);
     if (characterControl)
     {
+        animation->SetAutoCycleEnabled(false);
         m_SpringArm = &character->CreateDefaultSubobject<PARS::SpringArmComponent>("SpringArmComponent");
         PARS::SpringArmComponent::Settings cameraSettings = m_SpringArm->GetSettings();
         cameraSettings.collisionTest = false;
@@ -945,8 +940,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 #if defined(_M_X64)
     if (m_PhysicsDemo && mesh.GetPhysicsAsset())
     {
-        // 초기화 직후에도 ImGui 버튼과 같은 절차로 액티브 래그돌을 시작한다.
-        EnableActiveRagdoll(*character);
+        // 플레이어는 기본 키네마틱 상태로 시작하고, 몸통 캡슐은 공통 설정으로 생성한다.
         m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_FootSoles);
         m_ImpactTest->SetSpawnOrigin(m_PhysicsDemo->GetDummySpawnOrigin());
         const size_t impactDirectory = m_DefaultPAPath.find_last_of("/\\");
