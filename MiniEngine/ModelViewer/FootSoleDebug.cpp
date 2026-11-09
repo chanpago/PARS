@@ -413,6 +413,9 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             settings.startPredictionTime, settings.landingPredictionTime, settings.stanceScale, settings.maximumStepLength);
         ImGui::DragFloat(u8"발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"최소 들기 높이 (m)", &settings.minimumLiftHeight, .005f, .01f, .3f, "%.3f");
+        ImGui::DragFloat(u8"착지 수평 목표 고정 진행률", &settings.landingLockProgress, .01f, .5f, 1.0f, "%.2f");
+        ImGui::DragFloat(u8"착지 추가 하강 속도 (m/s)", &settings.landingLoweringSpeed, .005f, 0.0f, .3f, "%.3f");
+        ImGui::DragFloat(u8"착지 최대 추가 하강 (m)", &settings.maximumLandingLowering, .005f, 0.0f, .1f, "%.3f");
         ImGui::Checkbox(u8"발 교차 억제 (경계 0.1m)", &settings.preventCrossing);
         if (step.hasPrediction)
         {
@@ -448,6 +451,9 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 motion.elapsedTime, motion.duration, motion.progress * 100,
                 motion.measuredProgress * 100, motion.remainingDistance * 100);
             ImGui::ProgressBar(motion.progress, ImVec2(-1, 0));
+            ImGui::Text(u8"착지 수평 목표 고정: %s / 추가 하강 %.2f / %.2fcm",
+                motion.landingTargetLocked ? "ON" : "OFF", motion.landingLowering * 100,
+                motion.maximumLandingLowering * 100);
             if (motion.valid)
             {
                 ImGui::Text(u8"추가 높이 %.1fcm / 발 이동 목표 (%.3f, %.3f, %.3f) m", motion.height * 100,
@@ -464,7 +470,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         }
         ImGui::Text(u8"최고 높이 = min(max(시작 거리 x %.2f, %.2fm), 기준 종아리 길이)",
             settings.liftHeightScale, settings.minimumLiftHeight);
-        ImGui::TextWrapped(u8"설정은 다음 발딛기부터 적용됩니다. 출발점에서 부드럽게 이동하며 중간에 가장 높게 듭니다. 계획 시간이 끝난 뒤 실제 접촉을 확인해 종료합니다.");
+        ImGui::TextWrapped(u8"설정은 다음 발딛기부터 적용됩니다. 하강 중 수평 착지 목표를 고정하고, 계획 시간이 끝나도 닿지 않으면 제한된 속도와 깊이로 더 내립니다. 실제 접촉을 확인해 종료합니다.");
         ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
         ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동/지지 다리의 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
         const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();

@@ -18,6 +18,9 @@ namespace PARS
         float liftHeightScale = .15f;   // 발 이동 거리에 비례해 들어 올리는 높이를 정하는 비율
         float stepDuration = .15f;       // 발 이동 목표 궤적의 진행시간
         float minimumLiftHeight = .03f; // 발을 들어 올리는 최고 높이를 계산할 때 사용하는 최소값
+        float landingLockProgress = .75f; // 하강 중 착지 목표의 수평 위치를 고정할 시간 진행률
+        float landingLoweringSpeed = .05f; // 계획 시간이 끝나도 접촉하지 못한 발의 추가 하강 속도(m/s)
+        float maximumLandingLowering = .03f; // 실제 접촉면 아래로 내릴 제어 목표의 최대 깊이(m)
         float supportLoadRatio = .5f;   // 착지 후 다음 지지발에 필요한 수직 하중 / 전신 체중
         float supportConfirmationTime = .05f; // 착지 충격 피크를 제외하기 위한 연속 하중 확인 시간(s)
         float supportSwitchDistance = .02f; // 예측 COM 거리 차이가 작으면 기존 지지발을 유지하는 여유(m)
@@ -127,9 +130,15 @@ namespace PARS
         float progress = 0;
         float remainingDistance = 0;
         float landingError = 0;
+        // 착지 마무리 설정은 발딛기를 시작할 때 저장하며, 하강량은 유효 목표를 출력할 때만 누적한다.
+        float landingLockProgress = 0;
+        float landingLoweringSpeed = 0;
+        float maximumLandingLowering = 0;
+        float landingLowering = 0;
         // valid일 때만 다음 단계의 IK 목표로 사용할 수 있다. 착지 목표와 별개인 발바닥 월드 목표다.
         bool valid = false;
         bool hasLandingError = false;
+        bool landingTargetLocked = false;
     };
 
     struct FootstepRoles
@@ -184,7 +193,7 @@ namespace PARS
         int stepFoot = -1;                                // 발딛기 시작 시 확정한 움직일 발. 진행 중에는 유지하며 -1이면 미선택
         int supportFoot = -1;                             // 발딛기 시작 시 확정한 지지발. 움직일 발의 반대쪽이며 -1이면 미선택
         physx::PxVec3 predictedCom{0};                    // 발딛기 필요 여부를 판단할 미래 COM 위치. XZ는 현재 COM과 속도로 예측하고 Y는 지면 투영 높이
-        physx::PxVec3 target{0};                          // 선택한 발의 최신 착지 목표 월드 위치(m). 진행 중 입력에 따라 갱신
+        physx::PxVec3 target{0};                          // 착지면 위 목표 위치(m). 착지 마무리부터 XZ를 고정하며 추가 하강은 motion에만 적용
         physx::PxVec3 targetNormal{0};                    // 최신 착지 목표 평면의 법선. 발바닥 목표 방향을 지면에 맞출 때 사용
         physx::PxVec3 startPosition{0};                   // 발딛기 시작 순간 움직일 발의 실제 발바닥 월드 위치(m). 이동 궤적의 시작점
         physx::PxVec3 initialTarget{0};                   // 발딛기 시작 순간의 최초 착지 목표 월드 위치(m). 이후 목표가 갱신돼도 유지
@@ -209,7 +218,7 @@ namespace PARS
     private:
         void Abort(FootstepReason reason);
         bool UpdateMotionProgress(const FootstepFootInput& foot);
-        void UpdateMotionTarget(const FootstepFootInput& foot);
+        void UpdateMotionTarget(const FootstepInput& input);
         void UpdateSupportTransfer(const FootstepInput& input, const FootstepSettings& settings);
 
     public:
