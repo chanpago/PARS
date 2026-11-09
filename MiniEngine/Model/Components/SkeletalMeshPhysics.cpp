@@ -107,6 +107,7 @@ namespace PARS
                 - 균형 판단: A 영역, COM의 지면 투영과 A 내부 여부, A/B 기준 골반 지지계수 weight.
                 - 발딛기 판단: 지지발·움직일 발 후보, 예측 COM, 발딛기 필요 여부, 착지 목표와 발딛기 진행 상태.
             */
+            // 현재 몸과 발의 상태를 읽고, 균형 판단과 발딛기 계획을 m_Snapshot에 갱신하는함수
             m_FootSupport.Update(*this, *physics);
         }
         else
