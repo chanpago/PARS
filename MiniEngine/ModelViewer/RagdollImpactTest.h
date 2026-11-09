@@ -51,6 +51,10 @@ private:
     bool FireAt(const PARS::Character& player, Math::Vector3 target, bool checkMuzzle = false);
 
 public:
+    void SetSpawnOrigin(Math::Vector3 origin)
+    {
+        m_SpawnOrigin = origin;
+    }
     void RememberPhysicsAsset(const PARS::PhysicsAsset& asset)
     {
         m_Asset = asset;
@@ -85,6 +89,7 @@ public:
 private:
     Math::Vector3 m_HipsReference{Math::kZero};
     Math::Vector3 m_RulerOrigin{Math::kZero};
+    Math::Vector3 m_SpawnOrigin{3.5f, 0, -2.5f};
     PARS::World& m_World;
     PARS::ActorHandle m_Dummy;
     PARS::PhysicsAsset m_Asset;

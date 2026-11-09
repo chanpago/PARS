@@ -618,10 +618,14 @@ bool ModelViewer::EnterMap(PhysicsDemo::MapId map)
             m_Comparison->Reset();
         }
         m_WasComparing = false;
-        if (m_ImpactTest && !m_ImpactTest->Reset())
+        if (m_ImpactTest)
         {
-            m_MapError = m_ImpactTest->GetStatusMessage();
-            return false;
+            m_ImpactTest->SetSpawnOrigin(m_PhysicsDemo->GetDummySpawnOrigin());
+            if (!m_ImpactTest->Reset())
+            {
+                m_MapError = m_ImpactTest->GetStatusMessage();
+                return false;
+            }
         }
         if (!ResetMapCharacter(true))
         {
@@ -944,6 +948,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         // 초기화 직후에도 ImGui 버튼과 같은 절차로 액티브 래그돌을 시작한다.
         EnableActiveRagdoll(*character);
         m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_FootSoles);
+        m_ImpactTest->SetSpawnOrigin(m_PhysicsDemo->GetDummySpawnOrigin());
         const size_t impactDirectory = m_DefaultPAPath.find_last_of("/\\");
         m_ImpactTest->LoadBodyImpactSettings(*character,
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "CharacterImpact.settings.json");

@@ -80,6 +80,7 @@ public:
         return m_Map;
     }
     Math::Vector3 GetSpawnLocation(float halfHeight) const;
+    Math::Vector3 GetDummySpawnOrigin() const;
 
 private:
     static constexpr int HistoryCapacity = 240;

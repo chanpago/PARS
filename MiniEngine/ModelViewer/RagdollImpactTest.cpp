@@ -100,16 +100,16 @@ bool RagdollImpactTest::Reset()
     {
         return false;
     }
-    dummy->SetActorLocation(Vector3(3.5f, dummy->GetCapsuleComponent().GetHalfHeight(), -2.5f));
+    dummy->SetActorLocation(m_SpawnOrigin + Vector3(0, dummy->GetCapsuleComponent().GetHalfHeight(), 0));
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
     mesh.GetAnimInstance().PlayAnimation(0);
     if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
     {
         return false;
     }
-    // 캡슐 중심 대신 PA의 실제 최하단을 바닥에 맞춘다.
+    // 캡슐 중심 대신 PA의 실제 최하단을 시작 지점의 바닥 높이에 맞춘다.
     const float lowest = mesh.GetRagdoll().GetLowestPoint();
-    dummy->SetActorLocation(dummy->GetActorLocation() - Vector3(0, lowest, 0));
+    dummy->SetActorLocation(dummy->GetActorLocation() - Vector3(0, lowest - float(m_SpawnOrigin.GetY()), 0));
     if (!dummy->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_Message) ||
         !mesh.GetRagdoll().SetRootSupported(true, m_Message))
     {
@@ -126,9 +126,9 @@ bool RagdollImpactTest::Reset()
     }
     m_HipsReference = mesh.GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
-    // 눈금 0은 바닥 Y=0이다. 더미가 밀려도 눈금자는 초기 위치 옆에 고정한다.
+    // 눈금 0은 시작 지점의 바닥 높이다. 더미가 밀려도 눈금자는 초기 위치 옆에 고정한다.
     const Vector3 dummyPosition = dummy->GetActorLocation();
-    m_RulerOrigin = Vector3(float(dummyPosition.GetX()) - .75f, 0, float(dummyPosition.GetZ()));
+    m_RulerOrigin = Vector3(float(dummyPosition.GetX()) - .75f, float(m_SpawnOrigin.GetY()), float(dummyPosition.GetZ()));
     m_Message.clear();
     return true;
 }

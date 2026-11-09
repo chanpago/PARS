@@ -484,6 +484,12 @@ Math::Vector3 PhysicsDemo::GetSpawnLocation(float halfHeight) const
     return Math::Vector3(2, halfHeight, m_Map == MapId::Cliff ? 2.0f : 0.0f);
 }
 
+Math::Vector3 PhysicsDemo::GetDummySpawnOrigin() const
+{
+    // 절벽 앞쪽 경계(Z=-6)에서 30cm 안쪽에 더미를 배치한다.
+    return Math::Vector3(3.5f, 0, m_Map == MapId::Cliff ? -5.7f : -2.5f);
+}
+
 void PhysicsDemo::ResetBox()
 {
     if (m_Box)
