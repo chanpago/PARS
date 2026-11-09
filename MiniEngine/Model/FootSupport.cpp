@@ -252,8 +252,15 @@ void PARS::FootSupport::Reset()
 void PARS::FootSupport::ResetFootstep()
 {
     m_FootstepPlanner.Reset();
+    m_BufferGrace.Reset();
     m_HasIdleReference = false;
     m_Snapshot.footstep = {};
+}
+
+void PARS::FootSupport::UpdateBufferGrace(bool enabled)
+{
+    m_BufferGrace.Update(enabled, m_Snapshot.contactRevision, m_Snapshot.completedPhysicsStep,
+        PhysicsWorld::FixedDeltaTime, m_Snapshot.balance);
 }
 
 void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorld& physics)
@@ -383,7 +390,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.automaticSupport = mesh.UsesAutomaticRootSupport();
     input.idleAnimation = idle;
     input.rootReleased = mesh.GetRootSupportRelease() != RootSupportRelease::None;
-    input.outsideBufferReleased = mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer;
+    input.outsideBufferReleased = mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer || m_BufferGrace.HasExpired();
     input.hasCom = m_Snapshot.hasCenterOfMass;
     input.hasVelocity = m_Snapshot.hasCenterOfMassVelocity;
     input.com = m_Snapshot.centerOfMass;
@@ -494,6 +501,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     // 다리 IK에 필요한 본 연결과 다리길이 파악
     if (!Prepare(mesh))
     {
+        m_BufferGrace.Reset();
         m_ContactWorld = nullptr;
         m_Contacts = {};
         m_FootstepPlanner.Reset();
@@ -578,13 +586,15 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
 
     // 현재 COM이 어디에 있는지 기록한다.
     m_Snapshot.balance = EvaluateFootSupportBalance(m_Snapshot.hull, m_Snapshot.hasComProjection ? m_Snapshot.projectedCenterOfMass : PxVec3(std::numeric_limits<float>::quiet_NaN()), m_BufferScale);
+    UpdateBufferGrace(mesh.IsActiveRagdoll() && mesh.UsesAutomaticRootSupport());
     
     if (m_Snapshot.hasComProjection)
     {
         // 위에서 계산한 A/B 판정을 전달해 A~B에서도 움직일 발 후보를 만들 수 있게 한다.
         // 계산 방법은 그냥 단순히 COM과 가까운 것으로 정한다.
         // 발딛기 필요 여부와 반대 발의 실제 지지 여부는 이후 플래너에서 판단한다.
-        m_Snapshot.candidates = EvaluateFootSupportCandidates(m_Snapshot.hull, m_Snapshot.projectedCenterOfMass, footPoints, m_Snapshot.balance.zone, previousCandidate);
+        m_Snapshot.candidates = EvaluateFootSupportCandidates(m_Snapshot.hull, m_Snapshot.projectedCenterOfMass,
+            footPoints, m_Snapshot.balance.zone, previousCandidate, m_BufferGrace.IsActive());
     }
 
     // COM 예측과 발 접촉 정보를 바탕으로 발딛기 필요 여부, 움직일 발과 착지 목표를 판단한다.

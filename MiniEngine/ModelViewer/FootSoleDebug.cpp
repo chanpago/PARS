@@ -299,9 +299,12 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
     {
         const PARS::RootSupportRelease released = mesh.GetRootSupportRelease();
         const char* state = released == PARS::RootSupportRelease::None ? u8"지지 중" :
-            released == PARS::RootSupportRelease::OutsideBuffer ? u8"B 이탈로 해제" :
+            released == PARS::RootSupportRelease::OutsideBuffer ? u8"B 이탈 유예 만료로 해제" :
             released == PARS::RootSupportRelease::NoSupport ? u8"발 지지 없음으로 해제" : u8"지지 해제";
         ImGui::Text(u8"적용 w = %.3f / %s", mesh.GetRagdoll().GetRootSupportWeight(), state);
+        const PARS::FootSupportGrace& grace = support.GetBufferGrace();
+        ImGui::Text(u8"B 연속 이탈: %.2f / %.2f초%s", grace.GetOutsideTime(), PARS::FootSupportGrace::Duration,
+            grace.IsActive() && released == PARS::RootSupportRelease::None ? u8" · 회복 유예 중" : "");
         if (released != PARS::RootSupportRelease::None)
         {
             ImGui::TextUnformatted(u8"더미 초기화 전까지 해제 상태를 유지합니다.");

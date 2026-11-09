@@ -146,6 +146,7 @@
     <ClCompile Include="PhysicsPose.cpp" />
     <ClInclude Include="PhysicsPose.h" />
     <ClInclude Include="FootSupport.h" />
+    <ClInclude Include="FootSupportGrace.h" />
     <ClInclude Include="FootSupportContact.h" />
     <ClInclude Include="FootSupportHull.h" />
     <ClCompile Include="FootSupport.cpp" />

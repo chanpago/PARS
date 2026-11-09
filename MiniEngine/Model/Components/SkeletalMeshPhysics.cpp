@@ -390,6 +390,9 @@ namespace PARS
             return true;
         }
         const FootSupportBalance& balance = m_FootSupport.GetSnapshot().balance;
+        // 모드 전환 직후에도 현재 샘플로 유예를 준비한다. 같은 샘플은 중복 누적되지 않는다.
+        m_FootSupport.UpdateBufferGrace(IsActiveRagdoll());
+        const FootSupportGrace& grace = m_FootSupport.GetBufferGrace();
         if (m_RootSupportRelease == RootSupportRelease::None)
         {
             if (!IsActiveRagdoll())
@@ -400,12 +403,12 @@ namespace PARS
             {
                 m_RootSupportRelease = RootSupportRelease::NoSupport;
             }
-            else if (balance.weight <= 0)
+            else if (grace.HasExpired())
             {
                 m_RootSupportRelease = RootSupportRelease::OutsideBuffer;
             }
         }
-        const float weight = m_RootSupportRelease == RootSupportRelease::None ? balance.weight : 0;
+        const float weight = m_RootSupportRelease == RootSupportRelease::None ? grace.GetSupportWeight(balance) : 0;
         const bool idle = !m_AnimInstance->IsBlending() &&
             m_AnimInstance->GetAnimationName(m_AnimInstance->GetCurrentAnimationIndex()) == "Idle";
         m_Ragdoll.SetFootDrivenSupport(IsActiveRagdoll() && idle && m_RootSupportRelease == RootSupportRelease::None);

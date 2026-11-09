@@ -353,9 +353,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
     }
 
-    // 실제 COM의 B 이탈 및 기존 해제 래치를 착지 처리보다 먼저 검사한다.
-    // 액티브 래그돌·자동 지지 상태에서 현재 COM이 B 밖이거나, 이미 B 이탈로 지지가 해제됐다면 중단
-    if (input.active && input.automaticSupport && (input.zone == FootSupportZone::Outside || input.outsideBufferReleased))
+    // B 이탈 유예가 만료되거나 이미 해제된 경우에만 중단한다. 유예 중에는 착지를 계속 처리한다.
+    if (input.active && input.automaticSupport && input.outsideBufferReleased)
     {
         Abort(FootstepReason::OutsideBuffer);
         return;

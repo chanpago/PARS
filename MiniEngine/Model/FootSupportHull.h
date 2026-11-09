@@ -125,17 +125,18 @@ namespace PARS
         std::array<float, 2> distances{};                                         // 각 발 중심과 COM까지의 거리 저장
     };
 
-    // 현재 COM이 A 내부 또는 A~B 사이에 있으면 지지발·움직일 발 후보를 고른다.
-    // zone은 호출자가 같은 COM과 현재 B 크기로 계산한 판정이다. B 경계·바깥과 무효 영역은 제외한다.
+    // A 내부, A~B 사이와 명시적인 B 이탈 유예 중에 지지발·움직일 발 후보를 고른다.
+    // 실제 영역 판정은 그대로 보존하고, 무효 영역은 유예 여부와 관계없이 제외한다.
     // 후보는 COM과 발 중심의 수평 거리로 정한다. 실제 접촉과 착지 가능 여부는 플래너가 별도로 검사한다.
     inline FootSupportCandidates EvaluateFootSupportCandidates(const std::vector<physx::PxVec3>& hull,
         const physx::PxVec3& com, const std::array<std::vector<physx::PxVec3>, 2>& feet,
-        FootSupportZone zone, int previous = -1)
+        FootSupportZone zone, int previous = -1, bool allowOutside = false)
     {
         FootSupportCandidates result;
         // A를 벗어났다는 이유만으로 회복 발딛기 후보를 없애지 않는다.
         if (!com.isFinite() || hull.size() < 3 ||
-            (zone != FootSupportZone::Inside && zone != FootSupportZone::Buffer))
+            (zone != FootSupportZone::Inside && zone != FootSupportZone::Buffer &&
+                !(allowOutside && zone == FootSupportZone::Outside)))
         {
             return result;
         }

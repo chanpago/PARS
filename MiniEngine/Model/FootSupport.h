@@ -3,6 +3,7 @@
 #include "PhysicsAsset.h"
 #include "FootSupportContact.h"
 #include "FootSupportHull.h"
+#include "FootSupportGrace.h"
 #include "FootstepPlanner.h"
 #include <array>
 #include <cstdint>
@@ -142,6 +143,7 @@ namespace PARS
         void Reset();
         // 명시적으로 자동 지지를 재설정할 때 기존 해제 래치와 발 판단을 함께 초기화한다.
         void ResetFootstep();
+        void UpdateBufferGrace(bool enabled);
         // PA 적용 시에만 저장한 발 바디의 연결·형상 변경 여부를 확인한다.
         void OnPhysicsAssetChanged(const PhysicsAsset& asset);
         // 발바닥 설정 초기화 후 다음 갱신에서 기준 정보를 다시 준비한다.
@@ -169,6 +171,10 @@ namespace PARS
             return m_BufferScale;
         }
         bool SetBufferScale(float scale);
+        const FootSupportGrace& GetBufferGrace() const
+        {
+            return m_BufferGrace;
+        }
         FootstepSettings& GetFootstepSettings()
         {
             return m_FootstepSettings;
@@ -182,6 +188,7 @@ namespace PARS
         FootSupportSnapshot m_Snapshot;
         std::array<Math::Matrix4, 2> m_IdleFootBones{Math::Matrix4(Math::kIdentity), Math::Matrix4(Math::kIdentity)}; // idle 애니메이션에서 가져온 양발 본의 기준 위치,회전을 저장하는 배열. 발딛기 목표를 계산할 때 기준 발 간격과 배치를 알아내는데 사용
         FootstepPlanner m_FootstepPlanner;                                                                            // FootSupport가 수집한 발, 균형 정보로 발딛기를 판단하고, 움직일 발, 착지 목표와 진행 단계 결정
+        FootSupportGrace m_BufferGrace;
         uint64_t m_IdleReferenceRevision = 0;                                                                         // 접촉 정보가 바뀌어 그 기준을 새로 준비해야하는지 판단
         std::array<FootContactSample, 2> m_Contacts;                                                                  // 접촉에 대한 정보를 포함하는 배열
         const PhysicsWorld* m_ContactWorld = nullptr;
