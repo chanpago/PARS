@@ -26,7 +26,7 @@ namespace PARS
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
         m_StandingUpStableTime = 0;
-        m_ReturningFromStandingUp = false;
+        m_StandingUpState = StandingUpState::None;
         m_PhysicsAsset.reset();
         return true;
     }
@@ -130,7 +130,7 @@ namespace PARS
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
         m_StandingUpStableTime = 0;
-        m_ReturningFromStandingUp = false;
+        m_StandingUpState = StandingUpState::None;
         UpdateKinematicPose(true);
         return true;
     }
@@ -195,6 +195,10 @@ namespace PARS
 
         // ì§€ì§€ í•´ì œ íŒì •ì´ ëë‚œ ê°™ì€ ë¬¼ë¦¬ ìŠ¤í…ì—ì„œ ë‚™ìƒ í´ë¦½ì„ ì„ íƒí•œë‹¤.
         const bool fallingTargetReady = UpdateFallingAnimation(deltaTime);
+        if (!fallingTargetReady && !IsActiveRagdoll())
+        {
+            return;
+        }
 
         // Ä³¸¯ÅÍ ÀÌµ¿ÀÌ ÄÄÆ÷³ÍÆ® ·çÆ®¸¦ ÀÌ¹Ì °»½ÅÇÑ »óÅÂ´Ù. simulate() Àü¿¡ ¾Ö´Ï¸ŞÀÌ¼ÇÀ»
         // »ùÇÃ¸µÇØ PVD¿Í ·»´õ¸µÀÌ ¸ğµÎ ÀÌ Æ÷Áî¸¦ »ç¿ëÇÏµµ·Ï ÇÑ´Ù.

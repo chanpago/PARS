@@ -37,6 +37,8 @@ namespace PARS
         bool PlayAnimation(uint32_t index, bool loop = true, float startTime = 0.0f);
         // 시작 시점을 지정해 발 디딤 위상을 맞출 수 있다. 일반 전환에서는 두 클립의 시간을 함께 진행한다.
         bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true, float startTime = 0.0f);
+        // 재생 상태를 바꾸지 않고 지정한 클립의 자세를 계산한다.
+        bool SampleAnimationPose(uint32_t index, float time, std::vector<GraphNode>& pose) const;
         void Stop();
         void Reset();
         void UpdateAnimation(float deltaTime);

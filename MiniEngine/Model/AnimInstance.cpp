@@ -134,6 +134,16 @@ namespace PARS
         return true;
     }
 
+    bool AnimInstance::SampleAnimationPose(uint32_t index, float time, std::vector<GraphNode>& pose) const
+    {
+        if (!m_Skeleton || index >= m_Clips.size() || !std::isfinite(time) || time < 0.0f)
+        {
+            return false;
+        }
+        EvaluateClipPose(index, Math::Min(time, GetAnimationDuration(index)), pose);
+        return !pose.empty();
+    }
+
     void AnimInstance::Stop()
     {
         m_Playing = false;

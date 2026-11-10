@@ -1,5 +1,6 @@
 ﻿#include "SkeletalMeshComponent.h"
 #include <cmath>
+#include <limits>
 #include "../GameFramework/Character.h"
 #include "PhysicsWorld.h"
 
@@ -36,7 +37,7 @@ namespace PARS
         m_StandingUpAnimationIndex = animationIndex;
         m_StandingIdleAnimationIndex = idleAnimationIndex;
         m_StandingUpStableTime = 0;
-        m_ReturningFromStandingUp = false;
+        m_StandingUpState = StandingUpState::None;
         return true;
     }
 
@@ -48,13 +49,18 @@ namespace PARS
 
     bool SkeletalMeshComponent::UpdateFallingAnimation(float deltaTime)
     {
+        // 기상과 Idle 보간은 물리 시뮬레이션을 꺼 둔 상태에서도 계속 진행한다.
+        if (m_StandingUpState == StandingUpState::Kinematic || m_StandingUpState == StandingUpState::IdleBlend)
+        {
+            return UpdateStandingUpAnimation(deltaTime);
+        }
         if (!IsActiveRagdoll() || !m_AutomaticRootSupport)
         {
             m_StandingUpStableTime = 0;
-            m_ReturningFromStandingUp = false;
+            m_StandingUpState = StandingUpState::None;
             return true;
         }
-        if (IsFollowingFallingAnimation() || IsFollowingStandingUpAnimation() || m_ReturningFromStandingUp)
+        if (IsFollowingFallingAnimation())
         {
             return UpdateStandingUpAnimation(deltaTime);
         }
@@ -71,6 +77,7 @@ namespace PARS
         }
         m_KinematicRecoveryTimer.Reset();
         m_StandingUpStableTime = 0;
+        m_StandingUpState = StandingUpState::None;
         m_Ragdoll.ResetDriveTargetHistory();
         ResetRecovery();
         return true;
@@ -83,25 +90,21 @@ namespace PARS
         {
             return true;
         }
-        const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
-        const bool bothGrounded = sample.feet[0].available && sample.feet[0].contact.hasSample &&
-            sample.feet[0].contact.grounded && sample.feet[1].available &&
-            sample.feet[1].contact.hasSample && sample.feet[1].contact.grounded;
-        const bool balanced = bothGrounded && sample.hasComProjection && sample.balance.zone == FootSupportZone::Inside;
-
-        if (m_ReturningFromStandingUp)
+        if (m_StandingUpState == StandingUpState::IdleBlend)
         {
-            if (m_AnimInstance->IsBlending())
+            if (m_AnimInstance->IsBlending() || IsBlendingToKinematic())
             {
                 return true;
             }
-            m_ReturningFromStandingUp = false;
-            // Idle 전환 중 다시 지지를 잃으면 낙상부터 재시작한다.
-            if (!balanced)
+            // 완성된 Idle 자세와 키네마틱 재생 속도를 물리 바디에 넘긴다.
+            Character* character = dynamic_cast<Character*>(&GetOwner());
+            const bool activated = character ? character->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_PhysicsError) :
+                SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, Vector3(kZero), m_PhysicsError);
+            if (!activated)
             {
-                return UpdateFallingAnimation(deltaTime);
+                return false;
             }
-            // 전환이 끝나고 실제 양발 지지가 있을 때만 발 기반 지지를 다시 준비한다.
+            m_StandingUpState = StandingUpState::Active;
             m_RootSupportRelease = RootSupportRelease::None;
             m_FootSupport.ResetFootstep();
             ResetRecovery();
@@ -110,40 +113,169 @@ namespace PARS
             return UpdateAutomaticRootSupport(m_PhysicsError);
         }
 
-        if (m_AnimInstance->IsPlaying() || m_AnimInstance->IsBlending())
+        if (m_AnimInstance->IsPlaying() || m_AnimInstance->IsBlending() || IsBlendingToKinematic())
         {
             m_StandingUpStableTime = 0;
             return true;
         }
+        if (m_StandingUpState == StandingUpState::Kinematic)
+        {
+            // 키네마틱 기상은 양발의 물리 접촉을 기다리지 않고 클립이 끝나면 Idle로 이어진다.
+            if (!m_AnimInstance->TransitionToAnimation(m_StandingIdleAnimationIndex, .2f, true))
+            {
+                m_PhysicsError = "Cannot transition from the standing-up animation to idle.";
+                return false;
+            }
+            m_StandingUpState = StandingUpState::IdleBlend;
+            return true;
+        }
+
         Vector3 velocity(kZero);
         const bool settled = m_Ragdoll.GetCenterOfMassVelocity(velocity) &&
             float(Length(velocity)) <= m_RecoverySettings.maximumReturnSpeed;
         bool grounded = false;
+        float groundHeight = -std::numeric_limits<float>::infinity();
         for (size_t body = 0; body < m_Ragdoll.GetBodyCount(); ++body)
         {
             PhysicsGroundContact contact;
             if (m_Ragdoll.GetBodyGroundContact(body, contact))
             {
                 grounded = true;
-                break;
+                groundHeight = Max(groundHeight, contact.position.y);
             }
         }
-        const bool standingUp = IsFollowingStandingUpAnimation();
-        const bool ready = settled && (standingUp ? balanced : grounded);
+        const bool ready = settled && grounded;
         m_StandingUpStableTime = ready ? m_StandingUpStableTime + deltaTime : 0;
         if (m_StandingUpStableTime < m_RecoverySettings.stableDuration)
         {
             return true;
         }
 
-        // 공중에서는 기상을 시작하지 않는다. 기상 중에도 전신 관절 PD와 접촉 물리를 유지한다.
-        const uint32_t nextAnimation = standingUp ? m_StandingIdleAnimationIndex : m_StandingUpAnimationIndex;
-        if (!m_AnimInstance->TransitionToAnimation(nextAnimation, .2f, standingUp))
+        return BeginKinematicStandingUp(groundHeight);
+    }
+
+    bool SkeletalMeshComponent::BeginKinematicStandingUp(float groundHeight)
+    {
+        const int rootBody = m_Ragdoll.GetImpactRootBody();
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        if (!m_PhysicsAsset || !std::isfinite(groundHeight) || rootBody < 0 ||
+            static_cast<size_t>(rootBody) >= nodes.size())
         {
-            m_PhysicsError = "Cannot transition to the standing-up or idle animation.";
+            m_PhysicsError = "Kinematic standing-up requires a pelvis body and ground contact.";
             return false;
         }
-        m_ReturningFromStandingUp = standingUp;
+        std::vector<GraphNode> standingPose;
+        std::vector<GraphNode> idlePose;
+        std::vector<Matrix4> standingWorld;
+        std::vector<Matrix4> idleWorld;
+        const Matrix4 component(GetComponentTransform());
+        if (!m_AnimInstance->SampleAnimationPose(m_StandingUpAnimationIndex, 0, standingPose) ||
+            !m_AnimInstance->SampleAnimationPose(m_StandingIdleAnimationIndex, 0, idlePose) ||
+            !EvaluatePhysicsPose(m_PhysicsSkeleton, standingPose, component, standingWorld, m_PhysicsError) ||
+            !EvaluatePhysicsPose(m_PhysicsSkeleton, idlePose, component, idleWorld, m_PhysicsError))
+        {
+            m_PhysicsError = "Cannot sample the standing-up and idle alignment poses.";
+            return false;
+        }
+        const int rootNode = nodes[rootBody];
+        if (rootNode < 0 || static_cast<size_t>(rootNode) >= standingWorld.size() ||
+            nodes.size() != m_PhysicsAsset->bodies.size())
+        {
+            m_PhysicsError = "Invalid pelvis or body mapping for kinematic standing-up.";
+            return false;
+        }
+
+        // 기상 뒤 Idle의 PA 최하단이 실제 착지한 바닥에 놓이도록 기준 높이를 잡는다.
+        float idleLowest = std::numeric_limits<float>::infinity();
+        for (size_t body = 0; body < nodes.size(); ++body)
+        {
+            const int node = nodes[body];
+            if (node < 0 || static_cast<size_t>(node) >= idleWorld.size())
+            {
+                m_PhysicsError = "Invalid idle body mapping for kinematic standing-up.";
+                return false;
+            }
+            const PARS::PhysicsBody& shape = m_PhysicsAsset->bodies[body];
+            const Matrix4 frame = PhysicsBoneFrame(idleWorld[node]) * shape.GetLocalTransform();
+            float extent = shape.radius;
+            if (shape.shape == PhysicsShapeType::Capsule)
+            {
+                extent += shape.halfLength * std::abs(float(frame.GetX().GetY()));
+            }
+            else if (shape.shape == PhysicsShapeType::Box)
+            {
+                extent = shape.halfExtents.x * std::abs(float(frame.GetX().GetY())) +
+                    shape.halfExtents.y * std::abs(float(frame.GetY().GetY())) +
+                    shape.halfExtents.z * std::abs(float(frame.GetZ().GetY()));
+            }
+            idleLowest = Min(idleLowest, float(frame.GetW().GetY()) - extent);
+        }
+
+        // 누운 골반의 몸통 방향을 수평으로 맞춘다. 수직에 가까우면 다른 축을 사용한다.
+        const Matrix4 actualPelvis = m_Ragdoll.GetBoneWorld(static_cast<size_t>(rootBody));
+        const Matrix4 animatedPelvis = PhysicsBoneFrame(standingWorld[rootNode]);
+        const Vector3 actualAxes[] = {Vector3(actualPelvis.GetY()), Vector3(actualPelvis.GetZ()), Vector3(actualPelvis.GetX())};
+        const Vector3 animatedAxes[] = {Vector3(animatedPelvis.GetY()), Vector3(animatedPelvis.GetZ()), Vector3(animatedPelvis.GetX())};
+        float yaw = 0;
+        for (size_t axis = 0; axis < 3; ++axis)
+        {
+            Vector3 actual = actualAxes[axis];
+            Vector3 animated = animatedAxes[axis];
+            actual.SetY(0);
+            animated.SetY(0);
+            if (float(LengthSquare(actual)) > .01f && float(LengthSquare(animated)) > .01f)
+            {
+                yaw = std::atan2(float(Cross(animated, actual).GetY()), float(Dot(animated, actual)));
+                break;
+            }
+        }
+        AffineTransform alignment = AffineTransform::MakeYRotation(yaw);
+        const Vector3 rotatedPelvis = alignment * Vector3(animatedPelvis.GetW());
+        Vector3 offset = Vector3(actualPelvis.GetW()) - rotatedPelvis;
+        offset.SetY(groundHeight - idleLowest);
+        if (!std::isfinite(float(Length(offset))))
+        {
+            m_PhysicsError = "Invalid kinematic standing-up alignment.";
+            return false;
+        }
+        alignment.SetTranslation(offset);
+        const AffineTransform previousTransform = GetOwner().GetActorTransform();
+        if (!GetOwner().SetActorTransform(alignment * previousTransform))
+        {
+            m_PhysicsError = "Cannot align the character for kinematic standing-up.";
+            return false;
+        }
+        // 정렬된 액터 좌표계에서 실제 물리 자세를 다시 표현해 전환 순간의 월드 자세를 보존한다.
+        if (!CaptureRecoveryBlendSource())
+        {
+            GetOwner().SetActorTransform(previousTransform);
+            m_PhysicsError = "Cannot capture the fallen pose for kinematic standing-up.";
+            return false;
+        }
+        m_KinematicBlendSource = m_RecoveryBlendSource;
+        m_KinematicBlendPose = m_KinematicBlendSource;
+        m_KinematicBlendTime = 0;
+        Character* character = dynamic_cast<Character*>(&GetOwner());
+        if (character)
+        {
+            if (!character->StopRagdoll(m_PhysicsError))
+            {
+                GetOwner().SetActorTransform(previousTransform);
+                m_KinematicBlendSource.clear();
+                m_KinematicBlendPose.clear();
+                return false;
+            }
+        }
+        else
+        {
+            StopRagdoll();
+        }
+        if (IsRagdoll() || !m_AnimInstance->PlayAnimation(m_StandingUpAnimationIndex, false))
+        {
+            m_PhysicsError = "Cannot start kinematic standing-up.";
+            return false;
+        }
+        m_StandingUpState = StandingUpState::Kinematic;
         m_StandingUpStableTime = 0;
         m_KinematicRecoveryTimer.Reset();
         m_Ragdoll.ResetDriveTargetHistory();
@@ -160,7 +292,7 @@ namespace PARS
         m_KinematicBlendTime = 0;
         m_PendingRecoveryImpact = false;
         m_StandingUpStableTime = 0;
-        m_ReturningFromStandingUp = false;
+        m_StandingUpState = StandingUpState::None;
     }
 
     void SkeletalMeshComponent::SetKinematicStableDuration(float duration)
@@ -176,6 +308,12 @@ namespace PARS
     {
         if (!m_AutomaticRagdoll)
         {
+            return true;
+        }
+        // 기상 중에는 충격에 의한 자동 활성화를 막고, 기상 완료 후에는 액티브 상태를 유지한다.
+        if (m_StandingUpState != StandingUpState::None)
+        {
+            m_KinematicRecoveryTimer.Reset();
             return true;
         }
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
@@ -206,8 +344,8 @@ namespace PARS
             m_Ragdoll.ApplyExternalImpacts(impacts);
             return m_Ragdoll.SetRootSupported(true, m_PhysicsError);
         }
-        // 낙상과 기상 도중의 자세를 키네마틱으로 고정하지 않는다.
-        if (!IsActiveRagdoll() || IsFollowingFallingAnimation() || IsFollowingStandingUpAnimation() || m_ReturningFromStandingUp)
+        // 낙상은 전용 기상 경로에서 처리하므로 기존 서기 복귀 타이머에서 제외한다.
+        if (!IsActiveRagdoll() || IsFollowingFallingAnimation())
         {
             m_KinematicRecoveryTimer.Reset();
             return true;

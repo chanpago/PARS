@@ -28,6 +28,15 @@ namespace PARS
     };
     class SkeletalMeshComponent : public SkinnedMeshComponent
     {
+    private:
+        enum class StandingUpState : uint8_t
+        {
+            None,
+            Kinematic,
+            IdleBlend,
+            Active
+        };
+
     public:
         SkeletalMeshComponent(Actor& owner, const std::string& name);
 
@@ -77,6 +86,7 @@ namespace PARS
         bool UpdateAutomaticRagdoll(float deltaTime);
         bool UpdateFallingAnimation(float deltaTime);
         bool UpdateStandingUpAnimation(float deltaTime);
+        bool BeginKinematicStandingUp(float groundHeight);
         bool BeginKinematicRecovery();
         bool UpdateKinematicRecoveryPose(float deltaTime);
 
@@ -225,6 +235,6 @@ namespace PARS
         bool m_AutomaticRootSupport = false;
         bool m_AutomaticRagdoll = false;
         bool m_PendingRecoveryImpact = false;
-        bool m_ReturningFromStandingUp = false;
+        StandingUpState m_StandingUpState = StandingUpState::None;
     };
 }
