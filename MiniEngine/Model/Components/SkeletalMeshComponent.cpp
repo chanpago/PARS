@@ -23,6 +23,10 @@ namespace PARS
         m_ModelInstance = m_SkeletalMesh;
         m_AnimInstance->Initialize(m_SkeletalMesh);
         m_FallingAnimationIndex = UINT32_MAX;
+        m_StandingUpAnimationIndex = UINT32_MAX;
+        m_StandingIdleAnimationIndex = UINT32_MAX;
+        m_StandingUpStableTime = 0;
+        m_ReturningFromStandingUp = false;
         m_PhysicsAsset.reset();
         return true;
     }
@@ -123,6 +127,10 @@ namespace PARS
         instance->Initialize(m_SkeletalMesh);
         m_AnimInstance = std::move(instance);
         m_FallingAnimationIndex = UINT32_MAX;
+        m_StandingUpAnimationIndex = UINT32_MAX;
+        m_StandingIdleAnimationIndex = UINT32_MAX;
+        m_StandingUpStableTime = 0;
+        m_ReturningFromStandingUp = false;
         UpdateKinematicPose(true);
         return true;
     }
@@ -186,7 +194,7 @@ namespace PARS
         }
 
         // ì§€ì§€ í•´ì œ íŒì •ì´ ëë‚œ ê°™ì€ ë¬¼ë¦¬ ìŠ¤í…ì—ì„œ ë‚™ìƒ í´ë¦½ì„ ì„ íƒí•œë‹¤.
-        const bool fallingTargetReady = UpdateFallingAnimation();
+        const bool fallingTargetReady = UpdateFallingAnimation(deltaTime);
 
         // Ä³¸¯ÅÍ ÀÌµ¿ÀÌ ÄÄÆ÷³ÍÆ® ·çÆ®¸¦ ÀÌ¹Ì °»½ÅÇÑ »óÅÂ´Ù. simulate() Àü¿¡ ¾Ö´Ï¸ŞÀÌ¼ÇÀ»
         // »ùÇÃ¸µÇØ PVD¿Í ·»´õ¸µÀÌ ¸ğµÎ ÀÌ Æ÷Áî¸¦ »ç¿ëÇÏµµ·Ï ÇÑ´Ù.

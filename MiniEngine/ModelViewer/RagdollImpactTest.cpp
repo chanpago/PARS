@@ -51,7 +51,8 @@ Character* RagdollImpactTest::GetDummy() const
     return m_World.FindActor<Character>(m_Dummy);
 }
 
-bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::shared_ptr<const Model> falling, const PhysicsAsset& asset)
+bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::shared_ptr<const Model> falling,
+    std::shared_ptr<const Model> standingUp, const PhysicsAsset& asset)
 {
     m_Asset = asset;
     if (std::none_of(m_Asset.constraints.begin(), m_Asset.constraints.end(), HasEnabledAngularDrive))
@@ -72,13 +73,14 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
         m_Message = u8"더미 메시를 초기화하지 못했습니다.";
         return false;
     }
-    // 평소에는 Idle을 반복하고, 지지를 잃으면 등록된 낙상 클립을 한 번 추종한다.
+    // 평소에는 Idle을 반복하고, 낙상과 착지 후 기상 클립을 순서대로 추종한다.
     if (!mesh.SetAnimInstance(std::make_unique<AnimInstance>(mesh)) ||
         !mesh.GetAnimInstance().AddAnimation("Idle", idle) ||
         !mesh.GetAnimInstance().AddAnimation("Falling Down", falling) ||
-        !mesh.SetFallingAnimation(1) || !mesh.GetAnimInstance().PlayAnimation(0))
+        !mesh.GetAnimInstance().AddAnimation("Standing Up", standingUp) ||
+        !mesh.SetFallingAnimation(1) || !mesh.SetStandingUpAnimation(2, 0) || !mesh.GetAnimInstance().PlayAnimation(0))
     {
-        m_Message = u8"더미의 Idle 또는 Falling Down 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
+        m_Message = u8"더미의 Idle, Falling Down 또는 Standing Up 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
         return false;
     }
     if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
