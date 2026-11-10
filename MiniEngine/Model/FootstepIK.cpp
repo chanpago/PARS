@@ -99,7 +99,12 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     {
         return result;
     }
+
+    // input.targetSole: 발바닥의 목표 위치·회전
+    // input.soleInBone: 발목본 기준으로 저장한 발바닥 로컬 변환
+    // requested: 역산한 발목본의 목표 위치·회전
     const PxTransform requested = input.targetSole * input.soleInBone.getInverse();
+
     PxVec3 sourceUpper = input.knee.p - input.hip.p, sourceLower = input.ankle.p - input.knee.p;
     if (!requested.isSane() || !Unit(sourceUpper) || !Unit(sourceLower))
     {
@@ -121,11 +126,21 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
         direction = sourceAxis;
     }
 
+    // 고관절에서 애니메이션 무릎으로 향하는 벡터
     const PxVec3 kneeOffset = input.knee.p - input.hip.p;
+
+    // sourceAxis는 애니메이션 고관절에서 발목으로 향하는 단위벡터
+    // 무릎 벡터에서 축과 나란한 성분을 제거해, 축에서 벗어난 굽힘 벡터를 구함
     PxVec3 sourceBend = kneeOffset - sourceAxis * kneeOffset.dot(sourceAxis);
+
     const bool animationBent = sourceBend.magnitude() > (upper + lower) * .001f;
+
+
     PxVec3 bend = sourceBend;
     // 거의 펴진 애니메이션의 작은 오차로 무릎 방향이 뒤집히는 것을 피한다.
+
+    // bend는 b0
+    // direction은 고관절에서 새 목표 발목으로 향하는 단위벡터
     if (animationBent && ProjectHint(bend, direction))
     {
         result.hintSource = KneeHintSource::Animation;
@@ -133,6 +148,8 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     else
     {
         bend = input.previousBend;
+
+        
         if (input.hasPreviousBend && ProjectHint(bend, direction))
         {
             result.hintSource = KneeHintSource::Previous;
@@ -155,9 +172,17 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     // 뼈 길이는 유지한다. 완전히 펴지거나 접히는 특이점에만 작은 계산 여유를 둔다.
     const float margin = PxMin((upper + lower) * 1e-4f, PxMin(upper, lower) * .1f);
     const float distance = PxClamp(requestedDistance, PxAbs(upper - lower) + margin, upper + lower - margin);
+
+    // 두 직각삼각형의 관계로 고관절 H에서 기준점 Q까지의 거리 a를 구함
     const double along = (double(upper) * upper - double(lower) * lower + double(distance) * distance) / (2 * distance);
+
+    // 피타고라스 정리로 기준선에서 무릎까지 떨어진 거리 h를 구함
     const float height = float(std::sqrt((std::max)(0.0, double(upper) * upper - along * along)));
+
+    // Q = H + u * a에 무릎 굽힘 방향의 이동량 b * h를 더해 월드 위치 K를 구함
     const PxVec3 knee = input.hip.p + direction * float(along) + bend * height;
+
+
     const PxVec3 ankle = input.hip.p + direction * distance;
     const PxVec3 planeNormal = direction.cross(bend);
     if (!animationBent || !Unit(sourceBend))

@@ -232,11 +232,9 @@ void FootstepPlanner::UpdateMotionTarget(const FootstepInput& input)
     // blend는 출발과 도착에서 속도가 0이 되도록 만든 보간 비율
     const float blend = t * t * (3.0f - 2.0f * t);
 
-    // arc와 높이 식은 발을 부드럽게 들어올렸다 내려놓기 위한 것 
-    const float arc = t * (1.0f - t);
-    // 출발/도착 시 변화율이 0인 보간으로 이동하고, 중간에 최고 높이에 도달한다.
+    // 코사인 한 주기를 높이 0 → 최고 높이 → 0으로 바꾸며, 출발과 도착의 수직 변화율은 0이다.
     // 발이 이미 공중에 있었다면 실제 시작 높이에서 착지면 높이로 함께 보간한다.
-    motion.height = motion.initialHeight * 16.0f * arc * arc;
+    motion.height = motion.initialHeight * .5f * (1.0f - std::cos(PxTwoPi * t));
 
     // 이번 프레임의 목표를 만듦
     motion.position = state.startPosition + (state.target - state.startPosition) * blend + PxVec3(0, motion.height, 0);
