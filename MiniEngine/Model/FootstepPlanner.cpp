@@ -116,7 +116,7 @@ namespace
                     tangent *= limit / length;
                     result.lengthLimited = true;
                 }
-                // 교차 경계와 2m 반경을 동시에 지킨다. 마지막 반경 제한으로 경계를 다시 넘기지 않는다.
+                // 교차 경계와 설정된 보폭 상한을 동시에 지킨다. 마지막 반경 제한으로 경계를 다시 넘기지 않는다.
                 delta = outward * settings.crossingOffset + tangent;
                 result.crossingLimited = true;
             }

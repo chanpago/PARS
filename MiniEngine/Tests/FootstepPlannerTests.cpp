@@ -440,9 +440,9 @@ namespace
         input.feet[1].position.x = 10;
         planner.Update(input, settings);
         const PARS::FootstepTarget capped = planner.GetSnapshot().candidates[1];
-        Check(capped.valid && capped.lengthLimited && Near(capped.stanceDistance, 2),
-            "Maximum step length is two meters from the opposite foot");
-        Check(capped.travelDistance > 2 && Near(capped.position.y, .4f),
+        Check(capped.valid && capped.lengthLimited && Near(capped.stanceDistance, .7f),
+            "Maximum step length is 0.7 meters from the opposite foot");
+        Check(capped.travelDistance > settings.maximumStepLength && Near(capped.position.y, .4f),
             "The cap is not measured from the moving foot and ignores vertical COM velocity");
         planner.Reset();
         input = Standing();
@@ -467,7 +467,7 @@ namespace
         planner.Update(input, settings);
         const PARS::FootstepTarget crossed = planner.GetSnapshot().candidates[1];
         Check(crossed.valid && crossed.crossingLimited &&
-            Near(crossed.position.x - input.feet[0].position.x, .1f) && crossed.stanceDistance <= 2.00001f,
+            Near(crossed.position.x - input.feet[0].position.x, .1f) && crossed.stanceDistance <= settings.maximumStepLength + 1e-5f,
             "Optional crossing boundary and maximum radius remain satisfied together");
 
         planner.Reset();
