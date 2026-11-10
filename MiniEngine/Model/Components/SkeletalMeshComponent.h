@@ -33,8 +33,7 @@ namespace PARS
         {
             None,
             Kinematic,
-            IdleBlend,
-            Active
+            IdleBlend
         };
 
     public:

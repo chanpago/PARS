@@ -96,21 +96,16 @@ namespace PARS
             {
                 return true;
             }
-            // 완성된 Idle 자세와 키네마틱 재생 속도를 물리 바디에 넘긴다.
-            Character* character = dynamic_cast<Character*>(&GetOwner());
-            const bool activated = character ? character->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_PhysicsError) :
-                SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, Vector3(kZero), m_PhysicsError);
-            if (!activated)
-            {
-                return false;
-            }
-            m_StandingUpState = StandingUpState::Active;
+            // 최초 스폰처럼 키네마틱 Idle을 유지하고, 다음 충격에서만 물리 시뮬레이션을 켠다.
+            m_StandingUpState = StandingUpState::None;
+            m_StandingUpStableTime = 0;
             m_RootSupportRelease = RootSupportRelease::None;
+            m_PendingRecoveryImpact = false;
             m_FootSupport.ResetFootstep();
             ResetRecovery();
             m_Ragdoll.ResetDriveTargetHistory();
             m_KinematicRecoveryTimer.Reset();
-            return UpdateAutomaticRootSupport(m_PhysicsError);
+            return true;
         }
 
         if (m_AnimInstance->IsPlaying() || m_AnimInstance->IsBlending() || IsBlendingToKinematic())
@@ -310,12 +305,6 @@ namespace PARS
         {
             return true;
         }
-        // 기상 중에는 충격에 의한 자동 활성화를 막고, 기상 완료 후에는 액티브 상태를 유지한다.
-        if (m_StandingUpState != StandingUpState::None)
-        {
-            m_KinematicRecoveryTimer.Reset();
-            return true;
-        }
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const float impactVelocity = sample.totalMass > 0 ? m_Ragdoll.GetExternalImpactImpulse() / sample.totalMass : 0;
         const bool impact = impactVelocity >= m_RecoverySettings.impactVelocity;
@@ -326,6 +315,8 @@ namespace PARS
             {
                 return true;
             }
+            const bool interruptedStandingUp = m_StandingUpState == StandingUpState::Kinematic ||
+                m_StandingUpState == StandingUpState::IdleBlend;
             // 모드 전환은 접촉 캐시를 비우므로 충격점과 바디별 충격량을 먼저 복사한다.
             std::vector<RagdollBodyImpulse> impacts;
             m_Ragdoll.CaptureExternalImpacts(impacts);
@@ -336,13 +327,20 @@ namespace PARS
             {
                 return false;
             }
-            m_RootSupportRelease = RootSupportRelease::None;
+            if (interruptedStandingUp)
+            {
+                // 현재 보간 자세와 속도를 물리 바디에 넘긴 뒤 기상을 취소한다.
+                m_StandingUpState = StandingUpState::None;
+                m_StandingUpStableTime = 0;
+            }
+            // 일어나는 도중에는 골반을 서기 목표에 붙잡지 않고 낙상 경로로 돌아간다.
+            m_RootSupportRelease = interruptedStandingUp ? RootSupportRelease::NoSupport : RootSupportRelease::None;
             m_FootSupport.ResetFootstep();
             ResetRecovery();
             m_KinematicRecoveryTimer.Reset();
-            m_PendingRecoveryImpact = true;
+            m_PendingRecoveryImpact = !interruptedStandingUp;
             m_Ragdoll.ApplyExternalImpacts(impacts);
-            return m_Ragdoll.SetRootSupported(true, m_PhysicsError);
+            return m_Ragdoll.SetRootSupported(!interruptedStandingUp, m_PhysicsError);
         }
         // 낙상은 전용 기상 경로에서 처리하므로 기존 서기 복귀 타이머에서 제외한다.
         if (!IsActiveRagdoll() || IsFollowingFallingAnimation())
