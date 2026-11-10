@@ -29,7 +29,7 @@ public:
     ~RagdollImpactTest();
 
 public:
-    bool Initialize(std::shared_ptr<const Model> idle, const PARS::PhysicsAsset& asset);
+    bool Initialize(std::shared_ptr<const Model> idle, std::shared_ptr<const Model> falling, const PARS::PhysicsAsset& asset);
     bool Reset();
     bool SetAutomaticSupport(bool enabled);
     bool FireFrom(const PARS::Character& player);

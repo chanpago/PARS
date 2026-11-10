@@ -428,6 +428,138 @@
       "gltf_sha256": "2447c331ea35c9548b73ff83228a191be64ea850aec6b267e25ca9157e88b1aa",
       "frames_per_second": 60,
       "source_bones_match_first_clip": true
+    },
+    {
+      "path": "Converted/FallingDown/FallingDown.gltf",
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "animation": "FallingDown",
+      "channels": 195,
+      "sample_counts": [
+        137
+      ],
+      "durations_seconds": [
+        2.266667
+      ],
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "bytes": 9555040
+        }
+      ],
+      "movement": [
+        {
+          "node": "mixamorig1:Hips",
+          "start": [
+            -0.1956215351819992,
+            0.5322060585021973,
+            -99.32377624511719
+          ],
+          "end": [
+            -59.58218765258789,
+            -83.00617980957031,
+            -9.218193054199219
+          ],
+          "range": [
+            66.29315423965454,
+            94.10808801651001,
+            91.03070068359375
+          ]
+        }
+      ],
+      "source": "Source/Falling Down.fbx",
+      "source_sha256": "87ce4ca752194d08e71f008d6a3319bb72d262a5a71adbd25805678d2f5e4de9",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1.0,
+        137.0
+      ],
+      "source_bones": [
+        "mixamorig1:Hips",
+        "mixamorig1:Spine",
+        "mixamorig1:Spine1",
+        "mixamorig1:Spine2",
+        "mixamorig1:Neck",
+        "mixamorig1:Head",
+        "mixamorig1:HeadTop_End",
+        "mixamorig1:LeftShoulder",
+        "mixamorig1:LeftArm",
+        "mixamorig1:LeftForeArm",
+        "mixamorig1:LeftHand",
+        "mixamorig1:LeftHandThumb1",
+        "mixamorig1:LeftHandThumb2",
+        "mixamorig1:LeftHandThumb3",
+        "mixamorig1:LeftHandThumb4",
+        "mixamorig1:LeftHandIndex1",
+        "mixamorig1:LeftHandIndex2",
+        "mixamorig1:LeftHandIndex3",
+        "mixamorig1:LeftHandIndex4",
+        "mixamorig1:LeftHandMiddle1",
+        "mixamorig1:LeftHandMiddle2",
+        "mixamorig1:LeftHandMiddle3",
+        "mixamorig1:LeftHandMiddle4",
+        "mixamorig1:LeftHandRing1",
+        "mixamorig1:LeftHandRing2",
+        "mixamorig1:LeftHandRing3",
+        "mixamorig1:LeftHandRing4",
+        "mixamorig1:LeftHandPinky1",
+        "mixamorig1:LeftHandPinky2",
+        "mixamorig1:LeftHandPinky3",
+        "mixamorig1:LeftHandPinky4",
+        "mixamorig1:RightShoulder",
+        "mixamorig1:RightArm",
+        "mixamorig1:RightForeArm",
+        "mixamorig1:RightHand",
+        "mixamorig1:RightHandThumb1",
+        "mixamorig1:RightHandThumb2",
+        "mixamorig1:RightHandThumb3",
+        "mixamorig1:RightHandThumb4",
+        "mixamorig1:RightHandIndex1",
+        "mixamorig1:RightHandIndex2",
+        "mixamorig1:RightHandIndex3",
+        "mixamorig1:RightHandIndex4",
+        "mixamorig1:RightHandMiddle1",
+        "mixamorig1:RightHandMiddle2",
+        "mixamorig1:RightHandMiddle3",
+        "mixamorig1:RightHandMiddle4",
+        "mixamorig1:RightHandRing1",
+        "mixamorig1:RightHandRing2",
+        "mixamorig1:RightHandRing3",
+        "mixamorig1:RightHandRing4",
+        "mixamorig1:RightHandPinky1",
+        "mixamorig1:RightHandPinky2",
+        "mixamorig1:RightHandPinky3",
+        "mixamorig1:RightHandPinky4",
+        "mixamorig1:LeftUpLeg",
+        "mixamorig1:LeftLeg",
+        "mixamorig1:LeftFoot",
+        "mixamorig1:LeftToeBase",
+        "mixamorig1:LeftToe_End",
+        "mixamorig1:RightUpLeg",
+        "mixamorig1:RightLeg",
+        "mixamorig1:RightFoot",
+        "mixamorig1:RightToeBase",
+        "mixamorig1:RightToe_End"
+      ],
+      "source_meshes": [
+        "Ch36"
+      ],
+      "gltf_sha256": "b9666d9381eb1c4eec7baa8ea86da858f0884b937096ced74c2b120b76cbfc17"
     }
   ]
 }

@@ -948,7 +948,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "CharacterImpact.settings.json");
         m_ImpactTest->LoadProjectileSettings(
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "Projectile.settings.json");
-        if (!m_ImpactTest->Initialize(models[0], *mesh.GetPhysicsAsset()))
+        const std::shared_ptr<const Model> falling = Renderer::LoadModel(root + L"Converted/FallingDown/FallingDown.gltf", forceRebuild);
+        if (!m_ImpactTest->Initialize(models[0], falling, *mesh.GetPhysicsAsset()))
         {
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
             m_ImpactTest.reset();

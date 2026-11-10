@@ -51,7 +51,7 @@ Character* RagdollImpactTest::GetDummy() const
     return m_World.FindActor<Character>(m_Dummy);
 }
 
-bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const PhysicsAsset& asset)
+bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::shared_ptr<const Model> falling, const PhysicsAsset& asset)
 {
     m_Asset = asset;
     if (std::none_of(m_Asset.constraints.begin(), m_Asset.constraints.end(), HasEnabledAngularDrive))
@@ -72,10 +72,16 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const Phys
         m_Message = u8"더미 메시를 초기화하지 못했습니다.";
         return false;
     }
-    // 이동 상태나 자동 클립 전환 없이 Idle 하나만 반복한다.
-    mesh.SetAnimInstance(std::make_unique<AnimInstance>(mesh));
-    if (!mesh.GetAnimInstance().AddAnimation("Idle", idle) || !mesh.GetAnimInstance().PlayAnimation(0) ||
-        !mesh.SetPhysicsAsset(m_Asset, m_Message))
+    // 평소에는 Idle을 반복하고, 지지를 잃으면 등록된 낙상 클립을 한 번 추종한다.
+    if (!mesh.SetAnimInstance(std::make_unique<AnimInstance>(mesh)) ||
+        !mesh.GetAnimInstance().AddAnimation("Idle", idle) ||
+        !mesh.GetAnimInstance().AddAnimation("Falling Down", falling) ||
+        !mesh.SetFallingAnimation(1) || !mesh.GetAnimInstance().PlayAnimation(0))
+    {
+        m_Message = u8"더미의 Idle 또는 Falling Down 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
+        return false;
+    }
+    if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
     {
         return false;
     }
@@ -488,6 +494,10 @@ void RagdollImpactTest::DrawUI(Character* player)
             SkeletalMeshComponent& mesh = dummy->GetMesh();
             ImGui::Text(u8"물리 모드: %s", mesh.IsActiveRagdoll() ? u8"액티브 래그돌" :
                 mesh.IsRagdoll() ? u8"패시브 래그돌" : mesh.IsBlendingToKinematic() ? u8"키네마틱 복귀 보간" : u8"키네마틱");
+            const AnimInstance& animation = mesh.GetAnimInstance();
+            const uint32_t clip = animation.GetCurrentAnimationIndex();
+            ImGui::Text(u8"추종 애니메이션: %s (%.2f / %.2f s)", animation.GetAnimationName(clip).c_str(),
+                animation.GetAnimationTime(), animation.GetAnimationDuration(clip));
             float stableDuration = mesh.GetKinematicStableDuration();
             if (ImGui::DragFloat(u8"A영역 복귀 대기 시간", &stableDuration, .1f, .1f, 10.0f, "%.1f s", ImGuiSliderFlags_AlwaysClamp))
             {

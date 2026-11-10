@@ -7,6 +7,42 @@ using namespace physx;
 
 namespace PARS
 {
+    bool SkeletalMeshComponent::SetFallingAnimation(uint32_t animationIndex)
+    {
+        if (animationIndex >= m_AnimInstance->GetAnimationCount())
+        {
+            return false;
+        }
+        m_FallingAnimationIndex = animationIndex;
+        return true;
+    }
+
+    bool SkeletalMeshComponent::IsFollowingFallingAnimation() const
+    {
+        return m_FallingAnimationIndex < m_AnimInstance->GetAnimationCount() &&
+            m_AnimInstance->GetCurrentAnimationIndex() == m_FallingAnimationIndex;
+    }
+
+    bool SkeletalMeshComponent::UpdateFallingAnimation()
+    {
+        if (!IsActiveRagdoll() || !m_AutomaticRootSupport || m_RootSupportRelease == RootSupportRelease::None ||
+            m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount() || IsFollowingFallingAnimation())
+        {
+            return true;
+        }
+
+        // 낙상은 한 번 재생하고 마지막 자세를 유지한다. 위치와 회전 지지는 이미 해제된 상태다.
+        if (!m_AnimInstance->TransitionToAnimation(m_FallingAnimationIndex, .2f, false))
+        {
+            m_PhysicsError = "Cannot transition to the falling animation.";
+            return false;
+        }
+        m_KinematicRecoveryTimer.Reset();
+        m_Ragdoll.ResetDriveTargetHistory();
+        ResetRecovery();
+        return true;
+    }
+
     void SkeletalMeshComponent::SetAutomaticRagdoll(bool enabled)
     {
         m_AutomaticRagdoll = enabled;
@@ -60,7 +96,8 @@ namespace PARS
             m_Ragdoll.ApplyExternalImpacts(impacts);
             return m_Ragdoll.SetRootSupported(true, m_PhysicsError);
         }
-        if (!IsActiveRagdoll())
+        // 낙상 클립의 자세를 키네마틱으로 고정하지 않고, 초기화할 때까지 물리 추종을 유지한다.
+        if (!IsActiveRagdoll() || IsFollowingFallingAnimation())
         {
             m_KinematicRecoveryTimer.Reset();
             return true;

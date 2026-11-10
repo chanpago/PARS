@@ -22,6 +22,7 @@ namespace PARS
         m_SkeletalMesh = std::move(mesh);
         m_ModelInstance = m_SkeletalMesh;
         m_AnimInstance->Initialize(m_SkeletalMesh);
+        m_FallingAnimationIndex = UINT32_MAX;
         m_PhysicsAsset.reset();
         return true;
     }
@@ -121,6 +122,7 @@ namespace PARS
         }
         instance->Initialize(m_SkeletalMesh);
         m_AnimInstance = std::move(instance);
+        m_FallingAnimationIndex = UINT32_MAX;
         UpdateKinematicPose(true);
         return true;
     }
@@ -183,6 +185,9 @@ namespace PARS
             return;
         }
 
+        // ì§€ì§€ í•´ì œ íŒì •ì´ ëë‚œ ê°™ì€ ë¬¼ë¦¬ ìŠ¤í…ì—ì„œ ë‚™ìƒ í´ë¦½ì„ ì„ íƒí•œë‹¤.
+        const bool fallingTargetReady = UpdateFallingAnimation();
+
         // Ä³¸¯ÅÍ ÀÌµ¿ÀÌ ÄÄÆ÷³ÍÆ® ·çÆ®¸¦ ÀÌ¹Ì °»½ÅÇÑ »óÅÂ´Ù. simulate() Àü¿¡ ¾Ö´Ï¸ŞÀÌ¼ÇÀ»
         // »ùÇÃ¸µÇØ PVD¿Í ·»´õ¸µÀÌ ¸ğµÎ ÀÌ Æ÷Áî¸¦ »ç¿ëÇÏµµ·Ï ÇÑ´Ù.
         // ÀÌ¹ö ½ºÅÜ¿¡¼­ÀÇ ¾Ö´Ï¸ŞÀÌ¼Ç ÀÚ¼¼¸¦ ±¸ÇÑ´Ù.
@@ -206,7 +211,7 @@ namespace PARS
             //      - °ñ¹İº¸Á¤
             //      - Å¸°ÙÀ» ¸ñÇ¥·Î À¯È¿°ü¼ºÀ» °è»êÇÏ°í Áß·Âº¸»ó, ÄÚ¸®¿Ã¸®-¿ø½É·Â º¸»óÀ» ÅäÅ©°ª¿¡ ´õÇÔ
             //      - °¢ °üÀıÀÇ °¢ Ãà¿¡ ¾ó¸¶¸¸Å­ÀÇ PD¸¦ Àû¿ë½ÃÅ³Áö °è»ê
-            bool evaluated = EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError);
+            bool evaluated = fallingTargetReady && EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError);
             if (evaluated)
             {
                 evaluated = ApplyRecoveryTargets(target, deltaTime);

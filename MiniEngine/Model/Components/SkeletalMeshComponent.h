@@ -75,6 +75,7 @@ namespace PARS
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
         bool UpdateAutomaticRagdoll(float deltaTime);
+        bool UpdateFallingAnimation();
         bool BeginKinematicRecovery();
         bool UpdateKinematicRecoveryPose(float deltaTime);
 
@@ -127,6 +128,8 @@ namespace PARS
         {
             return m_RecoverySettings;
         }
+        bool SetFallingAnimation(uint32_t animationIndex);
+        bool IsFollowingFallingAnimation() const;
         bool UsesAutomaticRagdoll() const
         {
             return m_AutomaticRagdoll;
@@ -210,6 +213,7 @@ namespace PARS
         PhysicsAnimationMode m_PhysicsMode = PhysicsAnimationMode::Animation;
         float m_KinematicStableDuration = 2.0f;
         float m_KinematicBlendTime = 0;
+        uint32_t m_FallingAnimationIndex = UINT32_MAX;
         bool m_HasRecoverySoles = false;
         bool m_FootCandidateDebugVisible = false;
         bool m_AutomaticRootSupport = false;
