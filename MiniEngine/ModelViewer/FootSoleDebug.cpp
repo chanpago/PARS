@@ -407,28 +407,14 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 FootLabel(step.transfer.candidateFoot), step.transfer.confirmationTime, settings.supportConfirmationTime);
             ImGui::Text(u8"수직 하중 / 체중: 왼발 %.2f · 오른발 %.2f / 필요 %.2f",
                 step.transfer.loadRatios[0], step.transfer.loadRatios[1], settings.supportLoadRatio);
-            ImGui::Text(u8"다음 발 이동 허용: %s", step.transfer.ready ? "ON" : "OFF");
+            ImGui::Text(u8"다음 발 이동 허용: %s / 지지 후보 예측 %.2f초", step.transfer.ready ? "ON" : "OFF", settings.stepDuration);
         }
         ImGui::Text(u8"시작 %llu / 착지 %llu / 중단 %llu",
             static_cast<unsigned long long>(step.startCount), static_cast<unsigned long long>(step.landingCount),
             static_cast<unsigned long long>(step.abortCount));
         ImGui::Text(u8"예측: 시작 %.2fs / 착지 %.2fs · 발 간격 %.2f · 최대 보폭 %.1fm",
             settings.startPredictionTime, settings.landingPredictionTime, settings.stanceScale, settings.maximumStepLength);
-        ImGui::Checkbox(u8"실험: 시간·착지 위치 회복 평가", &settings.adaptiveTiming);
-        if (settings.adaptiveTiming)
-        {
-            ImGui::DragFloat(u8"최소 발 이동 시간 (초)", &settings.minimumStepDuration, .01f, .05f, 1.0f, "%.2f");
-            ImGui::DragFloat(u8"최대 발 이동 시간 (초)", &settings.maximumStepDuration, .01f, .05f, 1.0f, "%.2f");
-            ImGui::DragFloat(u8"발 수평 최대 속도 (m/s)", &settings.maximumFootSpeed, .05f, .1f, 10.0f, "%.2f");
-            ImGui::DragFloat(u8"발 수평 최대 가속도 (m/s²)", &settings.maximumFootAcceleration, 1.0f, 1.0f, 200.0f, "%.1f");
-            ImGui::DragFloat(u8"발 수직 최대 속도 (m/s)", &settings.maximumLiftSpeed, .05f, .1f, 10.0f, "%.2f");
-            ImGui::DragFloat(u8"발 수직 최대 가속도 (m/s²)", &settings.maximumLiftAcceleration, 1.0f, 1.0f, 200.0f, "%.1f");
-            ImGui::TextWrapped(u8"위 한계는 목표 궤적에 적용합니다. 고정 높이 역진자로 착지와 후속 한 걸음을 비교하며 실제 회복 보장은 아닙니다.");
-        }
-        else
-        {
-            ImGui::DragFloat(u8"발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
-        }
+        ImGui::DragFloat(u8"발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"최소 들기 높이 (m)", &settings.minimumLiftHeight, .005f, .01f, .3f, "%.3f");
         ImGui::DragFloat(u8"착지 수평 목표 고정 진행률", &settings.landingLockProgress, .01f, .5f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"착지 추가 하강 속도 (m/s)", &settings.landingLoweringSpeed, .005f, 0.0f, .3f, "%.3f");
@@ -436,8 +422,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         ImGui::Checkbox(u8"발 교차 억제 (경계 0.1m)", &settings.preventCrossing);
         if (step.hasPrediction)
         {
-            ImGui::Text(u8"등속 예측 COM (%.3f, %.3f, %.3f) m / 발딛기 필요 %s", step.predictedCom.x,
-                step.predictedCom.y, step.predictedCom.z, step.needsStep ? "YES" : "NO");
+            ImGui::Text(u8"예측 COM (%.3f, %.3f, %.3f) m / A %s", step.predictedCom.x,
+                step.predictedCom.y, step.predictedCom.z, step.needsStep ? u8"밖" : u8"안");
         }
         for (size_t side = 0; side < step.candidates.size(); ++side)
         {
@@ -449,13 +435,6 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 ImGui::Text(u8"  발 이동 %.2fm / 지지발 거리 %.2fm · 보폭 제한 %s / 교차 제한 %s",
                     target.travelDistance, target.stanceDistance, target.lengthLimited ? "ON" : "OFF",
                     target.crossingLimited ? "ON" : "OFF");
-                if (settings.adaptiveTiming)
-                {
-                    ImGui::Text(u8"  선택 시간 %.3fs / 실행 가능 후보 %u / 회복 오차 %.3f → %.3fm",
-                        target.duration, target.feasibleCandidates, target.noStepError, target.recoveryError);
-                    ImGui::Text(u8"  모델상 정지 가능 %s / 후속 한 걸음 %s (%.3fs)",
-                        target.modelCapturable ? "YES" : "NO", target.usesNextStep ? "YES" : "NO", target.nextDuration);
-                }
             }
             else
             {
@@ -494,7 +473,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         }
         ImGui::Text(u8"최고 높이 = min(max(시작 거리 x %.2f, %.2fm), 기준 종아리 길이)",
             settings.liftHeightScale, settings.minimumLiftHeight);
-        ImGui::TextWrapped(u8"적응형 계획은 시작 시 시간·착지점·높이를 고정합니다. 실제 착지 후 하중을 확인하고 새 상태로 다시 계획합니다. 계획 시간이 끝나도 닿지 않으면 제한된 속도와 깊이로 더 내립니다.");
+        ImGui::TextWrapped(u8"설정은 다음 발딛기부터 적용됩니다. 하강 중 수평 착지 목표를 고정하고, 계획 시간이 끝나도 닿지 않으면 제한된 속도와 깊이로 더 내립니다. 실제 접촉을 확인해 종료합니다.");
         ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
         ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동/지지 다리의 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
         const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();

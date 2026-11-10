@@ -1,7 +1,5 @@
 ﻿#include "FootstepPlanner.h"
 
-#include "FootstepRecoveryPlan.h"
-
 using namespace physx;
 using namespace PARS;
 
@@ -12,18 +10,6 @@ namespace
 
     bool ValidSettings(const FootstepSettings& settings)
     {
-        if (settings.adaptiveTiming &&
-            (!std::isfinite(settings.minimumStepDuration) || settings.minimumStepDuration <= 0 ||
-                !std::isfinite(settings.maximumStepDuration) || settings.maximumStepDuration < settings.minimumStepDuration ||
-                settings.maximumStepDuration > 2 ||
-                !std::isfinite(settings.maximumFootSpeed) || settings.maximumFootSpeed <= 0 ||
-                !std::isfinite(settings.maximumFootAcceleration) || settings.maximumFootAcceleration <= 0 ||
-                !std::isfinite(settings.maximumLiftSpeed) || settings.maximumLiftSpeed <= 0 ||
-                !std::isfinite(settings.maximumLiftAcceleration) || settings.maximumLiftAcceleration <= 0 ||
-                !std::isfinite(settings.minimumRecoveryImprovement) || settings.minimumRecoveryImprovement <= 0))
-        {
-            return false;
-        }
         return std::isfinite(settings.startPredictionTime) && settings.startPredictionTime > 0 &&
             std::isfinite(settings.landingPredictionTime) && settings.landingPredictionTime > 0 &&
             std::isfinite(settings.stanceScale) && settings.stanceScale >= 0 &&
@@ -309,24 +295,6 @@ void FootstepPlanner::UpdateSupportTransfer(const FootstepInput& input, const Fo
     {
         transfer.candidateFoot = transfer.supportFoot;
     }
-    if (settings.adaptiveTiming)
-    {
-        // 다음 이동 발의 유효 계획이 요구하는 반대 발로 지지를 넘긴다.
-        int next = -1;
-        for (size_t side = 0; side < m_Snapshot.candidates.size(); ++side)
-        {
-            const FootstepTarget& candidate = m_Snapshot.candidates[side];
-            if (candidate.valid && (next < 0 || candidate.recoveryRate > m_Snapshot.candidates[next].recoveryRate))
-            {
-                next = static_cast<int>(side);
-            }
-        }
-        if (next >= 0)
-        {
-            transfer.candidateFoot = 1 - next;
-            transfer.predictedCom = m_Snapshot.candidates[next].landingCom;
-        }
-    }
     if (transfer.candidateFoot != previousCandidate)
     {
         transfer.confirmationTime = 0;
@@ -486,19 +454,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
     }
 
-    if (state.IsInProgress() && state.motion.frozenPlan)
-    {
-        // 계획 중 목표·시간을 바꾸면 검증한 속도·가속도 상한이 무효가 된다.
-        // 실제 접촉·지지 해제는 위에서 계속 확인하고 다음 걸음에서 새 충격을 반영한다.
-        state.target = state.plan.position;
-        state.targetNormal = state.plan.normal;
-        state.candidates[state.stepFoot] = state.plan;
-        state.hasTarget = true;
-        state.reason = state.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;
-        UpdateMotionTarget(input);
-        return;
-    }
-
     // 예측 계산에 필요한 설정과 입력이 유효한지 확인
     if (!ValidSettings(settings))
     {
@@ -537,16 +492,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
 
     // 예측점이 A 밖이면 needsStep = true, 안이면 false
     state.needsStep = !IsInsideFootSupportHull(input.hull, state.predictedCom);
-    if (settings.adaptiveTiming)
-    {
-        if (input.fixedDeltaTime < .001f || settings.maximumStepDuration / input.fixedDeltaTime > 512 ||
-            !std::isfinite(input.remainingSupportTime) || input.remainingSupportTime < 0)
-        {
-            state.reason = FootstepReason::InvalidSettings;
-            return;
-        }
-        state.needsStep = FootstepCaptureError(input) > settings.minimumRecoveryImprovement;
-    }
 
     // 왼발·오른발 각각의 착지 후보를 계산
     for (size_t side = 0; side < state.candidates.size(); ++side)
@@ -554,29 +499,13 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         // MakeTarget()은 반대 발이 실제로 지지 중인지 확인하고, COM 위치·속도와 Idle 발 간격을 이용해 후보를 만듦
         // 이후 지지발의 위치·접촉 법선으로 만든 평면에 맞추고 보폭 제한 등을 적용
         // 시작 판단과 착지 후보의 예측 시간은 발 이동 시간과 별개다.
-        state.candidates[side] = settings.adaptiveTiming && !state.IsInProgress()
-            ? PlanFootstepRecovery(input, settings, side) : MakeTarget(input, settings, side);
+        state.candidates[side] = MakeTarget(input, settings, side);
     }
 
     // 진행 중인 발딛기가 없을 때만 새 발딛기의 시작 조건을 검사
     if (!state.IsInProgress())
     {
         int movingFoot = input.blueFoot;
-        if (settings.adaptiveTiming)
-        {
-            // 첫 발도 거리만으로 고르지 않고 유효한 회복 계획을 비교한다.
-            for (size_t side = 0; side < state.candidates.size(); ++side)
-            {
-                const FootstepTarget& candidate = state.candidates[side];
-                if (candidate.valid && (movingFoot < 0 || movingFoot > 1 || !state.candidates[movingFoot].valid ||
-                    candidate.recoveryRate > state.candidates[movingFoot].recoveryRate + 1e-5f ||
-                    (std::abs(candidate.recoveryRate - state.candidates[movingFoot].recoveryRate) <= 1e-5f &&
-                        candidate.duration < state.candidates[movingFoot].duration)))
-                {
-                    movingFoot = static_cast<int>(side);
-                }
-            }
-        }
         if (state.transfer.active)
         {
             UpdateSupportTransfer(input, settings);
@@ -591,7 +520,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.stepFoot = state.supportFoot = -1;
         if (!state.needsStep)
         {
-            state.reason = settings.adaptiveTiming ? FootstepReason::CaptureStable : FootstepReason::PredictedInside;
+            state.reason = FootstepReason::PredictedInside;
             return;
         }
         if (movingFoot < 0 || movingFoot > 1)
@@ -629,7 +558,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.startPosition = foot.position;
         state.initialTarget = candidate.position;
         state.initialDistance = candidate.travelDistance;
-        state.plan = candidate;
 
         // 발을 들어 올릴 초기 목표 높이를 계산하고 시작을 기록
         state.motion = {};
@@ -641,15 +569,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.motion.landingLockProgress = settings.landingLockProgress;
         state.motion.landingLoweringSpeed = settings.landingLoweringSpeed;
         state.motion.maximumLandingLowering = (std::min)(settings.maximumLandingLowering, foot.calfLength);
-        if (settings.adaptiveTiming)
-        {
-            state.motion.duration = candidate.duration;
-            state.motion.initialHeight = candidate.liftHeight;
-            state.motion.frozenPlan = true;
-            state.motion.landingTargetLocked = true;
-            state.target = candidate.position;
-            state.targetNormal = candidate.normal;
-        }
         state.startedStep = input.completedStep;
         state.justStarted = true;
         ++state.startCount;
@@ -658,12 +577,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     // 착지 마무리 전에는 최신 후보를 추종하고, 이후에는 고정한 수평 위치의 지면 높이만 갱신한다.
     // 착지 목표갱신 또는 수평위치 고정
     const FootstepTarget& candidate = state.candidates[state.stepFoot];
-    if (state.motion.frozenPlan)
-    {
-        state.target = state.plan.position;
-        state.targetNormal = state.plan.normal;
-    }
-    else if (state.motion.landingTargetLocked)
+    if (state.motion.landingTargetLocked)
     {
         if (candidate.valid)
         {
@@ -759,14 +673,6 @@ const char* PARS::FootstepReasonLabel(FootstepReason reason)
         return u8"이동 시간 종료 및 접촉 확인 / 지지 하중 확인 시작";
     case FootstepReason::WaitingSupportLoad:
         return u8"착지 후 예측 지지발의 지속 접촉·하중 대기";
-    case FootstepReason::InvalidLegGeometry:
-        return u8"다리 위치·길이 또는 발바닥 크기 없음";
-    case FootstepReason::NoReachablePlan:
-        return u8"시간·속도·가속도·다리 도달 범위를 만족하는 계획 없음";
-    case FootstepReason::NoRecoveryImprovement:
-        return u8"도달 가능한 후보가 모델의 회복 오차를 줄이지 못함";
-    case FootstepReason::CaptureStable:
-        return u8"캡처 포인트가 현재 접촉 지지 범위 안";
     case FootstepReason::OutsideBuffer:
         return u8"실제 COM의 B 이탈 / 재진입해도 재개하지 않음";
     case FootstepReason::RootSupportReleased:

@@ -24,17 +24,7 @@ namespace PARS
         float supportLoadRatio = .5f;   // 착지 후 다음 지지발에 필요한 수직 하중 / 전신 체중
         float supportConfirmationTime = .05f; // 착지 충격 피크를 제외하기 위한 연속 하중 확인 시간(s)
         float supportSwitchDistance = .02f; // 예측 COM 거리 차이가 작으면 기존 지지발을 유지하는 여유(m)
-        // 적응형 계획의 목표 궤적 한계다. 실제 관절의 토크 상한을 대신하지 않는다.
-        float minimumStepDuration = .15f;
-        float maximumStepDuration = .4f;
-        float maximumFootSpeed = 2.0f;
-        float maximumFootAcceleration = 30.0f;
-        float maximumLiftSpeed = 1.0f;
-        float maximumLiftAcceleration = 40.0f;
-        float minimumRecoveryImprovement = .002f;
         bool preventCrossing = false;   // 움직이는 발이 반대편으로 교차하는 것을 제한할지
-        // 실제 충격 검증에서 회귀가 남아 있어 검토 전까지 명시적으로 선택한 경우에만 사용한다.
-        bool adaptiveTiming = false;
     };
 
     enum class FootstepPhase
@@ -69,11 +59,7 @@ namespace PARS
         Landed,
         OutsideBuffer,
         RootSupportReleased,
-        WaitingSupportLoad,
-        InvalidLegGeometry,
-        NoReachablePlan,
-        NoRecoveryImprovement,
-        CaptureStable
+        WaitingSupportLoad
     };
 
     struct FootstepFootInput
@@ -84,17 +70,11 @@ namespace PARS
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
-        physx::PxVec3 hipPosition{0};
-        physx::PxVec3 soleToAnkle{0};
-        std::array<physx::PxVec3, 4> supportOffsets{};
-        float thighLength = 0;
-        float supportRadius = 0;
         float calfLength = 0;
         float normalImpulse = 0;
         bool available = false;
         bool hasContactSample = false;
         bool grounded = false;
-        bool hasLegGeometry = false;
     };
 
     struct FootstepInput
@@ -111,7 +91,6 @@ namespace PARS
         float projectionHeight = 0;
         float fixedDeltaTime = 0;
         float bodyWeight = 0;
-        float remainingSupportTime = (std::numeric_limits<float>::max)();
         int blueFoot = -1;
         bool active = false;
         bool automaticSupport = false;
@@ -130,25 +109,11 @@ namespace PARS
         physx::PxVec3 raw{0};
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0};
-        physx::PxVec3 landingCom{0};
-        physx::PxVec3 landingVelocity{0};
-        physx::PxVec3 capturePoint{0};
-        physx::PxVec3 nextTarget{0};
         float travelDistance = 0;
         float stanceDistance = 0;
-        float duration = 0;
-        float liftHeight = 0;
-        float nextDuration = 0;
-        float noStepError = 0;
-        float recoveryError = 0;
-        float oneStepError = 0;
-        float recoveryRate = 0;
-        uint32_t feasibleCandidates = 0;
         bool valid = false;
         bool lengthLimited = false;
         bool crossingLimited = false;
-        bool usesNextStep = false;
-        bool modelCapturable = false;
     };
 
     struct FootstepMotion
@@ -174,7 +139,6 @@ namespace PARS
         bool valid = false;
         bool hasLandingError = false;
         bool landingTargetLocked = false;
-        bool frozenPlan = false;
     };
 
     struct FootstepRoles
@@ -237,7 +201,6 @@ namespace PARS
         FootstepMotion motion;                            // 현재 발 이동 궤적의 목표 위치, 경과 시간, 시간 및 실측 진행률과 착지 오차
         std::array<FootstepTarget, 2> candidates;         // 양발 각각의 착지 목표 후보. 위치, 유효성, 거리 및 교차 제한 여부와 실패 사유를 저장
         FootstepSupportTransfer transfer;                 // 착지 후 예측 후보와 지속 하중을 확인한 지지발
-        FootstepTarget plan;                              // 시작 시 확정한 시간·위치와 역진자 모델의 회복 평가
         bool hasPrediction = false;                       // 미래 COM 위치를 유효하게 계산했는지. predictedCom을 사용할 때 확인
         bool needsStep = false;                           // 예측 COM이 현재 지지 영역 A 밖이어서 발딛기가 필요한지
         bool hasTarget = false;                           // 이번 완료 물리 스텝에서 선택한 발의 유효한 착지 목표를 출력했는지

@@ -47,7 +47,6 @@
     <ClCompile Include="FramePerformanceTests.cpp" />
     <ClCompile Include="FootstepPlannerTests.cpp" />
     <ClCompile Include="..\Model\FootstepPlanner.cpp" />
-    <ClCompile Include="..\Model\FootstepRecoveryPlan.cpp" />
     <ClCompile Include="FootstepIKTests.cpp" />
     <ClCompile Include="..\Model\FootstepIK.cpp" />
     <ClCompile Include="StandingSupportTests.cpp" />

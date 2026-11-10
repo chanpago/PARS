@@ -220,7 +220,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     std::ofstream events(path + L".events.csv");
     std::ofstream states(path + L".states.csv");
     std::ofstream capsules(path + L".capsules.csv");
-    std::ofstream steps(path + L".steps.csv");
     uint32_t kinematicPlayer = 0;
     uint32_t modeCycles = 0;
     uint32_t incoming = 0;
@@ -242,16 +241,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             "Open actual-character body impact validation");
         std::string error;
         check(test.Reset(), "Reset grounded Idle dummy with original automatic support");
-        uint32_t forceActive = 0;
-        uint32_t adaptive = dummy->GetMesh().GetFootSupport().GetFootstepSettings().adaptiveTiming ? 1 : 0;
-        CommandLineArgs::GetInteger(L"footstepadaptive", adaptive);
-        CommandLineArgs::GetInteger(L"bodyimpactactiveidle", forceActive);
-        dummy->GetMesh().GetFootSupport().GetFootstepSettings().adaptiveTiming = adaptive != 0;
-        if (forceActive)
-        {
-            dummy->GetMesh().SetAutomaticRagdoll(false);
-            check(dummy->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error), "Keep the idle dummy physically active");
-        }
         PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());
         check(controller != nullptr, "Use the normal player movement controller");
         controller->SetInputEnabled(true);
@@ -299,7 +288,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
         events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
         states << "frame,mode,blending,zone,stable_time,step_count,impact\n";
-        steps << "frame,time,side,phase,reason,starts,landings,aborts,just_started,just_landed,duration,progress,landing_error,root_release,grounded,sole_x,sole_y,sole_z,sole_up_y,target_x,target_y,target_z,ik_valid,ik_position_error,ik_rotation_error,reach_error,com_x,com_y,com_z,com_vx,com_vz\n";
         capsules << "frame,time,mode,root_x,root_y,root_z,present,mass,radius,half_length,x,y,z,cyan_lines\n";
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
@@ -386,31 +374,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()
                 << ',' << static_cast<int>(dummySupport.balance.zone) << ',' << dummyMesh.GetKinematicStableTime()
                 << ',' << dummySupport.footstep.startCount << ',' << dummy->GetMesh().GetRagdoll().GetExternalImpactImpulse() << '\n';
-            // 실제 발과 그 틱에 전달한 IK 목표를 기록한다. 애니메이션 대비 오차와 구분한다.
-            const FootstepSnapshot& step = dummySupport.footstep;
-            const FootstepIKSnapshot& ik = dummyMesh.GetFootstepIKSnapshot();
-            for (size_t side = 0; side < dummySupport.feet.size(); ++side)
-            {
-                const FootSoleSample& foot = dummySupport.feet[side];
-                const LegIKResult& leg = ik.legs[side];
-                const Vector3 sole(foot.soleWorld.GetW());
-                const PxVec3 position(float(sole.GetX()), float(sole.GetY()), float(sole.GetZ()));
-                DirectX::XMFLOAT4 rotation;
-                DirectX::XMStoreFloat4(&rotation, Quaternion(foot.soleWorld));
-                const PxQuat actual(rotation.x, rotation.y, rotation.z, rotation.w);
-                const float angle = 2 * std::acos(PxClamp(std::abs(actual.dot(leg.requestedSole.q)), 0.0f, 1.0f));
-                steps << frame << ',' << time << ',' << side << ',' << static_cast<int>(step.phase)
-                    << ',' << static_cast<int>(step.reason) << ',' << step.startCount << ',' << step.landingCount
-                    << ',' << step.abortCount << ',' << step.justStarted << ',' << step.justLanded
-                    << ',' << step.motion.duration << ',' << step.motion.progress << ',' << step.motion.landingError
-                    << ',' << static_cast<int>(dummyMesh.GetRootSupportRelease()) << ',' << foot.contact.grounded
-                    << ',' << position.x << ',' << position.y << ',' << position.z << ',' << float(foot.soleWorld.GetY().GetY())
-                    << ',' << leg.requestedSole.p.x << ',' << leg.requestedSole.p.y << ',' << leg.requestedSole.p.z
-                    << ',' << leg.valid << ',' << (position - leg.requestedSole.p).magnitude() << ',' << angle
-                    << ',' << leg.reachError << ',' << dummySupport.centerOfMass.x << ',' << dummySupport.centerOfMass.y
-                    << ',' << dummySupport.centerOfMass.z << ',' << dummySupport.centerOfMassVelocity.x
-                    << ',' << dummySupport.centerOfMassVelocity.z << '\n';
-            }
             for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
             {
                 ++eventCount;

@@ -249,8 +249,4 @@
     <ClInclude Include="CharacterImpact.h" />
     <ClInclude Include="Components\CharacterImpactComponent.h" />
   </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="FootstepRecoveryPlan.cpp" />
-    <ClInclude Include="FootstepRecoveryPlan.h" />
-  </ItemGroup>
 </Project>
