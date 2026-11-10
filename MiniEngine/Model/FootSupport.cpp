@@ -404,6 +404,10 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.blueFoot = m_Snapshot.candidates.step;
     input.completedStep = m_Snapshot.completedPhysicsStep;
     input.revision = m_Snapshot.contactRevision;
+    if (m_BufferGrace.IsActive())
+    {
+        input.remainingSupportTime = static_cast<float>(FootSupportGrace::Duration - m_BufferGrace.GetOutsideTime());
+    }
 
     // 캐릭터의 의도된 수평 방향을 사용한다. 충격에 의한 골반의 순간 회전은 기준 방향에 섞지 않는다.
     // 현재 캐릭터가 보고있는 수평 방향을 구한다
@@ -450,6 +454,46 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.normal = foot.contact.normal;
         target.normalImpulse = foot.contact.normalImpulse;
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
+        target.thighLength = foot.leg.available ? foot.leg.thighLength : 0;
+        target.supportRadius = (std::min)(m_Settings[side].halfWidth, m_Settings[side].halfLength);
+        const std::vector<int>& boneNodes = mesh.GetRagdoll().GetBoneNodes();
+        for (size_t body = 0; body < boneNodes.size(); ++body)
+        {
+            if (foot.leg.available && boneNodes[body] == foot.leg.hipNode)
+            {
+                target.hipPosition = ToPx(Vector3(mesh.GetRagdoll().GetBoneWorld(body).GetW()));
+                target.hasLegGeometry = true;
+                break;
+            }
+        }
+        // 착지면에 맞춘 발바닥 회전으로 발목까지의 오프셋을 계산한다.
+        const FootSoleSample& stance = m_Snapshot.feet[1 - side];
+        PxVec3 groundNormal = stance.contact.grounded ? stance.contact.normal : foot.contact.normal;
+        if (!groundNormal.isFinite() || groundNormal.normalize() < 1e-6f)
+        {
+            groundNormal = PxVec3(0, 1, 0);
+        }
+        const Vector3 up(groundNormal.x, groundNormal.y, groundNormal.z);
+        Vector3 soleForward = Vector3(foot.soleWorld.GetZ()) - up * Dot(up, Vector3(foot.soleWorld.GetZ()));
+        if (float(LengthSquare(soleForward)) > 1e-8f)
+        {
+            soleForward = Normalize(soleForward);
+            const Matrix4 groundSole(Normalize(Cross(up, soleForward)), up, soleForward, Vector3(kZero));
+            target.soleToAnkle = ToPx(Vector3((groundSole * Invert(foot.soleInBone)).GetW()));
+            const float width = m_Settings[side].halfWidth;
+            const float length = m_Settings[side].halfLength;
+            const std::array<Vector3, 4> localCorners{
+                Vector3(-width, 0, -length), Vector3(width, 0, -length),
+                Vector3(width, 0, length), Vector3(-width, 0, length)};
+            for (size_t corner = 0; corner < localCorners.size(); ++corner)
+            {
+                target.supportOffsets[corner] = ToPx(Vector3(groundSole * localCorners[corner]));
+            }
+        }
+        else
+        {
+            target.hasLegGeometry = false;
+        }
 
         // idle기준 발배치 오프셋을 현재 캐릭터 방향으로 돌림
         const PxVec3 offset = referenceFeet[side] - midpoint;

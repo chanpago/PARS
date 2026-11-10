@@ -29,6 +29,7 @@ namespace
     {
         // 궤적 검증의 시간 조건을 고정해 기본 튜닝 값의 변경과 분리한다.
         FootstepSettings settings;
+        settings.adaptiveTiming = false;
         settings.startPredictionTime = .3f;
         settings.landingPredictionTime = .3f;
         settings.stepDuration = .3f;
@@ -144,7 +145,8 @@ namespace
 
     void TestBufferStartCandidates()
     {
-        const FootstepSettings settings;
+        FootstepSettings settings;
+        settings.adaptiveTiming = false;
         for (const float direction : {-1.0f, 1.0f})
         {
             FootstepInput input = Standing();
@@ -187,9 +189,14 @@ namespace
             input.blueFoot = EvaluateFootSupportCandidates(input.hull, input.com, feet, input.zone).step;
             planner.Reset();
             planner.Update(input, settings);
+            Check(planner.GetSnapshot().phase != FootstepPhase::Aborted,
+                "Geometric B exit alone does not expire the existing support grace");
+            input.outsideBufferReleased = true;
+            ++input.completedStep;
+            planner.Update(input, settings);
             Check(input.zone == FootSupportZone::Outside && input.blueFoot == -1 &&
                     planner.GetSnapshot().phase == FootstepPhase::Aborted && planner.GetSnapshot().startCount == 0,
-                "Actual COM beyond B still aborts without starting a step");
+                "Expired B grace aborts without starting a step");
             input.com.x = .25f * direction;
             input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
             input.blueFoot = EvaluateFootSupportCandidates(input.hull, input.com, feet, input.zone).step;
@@ -343,6 +350,7 @@ namespace
                 "Sustained support after landing permits the predicted role change");
 
             input.zone = FootSupportZone::Outside;
+            input.outsideBufferReleased = true;
             ++input.completedStep;
             planner.Update(input, settings);
             Check(!planner.GetSnapshot().GetRoles().IsValid(), "Aborting clears visible roles even when stored foot IDs remain");
@@ -395,6 +403,7 @@ namespace
         input.feet[1].grounded = true;
         input.hasVelocity = true;
         input.zone = FootSupportZone::Outside;
+        input.outsideBufferReleased = true;
         ++input.completedStep;
         planner.Update(input, settings);
         Check(planner.GetSnapshot().phase == FootstepPhase::Aborted && planner.GetSnapshot().abortCount == 1 &&
@@ -403,6 +412,7 @@ namespace
         Check(!planner.GetSnapshot().candidates[0].valid && !planner.GetSnapshot().candidates[1].valid,
             "Aborted output cannot reuse a formerly valid candidate");
         input.zone = FootSupportZone::Inside;
+        input.outsideBufferReleased = false;
         ++input.completedStep;
         planner.Update(input, settings);
         Check(planner.GetSnapshot().phase == FootstepPhase::Aborted && planner.GetSnapshot().startCount == 1,
@@ -740,7 +750,8 @@ namespace
 
     void TestSupportTransfer()
     {
-        const FootstepSettings settings;
+        FootstepSettings settings;
+        settings.adaptiveTiming = false;
         Check(Near(settings.stepDuration, .15f) && Near(settings.landingPredictionTime, .3f),
             "The tuned movement and landing prediction defaults remain unchanged");
         for (const float dt : {1.0f / 60, 1.0f / 120})
@@ -856,6 +867,163 @@ namespace
             "A contact revision clears post-landing load history");
     }
 
+    FootstepInput AdaptiveStanding()
+    {
+        FootstepInput input = Standing();
+        input.velocity = PxVec3(0, 0, .7f);
+        for (FootstepFootInput& foot : input.feet)
+        {
+            foot.hasLegGeometry = true;
+            foot.hipPosition = foot.position + PxVec3(0, .75f, 0);
+            foot.soleToAnkle = PxVec3(0, .05f, 0);
+            foot.thighLength = .45f;
+            foot.supportRadius = .05f;
+            foot.supportOffsets = {PxVec3(-.05f, 0, -.15f), PxVec3(.05f, 0, -.15f),
+                PxVec3(.05f, 0, .15f), PxVec3(-.05f, 0, .15f)};
+        }
+        return input;
+    }
+
+    void TestAdaptiveRecovery()
+    {
+        FootstepSettings settings;
+        Check(!settings.adaptiveTiming, "The unapproved adaptive candidate is opt-in");
+        settings.adaptiveTiming = true;
+        unsigned started = 0;
+        unsigned followups = 0;
+        float shortest = 10;
+        float longest = 0;
+        for (int lateral = -2; lateral <= 2; ++lateral)
+        {
+            for (int forward = -5; forward <= 5; ++forward)
+            {
+                FootstepPlanner planner;
+                FootstepInput input = AdaptiveStanding();
+                input.velocity = PxVec3(lateral * .2f, 0, forward * .2f);
+                planner.Update(input, settings);
+                const FootstepSnapshot state = planner.GetSnapshot();
+                if (!state.justStarted)
+                {
+                    Check(!state.motion.valid, "Rejected plans never output a swing target");
+                    continue;
+                }
+                ++started;
+                followups += state.plan.usesNextStep ? 1 : 0;
+                shortest = (std::min)(shortest, state.motion.duration);
+                longest = (std::max)(longest, state.motion.duration);
+                Check(state.plan.valid && state.plan.feasibleCandidates > 0 &&
+                        state.plan.noStepError - state.plan.recoveryError >= settings.minimumRecoveryImprovement,
+                    "Every accepted plan has reachable candidates and improves modeled recovery");
+                Check(state.motion.duration >= settings.minimumStepDuration - 1e-6f &&
+                        state.motion.duration <= settings.maximumStepDuration + 1e-6f &&
+                        std::abs(state.motion.duration / input.fixedDeltaTime - std::round(state.motion.duration / input.fixedDeltaTime)) < 1e-4f,
+                    "Selected durations respect the range and completed physics ticks");
+                // 실제 출력된 이산 궤적에서 속도와 가속도를 측정한다.
+                input.feet[state.stepFoot].grounded = false;
+                PxVec3 previousPosition = state.motion.position;
+                PxVec3 previousVelocity(0);
+                const unsigned count = static_cast<unsigned>(std::round(state.motion.duration / input.fixedDeltaTime));
+                for (unsigned tick = 1; tick <= count; ++tick)
+                {
+                    // 도중의 외력 추정과 설정 변경으로 고정한 궤적이 튀지 않아야 한다.
+                    input.velocity = PxVec3(20, 0, -20);
+                    ++input.completedStep;
+                    planner.Update(input, settings);
+                    const FootstepSnapshot& moving = planner.GetSnapshot();
+                    Check(moving.motion.valid && (moving.target - state.target).magnitude() < 1e-6f &&
+                            Near(moving.motion.duration, state.motion.duration),
+                        "A disturbance during swing preserves the committed target and duration");
+                    const PxVec3 velocity = (moving.motion.position - previousPosition) / input.fixedDeltaTime;
+                    const PxVec3 acceleration = (velocity - previousVelocity) / input.fixedDeltaTime;
+                    Check(PxVec3(velocity.x, 0, velocity.z).magnitude() <= settings.maximumFootSpeed + .001f &&
+                            std::abs(velocity.y) <= settings.maximumLiftSpeed + .001f,
+                        "Output horizontal and vertical speeds stay bounded");
+                    Check(PxVec3(acceleration.x, 0, acceleration.z).magnitude() <= settings.maximumFootAcceleration + .01f &&
+                            std::abs(acceleration.y) <= settings.maximumLiftAcceleration + .01f,
+                        "Output horizontal and vertical accelerations stay bounded");
+                    previousPosition = moving.motion.position;
+                    previousVelocity = velocity;
+                }
+                Check(!planner.GetSnapshot().justLanded, "Elapsed duration alone does not certify actual landing");
+                input.feet[state.stepFoot].grounded = true;
+                ++input.completedStep;
+                planner.Update(input, settings);
+                Check(planner.GetSnapshot().justLanded && planner.GetSnapshot().motion.hasLandingError,
+                    "Actual contact completes the plan and records tracking error");
+            }
+        }
+        std::printf("Adaptive coverage: %u started, duration %.3f..%.3f s\n", started, shortest, longest);
+        Check(started >= 10, "The COM state grid includes executable improving plans");
+        FootstepPlanner raised;
+        FootstepInput raisedInput = AdaptiveStanding();
+        raisedInput.feet[1].position.y += .08f;
+        raisedInput.feet[1].grounded = false;
+        raised.Update(raisedInput, settings);
+        Check(raised.GetSnapshot().justStarted && raised.GetSnapshot().motion.duration > shortest,
+            "An already raised swing foot requires a longer feasible landing duration");
+        FootstepPlanner staggered;
+        FootstepInput staggeredInput = AdaptiveStanding();
+        staggeredInput.velocity.z = 1.4f;
+        staggeredInput.feet[0].position.z = -.4f;
+        staggeredInput.feet[1].position.z = .4f;
+        staggeredInput.feet[0].contactPosition = staggeredInput.feet[0].position;
+        staggeredInput.feet[1].contactPosition = staggeredInput.feet[1].position;
+        staggered.Update(staggeredInput, settings);
+        Check(staggered.GetSnapshot().justStarted &&
+                staggered.GetSnapshot().plan.recoveryError < staggered.GetSnapshot().plan.noStepError,
+            "A staggered stance selects an improving recovery plan");
+        Check(followups > 0, "Sampled states include recovery plans using a following step");
+
+        for (unsigned invalid = 0; invalid < 8; ++invalid)
+        {
+            FootstepPlanner planner;
+            FootstepInput input = AdaptiveStanding();
+            FootstepSettings candidate = settings;
+            if (invalid == 0)
+            {
+                input.remainingSupportTime = .05f;
+            }
+            else if (invalid == 1)
+            {
+                input.feet[0].hasLegGeometry = false;
+            }
+            else if (invalid == 2)
+            {
+                candidate.maximumLiftAcceleration = .1f;
+            }
+            else if (invalid == 3)
+            {
+                candidate.maximumFootSpeed = .0001f;
+            }
+            else if (invalid == 4)
+            {
+                candidate.maximumFootSpeed = std::numeric_limits<float>::quiet_NaN();
+            }
+            else if (invalid == 5)
+            {
+                candidate.minimumStepDuration = candidate.maximumStepDuration + .1f;
+            }
+            else if (invalid == 6)
+            {
+                input.feet[0].grounded = false;
+                input.feet[1].grounded = false;
+            }
+            else
+            {
+                input.outsideBufferReleased = true;
+            }
+            planner.Update(input, candidate);
+            Check(!planner.GetSnapshot().justStarted && !planner.GetSnapshot().motion.valid,
+                "Unreachable, unsupported, expired and invalid adaptive plans are rejected");
+        }
+        FootstepPlanner idle;
+        FootstepInput input = AdaptiveStanding();
+        input.velocity = PxVec3(0);
+        idle.Update(input, settings);
+        Check(!idle.GetSnapshot().needsStep && idle.GetSnapshot().reason == FootstepReason::CaptureStable,
+            "Stationary supported COM does not create an adaptive swing");
+        std::printf("Adaptive scenarios: %u started, %u with followup, duration %.3f..%.3f s\n", started, followups, shortest, longest);
+    }
 }
 
 void TestFootstepPlanner()
@@ -870,5 +1038,6 @@ void TestFootstepPlanner()
     TestMotionHeightAndProgress();
     TestMotionLimitsAndRetargeting();
     TestSupportTransfer();
+    TestAdaptiveRecovery();
     std::printf("PASS: %u procedural footstep checks (no PhysX simulation)\n", checks);
 }
