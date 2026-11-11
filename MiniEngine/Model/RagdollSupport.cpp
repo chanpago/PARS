@@ -43,11 +43,10 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
     {
         // 양발 사이로 투영한 COM에 따라 하중을 분담한다. 지면반력 측정값과는 별개의 목표값이다.
         const PxVec3 span = m_SupportContacts[1].position - m_SupportContacts[0].position;
-        const PxVec3 relative = PxVec3(float(center.GetX()), float(center.GetY()), float(center.GetZ())) -
-            m_SupportContacts[0].position;
+        const PxVec3 relative = PxVec3(float(center.GetX()), float(center.GetY()), float(center.GetZ())) - m_SupportContacts[0].position;
+
         const float lengthSquared = span.x * span.x + span.z * span.z;
-        const float right = lengthSquared > 1e-8f ?
-            PxClamp((relative.x * span.x + relative.z * span.z) / lengthSquared, 0.0f, 1.0f) : .5f;
+        const float right = lengthSquared > 1e-8f ? PxClamp((relative.x * span.x + relative.z * span.z) / lengthSquared, 0.0f, 1.0f) : .5f;
         m_SupportLoads.fractions = {1.0f - right, right};
     }
     else
@@ -56,6 +55,8 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
     }
     PxArticulationCache& cache = *m_ArticulationCache;
     PxU32 rows = 0, columns = 0;
+
+
     m_Articulation->computeDenseJacobian(cache, rows, columns);
     if (columns != count)
     {
@@ -63,6 +64,7 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
         return generalized;
     }
     const float weight = (std::max)(0.0f, -mass * m_Articulation->getScene()->getGravity().y);
+
     for (size_t side = 0; side < m_SupportContacts.size(); ++side)
     {
         if (!valid[side])
@@ -77,9 +79,12 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
             m_SupportLoads = {};
             return std::vector<float>(count, 0);
         }
+
         const PxVec3 force = contact.normal * (weight * m_SupportLoads.fractions[side] / contact.normal.y);
+
         const PxVec3 centerOfMass = (body.getGlobalPose() * body.getCMassLocalPose()).p;
         const PxVec3 torque = (contact.position - centerOfMass).cross(force);
+
         m_SupportLoads.forces[side] = force;
         const PxU32 firstRow = 6 * link->getLinkIndex();
         for (unsigned column = 0; column < count; ++column)
