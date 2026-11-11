@@ -35,9 +35,9 @@ Microsoft MiniEngine을 확장한 **C++ · DirectX 12 · PhysX 5.6.1 · Dear ImG
 
 프로젝트의 목표, 기술적 접근과 주차별 진행 내용을 정리한 발표자료입니다.
 
-| 1주차 | 2주차 | 3주차 |
-| --- | --- | --- |
-| [1주차 발표자료](https://www.canva.com/design/DAHYFBn98Zc/BCHxzDVSFVDVx0fE3fzTkA/edit) | [2주차 발표자료](https://canva.link/yow5q7gh7rrlmi0) | [3주차 발표자료](https://canva.link/fzt4crcfri8y5z5) |
+| 1주차 | 2주차 | 3주차 | 4주차 |
+| --- | --- | --- | --- |
+| [1주차 발표자료](https://www.canva.com/design/DAHYFBn98Zc/BCHxzDVSFVDVx0fE3fzTkA/edit) | [2주차 발표자료](https://canva.link/yow5q7gh7rrlmi0) | [3주차 발표자료](https://canva.link/fzt4crcfri8y5z5) | [4주차 발표자료](https://canva.link/18hwphk0quld8vq) |
 
 <a id="build-and-run"></a>
 
