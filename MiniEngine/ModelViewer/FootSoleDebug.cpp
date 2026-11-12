@@ -378,6 +378,21 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             static_cast<unsigned long long>(recovery.recoveryCount), static_cast<unsigned long long>(recovery.returnCount));
         ImGui::TextWrapped(u8"Recovery에서는 접촉이 잠시 끊겨도 양발 목표를 유지합니다. 연한 파랑 영역은 현재 양발 중심에 맞춘 애니메이션 기준 발 영역입니다.");
         const PARS::StandingSupportSnapshot& standing = mesh.GetStandingSupportSnapshot();
+        PARS::StandingSupportSettings& standingSettings = mesh.GetStandingSupportSettings();
+        ImGui::SliderFloat(u8"지지발 발목 최대 추가 강성·감쇠", &standingSettings.ankleDriveBoost,
+            0.0f, 1.0f, "+%.2f", ImGuiSliderFlags_AlwaysClamp);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(u8"체중 전체를 받는 발의 추가 배율입니다. 0.5이면 최대 1.5배, 0이면 보정을 끕니다.");
+        }
+        ImGui::Checkbox(u8"지지발이 들린 방향으로 과도한 기울기 목표 제한", &standingSettings.limitFootTilt);
+        if (standingSettings.limitFootTilt)
+        {
+            ImGui::SliderFloat(u8"기울기 제한 시작 (도)", &standingSettings.footTiltLimitStartDegrees,
+                0.0f, standingSettings.footTiltLimitDegrees - .1f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat(u8"기울기 제한 완료 (도)", &standingSettings.footTiltLimitDegrees,
+                standingSettings.footTiltLimitStartDegrees + .1f, 30.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+        }
         if (mesh.GetRagdoll().UsesFootDrivenSupport() && standing.valid)
         {
             const PARS::RagdollSupportLoads& loads = mesh.GetRagdoll().GetSupportLoads();
@@ -388,6 +403,9 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             ImGui::Text(u8"적용 높이 차이 %.1fcm / 수평 자세 보정 %.1fcm / 도달 불가 %s",
                 standing.lowering * 100, standing.horizontalCorrection.magnitude() * 100, standing.reachLimited ? "ON" : "OFF");
             ImGui::Text(u8"예상 지지 하중: 왼발 %.0fN / 오른발 %.0fN", loads.forces[0].y, loads.forces[1].y);
+            ImGui::Text(u8"발목 강성·감쇠 배율: 왼발 %.2f / 오른발 %.2f · 기울기 목표 제한 %s / %s",
+                loads.ankleDriveScales[0], loads.ankleDriveScales[1],
+                standing.footTiltLimited[0] ? "ON" : "OFF", standing.footTiltLimited[1] ? "ON" : "OFF");
             ImGui::Text(u8"측정 접촉 반력: 왼발 %.0fN / 오른발 %.0fN",
                 sample.feet[0].contact.normalImpulse / float(PhysicsWorld::FixedDeltaTime),
                 sample.feet[1].contact.normalImpulse / float(PhysicsWorld::FixedDeltaTime));

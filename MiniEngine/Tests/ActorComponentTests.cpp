@@ -182,9 +182,15 @@ void RunSpringArmTests();
 void RunRagdollRecoveryTests();
 
 void RunCharacterImpactTests();
+void RunSupportAnkleDriveTests();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--ankle-support-only") == 0)
+    {
+        RunSupportAnkleDriveTests();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--body-impact-only") == 0)
     {
         RunCharacterImpactTests();
@@ -233,6 +239,7 @@ int main(int argc, char** argv)
     RunRagdollReuseTests(true);
     RunAnatomicalLimitTests();
     RunActiveRagdollTests();
+    RunSupportAnkleDriveTests();
     RunRagdollComparisonTests();
     return 0;
 }

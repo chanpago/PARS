@@ -5,6 +5,67 @@
 using namespace PARS;
 using namespace physx;
 
+namespace
+{
+    PxVec3 SoleTiltVector(const PxQuat& orientation, const PxVec3& normal)
+    {
+        const PxVec3 up = orientation.rotate(PxVec3(0, 1, 0));
+        PxVec3 axis = normal.cross(up);
+        const float sine = axis.normalize();
+        const float cosine = PxClamp(normal.dot(up), -1.0f, 1.0f);
+        if (sine < 1e-6f)
+        {
+            if (cosine >= 0.0f)
+            {
+                return PxVec3(0);
+            }
+            axis = normal.cross(PxVec3(1, 0, 0));
+            if (axis.normalize() < 1e-6f)
+            {
+                axis = normal.cross(PxVec3(0, 0, 1)).getNormalized();
+            }
+        }
+        return axis * std::atan2(sine, cosine);
+    }
+
+    PxQuat TiltRotation(const PxVec3& rotation)
+    {
+        const float angle = rotation.magnitude();
+        return angle > 1e-6f ? PxQuat(angle, rotation / angle) : PxQuat(PxIdentity);
+    }
+
+    bool LimitSupportTilt(const StandingSupportFoot& foot, const StandingSupportSettings& settings,
+        PxQuat& target)
+    {
+        PxVec3 normal = foot.supportNormal;
+        if (!settings.limitFootTilt || !foot.actualSole.isSane() || !normal.isFinite() ||
+            normal.normalize() < 1e-6f || normal.y < .70710678f)
+        {
+            return false;
+        }
+        PxVec3 tiltAxis = SoleTiltVector(foot.actualSole.q, normal);
+        const float actualAngle = tiltAxis.normalize();
+        const float start = settings.footTiltLimitStartDegrees * PxPi / 180.0f;
+        const float maximum = settings.footTiltLimitDegrees * PxPi / 180.0f;
+        if (actualAngle <= start)
+        {
+            return false;
+        }
+        const PxVec3 targetTilt = SoleTiltVector(target, normal);
+        const float alongTilt = targetTilt.dot(tiltAxis);
+        const float blend = PxClamp((actualAngle - start) / (maximum - start), 0.0f, 1.0f);
+        const float excess = (std::max)(0.0f, alongTilt - maximum) * blend;
+        if (excess <= 1e-6f)
+        {
+            return false;
+        }
+        // 반대 방향의 복원과 선회는 남기고, 이미 들린 방향으로 과도한 목표만 줄인다.
+        const PxVec3 limitedTilt = targetTilt - tiltAxis * excess;
+        target = (TiltRotation(limitedTilt) * TiltRotation(targetTilt).getConjugate() * target).getNormalized();
+        return true;
+    }
+}
+
 void StandingSupport::Reset()
 {
     m_Snapshot = {};
@@ -43,7 +104,10 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         !std::isfinite(settings.reachReserve) || settings.reachReserve < 0 ||
         !std::isfinite(settings.horizontalDampingTime) || settings.horizontalDampingTime < 0 ||
         !std::isfinite(settings.maximumHorizontalCorrection) || settings.maximumHorizontalCorrection < 0 ||
-        !std::isfinite(settings.horizontalFrequency) || settings.horizontalFrequency <= 0)
+        !std::isfinite(settings.horizontalFrequency) || settings.horizontalFrequency <= 0 ||
+        !std::isfinite(settings.footTiltLimitStartDegrees) || settings.footTiltLimitStartDegrees < 0 ||
+        !std::isfinite(settings.footTiltLimitDegrees) ||
+        settings.footTiltLimitDegrees <= settings.footTiltLimitStartDegrees || settings.footTiltLimitDegrees > 90.0f)
     {
         m_Snapshot.valid = false;
         return false;
@@ -187,6 +251,8 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
             // 실제 골반이 낮으면 제어용 발 목표를 아래로 보내 다리가 바닥을 밀도록 한다.
             m_Snapshot.soleTargets[side].p.y += input.pelvis.p.y - m_Snapshot.targetHeight;
             m_Snapshot.soleTargets[side].p += horizontalCorrection;
+            m_Snapshot.footTiltLimited[side] = LimitSupportTilt(input.feet[side], settings,
+                m_Snapshot.soleTargets[side].q);
         }
     }
     m_Initialized = true;

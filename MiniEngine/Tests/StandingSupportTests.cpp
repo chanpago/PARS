@@ -223,6 +223,63 @@ namespace
             "Support grace never changes the swing-foot target");
     }
 
+    void TestSupportFootTilt()
+    {
+        StandingSupport controller;
+        StandingSupportSettings settings;
+        StandingSupportInput input = StandingPose();
+        const PxVec3 pitchAxis(1, 0, 0);
+        input.feet[0].actualSole.q = PxQuat(PxPi / 18.0f, pitchAxis);
+        input.feet[0].sole.q = PxQuat(PxPi / 9.0f, pitchAxis);
+        input.feet[1].supporting = false;
+        input.feet[1].actualSole.q = input.feet[0].actualSole.q;
+        input.feet[1].sole.q = input.feet[0].sole.q;
+        Check(controller.Update(input, settings), "Tilted support has a valid target");
+        const PxVec3 limitedUp = controller.GetSnapshot().soleTargets[0].q.rotate(PxVec3(0, 1, 0));
+        Check(controller.GetSnapshot().footTiltLimited[0] &&
+                std::abs(std::acos(PxClamp(limitedUp.y, -1.0f, 1.0f)) - PxPi / 36.0f) < 1e-5f,
+            "A tilted stance foot caps an excessive target at five degrees");
+        Check(!controller.GetSnapshot().footTiltLimited[1] &&
+                std::abs(controller.GetSnapshot().soleTargets[1].q.dot(input.feet[1].sole.q)) > .999999f,
+            "The same tilt never alters the swing-foot orientation");
+        ++input.completedStep;
+        input.feet[0].sole.q = PxQuat(-PxPi / 9.0f, pitchAxis);
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0],
+            "A restoring target in the opposite direction remains unchanged");
+        ++input.completedStep;
+        input.feet[0].sole.q = PxQuat(PxPi, PxVec3(0, 1, 0));
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0],
+            "Yaw alone is not treated as sole tilt");
+        ++input.completedStep;
+        const PxQuat slope(PxPi / 12.0f, PxVec3(0, 0, 1));
+        input.feet[0].supportNormal = slope.rotate(PxVec3(0, 1, 0));
+        input.feet[0].actualSole.q = slope;
+        input.feet[0].sole.q = slope;
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0],
+            "A foot flat on a slope is not flattened toward world up");
+        ++input.completedStep;
+        input.feet[0].supportNormal = PxVec3(0, 1, 0);
+        input.feet[0].actualSole.q = PxQuat(3.5f * PxPi / 180.0f, pitchAxis);
+        input.feet[0].sole.q = PxQuat(PxPi / 9.0f, pitchAxis);
+        Check(controller.Update(input, settings), "Intermediate tilt remains valid");
+        const PxVec3 blendedUp = controller.GetSnapshot().soleTargets[0].q.rotate(PxVec3(0, 1, 0));
+        Check(std::abs(std::acos(PxClamp(blendedUp.y, -1.0f, 1.0f)) - 12.5f * PxPi / 180.0f) < 1e-5f,
+            "The limit blends continuously between its onset and full strength");
+        ++input.completedStep;
+        input.feet[0].grounded = false;
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0],
+            "No tilt restriction remains after support contact expires");
+        ++input.completedStep;
+        input.feet[0].contactGraceActive = true;
+        Check(controller.Update(input, settings) && controller.GetSnapshot().footTiltLimited[0],
+            "Brief support contact grace preserves the tilt restriction");
+        ++input.completedStep;
+        settings.limitFootTilt = false;
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0] &&
+                std::abs(controller.GetSnapshot().soleTargets[0].q.dot(input.feet[0].sole.q)) > .999999f,
+            "Disabling the limiter restores the original rotation target");
+    }
+
     void TestDisplayContactGrace()
     {
         FootSupportSnapshot sample;
@@ -260,5 +317,6 @@ void TestStandingSupport()
     TestSupportContactGrace();
     TestGracePreservesStandingCorrection();
     TestDisplayContactGrace();
+    TestSupportFootTilt();
     std::puts("PASS: standing height, swing isolation, contact loss, reach and reset");
 }

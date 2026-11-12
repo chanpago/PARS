@@ -423,6 +423,13 @@ namespace PARS
 
     void Ragdoll::SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts)
     {
+        for (size_t side = 0; side < contacts.size(); ++side)
+        {
+            if (contacts[side].body != m_SupportContacts[side].body)
+            {
+                m_SupportLoads.ankleDriveScales[side] = 1.0f;
+            }
+        }
         m_SupportContacts = contacts;
     }
 

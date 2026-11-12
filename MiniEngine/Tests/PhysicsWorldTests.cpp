@@ -323,6 +323,11 @@ void TestFramePerformance();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--standing-support-only") == 0)
+    {
+        TestStandingSupport();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--footstep-only") == 0)
     {
         TestFootstepPlanner();

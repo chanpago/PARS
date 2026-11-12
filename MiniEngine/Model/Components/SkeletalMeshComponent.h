@@ -164,6 +164,14 @@ namespace PARS
         {
             return m_StandingSupport.GetSnapshot();
         }
+        StandingSupportSettings& GetStandingSupportSettings()
+        {
+            return m_StandingSupportSettings;
+        }
+        const StandingSupportSettings& GetStandingSupportSettings() const
+        {
+            return m_StandingSupportSettings;
+        }
         const std::vector<physx::PxVec3>& GetRecoveryReferenceHull() const
         {
             return m_RecoveryReferenceHull;

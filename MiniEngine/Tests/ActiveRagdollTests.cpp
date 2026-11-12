@@ -11,6 +11,123 @@
 using namespace Math;
 using namespace PARS;
 using namespace physx;
+
+void RunSupportAnkleDriveTests()
+{
+    const std::function<void(bool, const char*)> check = [](bool valid, const char* message) -> void
+    {
+        if (!valid)
+        {
+            std::fprintf(stderr, "FAIL: %s\n", message);
+            std::exit(1);
+        }
+    };
+    PhysicsWorld world;
+    check(world.Initialize(false), "Initialize ankle support test");
+    PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -.1f, 0)), PxVec3(4, .1f, 4), "floor");
+    check(floor != nullptr, "Create ankle support floor");
+    PhysicsAsset asset;
+    PhysicsBody root;
+    root.bone = "root";
+    root.shape = PhysicsShapeType::Box;
+    root.halfExtents = XMFLOAT3(.1f, .1f, .1f);
+    root.mass = 20.0f;
+    PhysicsBody left = root;
+    left.bone = "left_foot";
+    left.halfExtents = XMFLOAT3(.08f, .05f, .15f);
+    left.mass = 2.0f;
+    PhysicsBody right = left;
+    right.bone = "right_foot";
+    asset.bodies = {root, left, right};
+    const std::vector<std::string> names{root.bone, left.bone, right.bone};
+    const std::vector<Matrix4> pose{
+        Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 1, 0))),
+        Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(-.2f, .05f, 0))),
+        Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(.2f, .05f, 0)))};
+    for (size_t side = 0; side < 2; ++side)
+    {
+        PhysicsConstraint joint;
+        joint.parentBone = root.bone;
+        joint.childBone = names[side + 1];
+        joint.twist = PhysicsJointMotion::Free;
+        joint.swingY = PhysicsJointMotion::Free;
+        joint.swingZ = PhysicsJointMotion::Free;
+        joint.SetWorldFrame(pose[0], pose[side + 1], pose[side + 1]);
+        asset.constraints.push_back(joint);
+    }
+    ConfigureDefaultDrives(asset);
+    Ragdoll ragdoll;
+    std::string error;
+    check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error) && ragdoll.UsesArticulation(),
+        "Create articulated ankle test fixture");
+    ragdoll.SetDrivesEnabled(true);
+    ragdoll.SetFootDrivenSupport(true);
+    std::array<RagdollSupportContact, 2> contacts;
+    for (size_t side = 0; side < contacts.size(); ++side)
+    {
+        contacts[side].body = static_cast<int>(side + 1);
+        contacts[side].supporting = true;
+        contacts[side].position = PxVec3(side == 0 ? -.2f : .2f, 0, 0);
+        contacts[side].ankleDriveBlendTime = 0;
+    }
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Initialize support drive targets");
+    PxArticulationReducedCoordinate* articulation = nullptr;
+    check(floor->getScene()->getArticulations(&articulation, 1) == 1, "Find ankle articulation");
+    PxArticulationLink* links[3]{};
+    articulation->getLinks(links, 3);
+    std::array<PxArticulationJointReducedCoordinate*, 2> joints{};
+    for (PxArticulationLink* link : links)
+    {
+        for (size_t side = 0; side < joints.size(); ++side)
+        {
+            if (names[side + 1] == link->getName())
+            {
+                joints[side] = link->getInboundJoint();
+            }
+        }
+    }
+    check(joints[0] != nullptr && joints[1] != nullptr, "Find both foot drives");
+    const PxArticulationDrive baseline = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
+    check(baseline.stiffness > 0 && baseline.damping > 0, "Baseline ankle PD is enabled");
+    contacts[0].ankleDriveBoost = .5f;
+    contacts[1].ankleDriveBoost = .5f;
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Apply shared-load ankle gain");
+    const PxArticulationDrive shared = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
+    check(std::abs(shared.stiffness / baseline.stiffness - 1.25f) < 1e-5f &&
+            std::abs(shared.damping / baseline.damping - 1.25f) < 1e-5f,
+        "Half body weight increases both actual PhysX PD coefficients by one quarter");
+    contacts[1].supporting = false;
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Transfer support to one foot");
+    const PxArticulationDrive single = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
+    check(std::abs(single.stiffness / baseline.stiffness - 1.5f) < 1e-5f &&
+            std::abs(single.damping / baseline.damping - 1.5f) < 1e-5f &&
+            ragdoll.GetSupportLoads().ankleDriveScales[1] == 1.0f,
+        "A single supporting ankle receives full gain while the swing foot remains unboosted");
+    contacts[0].ankleDriveBoost = 0;
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Disable ankle gain");
+    check(joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == baseline.stiffness,
+        "Zero boost restores the original drive coefficient");
+    contacts[0].ankleDriveBoost = .5f;
+    contacts[0].ankleDriveBlendTime = .08f;
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error) && ragdoll.GetSupportLoads().ankleDriveScales[0] == 1.0f,
+        "A zero-time settings update does not advance gain blending");
+    check(ragdoll.UpdateDriveTargets(pose, 1.0f / 60.0f, error) &&
+            ragdoll.GetSupportLoads().ankleDriveScales[0] > 1.0f && ragdoll.GetSupportLoads().ankleDriveScales[0] < 1.5f,
+        "Load transfer blends rather than jumping to full ankle strength");
+    ragdoll.SetSupportContacts({});
+    check(ragdoll.UpdateDriveTargets(pose, 1.0f / 60.0f, error) &&
+            ragdoll.GetSupportLoads().ankleDriveScales[0] == 1.0f &&
+            ragdoll.GetSupportLoads().ankleDriveScales[1] == 1.0f,
+        "Lost support clears all ankle gain");
+    check(world.GetErrorCount() == 0, "Support gain updates have no PhysX errors");
+    std::puts("PASS: support ankle gains, load transfer, swing isolation, blending and disable");
+}
+
 namespace
 {
     void Check(bool value, const char* message)

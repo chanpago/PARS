@@ -255,6 +255,8 @@ namespace PARS
 
             support.sole = leg.targetSole;
             support.soleInBone = leg.soleInBone;
+            support.actualSole = toPx(foot.soleWorld);
+            support.supportNormal = foot.contact.support.GetNormal();
 
             // 입력 목표 포즈의 발바닥을 계산
             support.animatedSole = rigidTargets[leg.ankleNode] * leg.soleInBone;
@@ -282,6 +284,8 @@ namespace PARS
             contacts[side].supporting = support.supporting && foot.contact.support.IsValid();
             contacts[side].position = foot.contact.support.GetPosition();
             contacts[side].normal = foot.contact.support.GetNormal();
+            contacts[side].ankleDriveBoost = m_StandingSupportSettings.ankleDriveBoost;
+            contacts[side].ankleDriveBlendTime = m_StandingSupportSettings.ankleDriveBlendTime;
         }
 
         // 이동 중인 발은 제외하고 지지 역할의 현재 또는 유예 접촉만 전달한다.

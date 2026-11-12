@@ -86,6 +86,12 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
         const PxVec3 torque = (contact.position - centerOfMass).cross(force);
 
         m_SupportLoads.forces[side] = force;
+        if (weight > 0 && std::isfinite(contact.ankleDriveBoost))
+        {
+            // 예상 하중을 체중으로 정규화한다. 기존 관성 보상에 질량비를 중복 적용하지 않는다.
+            m_SupportLoads.ankleDriveScales[side] +=
+                PxClamp(contact.ankleDriveBoost, 0.0f, 1.0f) * m_SupportLoads.fractions[side];
+        }
         const PxU32 firstRow = 6 * link->getLinkIndex();
         for (unsigned column = 0; column < count; ++column)
         {

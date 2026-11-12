@@ -37,6 +37,8 @@ namespace PARS
         int body = -1;
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0, 1, 0};
+        float ankleDriveBoost = 0;
+        float ankleDriveBlendTime = .08f;
         bool supporting = false;
     };
 
@@ -45,6 +47,7 @@ namespace PARS
     public:
         std::array<float, 2> fractions{};
         std::array<physx::PxVec3, 2> forces{physx::PxVec3(0), physx::PxVec3(0)};
+        std::array<float, 2> ankleDriveScales{1.0f, 1.0f};
     };
 
     // 실행 중인 PhysX 객체를 소유한다. 소속 PhysicsWorld가 종료되기 전에 파괴해야 한다.
