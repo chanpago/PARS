@@ -42,6 +42,8 @@
     <ClCompile Include="ActorComponentTests.cpp" />
     <ClCompile Include="CharacterImpactTests.cpp" />
     <ClCompile Include="RagdollRecoveryTests.cpp" />
+    <ClCompile Include="RecoveryFlailTests.cpp" />
+    <ClCompile Include="..\Model\RecoveryFlail.cpp" />
     <ClCompile Include="..\Model\RagdollRecovery.cpp" />
     <ClCompile Include="..\Model\RagdollRecoveryPose.cpp" />
     <ClCompile Include="PhysicsAssetTests.cpp" />

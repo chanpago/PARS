@@ -195,6 +195,7 @@
     <ClCompile Include="Components\SkeletalMeshComponent.cpp" />
     <ClCompile Include="Components\SkeletalMeshPhysics.cpp" />
     <ClCompile Include="Components\SkeletalMeshRecovery.cpp" />
+    <ClCompile Include="Components\SkeletalMeshFlail.cpp" />
     <ClCompile Include="PhysicsPose.cpp" />
     <ClInclude Include="PhysicsPose.h" />
     <ClInclude Include="FootSupport.h" />
@@ -208,6 +209,8 @@
     <ClInclude Include="FootstepIK.h" />
     <ClCompile Include="FootstepIK.cpp" />
     <ClInclude Include="RagdollRecovery.h" />
+    <ClInclude Include="RecoveryFlail.h" />
+    <ClCompile Include="RecoveryFlail.cpp" />
     <ClCompile Include="RagdollRecovery.cpp" />
     <ClCompile Include="RagdollRecoveryPose.cpp" />
     <ClCompile Include="Ragdoll.cpp" />

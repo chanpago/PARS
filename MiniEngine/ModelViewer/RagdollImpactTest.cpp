@@ -52,7 +52,8 @@ Character* RagdollImpactTest::GetDummy() const
 }
 
 bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::shared_ptr<const Model> falling,
-    std::shared_ptr<const Model> standingUp, const PhysicsAsset& asset)
+    std::shared_ptr<const Model> standingUp, std::shared_ptr<const Model> flailFront,
+    std::shared_ptr<const Model> flailBack, const PhysicsAsset& asset)
 {
     m_Asset = asset;
     if (std::none_of(m_Asset.constraints.begin(), m_Asset.constraints.end(), HasEnabledAngularDrive))
@@ -78,9 +79,12 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
         !mesh.GetAnimInstance().AddAnimation("Idle", idle) ||
         !mesh.GetAnimInstance().AddAnimation("Falling Down", falling) ||
         !mesh.GetAnimInstance().AddAnimation("Standing Up", standingUp) ||
+        !mesh.GetAnimInstance().AddAnimation("Flail Front", flailFront) ||
+        !mesh.GetAnimInstance().AddAnimation("Flail Back", flailBack) ||
+        !mesh.ConfigureRecoveryFlail(3, 4) ||
         !mesh.SetFallingAnimation(1) || !mesh.SetStandingUpAnimation(2, 0) || !mesh.GetAnimInstance().PlayAnimation(0))
     {
-        m_Message = u8"더미의 Idle, Falling Down 또는 Standing Up 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
+        m_Message = u8"더미의 대기·낙상·기상·상체 버둥거림 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
         return false;
     }
     if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
@@ -503,6 +507,9 @@ void RagdollImpactTest::DrawUI(Character* player)
             const uint32_t clip = animation.GetCurrentAnimationIndex();
             ImGui::Text(u8"추종 애니메이션: %s (%.2f / %.2f s)", animation.GetAnimationName(clip).c_str(),
                 animation.GetAnimationTime(), animation.GetAnimationDuration(clip));
+            const RecoveryFlail& flail = mesh.GetRecoveryFlail();
+            ImGui::Text(u8"회복 상체 혼합: %.0f%% / 앞 %.0f%% · 뒤 %.0f%%", flail.GetWeight() * 100,
+                flail.GetFrontWeight() * 100, (1.0f - flail.GetFrontWeight()) * 100);
             float stableDuration = mesh.GetKinematicStableDuration();
             if (ImGui::DragFloat(u8"A영역 복귀 대기 시간", &stableDuration, .1f, .1f, 10.0f, "%.1f s", ImGuiSliderFlags_AlwaysClamp))
             {

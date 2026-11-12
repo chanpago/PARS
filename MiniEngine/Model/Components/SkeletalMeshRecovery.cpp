@@ -340,6 +340,11 @@ namespace PARS
             m_KinematicRecoveryTimer.Reset();
             m_PendingRecoveryImpact = !interruptedStandingUp;
             m_Ragdoll.ApplyExternalImpacts(impacts);
+            if (!interruptedStandingUp)
+            {
+                // 모드 전환으로 접촉 캐시가 지워지기 전에 복사한 충격 방향을 상체에 전달한다.
+                CaptureRecoveryFlailDirection(impacts);
+            }
             return m_Ragdoll.SetRootSupported(!interruptedStandingUp, m_PhysicsError);
         }
         // 낙상은 전용 기상 경로에서 처리하므로 기존 서기 복귀 타이머에서 제외한다.
@@ -460,6 +465,10 @@ namespace PARS
     void SkeletalMeshComponent::ResetRecovery()
     {
         m_Recovery.Reset();
+        m_RecoveryFlail.Reset();
+        m_RecoveryFlailPose.clear();
+        m_RecoveryFlailFrontPose.clear();
+        m_RecoveryFlailBackPose.clear();
         m_HasRecoverySoles = false;
         m_RecoveryReferenceHull.clear();
         m_RecoveryBlendSource.clear();
@@ -629,6 +638,7 @@ namespace PARS
         // 지지가 해제되거나 발딛기가 중단됐다면 발 보정 정보를 정리
         if (input.fallen)
         {
+            m_RecoveryFlail.Reset();
             m_HasRecoverySoles = false;
             m_RecoveryBlendSource.clear();
             m_FootstepIK.Reset();
@@ -643,6 +653,13 @@ namespace PARS
         {
             m_Ragdoll.ResetDriveTargetHistory();
             m_RecoveryBlendSource.clear();
+        }
+
+        // 전체 재생 클립은 Idle로 유지해 회복 조건과 기준 발 영역 계산을 보존한다.
+        // 회복 종료 시에는 아래의 실제 물리 자세 캡처와 기존 복귀 보간이 상체도 함께 처리한다.
+        if (!ApplyRecoveryFlailTargets(target, deltaTime, input.impactVelocity))
+        {
+            return false;
         }
 
         
