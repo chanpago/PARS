@@ -1877,7 +1877,7 @@
       "swingYLimit": 0.0872664600610733,
       "swingZ": "locked",
       "swingZLimit": 0.0872664600610733,
-      "twist": "locked",
+      "twist": "limited",
       "twistMax": 1.2217304706573486,
       "twistMin": -0.3490658402442932
     },
@@ -1939,7 +1939,7 @@
       "swingYLimit": 0.0872664600610733,
       "swingZ": "locked",
       "swingZLimit": 0.0872664600610733,
-      "twist": "locked",
+      "twist": "limited",
       "twistMax": 1.2217304706573486,
       "twistMin": -0.3490658402442932
     }
