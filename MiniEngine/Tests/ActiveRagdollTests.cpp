@@ -12,8 +12,146 @@ using namespace Math;
 using namespace PARS;
 using namespace physx;
 
+void RunSegmentedFootSupportTests()
+{
+    const std::function<void(bool, const char*)> check = [](bool valid, const char* message) -> void
+    {
+        if (!valid)
+        {
+            std::fprintf(stderr, "FAIL: %s\n", message);
+            std::exit(1);
+        }
+    };
+    PhysicsWorld world;
+    check(world.Initialize(false), "Initialize segmented foot support test");
+    PxRigidStatic* floor = world.CreateStaticBox(PxTransform(PxVec3(0, -.1f, 0)), PxVec3(4, .1f, 4), "floor");
+    check(floor != nullptr, "Create segmented support floor");
+    PhysicsBody root;
+    root.bone = "root";
+    root.shape = PhysicsShapeType::Box;
+    root.halfExtents = XMFLOAT3(.1f, .1f, .1f);
+    root.mass = 20;
+    PhysicsBody foot = root;
+    foot.bone = "foot";
+    foot.halfExtents = XMFLOAT3(.08f, .05f, .12f);
+    foot.mass = 2;
+    PhysicsBody toe = foot;
+    toe.bone = "toe";
+    toe.shape = PhysicsShapeType::Capsule;
+    toe.radius = .025f;
+    toe.halfLength = .05f;
+    toe.mass = .5f;
+    PhysicsAsset asset;
+    asset.bodies = {root, foot, toe};
+    const std::vector<std::string> names{root.bone, foot.bone, toe.bone};
+    const std::vector<Matrix4> pose{
+        Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 1, 0))),
+        Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, .05f, 0))),
+        Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, .025f, .17f)))};
+    PhysicsConstraint ankle;
+    ankle.parentBone = root.bone;
+    ankle.childBone = foot.bone;
+    ankle.twist = PhysicsJointMotion::Free;
+    ankle.swingY = PhysicsJointMotion::Free;
+    ankle.swingZ = PhysicsJointMotion::Free;
+    ankle.SetWorldFrame(pose[0], pose[1], pose[1]);
+    PhysicsConstraint hinge;
+    hinge.parentBone = foot.bone;
+    hinge.childBone = toe.bone;
+    hinge.twist = PhysicsJointMotion::Limited;
+    hinge.twistMin = 0;
+    hinge.twistMax = PxPi / 3;
+    hinge.swingY = PhysicsJointMotion::Locked;
+    hinge.swingZ = PhysicsJointMotion::Locked;
+    hinge.SetWorldFrame(pose[1], pose[2],
+        Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, .025f, .13f))));
+    asset.constraints = {ankle, hinge};
+    ConfigureDefaultDrives(asset);
+    Ragdoll ragdoll;
+    std::string error;
+    check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error), "Create a foot with a one-axis capsule toe");
+    ragdoll.SetDrivesEnabled(true);
+    ragdoll.SetFootDrivenSupport(true);
+    std::array<RagdollSupportContact, 2> contacts;
+    contacts[0].body = 1;
+    contacts[0].supporting = true;
+    contacts[0].ankleDriveBlendTime = 0;
+    contacts[0].parts[0].body = 1;
+    contacts[0].parts[0].position = PxVec3(0);
+    contacts[0].parts[0].fraction = 1;
+    contacts[0].parts[1].body = 2;
+    contacts[0].parts[1].position = PxVec3(0, 0, .19f);
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Apply rear-foot support");
+    PxArticulationReducedCoordinate* articulation = nullptr;
+    check(floor->getScene()->getArticulations(&articulation, 1) == 1, "Find segmented articulation");
+    PxArticulationLink* links[3]{};
+    articulation->getLinks(links, 3);
+    PxArticulationJointReducedCoordinate* ankleJoint = nullptr;
+    PxArticulationJointReducedCoordinate* toeJoint = nullptr;
+    for (PxArticulationLink* link : links)
+    {
+        if (foot.bone == link->getName())
+        {
+            ankleJoint = link->getInboundJoint();
+        }
+        if (toe.bone == link->getName())
+        {
+            toeJoint = link->getInboundJoint();
+        }
+    }
+    check(ankleJoint && toeJoint && articulation->getDofs() == 6 &&
+            toeJoint->getLimitParams(PxArticulationAxis::eTWIST).high > 1 &&
+            toeJoint->getLimitParams(PxArticulationAxis::eSWING1).high <= 1e-6f &&
+            toeJoint->getLimitParams(PxArticulationAxis::eSWING2).high <= 1e-6f,
+        "The spherical implementation keeps only toe flexion open and constrains its other coordinates");
+    const float ankleStiffness = ankleJoint->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
+    const float toeStiffness = toeJoint->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
+    PxArticulationCache* cache = articulation->createCache();
+    check(cache != nullptr, "Create a cache for applied joint torque inspection");
+    articulation->copyInternalStateToCache(*cache, PxArticulationCacheFlag::eFORCE);
+    // 잠긴 축도 내부 좌표가 있으므로 Foot의 세 회전 좌표 다음이 Toe의 굽힘이다.
+    const unsigned toeDof = 3;
+    const float rearSupportTorque = cache->jointForce[toeDof];
+    const float weight = (root.mass + foot.mass + toe.mass) * -floor->getScene()->getGravity().y;
+    contacts[0].parts[0].fraction = .25f;
+    contacts[0].parts[1].fraction = .75f;
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Apply split foot and toe support");
+    const RagdollSupportLoads split = ragdoll.GetSupportLoads();
+    check(std::abs(split.partForces[0][0].y - weight * .25f) < .001f &&
+            std::abs(split.partForces[0][1].y - weight * .75f) < .001f &&
+            std::abs(split.forces[0].y - weight) < .001f && split.forces[1].isZero(),
+        "Two parts share one body weight without counting a third foot");
+    contacts[0].parts[0].fraction = 0;
+    contacts[0].parts[1].fraction = 1;
+    contacts[0].ankleDriveBoost = .5f;
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Transfer all load to the toe capsule");
+    articulation->copyInternalStateToCache(*cache, PxArticulationCacheFlag::eFORCE);
+    check(std::abs(cache->jointForce[toeDof] - rearSupportTorque) > 1,
+        "Toe contact reaches the toe joint generalized torque instead of the rear-foot Jacobian");
+    check(ragdoll.GetSupportLoads().partForces[0][0].isZero() &&
+            std::abs(ragdoll.GetSupportLoads().partForces[0][1].y - weight) < .001f &&
+            std::abs(ankleJoint->getDriveParams(PxArticulationAxis::eTWIST).stiffness / ankleStiffness - 1.5f) < 1e-5f &&
+            toeJoint->getDriveParams(PxArticulationAxis::eTWIST).stiffness == toeStiffness,
+        "Toe-only load still boosts the main ankle and does not boost the toe drive");
+    cache->release();
+    ragdoll.SetSupportContacts({});
+    check(ragdoll.UpdateDriveTargets(pose, 0, error) && ragdoll.GetSupportLoads().forces[0].isZero(),
+        "Clearing contacts removes both part reactions");
+    world.Step();
+    PhysicsGroundContact toeContact;
+    check(ragdoll.GetBodyGroundContact(2, toeContact) && toeContact.pointCount > 0 &&
+            toeContact.normalImpulseVector.y > 0 && toeContact.position.isFinite(),
+        "The physical capsule reports its own real ground contact and vertical impulse");
+    check(ragdoll.IsFinite() && world.GetErrorCount() == 0, "Segmented support has finite states and no PhysX errors");
+    std::puts("PASS: segmented foot forces, toe joint compensation, ankle identity and capsule floor contact");
+}
+
 void RunSupportAnkleDriveTests()
 {
+    RunSegmentedFootSupportTests();
     const std::function<void(bool, const char*)> check = [](bool valid, const char* message) -> void
     {
         if (!valid)

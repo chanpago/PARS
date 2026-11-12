@@ -453,38 +453,7 @@ namespace PARS
 
         PxTransform CaptureSupportSole(const FootSoleSample& foot)
         {
-            const PxTransform actual = ToRecoveryFrame(foot.soleWorld);
-            PxVec3 points[3];
-            unsigned count = 0;
-            for (size_t corner = 0; corner < foot.projected.size() && count < 3; ++corner)
-            {
-                if (foot.projected[corner])
-                {
-                    points[count++] = foot.projections[corner];
-                }
-            }
-            if (count < 3)
-            {
-                return actual;
-            }
-            PxVec3 normal = (points[1] - points[0]).cross(points[2] - points[0]);
-            if (normal.normalize() < 1e-6f)
-            {
-                return actual;
-            }
-            if (normal.y < 0)
-            {
-                normal = -normal;
-            }
-            if (normal.y < .70710678f)
-            {
-                return actual;
-            }
-            // 초기 공중 위치를 영구 고정점으로 저장하지 않는다. 실제 레이로 얻은 바닥에 발 목표를 둔다.
-            // 목표만 바꾸며 물리 접촉 판정이나 실제 바디 위치는 수정하지 않는다.
-            const PxVec3 position = actual.p - normal * normal.dot(actual.p - points[0]);
-            PxTransform planted(PxIdentity);
-            return MakeFootSoleTarget(position, normal, actual, planted) ? planted : actual;
+            return ToRecoveryFrame(foot.supportSoleWorld);
         }
     }
 

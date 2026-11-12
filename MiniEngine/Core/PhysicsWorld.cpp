@@ -242,6 +242,7 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
     const void* ignoredOwner) const
 {
     contact = {};
+    PxVec3 weightedPosition(0);
     if (!m_Scene || body.getScene() != m_Scene)
     {
         return false;
@@ -276,7 +277,10 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
                 contact.position += point.position;
                 contact.normal += normal;
                 ++contact.pointCount;
-                contact.normalImpulse += physx::PxMax(0.0f, point.impulse.dot(point.normal));
+                const float impulse = physx::PxMax(0.0f, point.impulse.dot(point.normal));
+                contact.normalImpulse += impulse;
+                contact.normalImpulseVector += normal * impulse;
+                weightedPosition += point.position * (normal.y * impulse);
             }
         }
     }
@@ -284,8 +288,17 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
     {
         return false;
     }
-    contact.position /= float(contact.pointCount);
-    contact.normal.normalize();
+    if (contact.normalImpulseVector.y > 1e-8f)
+    {
+        contact.position = weightedPosition / contact.normalImpulseVector.y;
+        contact.normal = contact.normalImpulseVector.getNormalized();
+    }
+    else
+    {
+        // 무하중 접촉도 접지로 유지하되, 하중 중심을 계산할 수 없을 때만 점 평균을 쓴다.
+        contact.position /= static_cast<float>(contact.pointCount);
+        contact.normal.normalize();
+    }
     return true;
 }
 

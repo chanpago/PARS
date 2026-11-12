@@ -240,17 +240,31 @@ namespace PARS
             leg.soleInBone = toPx(foot.soleInBone);
             // 지지발은 현재 접촉한 발바닥 자세를 목표로 삼는다. 바디를 월드에 고정하지 않는다.
             // Recovery 진입/착지 시 저장한 유효 자세를 접촉이 잠시 끊겨도 유지한다.
+            const bool supporting = input.stepFoot != static_cast<int>(side);
+            if (supporting && foot.toe.available &&
+                (foot.contact.IsToeOnlySupport() || foot.contact.parts[0].landed))
+            {
+                m_RecoverySoles[side] = toPx(foot.supportSoleWorld);
+            }
             leg.targetSole = m_RecoverySoles[side];
             leg.available = leg.targetSole.isSane();
+            if (supporting && foot.toe.available && foot.contact.IsPartSupporting(1))
+            {
+                leg.toeNode = foot.toe.boneNode;
+                const PxTransform toeTarget = toPx(foot.toe.supportSoleWorld) * toPx(foot.toe.soleInBone).getInverse();
+                leg.toeTargetRotation = toeTarget.q;
+                leg.hasToeTarget = true;
+            }
 
             // 서있기 보정에 필요한 발,골반 관계를 계산
             StandingSupportFoot& support = standing.feet[side];
             support.available = leg.available;
 
             // 지지역할을 하는발과 실제 접지를 구분함
-            support.supporting = input.stepFoot != static_cast<int>(side);
+            support.supporting = supporting;
             support.grounded = foot.contact.hasSample && foot.contact.grounded;
             support.contactGraceActive = foot.contact.hasSample && !support.grounded && foot.contact.support.IsValid();
+            support.allowHeelLift = foot.contact.IsToeOnlySupport();
 
 
             support.sole = leg.targetSole;
@@ -286,6 +300,14 @@ namespace PARS
             contacts[side].normal = foot.contact.support.GetNormal();
             contacts[side].ankleDriveBoost = m_StandingSupportSettings.ankleDriveBoost;
             contacts[side].ankleDriveBlendTime = m_StandingSupportSettings.ankleDriveBlendTime;
+            for (size_t part = 0; part < contacts[side].parts.size(); ++part)
+            {
+                RagdollSupportPart& targetPart = contacts[side].parts[part];
+                targetPart.body = part == 0 ? foot.bodyIndex : foot.toe.bodyIndex;
+                targetPart.position = foot.contact.parts[part].support.GetPosition();
+                targetPart.normal = foot.contact.parts[part].support.GetNormal();
+                targetPart.fraction = foot.contact.IsPartSupporting(part) ? foot.contact.supportFractions[part] : 0;
+            }
         }
 
         // 이동 중인 발은 제외하고 지지 역할의 현재 또는 유예 접촉만 전달한다.
@@ -357,6 +379,16 @@ namespace PARS
         {
             m_ModelInstance.SetNodeDebugColor(uint32_t(supportNode), DirectX::XMFLOAT4(1, 0, 0, 1));
             m_ModelInstance.SetNodeDebugColor(uint32_t(stepNode), DirectX::XMFLOAT4(0, 0, 1, 1));
+            const int supportToe = sample.feet[roles.supportFoot].toe.boneNode;
+            const int stepToe = sample.feet[roles.movableFoot].toe.boneNode;
+            if (supportToe >= 0)
+            {
+                m_ModelInstance.SetNodeDebugColor(static_cast<uint32_t>(supportToe), DirectX::XMFLOAT4(1, 0, 0, 1));
+            }
+            if (stepToe >= 0)
+            {
+                m_ModelInstance.SetNodeDebugColor(static_cast<uint32_t>(stepToe), DirectX::XMFLOAT4(0, 0, 1, 1));
+            }
         }
     }
 

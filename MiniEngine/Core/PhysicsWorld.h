@@ -50,6 +50,8 @@ public:
     uint32_t pointCount = 0;
     // 완료한 물리 스텝의 법선 충격량 합이며 접촉 판정 기준은 바꾸지 않는다.
     float normalImpulse = 0;
+    // 접촉마다 법선 방향을 반영한 충격량 벡터 합이다. 수직 하중은 Y 성분을 사용한다.
+    physx::PxVec3 normalImpulseVector{0};
 };
 
 // 키네마틱 상태에서 받은 접촉 충격을 동적 전환 후 이어받는다.

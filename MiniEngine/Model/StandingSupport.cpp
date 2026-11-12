@@ -44,6 +44,16 @@ namespace
             return false;
         }
         PxVec3 tiltAxis = SoleTiltVector(foot.actualSole.q, normal);
+        if (foot.allowHeelLift)
+        {
+            // 앞쪽 지지 중에는 발 폭 방향의 굽힘을 허용하고, 옆으로 무너지는 기울기는 계속 제한한다.
+            PxVec3 hinge = foot.actualSole.q.rotate(PxVec3(1, 0, 0));
+            hinge -= normal * normal.dot(hinge);
+            if (hinge.normalize() > 1e-6f)
+            {
+                tiltAxis -= hinge * hinge.dot(tiltAxis);
+            }
+        }
         const float actualAngle = tiltAxis.normalize();
         const float start = settings.footTiltLimitStartDegrees * PxPi / 180.0f;
         const float maximum = settings.footTiltLimitDegrees * PxPi / 180.0f;

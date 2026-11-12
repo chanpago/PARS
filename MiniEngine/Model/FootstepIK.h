@@ -58,13 +58,17 @@ namespace PARS
         int hipNode = -1;
         int kneeNode = -1;
         int ankleNode = -1;
+        int toeNode = -1;
         float thighLength = 0;
         float calfLength = 0;
         physx::PxVec3 referenceBendInHip{0};
         physx::PxTransform actualAnchor{physx::PxIdentity};
         physx::PxTransform soleInBone{physx::PxIdentity};
         physx::PxTransform targetSole{physx::PxIdentity};
+        // 지지 중인 Toe의 월드 회전 목표다. 본의 로컬 위치와 길이는 IK 후에도 보존한다.
+        physx::PxQuat toeTargetRotation{physx::PxIdentity};
         bool available = false;
+        bool hasToeTarget = false;
     };
 
     struct FootstepIKInput

@@ -1,5 +1,6 @@
 ﻿#include "FootSupport.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "FootSupportGeometry.h"
 #include "PhysicsWorld.h"
 #include "PhysicsPose.h"
 #include <cmath>
@@ -65,6 +66,54 @@ namespace
         return PxVec3(float(point.GetX()), float(point.GetY()), float(point.GetZ()));
     }
 
+    PxTransform ToPx(const Matrix4& matrix)
+    {
+        const PARS::PhysicsJointFrame frame = PARS::PhysicsJointFrame::FromTransform(matrix);
+        return PxTransform(PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
+            PxQuat(frame.rotation.x, frame.rotation.y, frame.rotation.z, frame.rotation.w));
+    }
+
+    Matrix4 ToMath(const PxTransform& transform)
+    {
+        return Matrix4(OrthogonalTransform(Quaternion(DirectX::XMVectorSet(
+            transform.q.x, transform.q.y, transform.q.z, transform.q.w)),
+            Vector3(transform.p.x, transform.p.y, transform.p.z)));
+    }
+
+    Matrix4 ProjectSupportSole(const PARS::FootSoleSample& foot)
+    {
+        std::array<PxVec3, 3> points{};
+        size_t count = 0;
+        for (size_t point = 0; point < foot.projected.size() && count < points.size(); ++point)
+        {
+            if (foot.projected[point])
+            {
+                points[count++] = foot.projections[point];
+            }
+        }
+        if (count < points.size())
+        {
+            return foot.soleWorld;
+        }
+        PxVec3 normal = (points[1] - points[0]).cross(points[2] - points[0]);
+        if (normal.normalize() < 1e-6f)
+        {
+            return foot.soleWorld;
+        }
+        if (normal.y < 0)
+        {
+            normal = -normal;
+        }
+        if (normal.y < .70710678f)
+        {
+            return foot.soleWorld;
+        }
+        const PxTransform actual = ToPx(foot.soleWorld);
+        const PxVec3 position = actual.p - normal * normal.dot(actual.p - points[0]);
+        PxTransform planted(PxIdentity);
+        return PARS::MakeFootSoleTarget(position, normal, actual, planted) ? ToMath(planted) : foot.soleWorld;
+    }
+
 }
 
 // 발 지지 계산과 다리 IK에 사용할 바디·본 연결, 기준 길이, 발바닥 로컬 좌표계를 준비한다.
@@ -86,9 +135,9 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         return true;
     }
 
-    // 좌우 발 본에 연결된 PA 바디를 찾는다. 바디 인덱스와 스켈레톤의 본 인덱스는 서로 다르다.
-    // idices배열에 왼발,오른발의 물리바디 인덱스를 저장하기 위해 선언한다
+    // 좌우 발과 발가락의 PA 바디를 찾는다. 발가락 바디가 없는 PA도 허용한다.
     std::array<int, 2> indices{-1, -1};
+    std::array<int, 2> toeIndices{-1, -1};
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
         for (size_t body = 0; body < asset->bodies.size(); ++body)
@@ -96,6 +145,10 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
             if (Matches(asset->bodies[body].bone, FootNames[side]))
             {
                 indices[side] = static_cast<int>(body);
+            }
+            else if (Matches(asset->bodies[body].bone, ToeNames[side]))
+            {
+                toeIndices[side] = static_cast<int>(body);
             }
         }
     }
@@ -136,6 +189,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
 
         PARS::FootSupport::Sole& sole = m_Feet[side];
         sole.bodyIndex = index;
+        sole.toeBodyIndex = toeIndices[side];
         sole.source = asset->bodies[index];
 
         // 발목에서 부모 계층을 따라 무릎·고관절을 찾아 두 뼈 IK의 연결 정보를 저장한다.
@@ -215,6 +269,17 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         // PA 형상의 좌우·앞뒤 반범위로 레이 투영용 사각형의 기본 크기를 정한다.
         m_Settings[side].halfWidth = Max(.005f, Extent(sole.source, body, right));
         m_Settings[side].halfLength = Max(.005f, Extent(sole.source, body, forward));
+        if (sole.toeBodyIndex >= 0 && static_cast<size_t>(sole.toeBodyIndex) < ragdoll.GetBoneNodes().size())
+        {
+            const int toeNode = ragdoll.GetBoneNodes()[sole.toeBodyIndex];
+            if (toeNode >= 0 && static_cast<size_t>(toeNode) < referenceWorld.size())
+            {
+                sole.toeSource = asset->bodies[sole.toeBodyIndex];
+                const Matrix4 toeBody = PARS::PhysicsBoneFrame(referenceWorld[toeNode]) * sole.toeSource.GetLocalTransform();
+                const Vector3 toeCenter = Vector3(toeBody.GetW()) - up * Extent(sole.toeSource, toeBody, up);
+                sole.toeSoleInBody = Invert(toeBody) * Matrix4(right, up, forward, toeCenter);
+            }
+        }
         found = true;
     }
     // 한쪽이라도 발바닥 정보를 준비했으면 성공이다. 각 다리의 본 연결·길이 유효성은 leg.available로 따로 구분한다.
@@ -227,10 +292,25 @@ void PARS::FootSupport::OnPhysicsAssetChanged(const PhysicsAsset& asset)
 {
     // 같은 PA 재적용이나 드라이브 변경만으로 사용자가 조절한 발바닥 설정을 지우지 않는다.
     // 바디 순서·형상이 달라졌거나 빠진 발이 추가됐을 수 있을 때만 다음 갱신에서 다시 찾는다.
-    for (const Sole& sole : m_Feet)
+    for (size_t side = 0; side < m_Feet.size(); ++side)
     {
+        const Sole& sole = m_Feet[side];
         const int index = sole.bodyIndex;
         if (index < 0 || size_t(index) >= asset.bodies.size() || !SameGeometry(asset.bodies[index], sole.source))
+        {
+            ResetSoles();
+            return;
+        }
+        int toeIndex = -1;
+        for (size_t body = 0; body < asset.bodies.size(); ++body)
+        {
+            if (Matches(asset.bodies[body].bone, ToeNames[side]))
+            {
+                toeIndex = static_cast<int>(body);
+            }
+        }
+        if (toeIndex != sole.toeBodyIndex ||
+            (toeIndex >= 0 && !SameGeometry(asset.bodies[toeIndex], sole.toeSource)))
         {
             ResetSoles();
             return;
@@ -289,45 +369,20 @@ void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorl
     m_ContactStep = step;
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
-        // 이전 정보 저장
-        PARS::FootContactSample& current = m_Contacts[side];
-        const PARS::FootContactSample previous = current;
-
-        // 이번 프레임에서의 leftground, landed를 false로 초기화
-        current.leftGround = current.landed = false;
-        const int index = m_Feet[side].bodyIndex;
-        current.hasSample = index >= 0 && size_t(index) < ragdoll.GetBodyCount();
-        PhysicsGroundContact ground;
-
-        // 각 발의 실제 물리 접촉을 읽음
-        // 물리엔진에 저장된 접촉 결과에서 바닥으로 인정되는 접촉을 가져옴
-        current.grounded = current.hasSample && ragdoll.GetBodyGroundContact(size_t(index), ground);
-        current.position = ground.position;
-        current.normal = ground.normal;
-        current.pointCount = ground.pointCount;
-        current.normalImpulse = ground.normalImpulse;
-
-
-        // 실제 접촉과 이륙·착지 이력은 유지하고, 기존 지지 상태에만 유예를 적용한다.
-        // 잠깐 접촉이 끊기는 경우를 위한 지지 정보를 갱신. 유효했던 지지면 정보를 최대 3물리 스텝 동안 유지
-        current.support.Update(step, current.hasSample, current.grounded, current.position, current.normal);
-
-        // 이전 상태와 비교해서 이륙, 착지를 판정
-        if (previous.hasSample && current.hasSample)
+        const Sole& sole = m_Feet[side];
+        const bool hasSample = sole.bodyIndex >= 0 && static_cast<size_t>(sole.bodyIndex) < ragdoll.GetBodyCount();
+        PhysicsGroundContact foot;
+        PhysicsGroundContact toe;
+        if (hasSample)
         {
-            current.leftGround = previous.grounded && !current.grounded;
-            current.landed = !previous.grounded && current.grounded;
-            if (current.leftGround)
+            // 각 바디에 기존 지면 판정을 적용하므로 벽과 자기 몸의 접촉은 계속 제외된다.
+            ragdoll.GetBodyGroundContact(static_cast<size_t>(sole.bodyIndex), foot);
+            if (sole.toeBodyIndex >= 0)
             {
-                ++current.takeoffCount;
-                current.lastTakeoffStep = step;
-            }
-            if (current.landed)
-            {
-                ++current.landingCount;
-                current.lastLandingStep = step;
+                ragdoll.GetBodyGroundContact(static_cast<size_t>(sole.toeBodyIndex), toe);
             }
         }
+        m_Contacts[side].Update(step, hasSample, foot, toe);
     }
 }
 
@@ -448,7 +503,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.position = ToPx(Vector3(foot.soleWorld.GetW()));
         target.contactPosition = foot.contact.position;
         target.normal = foot.contact.normal;
-        target.normalImpulse = foot.contact.normalImpulse;
+        // 합산 법선과 충격량 크기를 함께 넘겨 수직 하중이 부위별 벡터 합과 일치하게 한다.
+        target.normalImpulse = foot.contact.normalImpulseVector.magnitude();
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
 
         // idle기준 발배치 오프셋을 현재 캐릭터 방향으로 돌림
@@ -521,12 +577,12 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     // COM을 히트 지점들의 평균 높이에 수직 투영한다. XZ는 그대로 두고 Y만 바꾼다.
     std::vector<PxVec3> supportPoints;
     std::array<std::vector<PxVec3>, 2> footPoints;
-    supportPoints.reserve(8);
+    supportPoints.reserve(24);
     double supportHeight = 0;
     const PxVec3 down(0, -RayLength, 0);
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
-        const Sole& sole = m_Feet[side];
+        Sole& sole = m_Feet[side];
         if (sole.bodyIndex < 0 || size_t(sole.bodyIndex) >= ragdoll.GetBodyCount())
         {
             continue;
@@ -534,6 +590,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         const FootSoleSettings& settings = m_Settings[side];
         FootSoleSample& foot = m_Snapshot.feet[side];
         foot.available = true;
+        foot.bodyIndex = sole.bodyIndex;
         foot.boneNode = ragdoll.GetBoneNodes()[sole.bodyIndex];
         foot.leg = sole.leg;
         foot.contact = m_Contacts[side];
@@ -563,6 +620,49 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
                 supportPoints.push_back(hit.position);
                 footPoints[side].push_back(hit.position);
                 supportHeight += hit.position.y;
+            }
+        }
+        foot.supportSoleWorld = ProjectSupportSole(foot);
+        if (sole.toeBodyIndex >= 0 && static_cast<size_t>(sole.toeBodyIndex) < ragdoll.GetBodyCount())
+        {
+            FootToeSample& toe = foot.toe;
+            toe.available = true;
+            toe.bodyIndex = sole.toeBodyIndex;
+            toe.boneNode = ragdoll.GetBoneNodes()[sole.toeBodyIndex];
+            const Matrix4 toeBodyWorld = ragdoll.GetBoneWorld(sole.toeBodyIndex) * sole.toeSource.GetLocalTransform();
+            toe.soleInBone = sole.toeSource.GetLocalTransform() * sole.toeSoleInBody;
+            toe.soleWorld = toeBodyWorld * sole.toeSoleInBody;
+            toe.corners = BuildFootBodyOutline(sole.toeSource, ToPx(toeBodyWorld), ToPx(toe.soleWorld));
+            for (size_t point = 0; point < toe.corners.size(); ++point)
+            {
+                PxRaycastHit hit;
+                toe.projected[point] = physics.Raycast(toe.corners[point], down, hit, &mesh.GetOwner());
+                toe.distances[point] = toe.projected[point] ? hit.distance : RayLength;
+                toe.projections[point] = toe.projected[point] ? hit.position : toe.corners[point] + down;
+                if (toe.projected[point])
+                {
+                    supportPoints.push_back(hit.position);
+                    footPoints[side].push_back(hit.position);
+                    supportHeight += hit.position.y;
+                }
+            }
+            // 레이 히트로 접지를 만들지 않는다. 실제 Toe 접촉으로만 지지 자세를 저장한다.
+            const FootstepSnapshot& previousStep = m_FootstepPlanner.GetSnapshot();
+            const bool moving = previousStep.IsInProgress() && previousStep.stepFoot == static_cast<int>(side);
+            if (moving || !foot.contact.IsPartSupporting(1))
+            {
+                sole.hasToeSupportSole = false;
+            }
+            else if (!sole.hasToeSupportSole)
+            {
+                sole.toeSupportSoleWorld = toe.soleWorld;
+                sole.hasToeSupportSole = true;
+            }
+            toe.supportSoleWorld = sole.hasToeSupportSole ? sole.toeSupportSoleWorld : toe.soleWorld;
+            if (foot.contact.IsToeOnlySupport())
+            {
+                foot.supportSoleWorld = ToMath(MakeToeSupportedFootTarget(ToPx(foot.soleWorld),
+                    ToPx(toe.soleWorld), ToPx(toe.supportSoleWorld)));
             }
         }
     }

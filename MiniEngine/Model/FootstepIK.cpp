@@ -255,7 +255,9 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
     {
         if (!leg.available || !Ancestor(parents, leg.anchorNode, leg.hipNode) ||
             !Ancestor(parents, leg.hipNode, leg.kneeNode) || !Ancestor(parents, leg.kneeNode, leg.ankleNode) ||
-            !leg.actualAnchor.isSane())
+            !leg.actualAnchor.isSane() || (leg.hasToeTarget &&
+                (leg.toeNode == leg.ankleNode || !Ancestor(parents, leg.ankleNode, leg.toeNode) ||
+                    !leg.toeTargetRotation.isSane())))
         {
             return false;
         }
@@ -304,9 +306,18 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         const int parent = parents[node];
         if (!changed[node] && parent >= 0 && changed[parent])
         {
-            // 발가락 등 별도 IK 대상이 아닌 자식은 기존 로컬 자세를 보존한다.
+            // 자식의 로컬 위치와 기본 애니메이션 회전을 먼저 보존한다.
             corrected[node] = corrected[parent] * pose[parent].getInverse() * pose[node];
             changed[node] = true;
+        }
+        for (const FootIKLegInput& leg : input.legs)
+        {
+            if (leg.hasToeTarget && static_cast<int>(node) == leg.toeNode)
+            {
+                const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
+                corrected[node].q = (toPhysical.q.getConjugate() * leg.toeTargetRotation).getNormalized();
+                changed[node] = true;
+            }
         }
         if (changed[node])
         {

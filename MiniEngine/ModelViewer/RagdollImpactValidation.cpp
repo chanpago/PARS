@@ -462,6 +462,25 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(support.GetSnapshot().hasCenterOfMass && !support.GetSnapshot().hull.empty() &&
                 !support.GetSnapshot().balance.bufferHull.empty(),
             "Reset prepares COM and A/B before the first physics step or render");
+        const std::function<bool()> useFootOnlyProjectionFixture = [&]() -> bool
+        {
+            // 아래 사각형 오프셋 시험은 Toe가 없는 PA의 호환성을 검사한다.
+            // Toe가 있으면 Foot 사각형을 옮겨도 Toe 투영은 실제 바디 아래에 남는 것이 정상이다.
+            PhysicsAsset footOnly = *dummy->GetMesh().GetPhysicsAsset();
+            for (size_t body = footOnly.bodies.size(); body-- > 0;)
+            {
+                const std::string& name = footOnly.bodies[body].bone;
+                const size_t separator = name.find_last_of(':');
+                const std::string leaf = name.substr(separator == std::string::npos ? 0 : separator + 1);
+                if (leaf == "LeftToeBase" || leaf == "RightToeBase")
+                {
+                    footOnly.RemoveBody(body);
+                }
+            }
+            std::string error;
+            return dummy->GetMesh().SetPhysicsAsset(footOnly, error);
+        };
+        check(useFootOnlyProjectionFixture(), "Use an explicitly toe-less PA only for legacy rectangle projection checks");
         world.SetPhysicsPaused(true);
         FootSoleDebug debug;
         debug.SetVisible(false);
@@ -646,6 +665,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(ragdoll.UsesFootDrivenSupport() && !ragdoll.IsRootAxisSupported(0) && !ragdoll.IsRootAxisSupported(1) &&
                 !ragdoll.IsRootAxisSupported(2) && ragdoll.IsRootAxisSupported(3),
             "Automatic Idle uses leg support, frees root translation and keeps rotation assistance");
+        check(useFootOnlyProjectionFixture(), "Use the toe-less projection fixture for synthetic rectangle displacement");
 
         // Deterministically exercise both release causes, and re-entry without rearming.
         world.SetPhysicsPaused(true);
@@ -674,6 +694,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(resetActive() && ragdoll.GetRootSupportWeight() == 1 &&
                 dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::None,
             "Dummy reset rearms support from its newly sampled grounded pose");
+        check(useFootOnlyProjectionFixture(), "Use the toe-less projection fixture for synthetic missing rays");
         support.GetSoleSettings(0).offset.y += 1;
         support.GetSoleSettings(1).offset.y += 1;
         singleStep();

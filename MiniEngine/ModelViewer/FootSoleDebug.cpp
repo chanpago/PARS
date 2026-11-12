@@ -152,6 +152,28 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
                 Line(lines, projected, ToMath(foot.projections[next]), HitColor);
             }
         }
+        if (foot.toe.available)
+        {
+            for (size_t point = 0; point < foot.toe.corners.size(); ++point)
+            {
+                const size_t next = (point + 1) % foot.toe.corners.size();
+                const Vector3 corner = ToMath(foot.toe.corners[point]);
+                const Vector3 projected = ToMath(foot.toe.projections[point]);
+                Line(lines, corner, ToMath(foot.toe.corners[next]), FootColors[side]);
+                if (m_ShowRays)
+                {
+                    Line(lines, corner, projected, foot.toe.projected[point] ? HitColor : MissColor);
+                }
+                if (foot.toe.projected[point])
+                {
+                    Point(lines, projected, HitColor);
+                }
+                if (foot.toe.projected[point] && foot.toe.projected[next])
+                {
+                    Line(lines, projected, ToMath(foot.toe.projections[next]), HitColor);
+                }
+            }
+        }
     }
     if (m_ShowHull)
     {
@@ -544,6 +566,13 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 contact.grounded ? u8"지지 중" : u8"접촉 없음", contact.pointCount);
             ImGui::Text(u8"접촉 이력: 이륙 %llu회 / 착지 %llu회",
                 static_cast<unsigned long long>(contact.takeoffCount), static_cast<unsigned long long>(contact.landingCount));
+            ImGui::Text(u8"Foot 접촉: %s / Toe 접촉: %s",
+                contact.parts[0].ground.pointCount > 0 ? u8"있음" : u8"없음",
+                contact.parts[1].ground.pointCount > 0 ? u8"있음" : u8"없음");
+            ImGui::Text(u8"수직 반력: Foot %.1f N / Toe %.1f N",
+                contact.parts[0].ground.normalImpulseVector.y / static_cast<float>(PhysicsWorld::FixedDeltaTime),
+                contact.parts[1].ground.normalImpulseVector.y / static_cast<float>(PhysicsWorld::FixedDeltaTime));
+            ImGui::Text(u8"Toe 지지 굽힘: %s", contact.IsToeOnlySupport() ? u8"허용" : u8"기본 발 지지");
             if (contact.grounded)
             {
                 ImGui::Text(u8"접촉점 (%.3f, %.3f, %.3f) m", contact.position.x, contact.position.y, contact.position.z);
@@ -573,7 +602,16 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             {
                 count += hit ? 1 : 0;
             }
-            ImGui::Text(u8"투영점 %u / 4", count);
+            ImGui::Text(u8"Foot 투영점 %u / 4", count);
+            if (foot.toe.available)
+            {
+                unsigned toeCount = 0;
+                for (bool projected : foot.toe.projected)
+                {
+                    toeCount += projected ? 1 : 0;
+                }
+                ImGui::Text(u8"Toe 투영점 %u / 8 · 실제 접촉과 별도", toeCount);
+            }
             for (int i = 0; i < 4; ++i)
             {
                 if (foot.projected[i])

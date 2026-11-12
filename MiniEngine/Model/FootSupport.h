@@ -5,6 +5,7 @@
 #include "FootSupportHull.h"
 #include "FootSupportGrace.h"
 #include "FootstepPlanner.h"
+#include "PhysicsWorld.h"
 #include <array>
 #include <cstdint>
 
@@ -38,18 +39,102 @@ namespace PARS
         bool available = false;
     };
 
-    // 접촉에 대한 정보
+    struct FootPartContact
+    {
+    public:
+        FootSupportContact support;
+        PhysicsGroundContact ground;
+        bool landed = false;
+    };
+
+    // 발딛기는 한쪽 발 단위로 판단하고, 토크 보상에는 각 부위의 접촉을 남긴다.
     struct FootContactSample
     {
+    public:
+        void Update(uint64_t completedStep, bool available,
+            const PhysicsGroundContact& foot, const PhysicsGroundContact& toe)
+        {
+            const bool previousHasSample = hasSample;
+            const bool previousGrounded = grounded;
+            hasSample = available;
+            const std::array<PhysicsGroundContact, 2> samples{foot, toe};
+            for (size_t part = 0; part < parts.size(); ++part)
+            {
+                const bool previouslyGrounded = parts[part].ground.pointCount > 0;
+                parts[part].ground = hasSample ? samples[part] : PhysicsGroundContact();
+                parts[part].landed = previousHasSample && hasSample && !previouslyGrounded &&
+                    parts[part].ground.pointCount > 0;
+                parts[part].support.Update(completedStep, hasSample, parts[part].ground.pointCount > 0,
+                    parts[part].ground.position, parts[part].ground.normal);
+            }
+            pointCount = hasSample ? foot.pointCount + toe.pointCount : 0;
+            grounded = pointCount > 0;
+            position = physx::PxVec3(0);
+            normal = physx::PxVec3(0);
+            normalImpulse = 0;
+            normalImpulseVector = physx::PxVec3(0);
+            if (grounded)
+            {
+                normalImpulse = foot.normalImpulse + toe.normalImpulse;
+                normalImpulseVector = foot.normalImpulseVector + toe.normalImpulseVector;
+                const float verticalImpulse = normalImpulseVector.y;
+                // 두 부위의 수직 하중으로 지지 위치를 계산한다. 무하중일 때는 접촉점 수를 사용한다.
+                const float footWeight = verticalImpulse > 1e-8f ? foot.normalImpulseVector.y :
+                    static_cast<float>(foot.pointCount);
+                const float toeWeight = verticalImpulse > 1e-8f ? toe.normalImpulseVector.y :
+                    static_cast<float>(toe.pointCount);
+                const float totalWeight = footWeight + toeWeight;
+                supportFractions = {footWeight / totalWeight, toeWeight / totalWeight};
+                position = foot.position * supportFractions[0] + toe.position * supportFractions[1];
+                normal = verticalImpulse > 1e-8f ? normalImpulseVector :
+                    foot.normal * footWeight + toe.normal * toeWeight;
+                normal.normalize();
+            }
+
+            support.Update(completedStep, hasSample, grounded, position, normal);
+            if (!support.IsValid())
+            {
+                supportFractions = {};
+            }
+            // 발과 발가락 사이의 접촉 이동은 이륙이나 재착지로 세지 않는다.
+            leftGround = previousHasSample && hasSample && previousGrounded && !grounded;
+            landed = previousHasSample && hasSample && !previousGrounded && grounded;
+            if (leftGround)
+            {
+                ++takeoffCount;
+                lastTakeoffStep = completedStep;
+            }
+            if (landed)
+            {
+                ++landingCount;
+                lastLandingStep = completedStep;
+            }
+        }
+
+    public:
+        bool IsPartSupporting(size_t part) const
+        {
+            return support.IsValid() && parts.at(part).support.IsValid() && supportFractions.at(part) > 0;
+        }
+
+        bool IsToeOnlySupport() const
+        {
+            return IsPartSupporting(1) && !IsPartSupporting(0);
+        }
+
     public:
         uint64_t takeoffCount = 0;    // 누적 이륙횟수
         uint64_t landingCount = 0;    // 누적 착지횟수
         uint64_t lastTakeoffStep = 0; // 마지막 이륙이 발생한 물리 스텝 번호
         uint64_t lastLandingStep = 0; // 마지막 착지가 발생한 물리 스텝 번호
         FootSupportContact support; // 보정과 표시에만 쓰는 3틱 접촉 유예
+        std::array<FootPartContact, 2> parts;
         // 접촉 위치와 접촉면 법선
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0};
+        physx::PxVec3 normalImpulseVector{0};
+        // 접촉 유예 동안은 마지막 분담 비율만 유지한다. 측정 충격량은 재사용하지 않는다.
+        std::array<float, 2> supportFractions{};
         uint32_t pointCount = 0; // 접촉점 개수
         float normalImpulse = 0; // 법선 방향 충격량
         bool hasSample = false;  // 접촉 판정에 사용할 샘플이 있는지
@@ -59,9 +144,22 @@ namespace PARS
         bool landed = false;
     };
 
-    /*
-    발 하나에 대한 정보
-    */
+    struct FootToeSample
+    {
+    public:
+        Math::Matrix4 soleInBone{Math::kIdentity};
+        Math::Matrix4 soleWorld{Math::kIdentity};
+        Math::Matrix4 supportSoleWorld{Math::kIdentity};
+        std::array<physx::PxVec3, 8> corners{};
+        std::array<physx::PxVec3, 8> projections{};
+        std::array<float, 8> distances{};
+        int bodyIndex = -1;
+        int boneNode = -1;
+        bool available = false;
+        std::array<bool, 8> projected{};
+    };
+
+    // 발목 IK 기준은 Foot에 두고 Toe의 물리 자세와 투영을 함께 보관한다.
     struct FootSoleSample
     {
     public:
@@ -69,7 +167,10 @@ namespace PARS
         Math::Matrix4 soleInBody{Math::kIdentity};
         Math::Matrix4 soleInBone{Math::kIdentity};
         Math::Matrix4 soleWorld{Math::kIdentity};
+        Math::Matrix4 supportSoleWorld{Math::kIdentity};
+        FootToeSample toe;
         FootContactSample contact;
+        int bodyIndex = -1;
         int boneNode = -1;
         FootLegSetup leg;
         std::array<physx::PxVec3, 4> corners{};
@@ -106,7 +207,7 @@ namespace PARS
         std::vector<physx::PxVec3> hull;    // 현재 발에서 계산한 지지 영역 A
         FootSupportBalance balance;         // 현재 COM이 지지영역 A와 완충 영역 B를 기준으로 어디에 있는지 저장
         FootstepSnapshot footstep;          // 발딛기 플래너의 판단과 진행 상태. 발딛기가 필요한지, 어느 발을 움직일지, 어디에 착지할지, 현재 어느단계인지 저장
-        size_t projectedPointCount = 0;     // 바닥을 맞힌 레이의 개수. 양박의 모서리에서 쏜 레이 중 실제로 무언가를 맞힌 개수 지금 범위는 0~8. hull생성과 평균 지면 높이 계산에 사용
+        size_t projectedPointCount = 0;     // Foot 사각형과 Toe 윤곽의 유효 레이 개수다. 실제 접촉점 개수와 구분한다.
         uint64_t sampleNumber = 0;          // [디버그]FootSupport::Update 를 호출할 때 마다 증가하는 디버그용 번호
         uint64_t completedPhysicsStep = 0;  // 결과가 속한 완료 물리 스텝번호. 회복제어와 발딛기 제어가 같은 물리결과를 중복 처리하지않도록 사용하는 값
         uint64_t contactRevision = 0;       // 접촉 이력이 초기화 됐는지 구분하는 번호. 물리월드 변경, 물리 시간 초기화, 래그돌의 접촉 무효화 등으로 기존 접촉 이력을 버려야할때 증가. 회적제어와 IK등은 이 값의 변경을 감지해 이전 상태를 초기화
@@ -133,9 +234,14 @@ namespace PARS
         {
         public:
             Math::Matrix4 soleInBody{Math::kIdentity};
+            Math::Matrix4 toeSoleInBody{Math::kIdentity};
+            Math::Matrix4 toeSupportSoleWorld{Math::kIdentity};
             PhysicsBody source;
+            PhysicsBody toeSource;
             int bodyIndex = -1;
+            int toeBodyIndex = -1;
             FootLegSetup leg;
+            bool hasToeSupportSole = false;
         };
 
     public:

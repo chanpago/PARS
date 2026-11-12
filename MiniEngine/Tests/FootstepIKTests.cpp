@@ -265,6 +265,36 @@ namespace
             "A nonfinite second goal does not leak a first-leg correction");
     }
 
+    void TestToeSupportTargets()
+    {
+        PoseFixture fixture;
+        FootstepIK ik;
+        const std::vector<PxTransform> original = fixture.pose;
+        FootIKLegInput& stance = fixture.input.legs[0];
+        stance.toeNode = 4;
+        stance.hasToeTarget = true;
+        const PxTransform physical = stance.actualAnchor * original[stance.anchorNode].getInverse();
+        stance.toeTargetRotation = (physical * original[4]).q;
+        stance.targetSole.q = PxQuat(-.35f, PxVec3(1, 0, 0)) * stance.targetSole.q;
+        Check(ik.Apply(fixture.input, fixture.parents, fixture.pose), "A supported toe can have a world rotation target");
+        Check(std::abs((physical * fixture.pose[4]).q.dot(stance.toeTargetRotation)) > .999999f,
+            "Toe orientation stays at its contact target while the ankle changes pitch");
+        Check(Near((fixture.pose[3].getInverse() * fixture.pose[4]).p, (original[3].getInverse() * original[4]).p),
+            "Toe support correction preserves the local joint attachment position");
+        Check(Near(fixture.pose[7].getInverse() * fixture.pose[8], original[7].getInverse() * original[8]),
+            "The swinging toe keeps its animated local transform");
+        fixture.pose = original;
+        stance.hasToeTarget = false;
+        Check(ik.Apply(fixture.input, fixture.parents, fixture.pose) &&
+                Near(fixture.pose[3].getInverse() * fixture.pose[4], original[3].getInverse() * original[4]),
+            "Released toe support restores the animated local toe rotation");
+        fixture.pose = original;
+        stance.hasToeTarget = true;
+        stance.toeNode = 8;
+        Check(!ik.Apply(fixture.input, fixture.parents, fixture.pose) && Near(fixture.pose[3], original[3]),
+            "A toe from the other leg is rejected without a partial IK correction");
+    }
+
     void TestHintHistoryReset()
     {
         PoseFixture fixture;
@@ -319,6 +349,7 @@ void TestFootstepIK()
     TestReachAndHints();
     TestSoleOrientation();
     TestPoseAndPhysicalAnchor();
+    TestToeSupportTargets();
     TestHintHistoryReset();
     TestRecoverySupportTargets();
     std::printf("PASS: %u footstep IK checks (no PhysX simulation)\n", checks);
