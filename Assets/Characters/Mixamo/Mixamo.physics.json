@@ -475,10 +475,10 @@
       "halfLength": 0.05000000074505806,
       "mass": 0.850100040435791,
       "material": {
-        "dynamicFriction": 0.6000000238418579,
+        "dynamicFriction": 0.800000011920929,
         "frictionCombine": "minimum",
         "restitution": 0.0,
-        "staticFriction": 0.6000000238418579
+        "staticFriction": 0.800000011920929
       },
       "offset": [
         -0.0015988923842087388,
@@ -562,10 +562,10 @@
       "halfLength": 0.05000000074505806,
       "mass": 0.850100040435791,
       "material": {
-        "dynamicFriction": 0.6000000238418579,
+        "dynamicFriction": 0.800000011920929,
         "frictionCombine": "minimum",
         "restitution": 0.0,
-        "staticFriction": 0.6000000238418579
+        "staticFriction": 0.800000011920929
       },
       "offset": [
         0.008707244880497456,
@@ -1564,9 +1564,9 @@
         ]
       },
       "swingY": "limited",
-      "swingYLimit": 0.45378559827804565,
+      "swingYLimit": 0.0872664600610733,
       "swingZ": "limited",
-      "swingZLimit": 0.27925267815589905,
+      "swingZLimit": 0.0872664600610733,
       "twist": "limited",
       "twistMax": 3.1398472785949707,
       "twistMin": -0.01745329238474369
@@ -1750,9 +1750,9 @@
         ]
       },
       "swingY": "limited",
-      "swingYLimit": 0.45378559827804565,
+      "swingYLimit": 0.0872664600610733,
       "swingZ": "limited",
-      "swingZLimit": 0.27925267815589905,
+      "swingZLimit": 0.0872664600610733,
       "twist": "limited",
       "twistMax": 3.1398472785949707,
       "twistMin": -0.01745329238474369
