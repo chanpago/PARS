@@ -19,7 +19,6 @@ using namespace Graphics;
 namespace
 {
     const PxVec3 FloorHalfExtents(15.0f, 0.25f, 15.0f);
-    const PxVec3 BoxHalfExtents(0.5f);
     // 외곽 벽의 위치와 길이는 바닥 크기에 맞추고 내부 장애물은 기존 배치를 유지한다.
     const PxVec3 WallCentres[] =
     {
@@ -292,12 +291,6 @@ bool PhysicsDemo::Startup(MapId map)
     {
         return false;
     }
-    if (!m_Box)
-    {
-        Cleanup();
-        return false;
-    }
-
     m_RootSignature.Reset(1);
     m_RootSignature[0].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSignature.Finalize(L"Physics demo", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
@@ -339,16 +332,11 @@ void PhysicsDemo::Cleanup()
 
 void PhysicsDemo::ReleaseMap()
 {
-    if (m_Box)
-    {
-        m_Box->release();
-    }
     for (const MapBox& box : m_MapBoxes)
     {
         box.body->release();
     }
     m_MapBoxes.clear();
-    m_Box = nullptr;
 }
 
 bool PhysicsDemo::AddMapBox(std::vector<MapBox>& boxes, const PxTransform& pose,
@@ -387,15 +375,6 @@ bool PhysicsDemo::LoadMap(MapId map)
         ready = AddMapBox(boxes, PxTransform(PxVec3(0, -.25f, 0)), FloorHalfExtents,
             groundColor, "Ground", groundMaterial);
     }
-    // 기존 테스트장은 바닥, 낙하 상자, 벽의 생성 순서까지 유지한다.
-    PxRigidDynamic* dropBox = ready
-        ? m_World.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), BoxHalfExtents, 10.0f, "Falling box")
-        : nullptr;
-    ready = ready && dropBox != nullptr;
-    if (dropBox)
-    {
-        dropBox->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-    }
     if (map == MapId::TestYard)
     {
         for (size_t index = 0; index < _countof(WallCentres) && ready; ++index)
@@ -424,10 +403,6 @@ bool PhysicsDemo::LoadMap(MapId map)
     }
     if (!ready)
     {
-        if (dropBox)
-        {
-            dropBox->release();
-        }
         for (const MapBox& box : boxes)
         {
             box.body->release();
@@ -437,11 +412,6 @@ bool PhysicsDemo::LoadMap(MapId map)
     ReleaseMap();
     m_MapBoxes = std::move(boxes);
     m_Map = map;
-    m_Box = dropBox;
-    m_DropReady = true;
-    m_HistoryCount = 0;
-    m_HistoryOffset = 0;
-    RecordHeight();
     return true;
 }
 
@@ -490,74 +460,9 @@ Math::Vector3 PhysicsDemo::GetDummySpawnOrigin() const
     return Math::Vector3(3.5f, 0, m_Map == MapId::Cliff ? -5.7f : -2.5f);
 }
 
-void PhysicsDemo::ResetBox()
-{
-    if (m_Box)
-    {
-        m_Box->release();
-    }
-    m_Box = m_World.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), BoxHalfExtents, 10.0f, "Falling box");
-    // 데모 상자만 고정하며, 캐릭터 물리는 계속 동작한다.
-    if (m_Box)
-    {
-        m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-    }
-    m_DropReady = true;
-    m_HistoryCount = 0;
-    m_HistoryOffset = 0;
-    RecordHeight();
-}
-
-void PhysicsDemo::StartDrop()
-{
-    ResetBox();
-    if (m_Box)
-    {
-        m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
-        // eKINEMATIC을 해제해도 수면 상태는 유지된다. 해제한 상자를 명시적으로 깨워
-        // 바로 다음 월드 스텝부터 중력이 작용하게 한다.
-        m_Box->wakeUp();
-    }
-    m_DropReady = m_Box == nullptr;
-    m_GameWorld.SetPhysicsPaused(false);
-}
-
-void PhysicsDemo::KickBox()
-{
-    if (!m_Box)
-    {
-        return;
-    }
-    m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
-    m_DropReady = false;
-    // 실제 충격량과 토크를 적용한다. 이후의 비행, 회전, 바닥 충돌은
-    // 현재 포즈를 기준으로 PhysX가 처리한다.
-    m_Box->addForce(PxVec3(0, 60, 0), PxForceMode::eIMPULSE);
-    m_Box->addTorque(PxVec3(5, 0, 3), PxForceMode::eIMPULSE);
-    m_GameWorld.SetPhysicsPaused(false);
-}
-
-void PhysicsDemo::RecordHeight()
-{
-    if (!m_Box)
-    {
-        return;
-    }
-    m_HeightHistory[m_HistoryOffset] = m_Box->getGlobalPose().p.y;
-    m_HistoryOffset = (m_HistoryOffset + 1) % HistoryCapacity;
-    if (m_HistoryCount < HistoryCapacity)
-    {
-        ++m_HistoryCount;
-    }
-}
-
 void PhysicsDemo::Update(float)
 {
     UpdatePvdConnection(); // 물리가 일시정지된 동안에도 연결 재시도를 수행해야 한다.
-    if (!m_DropReady && m_World.GetLastSubsteps() && m_Box && !m_Box->isSleeping())
-    {
-        RecordHeight();
-    }
 }
 
 void PhysicsDemo::ConnectPvd()
@@ -711,10 +616,6 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
             AppendBox(output, box.body->getGlobalPose(), box.halfExtents, box.color);
         }
     }
-    if (m_Box && !comparisonScene)
-    {
-        AppendBox(output, m_Box->getGlobalPose(), BoxHalfExtents, PxVec3(1.0f, 0.38f, 0.06f));
-    }
     const UINT count = static_cast<UINT>(output - vertices.data());
     if (count)
     {
@@ -845,30 +746,13 @@ void PhysicsDemo::RenderUI()
         return;
     }
     ImGui::SetNextWindowPos(ImVec2(20, 70), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(410, 610), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(390, 520), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowSize(ImVec2(410, 460), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(390, 360), ImVec2(FLT_MAX, FLT_MAX));
     if (ImGui::Begin(u8"PARS - 물리", &visible))
     {
-        const bool ready = m_DropReady;
         bool paused = m_GameWorld.IsPhysicsPaused();
         bool slowMotion = m_GameWorld.GetPhysicsTimeScale() < 1.0f;
-        ImGui::TextUnformatted(paused ? u8"월드 일시정지" : ready ? u8"상자 준비 완료 - 캐릭터 동작 중"
-                                                                  : u8"시뮬레이션 중");
-        if (ImGui::Button(ready ? u8"낙하 시작###Drop" : u8"다시 낙하###Drop", ImVec2(-1, 32)))
-        {
-            StartDrop();
-        }
-        if (ImGui::Button(u8"상자 초기화"))
-        {
-            ResetBox();
-        }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!m_Box);
-        if (ImGui::Button(u8"위로 밀기 + 회전"))
-        {
-            KickBox();
-        }
-        ImGui::EndDisabled();
+        ImGui::TextUnformatted(paused ? u8"월드 일시정지" : u8"시뮬레이션 중");
         if (ImGui::Checkbox(u8"느리게 (0.25배)", &slowMotion))
         {
             m_GameWorld.SetPhysicsTimeScale(slowMotion ? 0.25f : 1.0f);
@@ -885,19 +769,6 @@ void PhysicsDemo::RenderUI()
         }
         ImGui::EndDisabled();
         ImGui::Separator();
-        if (m_Box)
-        {
-            ImGui::Text(u8"상자 중심 높이: %.3f m", m_Box->getGlobalPose().p.y);
-            ImGui::Text(u8"수직 속도: %.3f m/s", m_Box->getLinearVelocity().y);
-            ImGui::Text(u8"바디 상태: %s", m_Box->isSleeping() ? u8"휴면" : u8"활성");
-            ImGui::PlotLines("##Height", m_HeightHistory, m_HistoryCount,
-                m_HistoryCount == HistoryCapacity ? m_HistoryOffset : 0,
-                u8"높이 변화 (m)", 0.0f, FLT_MAX, ImVec2(-1, 64));
-        }
-        else
-        {
-            ImGui::TextUnformatted(u8"상자를 생성하지 못했습니다. '상자 초기화'를 눌러주세요.");
-        }
         ImGui::Text(u8"%.1f FPS | 물리: 60 Hz | 속도: %.2f배", ImGui::GetIO().Framerate,
             m_GameWorld.GetPhysicsTimeScale());
         ImGui::Text(u8"물리 스텝: %llu | 현재 프레임: %u", static_cast<unsigned long long>(m_World.GetStepCount()),

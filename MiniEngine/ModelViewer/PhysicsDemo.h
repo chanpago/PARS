@@ -64,10 +64,6 @@ private:
         const physx::PxVec3& halfExtents, const physx::PxVec3& color, const char* name,
         const PARS::PhysicsMaterialSettings& material = {});
     void ReleaseMap();
-    void ResetBox();
-    void StartDrop();
-    void KickBox();
-    void RecordHeight();
     void ConnectPvd();
     void RestartPvd();
     void UpdatePvdConnection();
@@ -83,12 +79,8 @@ public:
     Math::Vector3 GetDummySpawnOrigin() const;
 
 private:
-    static constexpr int HistoryCapacity = 240;
-
-private:
     PARS::World& m_GameWorld;
     PhysicsWorld& m_World;
-    physx::PxRigidDynamic* m_Box = nullptr;
     RootSignature m_RootSignature;
     GraphicsPSO m_PSO;
     GraphicsPSO m_LinePSO;
@@ -98,12 +90,8 @@ private:
     uint64_t m_PvdConnectDeadline = 0;
     uint64_t m_PvdNextAttempt = 0;
     std::string m_PvdMessage;
-    float m_HeightHistory[HistoryCapacity] = {};
-    int m_HistoryCount = 0;
-    int m_HistoryOffset = 0;
     uint32_t m_PvdProcessId = 0;
     MapId m_Map = MapId::TestYard;
-    bool m_DropReady = true;
     bool m_PvdConnecting = false;
     bool m_PvdUnresponsive = false;
     bool m_PvdSceneQueries = false;

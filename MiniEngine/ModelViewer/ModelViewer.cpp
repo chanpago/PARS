@@ -1333,8 +1333,8 @@ void ModelViewer::Update(float deltaT)
 #if defined(_M_X64)
     if (m_PhysicsDemo)
     {
-        // 물리 디버거(PVD) 연결 상태를 갱신하고, 물리 스텝이 진행됐으면 낙하 상자의 높이를 기록한다.
-        // 이 함수는 데모의 관측/연결 관리이며, 월드 물리 계산은 바로 위 World::Tick에서 수행한다.
+        // 물리 디버거(PVD) 연결 상태를 갱신한다.
+        // 월드 물리 계산은 바로 위 World::Tick에서 수행한다.
         m_PhysicsDemo->Update(deltaT);
         if (m_ImpactTest)
         {
@@ -2102,7 +2102,7 @@ void ModelViewer::RenderScene(void)
 
         // 깊이 렌더링을 시작한다.
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
-        // 바닥과 상자의 깊이를 유지해 캐릭터를 올바르게 가리도록 한다.
+        // 바닥과 지형의 깊이를 유지해 캐릭터를 올바르게 가리도록 한다.
         if (!physicsScene)
         {
             gfxContext.ClearDepth(g_SceneDepthBuffer);
