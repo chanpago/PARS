@@ -13,6 +13,7 @@ namespace
         return std::isfinite(settings.startPredictionTime) && settings.startPredictionTime > 0 &&
             std::isfinite(settings.landingPredictionTime) && settings.landingPredictionTime > 0 &&
             std::isfinite(settings.stanceScale) && settings.stanceScale >= 0 &&
+            std::isfinite(settings.minimumStanceWidthRatio) && settings.minimumStanceWidthRatio >= 0 && settings.minimumStanceWidthRatio <= 1 &&
             std::isfinite(settings.maximumStepLength) && settings.maximumStepLength > 0 &&
             std::isfinite(settings.crossingOffset) && settings.crossingOffset >= 0 &&
             settings.crossingOffset <= settings.maximumStepLength &&
@@ -86,14 +87,15 @@ namespace
             delta *= settings.maximumStepLength / distance;
             result.lengthLimited = true;
         }
-        if (settings.preventCrossing)
+        if (settings.preventCrossing || settings.minimumStanceWidthRatio > 0)
         {
             PxVec3 outward = input.supportRight;
             if (!outward.isFinite() || !stance.stanceOffset.isFinite())
             {
                 return result;
             }
-            const float sideDirection = (foot.stanceOffset - stance.stanceOffset).dot(outward);
+            const PxVec3 referenceSeparation = foot.stanceOffset - stance.stanceOffset;
+            const float sideDirection = referenceSeparation.dot(outward);
             if (std::abs(sideDirection) < 1e-6f)
             {
                 return result;
@@ -105,20 +107,26 @@ namespace
                 return result;
             }
             const float lateral = delta.dot(outward);
-            if (lateral < settings.crossingOffset)
+            // COM 예측 목표가 지지발 쪽으로 좁아질 때만 Idle 간격의 일부를 확보한다.
+            const float minimumWidth = std::abs(referenceSeparation.dot(outward)) * settings.minimumStanceWidthRatio;
+            const float crossingWidth = settings.preventCrossing ? settings.crossingOffset : 0.0f;
+            const float minimumLateral = (std::min)(settings.maximumStepLength, (std::max)(minimumWidth, crossingWidth));
+            if (lateral < minimumLateral)
             {
                 PxVec3 tangent = delta - outward * lateral;
                 const float limit = std::sqrt((std::max)(0.0f,
-                    settings.maximumStepLength * settings.maximumStepLength - settings.crossingOffset * settings.crossingOffset));
+                    settings.maximumStepLength * settings.maximumStepLength - minimumLateral * minimumLateral));
                 const float length = tangent.magnitude();
                 if (length > limit && length > 0)
                 {
                     tangent *= limit / length;
                     result.lengthLimited = true;
                 }
-                // 교차 경계와 설정된 보폭 상한을 동시에 지킨다. 마지막 반경 제한으로 경계를 다시 넘기지 않는다.
-                delta = outward * settings.crossingOffset + tangent;
-                result.crossingLimited = true;
+                // 최소 간격과 보폭 상한을 함께 적용하며, 간격 자체가 상한보다 크면 보폭 상한을 우선한다.
+                delta = outward * minimumLateral + tangent;
+                result.lengthLimited = result.lengthLimited || minimumWidth > settings.maximumStepLength;
+                result.crossingLimited = settings.preventCrossing && lateral < crossingWidth;
+                result.stanceWidthLimited = lateral < minimumWidth;
             }
         }
         result.position = stanceOnGround + delta;

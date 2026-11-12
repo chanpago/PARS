@@ -12,6 +12,7 @@ namespace PARS
         float startPredictionTime = .6f;   // 발딛기가 필요한지 판단할 때, 몇 초뒤의 COM을 예측할지
         float landingPredictionTime = .4f; // 착지 위치를 계산할 때, 몇 초 뒤의 COM을 기준으로 삼을지
         float stanceScale = 1.0f;          // Idle 기준 발 배치 오프셋을 적용하는 비율
+        float minimumStanceWidthRatio = .7f; // Idle 좌우 발 간격에 대한 최소 착지 간격 비율이며, 0이면 보정을 끈다.
         float maximumStepLength = 1.0f;    // 지지발에서 착지 목표까지 허용하는 최대거리
         float crossingOffset = .1f;        // 교차 제한을 켰을 때 지지발 바깥 방향으로 확보할 최소거리
         // 착지 예측 시간과 별개인 발 이동 시간(s)과 궤적의 최소 최고 높이(m)다.
@@ -114,6 +115,7 @@ namespace PARS
         bool valid = false;
         bool lengthLimited = false;
         bool crossingLimited = false;
+        bool stanceWidthLimited = false;
     };
 
     struct FootstepMotion

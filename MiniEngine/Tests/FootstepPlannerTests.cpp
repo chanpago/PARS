@@ -460,8 +460,16 @@ namespace
         input = Standing();
         input.velocity = PxVec3(-100, 0, 100);
         planner.Update(input, settings);
+        const FootstepTarget narrowed = planner.GetSnapshot().candidates[1];
+        Check(narrowed.valid && narrowed.stanceWidthLimited && !narrowed.crossingLimited &&
+                Near(narrowed.position.x - input.feet[0].position.x, .24f * .7f) &&
+                narrowed.stanceDistance <= settings.maximumStepLength + 1e-5f,
+            "Default spacing keeps seventy percent of idle width within the maximum step radius");
+        settings.minimumStanceWidthRatio = 0;
+        ++input.completedStep;
+        planner.Update(input, settings);
         Check(planner.GetSnapshot().target.x < input.feet[0].position.x,
-            "Crossing suppression is off by default");
+            "Crossing remains possible when spacing and crossing suppression are both disabled");
         settings.preventCrossing = true;
         ++input.completedStep;
         planner.Update(input, settings);
@@ -469,6 +477,21 @@ namespace
         Check(crossed.valid && crossed.crossingLimited &&
             Near(crossed.position.x - input.feet[0].position.x, .1f) && crossed.stanceDistance <= settings.maximumStepLength + 1e-5f,
             "Optional crossing boundary and maximum radius remain satisfied together");
+
+        settings = TestSettings();
+        for (int movingFoot = 0; movingFoot < 2; ++movingFoot)
+        {
+            planner.Reset();
+            input = Standing();
+            input.blueFoot = movingFoot;
+            input.com.x = input.feet[1 - movingFoot].position.x;
+            planner.Update(input, settings);
+            const FootstepTarget spaced = planner.GetSnapshot().candidates[movingFoot];
+            Check(spaced.valid && spaced.stanceWidthLimited &&
+                    Near(std::abs(spaced.position.x - input.feet[1 - movingFoot].position.x), .24f * .7f) &&
+                    Near(spaced.position.z, spaced.raw.z),
+                "COM above either support foot preserves relaxed lateral spacing and forward prediction");
+        }
 
         planner.Reset();
         input = Standing();

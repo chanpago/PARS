@@ -414,6 +414,15 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             static_cast<unsigned long long>(step.abortCount));
         ImGui::Text(u8"예측: 시작 %.2fs / 착지 %.2fs · 발 간격 %.2f · 최대 보폭 %.1fm",
             settings.startPredictionTime, settings.landingPredictionTime, settings.stanceScale, settings.maximumStepLength);
+        float minimumStanceWidthPercent = settings.minimumStanceWidthRatio * 100.0f;
+        if (ImGui::SliderFloat(u8"최소 좌우 간격 (Idle 대비)", &minimumStanceWidthPercent, 0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp))
+        {
+            settings.minimumStanceWidthRatio = minimumStanceWidthPercent * .01f;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(u8"착지 목표가 이 간격보다 좁을 때만 바깥으로 보정합니다. 0%%이면 간격 보정을 끕니다.");
+        }
         ImGui::DragFloat(u8"발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"최소 들기 높이 (m)", &settings.minimumLiftHeight, .005f, .01f, .3f, "%.3f");
         ImGui::DragFloat(u8"착지 수평 목표 고정 진행률", &settings.landingLockProgress, .01f, .5f, 1.0f, "%.2f");
@@ -432,8 +441,9 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             {
                 ImGui::Text(u8"%s 목표 (%.3f, %.3f, %.3f) m", FootLabel(static_cast<int>(side)),
                     target.position.x, target.position.y, target.position.z);
-                ImGui::Text(u8"  발 이동 %.2fm / 지지발 거리 %.2fm · 보폭 제한 %s / 교차 제한 %s",
+                ImGui::Text(u8"  발 이동 %.2fm / 지지발 거리 %.2fm · 보폭 제한 %s / 간격 보정 %s / 교차 제한 %s",
                     target.travelDistance, target.stanceDistance, target.lengthLimited ? "ON" : "OFF",
+                    target.stanceWidthLimited ? "ON" : "OFF",
                     target.crossingLimited ? "ON" : "OFF");
             }
             else
