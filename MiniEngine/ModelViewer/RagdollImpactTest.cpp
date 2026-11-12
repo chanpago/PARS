@@ -88,6 +88,7 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
         return false;
     }
     m_World.InitializePendingActors();
+    m_SpawnTransform = dummy->GetActorTransform();
     return Reset();
 }
 
@@ -108,7 +109,14 @@ bool RagdollImpactTest::Reset()
     {
         return false;
     }
-    dummy->SetActorLocation(m_SpawnOrigin + Vector3(0, dummy->GetCapsuleComponent().GetHalfHeight(), 0));
+    // 회복 중 달라진 회전을 남기지 않고 최초 생성 당시 방향과 크기를 함께 복원한다.
+    AffineTransform spawnTransform = m_SpawnTransform;
+    spawnTransform.SetTranslation(m_SpawnOrigin + Vector3(0, dummy->GetCapsuleComponent().GetHalfHeight(), 0));
+    if (!dummy->SetActorTransform(spawnTransform))
+    {
+        m_Message = u8"더미의 초기 위치와 방향을 복원하지 못했습니다.";
+        return false;
+    }
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
     mesh.GetAnimInstance().PlayAnimation(0);
     if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
@@ -134,9 +142,6 @@ bool RagdollImpactTest::Reset()
     }
     m_HipsReference = mesh.GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
-    // 눈금 0은 시작 지점의 바닥 높이다. 더미가 밀려도 눈금자는 초기 위치 옆에 고정한다.
-    const Vector3 dummyPosition = dummy->GetActorLocation();
-    m_RulerOrigin = Vector3(float(dummyPosition.GetX()) - .75f, float(m_SpawnOrigin.GetY()), float(dummyPosition.GetZ()));
     m_Message.clear();
     return true;
 }
@@ -447,8 +452,6 @@ void RagdollImpactTest::DrawUI(Character* player)
         ImGui::TextWrapped("%s", u8"우클릭 유지: 조준 / 조준 중 좌클릭 또는 R: 발사");
         ImGui::TextWrapped("%s", u8"조준하지 않을 때 R: 더미 골반으로 발사");
         ImGui::TextUnformatted(u8"반지름 15cm / 중력과 실제 충돌 적용");
-        ImGui::Checkbox(u8"2m 눈금자 표시", &m_RulerVisible);
-        ImGui::TextUnformatted(u8"눈금자: 1cm 눈금 / 10cm 숫자 / 주황색 8cm 표시");
         ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
         ImGui::BeginDisabled(m_ProjectileSettingsPath.empty());

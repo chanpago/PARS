@@ -66,14 +66,6 @@ public:
     }
     bool SetProjectileSettings(float mass, float speed);
     PARS::Character* GetDummy() const;
-    bool IsRulerVisible() const
-    {
-        return m_RulerVisible;
-    }
-    Math::Vector3 GetRulerOrigin() const
-    {
-        return m_RulerOrigin;
-    }
     std::vector<physx::PxRigidDynamic*> GetProjectiles() const;
     float GetMaxHipsDisplacement() const
     {
@@ -89,8 +81,8 @@ public:
 
 private:
     Math::Vector3 m_HipsReference{Math::kZero};
-    Math::Vector3 m_RulerOrigin{Math::kZero};
     Math::Vector3 m_SpawnOrigin{3.5f, 0, -2.5f};
+    Math::AffineTransform m_SpawnTransform{Math::kIdentity};
     PARS::World& m_World;
     PARS::ActorHandle m_Dummy;
     PARS::PhysicsAsset m_Asset;
@@ -107,6 +99,5 @@ private:
     float m_Speed = 7.5f;
     float m_MaxHipsDisplacement = 0;
     bool m_AutomaticSupport = true;
-    bool m_RulerVisible = true;
     bool m_BodyImpactCapsuleVisible = true;
 };

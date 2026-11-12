@@ -2175,11 +2175,6 @@ void ModelViewer::RenderScene(void)
         m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
         if (m_ImpactTest)
         {
-            if (m_ImpactTest->GetDummy() && m_ImpactTest->IsRulerVisible())
-            {
-                m_PhysicsDemo->RenderRuler(gfxContext, m_Camera, viewport, scissor,
-                    m_ImpactTest->GetRulerOrigin());
-            }
             m_PhysicsDemo->RenderSpheres(gfxContext, m_Camera, viewport, scissor,
                 m_ImpactTest->GetProjectiles(), RagdollImpactTest::SphereRadius);
             std::vector<physx::PxDebugLine> lines;

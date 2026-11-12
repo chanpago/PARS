@@ -165,119 +165,6 @@ namespace
         }
     }
 
-    void AppendRulerQuad(std::vector<Vertex>& vertices, float x0, float y0, float x1, float y1,
-        float side, float depth, const PxVec3& color)
-    {
-        // 뒷면도 그 면을 바라보는 방향에서 글자가 바르게 읽히도록 좌우 축을 바꾼다.
-        const PxVec3 normal(0, 0, side);
-        const PxVec3 corners[] =
-        {
-            {side * x0, y0, side * depth}, {side * x1, y0, side * depth},
-            {side * x1, y1, side * depth}, {side * x0, y1, side * depth}
-        };
-        const int indices[] = {0, 1, 2, 0, 2, 3};
-        for (const int index : indices)
-        {
-            vertices.push_back({corners[index], normal, color});
-        }
-    }
-
-    const uint8_t* RulerGlyph(char letter)
-    {
-        // 숫자와 단위를 삼각형 메시로 만든다. 별도 텍스처나 화면 좌표 글꼴이 필요하지 않다.
-        static const uint8_t digits[10][7] =
-        {
-            {14, 17, 19, 21, 25, 17, 14}, {4, 12, 4, 4, 4, 4, 14},
-            {14, 17, 1, 2, 4, 8, 31}, {30, 1, 1, 14, 1, 1, 30},
-            {2, 6, 10, 18, 31, 2, 2}, {31, 16, 16, 30, 1, 1, 30},
-            {14, 16, 16, 30, 17, 17, 14}, {31, 1, 2, 4, 8, 8, 8},
-            {14, 17, 17, 14, 17, 17, 14}, {14, 17, 17, 15, 1, 1, 14}
-        };
-        static const uint8_t centimetre[] = {0, 0, 14, 16, 16, 16, 14};
-        static const uint8_t metre[] = {0, 0, 26, 21, 21, 21, 21};
-        if (letter >= '0' && letter <= '9')
-        {
-            return digits[letter - '0'];
-        }
-        if (letter == 'c')
-        {
-            return centimetre;
-        }
-        if (letter == 'm')
-        {
-            return metre;
-        }
-        return nullptr;
-    }
-
-    void AppendRulerText(std::vector<Vertex>& vertices, const std::string& text,
-        float x, float y, float height, float side, float depth, const PxVec3& color)
-    {
-        const float cell = height / 7.0f;
-        for (const char letter : text)
-        {
-            const uint8_t* glyph = RulerGlyph(letter);
-            if (glyph)
-            {
-                for (int row = 0; row < 7; ++row)
-                {
-                    for (int column = 0; column < 5; ++column)
-                    {
-                        if (glyph[row] & (1 << (4 - column)))
-                        {
-                            const float left = x + column * cell;
-                            const float bottom = y + (6 - row) * cell;
-                            AppendRulerQuad(vertices, left, bottom, left + cell, bottom + cell,
-                                side, depth, color);
-                        }
-                    }
-                }
-            }
-            x += 6.0f * cell;
-        }
-    }
-
-    std::vector<Vertex> BuildRulerMesh()
-    {
-        std::vector<Vertex> vertices(72);
-        Vertex* output = vertices.data();
-        const PxVec3 board(.94f, .88f, .67f);
-        const PxVec3 ink(.025f, .035f, .045f);
-        const PxVec3 major(.025f, .15f, .36f);
-        const PxVec3 highlight(1.0f, .28f, .025f);
-        AppendBox(output, PxTransform(PxVec3(0, 1.035f, 0)), PxVec3(.185f, 1.035f, .018f), board);
-        AppendBox(output, PxTransform(PxVec3(0, .003f, 0)), PxVec3(.24f, .003f, .12f), major);
-
-        // 월드 1단위는 1m다. 표시용 메시만 생성하고 물리 형상은 등록하지 않는다.
-        for (const float side : {-1.0f, 1.0f})
-        {
-            AppendRulerQuad(vertices, -.18f, 0, -.177f, 2.0f, side, .019f, ink);
-            for (int centimetres = 0; centimetres <= 200; ++centimetres)
-            {
-                const float height = centimetres * .01f;
-                const bool numbered = centimetres % 10 == 0;
-                const bool emphasized = centimetres % 50 == 0;
-                const float length = numbered ? .09f : centimetres % 5 == 0 ? .055f : .027f;
-                const float thickness = numbered ? .0025f : .001f;
-                const PxVec3 color = emphasized ? major : ink;
-                AppendRulerQuad(vertices, -.177f, height - thickness * .5f,
-                    -.177f + length, height + thickness * .5f, side, .019f, color);
-                if (numbered)
-                {
-                    const std::string label = centimetres == 200 ? "2m" : std::to_string(centimetres) + "cm";
-                    const float textHeight = emphasized ? .05f : .045f;
-                    const float bottom = centimetres == 0 ? .012f :
-                        centimetres == 200 ? 2.008f : height - textHeight * .5f;
-                    AppendRulerText(vertices, label, -.065f, bottom, textHeight, side, .0195f, color);
-                }
-            }
-            // 8cm 표시를 숫자 열 반대쪽으로 빼서 10cm 눈금과 글자가 겹치지 않게 한다.
-            AppendRulerQuad(vertices, -.38f, .048f, -.185f, .112f, side, .020f, highlight);
-            AppendRulerQuad(vertices, -.38f, .0785f, .177f, .0815f, side, .020f, highlight);
-            AppendRulerText(vertices, "8cm", -.366f, .058f, .044f, side, .0205f, ink);
-        }
-        return vertices;
-    }
 }
 
 PhysicsDemo::PhysicsDemo(PARS::World& world)
@@ -317,15 +204,11 @@ bool PhysicsDemo::Startup(MapId map)
     m_OverlayLinePSO.SetDepthStencilState(DepthStateDisabled);
     m_OverlayLinePSO.SetRenderTargetFormat(g_SceneColorBuffer.GetFormat(), DXGI_FORMAT_UNKNOWN);
     m_OverlayLinePSO.Finalize();
-    // 고정 눈금과 숫자는 한 번만 생성해 GPU에 보관한다.
-    const std::vector<Vertex> ruler = BuildRulerMesh();
-    m_RulerMesh.Create(L"Dummy 2m ruler", static_cast<uint32_t>(ruler.size()), sizeof(Vertex), ruler.data());
     return true;
 }
 
 void PhysicsDemo::Cleanup()
 {
-    m_RulerMesh.Destroy();
     m_PvdConnecting = false;
     ReleaseMap();
 }
@@ -667,28 +550,6 @@ void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& ca
     context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
     context.SetDynamicVB(0, static_cast<UINT>(vertices.size()), sizeof(Vertex), vertices.data());
     context.Draw(static_cast<UINT>(vertices.size()));
-}
-
-void PhysicsDemo::RenderRuler(GraphicsContext& context, const Math::Camera& camera,
-    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor, Math::Vector3 origin)
-{
-    if (m_RulerMesh.GetElementCount() == 0)
-    {
-        return;
-    }
-    const Math::Matrix4 viewProjection = camera.GetViewProjMatrix() *
-        Math::Matrix4(Math::OrthogonalTransform(origin));
-    context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-    context.TransitionResource(m_RulerMesh, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, true);
-    context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV());
-    context.SetViewportAndScissor(viewport, scissor);
-    context.SetRootSignature(m_RootSignature);
-    context.SetPipelineState(m_PSO);
-    context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context.SetDynamicConstantBufferView(0, sizeof(viewProjection), &viewProjection);
-    context.SetVertexBuffer(0, m_RulerMesh.VertexBufferView());
-    context.Draw(m_RulerMesh.GetElementCount());
 }
 
 void PhysicsDemo::RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
