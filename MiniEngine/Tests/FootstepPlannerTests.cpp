@@ -440,8 +440,8 @@ namespace
         input.feet[1].position.x = 10;
         planner.Update(input, settings);
         const PARS::FootstepTarget capped = planner.GetSnapshot().candidates[1];
-        Check(capped.valid && capped.lengthLimited && Near(capped.stanceDistance, .7f),
-            "Maximum step length is 0.7 meters from the opposite foot");
+        Check(capped.valid && capped.lengthLimited && Near(capped.stanceDistance, 1.0f),
+            "Maximum step length is 1.0 meter from the opposite foot");
         Check(capped.travelDistance > settings.maximumStepLength && Near(capped.position.y, .4f),
             "The cap is not measured from the moving foot and ignores vertical COM velocity");
         planner.Reset();
@@ -741,8 +741,8 @@ namespace
     void TestSupportTransfer()
     {
         const FootstepSettings settings;
-        Check(Near(settings.stepDuration, .15f) && Near(settings.landingPredictionTime, .3f),
-            "The tuned movement and landing prediction defaults remain unchanged");
+        Check(Near(settings.stepDuration, .15f) && Near(settings.landingPredictionTime, .4f),
+            "Landing prediction uses 0.4 seconds while movement duration stays at 0.15 seconds");
         for (const float dt : {1.0f / 60, 1.0f / 120})
         {
             FootstepPlanner planner;
