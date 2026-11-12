@@ -61,7 +61,8 @@ namespace PARS
         }
         if (m_Articulation)
         {
-            m_Articulation->setArticulationFlag(PxArticulationFlag::eDISABLE_SELF_COLLISION, m_DrivesEnabled);
+            // 모터 활성 여부와 관계없이 자기 충돌을 허용한다. 직접 연결된 부모·자식 링크는 PhysX가 제외한다.
+            m_Articulation->setArticulationFlag(PxArticulationFlag::eDISABLE_SELF_COLLISION, false);
             m_Articulation->setSolverIterationCounts(32, 8);
             UpdateArticulationDrives();
         }

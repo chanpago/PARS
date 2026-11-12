@@ -19,6 +19,91 @@ namespace
     { return 2 * std::acos((std::min)(1.0f, std::abs(XMVectorGetX(XMVector4Dot(a, b))))); }
     Matrix4 Pose(Vector3 position, Quaternion rotation = Quaternion(kIdentity)) { return Matrix4(OrthogonalTransform(rotation, position)); }
 
+    class SelfCollisionWorld : public PhysicsWorld
+    {
+    private:
+        void onContact(const PxContactPairHeader& header, const PxContactPair* pairs, PxU32 count) override
+        {
+            const PxArticulationLink* first = header.actors[0]->is<PxArticulationLink>();
+            const PxArticulationLink* second = header.actors[1]->is<PxArticulationLink>();
+            if (!first || !second || &first->getArticulation() != &second->getArticulation())
+            {
+                return;
+            }
+            for (PxU32 index = 0; index < count; ++index)
+            {
+                if (std::strcmp(first->getName(), "root") == 0 || std::strcmp(second->getName(), "root") == 0)
+                {
+                    parentChildContacts += pairs[index].contactCount;
+                }
+                else
+                {
+                    siblingContacts += pairs[index].contactCount;
+                }
+            }
+        }
+
+    public:
+        PxU32 parentChildContacts = 0;
+        PxU32 siblingContacts = 0;
+    };
+
+    void TestArticulationSelfCollision()
+    {
+        for (int mode = 0; mode < 3; ++mode)
+        {
+            SelfCollisionWorld world;
+            Check(world.Initialize(false), "Initialize articulation self-collision world");
+            PhysicsAsset asset;
+            PhysicsBody root;
+            root.bone = "root";
+            root.shape = PhysicsShapeType::Sphere;
+            root.radius = .6f;
+            PhysicsBody left = root;
+            left.bone = "left";
+            left.radius = .15f;
+            PhysicsBody right = left;
+            right.bone = "right";
+            asset.bodies = {root, left, right};
+            const std::vector<std::string> names{root.bone, left.bone, right.bone};
+            // 부모와 자식, 형제 링크의 형상을 모두 겹쳐 실제 접촉 생성 여부를 확인한다.
+            const std::vector<Matrix4> initial{
+                Pose(Vector3(0, 3.2f, 0)), Pose(Vector3(-.1f, 2.7f, 0)), Pose(Vector3(.1f, 2.7f, 0))};
+            for (size_t child = 1; child < names.size(); ++child)
+            {
+                PhysicsConstraint joint;
+                joint.parentBone = root.bone;
+                joint.childBone = names[child];
+                joint.twist = PhysicsJointMotion::Free;
+                joint.swingY = PhysicsJointMotion::Free;
+                joint.swingZ = PhysicsJointMotion::Free;
+                joint.SetWorldFrame(initial[0], initial[child], initial[0]);
+                asset.constraints.push_back(joint);
+            }
+            ConfigureDefaultDrives(asset);
+            Ragdoll ragdoll;
+            std::string error;
+            Check(ragdoll.Create(world, asset, names, initial, Vector3(kZero), error) && ragdoll.UsesArticulation(),
+                "Create overlapping articulation links");
+            Check(ragdoll.UpdateDriveTargets(initial, 0, error), "Set self-collision drive targets");
+            ragdoll.SetDrivesEnabled(true);
+            if (mode > 0)
+            {
+                ragdoll.SetDrivesEnabled(false);
+            }
+            if (mode == 2)
+            {
+                ragdoll.SetDrivesEnabled(true);
+            }
+            world.Step();
+            std::printf("self_collision mode=%d sibling_contacts=%u parent_child_contacts=%u\n",
+                mode, world.siblingContacts, world.parentChildContacts);
+            Check(world.siblingContacts > 0, "Non-adjacent articulation links collide in active, passive and re-enabled modes");
+            Check(world.parentChildContacts == 0, "Direct parent-child articulation links remain excluded from collisions");
+            Check(ragdoll.IsFinite() && world.GetErrorCount() == 0, "Self-collision produces finite states without PhysX errors");
+        }
+    }
+
     std::vector<float> SampleAccelerationResponse(float massScale, float radius, bool slerp, float maxTorque, bool rotatedFrames = false)
     {
         PhysicsWorld world;
@@ -675,6 +760,7 @@ void RunPelvisDriveTests()
 
 void RunActiveRagdollTests()
 {
+    TestArticulationSelfCollision();
     PhysicsAsset asset;
     PhysicsBody root; root.bone = "root"; root.shape = PhysicsShapeType::Sphere; root.radius = .08f;
     PhysicsBody child = root; child.bone = "child"; child.mass = 1.5f;
