@@ -499,6 +499,8 @@ namespace EngineProfiling
         DisplayTimingRow(Text, "PhysX step + wait", FramePerformance::Category::PhysXStep);
         DisplayTimingRow(Text, "PARS CPU total", FramePerformance::Category::ParsTotal);
         DisplayTimingRow(Text, "  Control / targets", FramePerformance::Category::ParsControl);
+        DisplayTimingRow(Text, "  Footstep planning", FramePerformance::Category::FootstepPlanning);
+        DisplayTimingRow(Text, "  Footstep IK", FramePerformance::Category::FootstepIK);
         DisplayTimingRow(Text, "  Pose / animation", FramePerformance::Category::ParsPose);
         DisplayTimingRow(Text, "  Other world work", FramePerformance::Category::ParsOther);
         DisplayTimingRow(Text, "Mesh render prep CPU", FramePerformance::Category::RenderPreparation);

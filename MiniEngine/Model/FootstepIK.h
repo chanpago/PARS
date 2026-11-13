@@ -128,7 +128,8 @@ namespace PARS
     };
 
     LegIKResult SolveFootIKLeg(const FootIKLegInput& leg,
-        const std::array<physx::PxTransform, 3>& bones, const LegIKResult& previous);
+        const std::array<physx::PxTransform, 3>& bones, const LegIKResult& previous,
+        float positionTolerance, float tiltTolerance);
     FootstepReachability EvaluateFootstepReachability(const FootstepPlanningInput& input,
         const FootstepSettings& settings, size_t side, const physx::PxVec3& position,
         const physx::PxVec3& normal, float duration, float liftHeight);

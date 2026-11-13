@@ -1,6 +1,7 @@
 ﻿#include "FootSupport.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "FootSupportGeometry.h"
+#include "FramePerformance.h"
 #include "PhysicsWorld.h"
 #include "PhysicsPose.h"
 #include <cmath>
@@ -397,6 +398,7 @@ bool PARS::FootSupport::SetBufferScale(float scale)
 
 void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
 {
+    FramePerformance::Scope planningTiming(FramePerformance::Category::FootstepPlanning);
     FootstepInput input;
     input.active = mesh.IsActiveRagdoll();
     input.automaticSupport = mesh.UsesAutomaticRootSupport();
@@ -434,6 +436,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     // 출발할 때만 실제 관절과 구동 상태를 수집한다. 진행 중에는 저장한 목표를 그대로 사용한다.
     if (input.active && input.automaticSupport && !input.rootReleased && !input.outsideBufferReleased &&
         input.hasCom && input.hasVelocity && prediction.isFinite() &&
+        (previous.completedStep != input.completedStep || previous.revision != input.revision) &&
+        (previous.phase != FootstepPhase::Aborted || previous.revision != input.revision) &&
         (!previous.IsInProgress() || previous.revision != input.revision) &&
         !IsInsideFootSupportHull(input.hull, prediction))
     {

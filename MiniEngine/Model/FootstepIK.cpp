@@ -1,6 +1,7 @@
 ﻿#include "FootstepIK.h"
 #include "foundation/PxMat33.h"
 #include "FootstepPlanner.h"
+#include "FramePerformance.h"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -98,6 +99,26 @@ namespace
         return length > 1e-8f ? vector * (2.0f * std::atan2(length, rotation.w) / length) : PxVec3(0);
     }
 
+    bool EvaluateLimitedLegError(const FootIKLegInput& leg, float positionWeight, LimitedLegPose& result)
+    {
+        result.sole = result.bones[2] * leg.soleInBone;
+        if (!result.sole.isSane())
+        {
+            return false;
+        }
+        result.positionError = leg.targetSole.p - result.sole.p;
+        result.reachError = result.positionError.magnitude();
+        const PxVec3 actualUp = result.sole.q.rotate(PxVec3(0, 1, 0));
+        const PxVec3 targetUp = leg.targetSole.q.rotate(PxVec3(0, 1, 0));
+        const PxQuat alignPlane = FromTo(actualUp, targetUp, leg.targetSole.q.rotate(PxVec3(1, 0, 0)));
+        result.tiltError = RotationVector(alignPlane);
+        result.tiltAngle = result.tiltError.magnitude();
+        // 위치와 발바닥 법선만 맞춘다. 법선 축을 중심으로 한 발끝 방향 회전은 목표에 포함하지 않는다.
+        result.cost = positionWeight * positionWeight * result.positionError.magnitudeSquared() +
+            TiltWeight * TiltWeight * result.tiltError.magnitudeSquared();
+        return std::isfinite(result.cost);
+    }
+
     bool EvaluateLimitedLeg(const FootIKLegInput& leg, const std::array<PxQuat, LegJointCount>& rotations,
         float positionWeight, LimitedLegPose& result)
     {
@@ -124,22 +145,34 @@ namespace
             }
             parent = result.bones[joint];
         }
-        result.sole = result.bones[2] * leg.soleInBone;
-        if (!result.sole.isSane())
+        return EvaluateLimitedLegError(leg, positionWeight, result);
+    }
+
+    bool EvaluateLimitedLegPerturbation(const FootIKLegInput& leg, const LimitedLegPose& base,
+        size_t joint, const PxQuat& rotation, float positionWeight, LimitedLegPose& result)
+    {
+        result = base;
+        result.rotations[joint] = leg.clampJointRotation(joint, rotation);
+        if (!result.rotations[joint].isSane())
         {
             return false;
         }
-        result.positionError = leg.targetSole.p - result.sole.p;
-        result.reachError = result.positionError.magnitude();
-        const PxVec3 actualUp = result.sole.q.rotate(PxVec3(0, 1, 0));
-        const PxVec3 targetUp = leg.targetSole.q.rotate(PxVec3(0, 1, 0));
-        const PxQuat alignPlane = FromTo(actualUp, targetUp, leg.targetSole.q.rotate(PxVec3(1, 0, 0)));
-        result.tiltError = RotationVector(alignPlane);
-        result.tiltAngle = result.tiltError.magnitude();
-        // 위치와 발바닥 법선만 맞춘다. 법선 축을 중심으로 한 발끝 방향 회전은 목표에 포함하지 않는다.
-        result.cost = positionWeight * positionWeight * result.positionError.magnitudeSquared() +
-            TiltWeight * TiltWeight * result.tiltError.magnitudeSquared();
-        return std::isfinite(result.cost);
+        result.rotations[joint].normalize();
+        // 수치 미분에서는 바뀐 관절만 다시 제한하고 그 아래의 본만 갱신한다.
+        // 나머지 관절의 제한 결과와 부모 자세는 기준 해에 이미 계산되어 있다.
+        PxTransform parent = joint == 0 ? leg.actualAnchor : base.bones[joint - 1];
+        for (size_t child = joint; child < LegJointCount; ++child)
+        {
+            const FootIKJointFrame& frame = leg.joints[child];
+            result.bones[child] = parent * frame.parentInBone * PxTransform(PxVec3(0), result.rotations[child]) *
+                frame.childInBone.getInverse();
+            if (!result.bones[child].isSane())
+            {
+                return false;
+            }
+            parent = result.bones[child];
+        }
+        return EvaluateLimitedLegError(leg, positionWeight, result);
     }
 
     std::array<float, LegErrorCount> LimitedLegErrors(const LimitedLegPose& pose, float positionWeight)
@@ -216,14 +249,15 @@ namespace
         return true;
     }
 
-    bool RefineLimitedLeg(const FootIKLegInput& leg, float positionWeight, LimitedLegPose& state, uint32_t& iterations)
+    bool RefineLimitedLeg(const FootIKLegInput& leg, float positionWeight, LimitedLegPose& state,
+        uint32_t& iterations, float positionTolerance, float tiltTolerance)
     {
         const float differenceStep = .002f;
         const uint32_t maximumIterations = 24;
         float damping = .01f;
         for (uint32_t iteration = 0; iteration < maximumIterations; ++iteration)
         {
-            if (state.reachError <= PositionTolerance && state.tiltAngle <= TiltTolerance)
+            if (state.reachError <= positionTolerance && state.tiltAngle <= tiltTolerance)
             {
                 break;
             }
@@ -235,14 +269,12 @@ namespace
                 const size_t joint = variable / 3;
                 PxVec3 axis(0);
                 axis[static_cast<unsigned>(variable % 3)] = 1;
-                std::array<PxQuat, LegJointCount> positive = state.rotations;
-                std::array<PxQuat, LegJointCount> negative = state.rotations;
-                positive[joint] = (PxQuat(differenceStep, axis) * positive[joint]).getNormalized();
-                negative[joint] = (PxQuat(-differenceStep, axis) * negative[joint]).getNormalized();
+                const PxQuat positive = (PxQuat(differenceStep, axis) * state.rotations[joint]).getNormalized();
+                const PxQuat negative = (PxQuat(-differenceStep, axis) * state.rotations[joint]).getNormalized();
                 LimitedLegPose plus;
                 LimitedLegPose minus;
-                if (!EvaluateLimitedLeg(leg, positive, positionWeight, plus) ||
-                    !EvaluateLimitedLeg(leg, negative, positionWeight, minus))
+                if (!EvaluateLimitedLegPerturbation(leg, state, joint, positive, positionWeight, plus) ||
+                    !EvaluateLimitedLegPerturbation(leg, state, joint, negative, positionWeight, minus))
                 {
                     return false;
                 }
@@ -309,7 +341,8 @@ namespace
         return true;
     }
 
-    bool ApplyLegJointLimits(const FootIKLegInput& leg, const LegIKResult& previous, LegIKResult& result)
+    bool ApplyLegJointLimits(const FootIKLegInput& leg, const LegIKResult& previous, LegIKResult& result,
+        float positionTolerance, float tiltTolerance)
     {
         const std::array<PxTransform, LegJointCount> seed{result.hip, result.knee, result.ankle};
         std::array<PxQuat, LegJointCount> rotations{PxQuat(PxIdentity), PxQuat(PxIdentity), PxQuat(PxIdentity)};
@@ -344,7 +377,7 @@ namespace
             }
         }
         uint32_t iterations = 0;
-        if (!RefineLimitedLeg(leg, positionWeight, state, iterations))
+        if (!RefineLimitedLeg(leg, positionWeight, state, iterations, positionTolerance, tiltTolerance))
         {
             return false;
         }
@@ -357,8 +390,8 @@ namespace
         result.soleTiltError = state.tiltAngle;
         result.limitIterations = iterations;
         result.jointLimitsApplied = true;
-        result.limitConverged = state.reachError <= PositionTolerance && state.tiltAngle <= TiltTolerance;
-        result.reachLimited = result.reachLimited || state.reachError > PositionTolerance;
+        result.limitConverged = state.reachError <= positionTolerance && state.tiltAngle <= tiltTolerance;
+        result.reachLimited = result.reachLimited || state.reachError > positionTolerance;
         PxVec3 axis = result.ankle.p - result.hip.p;
         PxVec3 bend = result.knee.p - result.hip.p;
         if (Unit(axis) && ProjectHint(bend, axis))
@@ -370,7 +403,8 @@ namespace
 }
 
 LegIKResult PARS::SolveFootIKLeg(const FootIKLegInput& leg,
-    const std::array<PxTransform, 3>& bones, const LegIKResult& previous)
+    const std::array<PxTransform, 3>& bones, const LegIKResult& previous,
+    float positionTolerance, float tiltTolerance)
 {
     TwoBoneIKInput solve;
     solve.hip = bones[0];
@@ -384,7 +418,8 @@ LegIKResult PARS::SolveFootIKLeg(const FootIKLegInput& leg,
     solve.previousBend = previous.bendDirection;
     solve.hasPreviousBend = previous.valid;
     LegIKResult result = SolveTwoBoneIK(solve);
-    if (result.valid && leg.clampJointRotation && !ApplyLegJointLimits(leg, previous, result))
+    if (result.valid && leg.clampJointRotation &&
+        !ApplyLegJointLimits(leg, previous, result, positionTolerance, tiltTolerance))
     {
         result.valid = false;
     }
@@ -476,6 +511,7 @@ namespace
         }
         // 끝점뿐 아니라 들어 올리고 내려놓는 궤적 전체를 같은 제한 IK로 검사한다.
         constexpr size_t Samples = 8;
+        std::array<FootIKLegInput, 2> legs = input.legs;
         std::array<LegIKResult, 2> previous;
         std::array<std::array<PxQuat, 3>, 2> rotations;
         std::array<std::array<PxVec3, 3>, 2> travels;
@@ -501,6 +537,28 @@ namespace
             }
         }
 
+        // 착지 자세가 관절 제한 안에서 불가능하면 앞선 일곱 궤적 지점을 풀 필요가 없다.
+        // 후보에 이미 설정된 위치·기울기 허용 오차까지만 계산한다.
+        for (size_t order = 0; order < legs.size(); ++order)
+        {
+            const size_t side = order == 0 ? moving : 1 - moving;
+            FootIKLegInput& leg = legs[side];
+            leg.actualAnchor = pelvisTarget;
+            leg.targetSole = side == moving ? landing : input.supportSoles[side];
+            const PxTransform delta = pelvisTarget * input.legs[side].actualAnchor.getInverse();
+            const std::array<PxTransform, 3> seed{
+                delta * input.bones[side][0], delta * input.bones[side][1], delta * input.bones[side][2]};
+            const LegIKResult solved = SolveFootIKLeg(leg, seed, previous[side],
+                settings.reachPositionTolerance, settings.reachTiltTolerance);
+            result.reachError = (std::max)(result.reachError, solved.reachError);
+            if (!solved.valid || !solved.jointLimitsApplied ||
+                solved.reachError > settings.reachPositionTolerance ||
+                solved.soleTiltError > settings.reachTiltTolerance)
+            {
+                return result;
+            }
+        }
+
         for (size_t sample = 1; sample <= Samples; ++sample)
         {
             const float progress = static_cast<float>(sample) / static_cast<float>(Samples);
@@ -508,7 +566,7 @@ namespace
             const PxTransform pelvis = InterpolateFootstepPelvis(result, progress);
             for (size_t side = 0; side < input.legs.size(); ++side)
             {
-                FootIKLegInput leg = input.legs[side];
+                FootIKLegInput& leg = legs[side];
                 leg.actualAnchor = pelvis;
                 leg.targetSole = input.supportSoles[side];
                 if (side == moving)
@@ -520,7 +578,8 @@ namespace
                 const PxTransform delta = pelvis * input.legs[side].actualAnchor.getInverse();
                 const std::array<PxTransform, 3> seed{
                     delta * input.bones[side][0], delta * input.bones[side][1], delta * input.bones[side][2]};
-                const LegIKResult solved = SolveFootIKLeg(leg, seed, previous[side]);
+                const LegIKResult solved = SolveFootIKLeg(leg, seed, previous[side],
+                    settings.reachPositionTolerance, settings.reachTiltTolerance);
                 result.reachError = (std::max)(result.reachError, solved.reachError);
                 if (!solved.valid || !solved.jointLimitsApplied ||
                     solved.reachError > settings.reachPositionTolerance ||
@@ -831,6 +890,7 @@ void FootstepIK::Reset()
 bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>& parents,
     std::vector<PxTransform>& pose)
 {
+    FramePerformance::Scope ikTiming(FramePerformance::Category::FootstepIK);
     if (!input.enabled || input.revision != m_Snapshot.revision)
     {
         Reset();
@@ -908,7 +968,8 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         {
             return false;
         }
-        if (leg.clampJointRotation && !ApplyLegJointLimits(leg, previousLegs[side], result))
+        if (leg.clampJointRotation &&
+            !ApplyLegJointLimits(leg, previousLegs[side], result, PositionTolerance, TiltTolerance))
         {
             result.valid = false;
             return false;

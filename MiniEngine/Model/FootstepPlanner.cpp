@@ -212,8 +212,14 @@ namespace
         }
         if (acceptedFraction < 1.0f)
         {
+            const float segmentLength = HorizontalDistance(start, result.raw);
             for (uint32_t refinement = 0; refinement < 6; ++refinement)
             {
+                // 이미 허용 위치 오차의 절반 이내인 경계는 더 잘게 탐색하지 않는다.
+                if ((rejectedFraction - acceptedFraction) * segmentLength <= settings.reachPositionTolerance * .5f)
+                {
+                    break;
+                }
                 const float fraction = (acceptedFraction + rejectedFraction) * .5f;
                 if (evaluate(fraction))
                 {
