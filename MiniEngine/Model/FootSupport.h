@@ -292,10 +292,8 @@ namespace PARS
     private:
         std::array<Sole, 2> m_Feet;
         FootSupportSnapshot m_Snapshot;
-        std::array<Math::Matrix4, 2> m_IdleFootBones{Math::Matrix4(Math::kIdentity), Math::Matrix4(Math::kIdentity)}; // idle 애니메이션에서 가져온 양발 본의 기준 위치,회전을 저장하는 배열. 발딛기 목표를 계산할 때 기준 발 간격과 배치를 알아내는데 사용
         FootstepPlanner m_FootstepPlanner;                                                                            // FootSupport가 수집한 발, 균형 정보로 발딛기를 판단하고, 움직일 발, 착지 목표와 진행 단계 결정
         FootSupportGrace m_BufferGrace;
-        uint64_t m_IdleReferenceRevision = 0;                                                                         // 접촉 정보가 바뀌어 그 기준을 새로 준비해야하는지 판단
         std::array<FootContactSample, 2> m_Contacts;                                                                  // 접촉에 대한 정보를 포함하는 배열
         const PhysicsWorld* m_ContactWorld = nullptr;
         uint64_t m_ClockRevision = 0;   // 마지막으로 확인한 물리시간
@@ -304,10 +302,7 @@ namespace PARS
         uint64_t m_ContactRevision = 0; // 자체의 접촉 이력버전
         std::array<FootSoleSettings, 2> m_Settings;
         FootstepSettings m_FootstepSettings; // 발 이동에 대한 세팅값
-        physx::PxVec3 m_FootstepForward{0, 0, 1}; // COM 수평 속도로 정한 마지막 유효 발 배치 방향
         float m_BufferScale = 2.0f;          // 지지영역 A를 확장해 완충 영역 B를 만드는 배율. 2배면 반지름이 두배
-        bool m_HasIdleReference = false;     // idle기준 자세를 저장했는지. 기준의 존재 여부
-        bool m_HasFootstepForward = false;   // 저속에서 유지할 발 배치 방향이 준비되었는지
         bool m_Initialized = false;          // 발 지지 계산에 필요한 기본 정보를 준비했는지. prepare()에서 필요한 정보를 준비했는지 표현
     };
 }

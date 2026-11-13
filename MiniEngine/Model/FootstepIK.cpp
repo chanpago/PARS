@@ -1,5 +1,6 @@
 ﻿#include "FootstepIK.h"
 #include "foundation/PxMat33.h"
+#include "FootstepPlanner.h"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -368,18 +369,290 @@ namespace
     }
 }
 
-bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
-    const PxTransform& animatedSole, PxTransform& target)
+LegIKResult PARS::SolveFootIKLeg(const FootIKLegInput& leg,
+    const std::array<PxTransform, 3>& bones, const LegIKResult& previous)
 {
-    PxVec3 up = normal;
-    if (!position.isFinite() || !animatedSole.isSane() || !Unit(up))
+    TwoBoneIKInput solve;
+    solve.hip = bones[0];
+    solve.knee = bones[1];
+    solve.ankle = bones[2];
+    solve.targetSole = leg.targetSole;
+    solve.soleInBone = leg.soleInBone;
+    solve.thighLength = leg.thighLength;
+    solve.calfLength = leg.calfLength;
+    solve.referenceBend = solve.hip.q.rotate(leg.referenceBendInHip);
+    solve.previousBend = previous.bendDirection;
+    solve.hasPreviousBend = previous.valid;
+    LegIKResult result = SolveTwoBoneIK(solve);
+    if (result.valid && leg.clampJointRotation && !ApplyLegJointLimits(leg, previous, result))
+    {
+        result.valid = false;
+    }
+    return result;
+}
+
+namespace
+{
+    PxQuat InterpolateRotation(const PxQuat& start, const PxQuat& target, float progress)
+    {
+        const PxVec3 rotation = RotationVector(target * start.getConjugate());
+        const float angle = rotation.magnitude();
+        if (angle <= 1e-6f)
+        {
+            return start;
+        }
+        return (PxQuat(angle * progress, rotation / angle) * start).getNormalized();
+    }
+
+    float AccelerationTimeScale(float acceleration, float limit)
+    {
+        if (acceleration <= 1e-4f)
+        {
+            return 0;
+        }
+        return limit > 1e-6f ? std::sqrt(acceleration / limit) : PX_MAX_F32;
+    }
+
+    FootstepReachability EvaluatePelvisPlan(const FootstepPlanningInput& input,
+        const FootstepSettings& settings, size_t moving, const PxVec3& position,
+        const PxVec3& normal, float duration, float liftHeight, const PxTransform& pelvisTarget)
+    {
+        FootstepReachability result;
+        result.pelvisStart = input.legs[moving].actualAnchor;
+        result.pelvisTarget = pelvisTarget;
+        const PxVec3 rotation = RotationVector(pelvisTarget.q * result.pelvisStart.q.getConjugate());
+        result.pelvisRotated = rotation.magnitude() > 1e-4f;
+        float timeScale = (std::max)(1.5f * rotation.magnitude() /
+            (duration * settings.maximumPelvisAngularSpeed),
+            AccelerationTimeScale(6.0f * rotation.magnitude() / (duration * duration),
+                settings.maximumPelvisAngularAcceleration));
+        timeScale = (std::max)(timeScale, AccelerationTimeScale(
+            2.0f * input.pelvisAngularVelocity.magnitude() / duration,
+            settings.maximumPelvisAngularAcceleration));
+        if (timeScale > 1.0f + 1e-6f)
+        {
+            result.timeLimited = true;
+            result.requiredDuration = duration * timeScale;
+            return result;
+        }
+
+        PxTransform landing(PxIdentity);
+        if (!MakeFootSoleTarget(position, normal, input.soles[moving], landing))
+        {
+            return result;
+        }
+        // 길이만으로 불가능한 끝점은 수치 IK의 반복 계산 전에 제외한다.
+        for (size_t side = 0; side < input.legs.size(); ++side)
+        {
+            const FootIKLegInput& leg = input.legs[side];
+            const PxTransform sole = side == moving ? landing : input.supportSoles[side];
+            const PxVec3 ankle = (sole * leg.soleInBone.getInverse()).p;
+            const PxTransform delta = pelvisTarget * leg.actualAnchor.getInverse();
+            const PxVec3 hip = (delta * input.bones[side][0]).p;
+            if ((ankle - hip).magnitude() > leg.thighLength + leg.calfLength + settings.reachPositionTolerance)
+            {
+                return result;
+            }
+        }
+        // 끝점뿐 아니라 들어 올리고 내려놓는 궤적 전체를 같은 제한 IK로 검사한다.
+        constexpr size_t Samples = 8;
+        const float dt = duration / static_cast<float>(Samples);
+        std::array<LegIKResult, 2> previous;
+        std::array<std::array<PxQuat, 3>, 2> rotations;
+        std::array<std::array<PxVec3, 3>, 2> velocities = input.jointVelocities;
+        for (size_t side = 0; side < input.legs.size(); ++side)
+        {
+            PxTransform parent = input.legs[side].actualAnchor;
+            for (size_t joint = 0; joint < 3; ++joint)
+            {
+                rotations[side][joint] = ((parent.q * input.legs[side].joints[joint].parentInBone.q).getConjugate() *
+                    input.bones[side][joint].q * input.legs[side].joints[joint].childInBone.q).getNormalized();
+                parent = input.bones[side][joint];
+            }
+        }
+
+        for (size_t sample = 1; sample <= Samples; ++sample)
+        {
+            const float progress = static_cast<float>(sample) / static_cast<float>(Samples);
+            const float blend = progress * progress * (3.0f - 2.0f * progress);
+            const PxTransform pelvis = InterpolateFootstepPelvis(result, progress);
+            for (size_t side = 0; side < input.legs.size(); ++side)
+            {
+                FootIKLegInput leg = input.legs[side];
+                leg.actualAnchor = pelvis;
+                leg.targetSole = input.supportSoles[side];
+                if (side == moving)
+                {
+                    leg.targetSole.p = input.soles[side].p + (position - input.soles[side].p) * blend +
+                        PxVec3(0, liftHeight * .5f * (1.0f - std::cos(PxTwoPi * progress)), 0);
+                    leg.targetSole.q = InterpolateRotation(input.soles[side].q, landing.q, blend);
+                }
+                const PxTransform delta = pelvis * input.legs[side].actualAnchor.getInverse();
+                const std::array<PxTransform, 3> seed{
+                    delta * input.bones[side][0], delta * input.bones[side][1], delta * input.bones[side][2]};
+                const LegIKResult solved = SolveFootIKLeg(leg, seed, previous[side]);
+                result.reachError = (std::max)(result.reachError, solved.reachError);
+                if (!solved.valid || !solved.jointLimitsApplied ||
+                    solved.reachError > settings.reachPositionTolerance ||
+                    solved.soleTiltError > settings.reachTiltTolerance)
+                {
+                    return result;
+                }
+                for (size_t joint = 0; joint < 3; ++joint)
+                {
+                    const PxVec3 velocity = RotationVector(
+                        solved.jointRotations[joint] * rotations[side][joint].getConjugate()) / dt;
+                    // 첫 구간과 마지막 구간은 현재 속도 및 착지 정지까지의 제동도 포함한다.
+                    const float interval = sample == 1 ? dt * .5f : dt;
+                    const PxVec3 acceleration = (velocity - velocities[side][joint]) / interval;
+                    for (size_t axis = 0; axis < 3; ++axis)
+                    {
+                        // 잠긴 축의 작은 실제 오차는 물리 구속이 복원하며 구동 이동 시간에 포함하지 않는다.
+                        if (input.lockedAxes[side][joint][axis])
+                        {
+                            continue;
+                        }
+                        timeScale = (std::max)(timeScale, PxAbs(velocity[axis]) / settings.maximumJointSpeed);
+                        const float limit = (std::min)(settings.maximumJointAcceleration,
+                            input.jointAccelerations[side][joint][axis]);
+                        timeScale = (std::max)(timeScale,
+                            AccelerationTimeScale(PxAbs(acceleration[axis]), limit));
+                        if (sample == Samples)
+                        {
+                            timeScale = (std::max)(timeScale,
+                                AccelerationTimeScale(2.0f * PxAbs(velocity[axis]) / dt, limit));
+                        }
+                    }
+                    rotations[side][joint] = solved.jointRotations[joint];
+                    velocities[side][joint] = velocity;
+                }
+                previous[side] = solved;
+            }
+            // 이미 시간 예산을 넘은 궤적은 남은 수치 IK 계산을 생략한다.
+            if (timeScale > 1.0f + 1e-6f)
+            {
+                result.timeLimited = true;
+                result.requiredDuration = timeScale < PX_MAX_F32 / (std::max)(duration, 1.0f) ?
+                    duration * timeScale : PX_MAX_F32;
+                return result;
+            }
+        }
+        // 접촉 충격까지 예측하는 물리 시뮬레이션은 아니다. 구동 한계와 샘플 궤적의 시간 예산 추정이다.
+        result.requiredDuration = timeScale < PX_MAX_F32 / (std::max)(duration, 1.0f) ?
+            duration * timeScale : PX_MAX_F32;
+        result.reachable = true;
+        return result;
+    }
+}
+
+PxTransform PARS::InterpolateFootstepPelvis(const FootstepReachability& plan, float progress)
+{
+    const float t = PxClamp(progress, 0.0f, 1.0f);
+    const float blend = t * t * (3.0f - 2.0f * t);
+    // 수평 성분은 현재 속도의 예측을 유지하고, 낮추기와 회전만 부드럽게 보간한다.
+    PxVec3 position = plan.pelvisStart.p + (plan.pelvisTarget.p - plan.pelvisStart.p) * t;
+    position.y = plan.pelvisStart.p.y + (plan.pelvisTarget.p.y - plan.pelvisStart.p.y) * blend;
+    return PxTransform(position, InterpolateRotation(plan.pelvisStart.q, plan.pelvisTarget.q, blend));
+}
+
+bool PARS::MakeFootstepSoleMotion(const PxTransform& start, const PxVec3& position,
+    const PxVec3& normal, float progress, PxTransform& target)
+{
+    if (!std::isfinite(progress) || !MakeFootSoleTarget(position, normal, start, target))
     {
         return false;
     }
-    PxVec3 forward = animatedSole.q.rotate(PxVec3(0, 0, 1));
+    const float t = PxClamp(progress, 0.0f, 1.0f);
+    const float blend = t * t * (3.0f - 2.0f * t);
+    target.q = InterpolateRotation(start.q, target.q, blend);
+    return target.isSane();
+}
+
+FootstepReachability PARS::EvaluateFootstepReachability(const FootstepPlanningInput& input,
+    const FootstepSettings& settings, size_t side, const PxVec3& position,
+    const PxVec3& normal, float duration, float liftHeight)
+{
+    FootstepReachability best;
+    if (side >= input.legs.size() || !input.legs[0].available || !input.legs[1].available ||
+        !std::isfinite(duration) || duration <= 0 || !std::isfinite(liftHeight) || liftHeight < 0 ||
+        !input.pelvisVelocity.isFinite() || !input.pelvisAngularVelocity.isFinite() ||
+        !std::isfinite(input.maximumLowering) || input.maximumLowering < 0 ||
+        !std::isfinite(input.loweringSpeed) || input.loweringSpeed < 0 ||
+        !std::isfinite(input.loweringScale) || input.loweringScale < 0 ||
+        !std::isfinite(settings.maximumJointSpeed) || settings.maximumJointSpeed <= 0 ||
+        !std::isfinite(settings.maximumJointAcceleration) || settings.maximumJointAcceleration <= 0 ||
+        !std::isfinite(settings.maximumPelvisAngularSpeed) || settings.maximumPelvisAngularSpeed <= 0 ||
+        !std::isfinite(settings.maximumPelvisAngularAcceleration) || settings.maximumPelvisAngularAcceleration <= 0 ||
+        !std::isfinite(settings.maximumPelvisYaw) || settings.maximumPelvisYaw < 0 ||
+        !std::isfinite(settings.maximumPelvisTilt) || settings.maximumPelvisTilt < 0 ||
+        !std::isfinite(settings.reachPositionTolerance) || settings.reachPositionTolerance <= 0 ||
+        !std::isfinite(settings.reachTiltTolerance) || settings.reachTiltTolerance <= 0)
+    {
+        return best;
+    }
+    const PxTransform start = input.legs[side].actualAnchor;
+    PxVec3 displacement = position - input.soles[side].p;
+    displacement.y = 0;
+    const float lowering = (std::min)(input.maximumLowering,
+        (std::min)(input.loweringSpeed * duration / 1.5f, displacement.magnitude() * input.loweringScale));
+    PxTransform target = start;
+    // 착지까지의 실제 골반 수평 속도를 반영하고, 기존 지지 제어의 낮추기 범위 안에서 계획한다.
+    target.p += PxVec3(input.pelvisVelocity.x * duration, -lowering, input.pelvisVelocity.z * duration);
+    PxVec3 direction = position - start.p;
+    direction.y = 0;
+    if (!Unit(direction))
+    {
+        direction = input.forward;
+    }
+    PxVec3 forward = input.forward;
+    forward.y = 0;
+    if (!Unit(forward) || !Unit(direction))
+    {
+        return best;
+    }
+    const float heading = std::atan2(forward.cross(direction).y, forward.dot(direction));
+    const float sign = PxAbs(heading) > 1e-4f ? (heading > 0 ? 1.0f : -1.0f) :
+        (side == 0 ? 1.0f : -1.0f);
+    const PxVec3 tiltAxis = PxVec3(0, 1, 0).cross(direction).getNormalized();
+    const std::array<float, 9> yawScales{0, .5f, 1, -.5f, -1, 0, .5f, 1, -.5f};
+    const std::array<float, 9> tiltScales{0, 0, 0, 0, 0, 1, 1, 1, 1};
+    for (size_t attempt = 0; attempt < yawScales.size(); ++attempt)
+    {
+        const PxQuat yaw(yawScales[attempt] * sign * settings.maximumPelvisYaw, PxVec3(0, 1, 0));
+        const PxQuat tilt(tiltScales[attempt] * settings.maximumPelvisTilt, tiltAxis);
+        target.q = (tilt * yaw * start.q).getNormalized();
+        const FootstepReachability candidate = EvaluatePelvisPlan(
+            input, settings, side, position, normal, duration, liftHeight, target);
+        if (candidate.reachable && (!best.reachable || candidate.requiredDuration < best.requiredDuration))
+        {
+            best = candidate;
+        }
+        else if (!best.reachable && candidate.timeLimited &&
+            (!best.timeLimited || candidate.requiredDuration < best.requiredDuration))
+        {
+            best = candidate;
+        }
+        // 회전 없이 가능하면 그대로 사용하고, 필요한 경우에만 골반 보조를 채택한다.
+        if (candidate.reachable && candidate.requiredDuration <= duration + 1e-6f)
+        {
+            return candidate;
+        }
+    }
+    return best;
+}
+
+bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
+    const PxTransform& referenceSole, PxTransform& target)
+{
+    PxVec3 up = normal;
+    if (!position.isFinite() || !referenceSole.isSane() || !Unit(up))
+    {
+        return false;
+    }
+    PxVec3 forward = referenceSole.q.rotate(PxVec3(0, 0, 1));
     if (!ProjectHint(forward, up))
     {
-        PxVec3 right = animatedSole.q.rotate(PxVec3(1, 0, 0));
+        PxVec3 right = referenceSole.q.rotate(PxVec3(1, 0, 0));
         if (!ProjectHint(right, up))
         {
             return false;
@@ -538,7 +811,7 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         return false;
     }
     m_Snapshot.status = FootstepIKStatus::InvalidPose;
-    if (pose.empty() || pose.size() != parents.size())
+    if (pose.empty() || pose.size() != parents.size() || (input.hasPelvisPlan && !input.plannedPelvis.isSane()))
     {
         return false;
     }
@@ -578,8 +851,12 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
     m_Snapshot.status = FootstepIKStatus::InvalidTarget;
     for (size_t side = 0; side < input.legs.size(); ++side)
     {
-        const PARS::FootIKLegInput& leg = input.legs[side];
-        // 현재 물리 부모를 기준으로 풀되, 골반의 애니메이션 목표 자체는 덮어쓰지 않는다.
+        FootIKLegInput leg = input.legs[side];
+        // 골반 보조 중에는 양쪽 다리를 같은 계획 골반에서 풀어 착지점과 지지발을 함께 유지한다.
+        if (input.hasPelvisPlan)
+        {
+            leg.actualAnchor = input.plannedPelvis;
+        }
         const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
         TwoBoneIKInput solve;
         solve.hip = toPhysical * pose[leg.hipNode];
@@ -622,7 +899,8 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         {
             if (leg.hasToeTarget && static_cast<int>(node) == leg.toeNode)
             {
-                const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
+                const PxTransform anchor = input.hasPelvisPlan ? input.plannedPelvis : leg.actualAnchor;
+                const PxTransform toPhysical = anchor * pose[leg.anchorNode].getInverse();
                 corrected[node].q = (toPhysical.q.getConjugate() * leg.toeTargetRotation).getNormalized();
                 changed[node] = true;
             }
@@ -635,7 +913,8 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
     pose = std::move(corrected);
     for (size_t side = 0; side < input.legs.size(); ++side)
     {
-        m_PreviousBendInAnchor[side] = input.legs[side].actualAnchor.q.rotateInv(m_Snapshot.legs[side].bendDirection);
+        const PxTransform anchor = input.hasPelvisPlan ? input.plannedPelvis : input.legs[side].actualAnchor;
+        m_PreviousBendInAnchor[side] = anchor.q.rotateInv(m_Snapshot.legs[side].bendDirection);
         m_HasPreviousBend[side] = true;
     }
     m_Snapshot.status = FootstepIKStatus::Applied;
@@ -664,7 +943,7 @@ const char* PARS::KneeHintSourceLabel(KneeHintSource source)
     switch (source)
     {
     case KneeHintSource::Animation:
-        return u8"애니메이션";
+        return u8"입력 다리 자세";
     case KneeHintSource::Previous:
         return u8"이전 방향";
     case KneeHintSource::Reference:

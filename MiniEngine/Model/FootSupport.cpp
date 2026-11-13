@@ -333,9 +333,6 @@ void PARS::FootSupport::ResetFootstep()
 {
     m_FootstepPlanner.Reset();
     m_BufferGrace.Reset();
-    m_HasIdleReference = false;
-    m_FootstepForward = PxVec3(0, 0, 1);
-    m_HasFootstepForward = false;
     m_Snapshot.footstep = {};
 }
 
@@ -400,55 +397,12 @@ bool PARS::FootSupport::SetBufferScale(float scale)
 
 void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
 {
-    const AnimInstance& animation = mesh.GetAnimInstance();
-
-    // 애니메이션 전환 중이 아니고 현재 클립이름이 idle일때만 true
-    const bool idle = !animation.IsBlending() && animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle";
-
-    if (m_IdleReferenceRevision != m_Snapshot.contactRevision || !idle)
-    {
-        m_HasIdleReference = false;
-        m_HasFootstepForward = false;
-        m_IdleReferenceRevision = m_Snapshot.contactRevision;
-    }
-
-    // 필요할 때 idle 자세의 양발 본 변환을 저장
-    if (idle && !m_HasIdleReference && m_Snapshot.feet[0].available && m_Snapshot.feet[1].available)
-    {
-        PhysicsSkeleton skeleton;
-        std::vector<Matrix4> reference;
-        std::string error;
-
-        // 메시의 본 계층과 연결정보를 준비, animation.GetPose()에 들어잇는 그 시점의 Idle애니메이션 자세를 본 계층에 따라 계산해서 reference에 넣음 reference는 vector<matrix>
-        if (mesh.BuildPhysicsSkeleton(skeleton, error) && EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(kIdentity), reference, error))
-        {
-            m_HasIdleReference = true;
-            for (size_t side = 0; side < m_Feet.size(); ++side)
-            {
-                // 본 노드를 가져옴 
-                const int node = m_Snapshot.feet[side].boneNode;
-
-                // 유효하지 않으면 탈락
-                if (node < 0 || size_t(node) >= reference.size())
-                {
-                    m_HasIdleReference = false;
-                    break;
-                }
-                // 충격으로 변한 실제 발 간격 대신 최초 유효한 Idle 목표 자세를 저장한다.
-                // 현재발의 목표 월드행렬을 가져온다
-                m_IdleFootBones[side] = PhysicsBoneFrame(reference[node]);
-            }
-        }
-    }
-
-    // 플래너에 넘길 현재 상태를 FootstepInput에 모음
-    // mesh에서 정보를 가져온다.
     FootstepInput input;
     input.active = mesh.IsActiveRagdoll();
     input.automaticSupport = mesh.UsesAutomaticRootSupport();
-    input.idleAnimation = idle;
     input.rootReleased = mesh.GetRootSupportRelease() != RootSupportRelease::None;
-    input.outsideBufferReleased = mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer || m_BufferGrace.HasExpired();
+    input.outsideBufferReleased = mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer ||
+        m_BufferGrace.HasExpired();
     input.hasCom = m_Snapshot.hasCenterOfMass;
     input.hasVelocity = m_Snapshot.hasCenterOfMassVelocity;
     input.com = m_Snapshot.centerOfMass;
@@ -457,94 +411,34 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.zone = m_Snapshot.balance.zone;
     input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
     input.fixedDeltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
-    // PhysicsWorld의 고정 중력 크기와 전신 질량으로 접촉 하중을 체중 비율로 환산한다.
     input.bodyWeight = m_Snapshot.totalMass * 9.81f;
-    input.blueFoot = m_Snapshot.candidates.step;
     input.completedStep = m_Snapshot.completedPhysicsStep;
     input.revision = m_Snapshot.contactRevision;
-
-    // 첫 발 배치 방향은 캐릭터의 수평 방향으로 준비한다.
-    const Matrix4 component(mesh.GetComponentTransform());
-    PxVec3 forward = ToPx(Vector3(component.GetZ()));
-    forward.y = 0;
-    input.hasReference = m_HasIdleReference && forward.isFinite() && forward.normalize() > 1e-6f;
-
-    if (!input.active || !input.automaticSupport || !idle || input.rootReleased || input.outsideBufferReleased)
-    {
-        m_HasFootstepForward = false;
-    }
-    else if (input.hasReference)
-    {
-        if (!m_HasFootstepForward)
-        {
-            m_FootstepForward = forward;
-            m_HasFootstepForward = true;
-        }
-        // COM 속도는 발 배치에만 반영한다. 골반이나 캐릭터의 회전 목표는 바꾸지 않는다.
-        // 수평 속도가 사실상 0이면 마지막 유효 방향을 유지한다.
-        if (input.hasVelocity && input.velocity.isFinite())
-        {
-            const PxVec3 horizontalVelocity(input.velocity.x, 0, input.velocity.z);
-            const float horizontalSpeed = horizontalVelocity.magnitude();
-            if (std::isfinite(horizontalSpeed) && horizontalSpeed > 1e-6f)
-            {
-                m_FootstepForward = horizontalVelocity / horizontalSpeed;
-            }
-        }
-        forward = m_FootstepForward;
-    }
-    // 최소 좌우 간격도 Idle 오프셋과 같은 회전 기준에서 검사한다.
-    input.supportRight = PxVec3(forward.z, 0, -forward.x);
-
-    // 저장한 Idle 발 본 자세를 캐릭터 로컬의 발바닥 위치로 변환한다.
-    std::array<PxVec3, 2> referenceFeet{PxVec3(0), PxVec3(0)};
-
-    // 원본 Idle 기준을 읽고, 아래에서 COM 진행 방향으로 같은 회전을 적용한다.
-    if (input.hasReference)
-    {
-        for (size_t side = 0; side < m_Feet.size(); ++side)
-        {
-            // 앞서 구한 로컬 발바닥 변환에 월드 발 m_IdleFootBones[side] 을 곱해 로컬 발바닥 위치를 구한다
-            const Matrix4 sole = m_IdleFootBones[side] * m_Snapshot.feet[side].soleInBone;
-
-            referenceFeet[side] = ToPx(Vector3(sole.GetW()));
-            input.hasReference = input.hasReference && referenceFeet[side].isFinite();
-        }
-    }
-
-    // 양발의 중점을 계산
-    // 발 배치를 표현하기 위한 중점을 사용. 이 정보가 있어야 중앙에서 왼쪽으로 얼마, 오른쪽으로 얼마와 같은 기준을 정할 수 있음
-    const PxVec3 midpoint = (referenceFeet[0] + referenceFeet[1]) * .5f;
-
-    // 각 발에서 중점을 빼면 원래 그 발이 중앙에서 얼마나 옆이나 앞뒤로 떨어져 있었는지 알 수 있음
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
-        // 각 발의 현재 물리 상태를 입력에 넣음
-        // foot은 이미 측정한 발 정보를 읽는 참조이고 target은 그 정보를 채워 넣을 입력 구조체의 참조
         const FootSoleSample& foot = m_Snapshot.feet[side];
         FootstepFootInput& target = input.feet[side];
         target.available = foot.available;
         target.hasContactSample = foot.contact.hasSample;
         target.grounded = foot.contact.grounded;
         target.position = ToPx(Vector3(foot.soleWorld.GetW()));
+        target.rotation = ToPx(foot.soleWorld).q;
         target.contactPosition = foot.contact.position;
         target.normal = foot.contact.normal;
-        // 합산 법선과 충격량 크기를 함께 넘겨 수직 하중이 부위별 벡터 합과 일치하게 한다.
         target.normalImpulse = foot.contact.normalImpulseVector.magnitude();
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
-
-        // 양발 중점 기준의 Idle 위치 오프셋만 COM 진행 방향으로 회전한다.
-        const PxVec3 offset = referenceFeet[side] - midpoint;
-        target.stanceOffset = input.supportRight * offset.x + forward * offset.z;
     }
 
-    // 균형을 회복하기위해 발을 어디에 딛을지 결정하고 발딛기의 진행 상태를 관리
-    /*
-    1. 현재 COM과 속도로 미래 COM을 예측
-    2. 예측 COM이 A 밖이면 발딛기가 필요하다고 판단
-    3. 전달받은 움직일 발 후보와 각 발의 착지 후보가 유효하면, 움직일 발과 착지 목표를 정함
-    4. 이후 실제 발의 이동·접촉을 확인하면서 목표와 이륙·공중·착지 상태를 갱신
-    */
+    const FootstepSnapshot& previous = m_FootstepPlanner.GetSnapshot();
+    const PxVec3 prediction = input.com + input.velocity * m_FootstepSettings.startPredictionTime;
+    // 출발할 때만 실제 관절과 구동 상태를 수집한다. 진행 중에는 저장한 목표를 그대로 사용한다.
+    if (input.active && input.automaticSupport && !input.rootReleased && !input.outsideBufferReleased &&
+        input.hasCom && input.hasVelocity && prediction.isFinite() &&
+        (!previous.IsInProgress() || previous.revision != input.revision) &&
+        !IsInsideFootSupportHull(input.hull, prediction))
+    {
+        mesh.PrepareFootstepPlanning(input, m_FootstepSettings);
+    }
     m_FootstepPlanner.Update(input, m_FootstepSettings);
     m_Snapshot.footstep = m_FootstepPlanner.GetSnapshot();
 }
@@ -587,8 +481,6 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         m_ContactWorld = nullptr;
         m_Contacts = {};
         m_FootstepPlanner.Reset();
-        m_HasIdleReference = false;
-        m_HasFootstepForward = false;
         return;
     }
 
@@ -717,10 +609,10 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     
     if (m_Snapshot.hasComProjection)
     {
-        // 위에서 계산한 A/B 판정을 전달해 A~B에서도 움직일 발 후보를 만들 수 있게 한다.
-        // 계산 방법은 그냥 단순히 COM과 가까운 것으로 정한다.
-        // 발딛기 필요 여부와 반대 발의 실제 지지 여부는 이후 플래너에서 판단한다.
-        m_Snapshot.candidates = EvaluateFootSupportCandidates(m_Snapshot.hull, m_Snapshot.projectedCenterOfMass,
+        // 표시용 후보도 제어와 같은 현재·예측 COM 중점을 사용한다.
+        const PxVec3 selectionCom = m_Snapshot.projectedCenterOfMass +
+            m_Snapshot.centerOfMassVelocity * (m_FootstepSettings.landingPredictionTime * .5f);
+        m_Snapshot.candidates = EvaluateFootSupportCandidates(m_Snapshot.hull, selectionCom,
             footPoints, m_Snapshot.balance.zone, previousCandidate, m_BufferGrace.IsActive());
     }
 

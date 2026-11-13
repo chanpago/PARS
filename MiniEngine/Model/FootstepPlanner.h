@@ -1,7 +1,9 @@
 ﻿#pragma once
 
 #include "FootSupportHull.h"
+#include <foundation/PxTransform.h>
 #include <cstdint>
+#include <functional>
 
 namespace PARS
 {
@@ -10,22 +12,26 @@ namespace PARS
     {
     public:
         float startPredictionTime = .6f;   // 발딛기가 필요한지 판단할 때, 몇 초뒤의 COM을 예측할지
-        float landingPredictionTime = .4f; // 착지 위치를 계산할 때, 몇 초 뒤의 COM을 기준으로 삼을지
-        float stanceScale = 1.0f;          // Idle 기준 발 배치 오프셋을 적용하는 비율
-        float minimumStanceWidthRatio = 1.0f; // Idle 좌우 발 간격에 대한 최소 착지 간격 비율이며, 0이면 보정을 끈다.
-        float maximumStepLength = 1.5f;    // 지지발에서 착지 목표까지 허용하는 최대거리
-        float crossingOffset = .1f;        // 교차 제한을 켰을 때 지지발 바깥 방향으로 확보할 최소거리
+        float landingPredictionTime = .6f; // 착지 목표로 사용할 예측 COM의 시간
+        float minimumStanceDistance = .6f; // 양발 접지 간격이 좁을 때 지지 접지점에서 확보할 착지 거리(m)
         // 착지 예측 시간과 별개인 발 이동 시간(s)과 궤적의 최소 최고 높이(m)다.
         float liftHeightScale = .15f;   // 발 이동 거리에 비례해 들어 올리는 높이를 정하는 비율
-        float stepDuration = .15f;       // 발 이동 목표 궤적의 진행시간
+        float stepDuration = .3f;        // 후보의 도달 가능성을 검사하고 실제 궤적에 사용할 시간
         float minimumLiftHeight = .03f; // 발을 들어 올리는 최고 높이를 계산할 때 사용하는 최소값
-        float landingLockProgress = .75f; // 하강 중 착지 목표의 수평 위치와 방향을 고정할 시간 진행률
         float landingLoweringSpeed = .05f; // 계획 시간이 끝나도 접촉하지 못한 발의 추가 하강 속도(m/s)
         float maximumLandingLowering = .03f; // 실제 접촉면 아래로 내릴 제어 목표의 최대 깊이(m)
         float supportLoadRatio = .5f;   // 착지 후 다음 지지발에 필요한 수직 하중 / 전신 체중
         float supportConfirmationTime = .05f; // 착지 충격 피크를 제외하기 위한 연속 하중 확인 시간(s)
         float supportSwitchDistance = .02f; // 예측 COM 거리 차이가 작으면 기존 지지발을 유지하는 여유(m)
-        bool preventCrossing = false;   // 움직이는 발이 반대편으로 교차하는 것을 제한할지
+        float maximumJointSpeed = 12.0f; // 후보 궤적에 허용할 관절 각속도(rad/s)
+        float maximumJointAcceleration = 120.0f; // PA 토크·관성 추정치에 추가로 적용할 각가속도 상한(rad/s²)
+        float maximumPelvisYaw = .78539816f; // 도달 보조 골반 회전의 최대 수평 각도(rad)
+        float maximumPelvisTilt = .17453293f; // 도달 보조 골반 기울기의 최대 각도(rad)
+        float maximumPelvisAngularSpeed = 3.0f;
+        float maximumPelvisAngularAcceleration = 20.0f;
+        float reachPositionTolerance = .02f; // 제한 적용 후 발바닥 위치 허용 오차(m)
+        float reachTiltTolerance = .08726646f; // 제한 적용 후 발바닥 기울기 허용 오차(rad)
+        uint32_t candidateSamples = 16; // 출발점과 예측 COM 사이의 선분을 검사할 구간 수
     };
 
     enum class FootstepPhase
@@ -43,11 +49,14 @@ namespace PARS
         ValidTarget,
         Inactive,
         AutomaticSupportRequired,
-        IdleRequired,
         InvalidSettings,
         InvalidCom,
         NoSupportArea,
-        NoReference,
+        NoReachability,
+        Unreachable,
+        InsufficientTime,
+        MinimumDistanceConflict,
+        LandingDelayed,
         NoCalfLength,
         NoStepDistance,
         NoContactSample,
@@ -70,7 +79,7 @@ namespace PARS
         physx::PxVec3 position{0};
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
-        physx::PxVec3 stanceOffset{0};
+        physx::PxQuat rotation{physx::PxIdentity};
         float calfLength = 0;
         float normalImpulse = 0;
         bool available = false;
@@ -78,29 +87,39 @@ namespace PARS
         bool grounded = false;
     };
 
+    // 양쪽 다리의 제한과 이동 시간을 확인한 골반 보조 계획이다.
+    struct FootstepReachability
+    {
+    public:
+        physx::PxTransform pelvisStart{physx::PxIdentity};
+        physx::PxTransform pelvisTarget{physx::PxIdentity};
+        float requiredDuration = 0;
+        float reachError = 0;
+        bool reachable = false;
+        bool pelvisRotated = false;
+        bool timeLimited = false;
+    };
+
     struct FootstepInput
     {
     public:
+        std::function<FootstepReachability(size_t, const physx::PxVec3&, const physx::PxVec3&, float, float)> evaluateReachability;
         std::vector<physx::PxVec3> hull;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
         physx::PxVec3 com{0};
         physx::PxVec3 velocity{0};
-        physx::PxVec3 supportRight{1, 0, 0};
         std::array<FootstepFootInput, 2> feet;
         FootSupportZone zone = FootSupportZone::Invalid;
         float projectionHeight = 0;
         float fixedDeltaTime = 0;
         float bodyWeight = 0;
-        int blueFoot = -1;
         bool active = false;
         bool automaticSupport = false;
-        bool idleAnimation = false;
         bool rootReleased = false;
         bool outsideBufferReleased = false;
         bool hasCom = false;
         bool hasVelocity = false;
-        bool hasReference = false;
     };
 
     struct FootstepTarget
@@ -110,12 +129,12 @@ namespace PARS
         physx::PxVec3 raw{0};
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0};
+        FootstepReachability reachability;
         float travelDistance = 0;
         float stanceDistance = 0;
         bool valid = false;
-        bool lengthLimited = false;
-        bool crossingLimited = false;
-        bool stanceWidthLimited = false;
+        bool reachLimited = false;
+        bool minimumDistanceRequired = false;
     };
 
     struct FootstepMotion
@@ -130,10 +149,11 @@ namespace PARS
         float duration = 0;
         float measuredProgress = 0;
         float progress = 0;
+        float commandProgress = 0; // 다음 물리 스텝 끝에 도달할 궤적 진행률
         float remainingDistance = 0;
         float landingError = 0;
+        float landingTolerance = 0;
         // 착지 마무리 설정은 발딛기를 시작할 때 저장하며, 하강량은 유효 목표를 출력할 때만 누적한다.
-        float landingLockProgress = 0;
         float landingLoweringSpeed = 0;
         float maximumLandingLowering = 0;
         float landingLowering = 0;
@@ -141,6 +161,7 @@ namespace PARS
         bool valid = false;
         bool hasLandingError = false;
         bool landingTargetLocked = false;
+        bool deadlineMissed = false;
     };
 
     struct FootstepRoles
@@ -191,18 +212,21 @@ namespace PARS
         uint64_t abortCount = 0;                          // 초기화 이후 발딛기가 중단 상태로 전환된 누적 횟수
         FootstepPhase phase = FootstepPhase::Idle;        // 발딛기 진행 단계. 대기, 이륙 대기, 공중, 착지, 중단 상태를 구분
         FootstepReason reason = FootstepReason::Inactive; // 현재 판단과 진행 상태의 사유. 목표 계산 실패나 발딛기 중단 원인 등을 기록
-        int rawBlueFoot = -1;                             // 현재 입력에서 받은 움직일 발 후보. 0은 왼발, 1은 오른발, -1은 후보 없음
+        int rawBlueFoot = -1;                             // 현재 COM과 예측 COM의 중점으로 선택한 이동발 후보
         int stepFoot = -1;                                // 발딛기 시작 시 확정한 움직일 발. 진행 중에는 유지하며 -1이면 미선택
         int supportFoot = -1;                             // 발딛기 시작 시 확정한 지지발. 움직일 발의 반대쪽이며 -1이면 미선택
         physx::PxVec3 predictedCom{0};                    // 발딛기 필요 여부를 판단할 미래 COM 위치. XZ는 현재 COM과 속도로 예측하고 Y는 지면 투영 높이
-        physx::PxVec3 target{0};                          // 착지면 위 목표 위치(m). 착지 마무리부터 XZ를 고정하며 추가 하강은 motion에만 적용
-        physx::PxVec3 targetNormal{0};                    // 최신 착지 목표 평면의 법선. 발바닥 목표 방향을 지면에 맞출 때 사용
+        physx::PxVec3 target{0};                          // 출발 전에 확정한 월드 착지점. 이동 중에는 갱신하지 않는다.
+        physx::PxVec3 targetNormal{0};                    // 출발 시 확정한 착지면 법선
+        physx::PxVec3 roleSelectionCom{0};                // 현재 COM과 착지 예측 COM의 중점
         physx::PxVec3 startPosition{0};                   // 발딛기 시작 순간 움직일 발의 실제 발바닥 월드 위치(m). 이동 궤적의 시작점
-        physx::PxVec3 initialTarget{0};                   // 발딛기 시작 순간의 최초 착지 목표 월드 위치(m). 이후 목표가 갱신돼도 유지
+        physx::PxQuat startRotation{physx::PxIdentity};    // 발바닥 기울기를 착지면까지 보간할 실제 시작 회전
+        physx::PxVec3 initialTarget{0};                   // 출발 시 확정한 착지점
         float initialDistance = 0;                        // 시작 위치에서 최초 착지 목표까지의 수평 거리(m). 발 들기 높이와 골반 낮추기 계산에 사용
         FootstepMotion motion;                            // 현재 발 이동 궤적의 목표 위치, 경과 시간, 시간 및 실측 진행률과 착지 오차
         std::array<FootstepTarget, 2> candidates;         // 양발 각각의 착지 목표 후보. 위치, 유효성, 거리 및 교차 제한 여부와 실패 사유를 저장
         FootstepSupportTransfer transfer;                 // 착지 후 예측 후보와 지속 하중을 확인한 지지발
+        FootstepReachability reachability;                // 출발 시 확정한 골반 자세와 도달 시간 추정
         bool hasPrediction = false;                       // 미래 COM 위치를 유효하게 계산했는지. predictedCom을 사용할 때 확인
         bool needsStep = false;                           // 예측 COM이 현재 지지 영역 A 밖이어서 발딛기가 필요한지
         bool hasTarget = false;                           // 이번 완료 물리 스텝에서 선택한 발의 유효한 착지 목표를 출력했는지

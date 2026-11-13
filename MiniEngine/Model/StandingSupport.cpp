@@ -102,7 +102,7 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     {
         return m_Snapshot.valid;
     }
-    if (!input.pelvis.isSane() || !input.animatedPelvis.isSane() || !input.velocity.isFinite() ||
+    if (!input.pelvis.isSane() || (input.hasPelvisPlan && !input.plannedPelvis.isSane()) || !input.velocity.isFinite() ||
         !std::isfinite(input.deltaTime) || input.deltaTime <= 0 ||
         !std::isfinite(input.stepDistance) || input.stepDistance < 0 ||
         !std::isfinite(settings.stepLoweringScale) || settings.stepLoweringScale < 0 ||
@@ -129,24 +129,20 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     float missingAmount = 0;
     bool reachable = true;
 
-    // 현재 발 목표 배치에 맞는 골반 기준 위치를 계산
-    // 처음에는 입력 목표 포즈의 골반 위치를 계산한다. 여기에 양발의 다음 차이를 절반씩 더한다
-    PxVec3 desiredPelvis = input.animatedPelvis.p;
+    // 실제 발 배치와 고관절 오프셋으로 골반의 수평 지지 기준을 계산한다.
+    PxVec3 desiredPelvis(0);
 
     for (size_t side = 0; side < input.feet.size(); ++side)
     {
         const StandingSupportFoot& foot = input.feet[side];
-        if (!foot.available || !foot.sole.isSane() || !foot.animatedSole.isSane() ||
+        if (!foot.available || !foot.sole.isSane() ||
             !foot.soleInBone.isSane() || !foot.hipOffset.isFinite() ||
             !std::isfinite(foot.length) || foot.length <= settings.reachReserve)
         {
             m_Snapshot.valid = false;
             return false;
         }
-        // 발바닥 목표가 애니메이션 기준 위치에서 옮겨진 평균만큼, 골반 기준 위치도 옮김
-        // 이렇게 desiredPelvis(애니메이션 목표 골반위치)에 물리발의 오프셋만큼 더해줌
-        // 발 목표 배치에 맞춘 골반 위치를 구해서, 뒤에서 수평 위치를 유지할 기준으로 사용
-        desiredPelvis += (foot.sole.p - foot.animatedSole.p) * .5f;
+        desiredPelvis += (foot.sole.p - foot.hipOffset) * .5f;
         if (!foot.supporting)
         {
             m_MissingContactTime[side] = 0;
@@ -165,10 +161,6 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         // 접촉 상실 때문에 골반을 얼마나 낮출지 정하는 비율 0~1로 설정된다.
         missingAmount = (std::max)(missingAmount, m_MissingContactTime[side] / settings.contactLoweringTime);
 
-        // 발바닥 목표 위에서 애니메이션과 같은 높이 관계를 유지하려면 골반이 어느 높이에 있어야하는지 계산하는 코드
-        nominalHeight += foot.sole.p.y + input.animatedPelvis.p.y - foot.animatedSole.p.y;
-        supportCount += 1;
-
         // 발목 목표에 다리가 닿을 수 있도록 골반이 올라갈 수 있는 최대 높이를 계산하는부분
         // 발목 목표와 고관절 위치를 구함
         const PxVec3 ankle = (foot.sole * foot.soleInBone.getInverse()).p;
@@ -178,6 +170,9 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         const float dx = ankle.x - hip.x;
         const float dz = ankle.z - hip.z;
         const float length = foot.length - settings.reachReserve;
+        // 기준 높이는 실제 다리 길이와 발목·골반 연결점으로 정한다.
+        nominalHeight += ankle.y + length - foot.hipOffset.y;
+        supportCount += 1;
 
         // 수직거리의 제곱을 구함
         const float verticalSquared = length * length - dx * dx - dz * dz;
@@ -245,7 +240,7 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     m_Snapshot.valid = true;
     m_Snapshot.reachLimited = !reachable || reachLowering > settings.maximumLowering;
     m_Snapshot.nominalHeight = nominalHeight;
-    m_Snapshot.targetHeight = previousHeight + change;
+    m_Snapshot.targetHeight = input.hasPelvisPlan ? input.plannedPelvis.p.y : previousHeight + change;
     m_Snapshot.actualHeight = input.pelvis.p.y;
     m_Snapshot.stepLowering = stepLowering;
     m_Snapshot.contactLowering = contactLowering;
@@ -258,6 +253,12 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         // 짧은 접촉 상실에는 보정을 이어가고, 유예가 끝난 다리는 바닥을 다시 찾는다.
         if (input.feet[side].supporting && (input.feet[side].grounded || input.feet[side].contactGraceActive))
         {
+            if (input.hasPelvisPlan)
+            {
+                // 양쪽 다리 IK가 계획 골반을 공통 부모로 사용하므로 발 월드 목표는 유지한다.
+                // 별도의 골반 오차를 다시 더하면 계획 보정이 중복된다.
+                continue;
+            }
             // 실제 골반이 낮으면 제어용 발 목표를 아래로 보내 다리가 바닥을 밀도록 한다.
             m_Snapshot.soleTargets[side].p.y += input.pelvis.p.y - m_Snapshot.targetHeight;
             m_Snapshot.soleTargets[side].p += horizontalCorrection;

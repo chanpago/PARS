@@ -31,7 +31,6 @@ namespace PARS
     {
     public:
         physx::PxTransform sole{physx::PxIdentity};
-        physx::PxTransform animatedSole{physx::PxIdentity};
         physx::PxTransform soleInBone{physx::PxIdentity};
         physx::PxVec3 hipOffset{0};
         physx::PxTransform actualSole{physx::PxIdentity};
@@ -52,11 +51,12 @@ namespace PARS
         float stepDistance = 0;
         float deltaTime = 0;
         physx::PxTransform pelvis{physx::PxIdentity};
-        physx::PxTransform animatedPelvis{physx::PxIdentity};
+        physx::PxTransform plannedPelvis{physx::PxIdentity};
         physx::PxVec3 velocity{0};
         std::array<StandingSupportFoot, 2> feet;
         bool enabled = false;
         bool stepping = false;
+        bool hasPelvisPlan = false;
     };
 
     struct StandingSupportSnapshot

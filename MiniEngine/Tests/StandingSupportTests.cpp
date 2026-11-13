@@ -28,13 +28,11 @@ namespace
         input.revision = 1;
         input.completedStep = 1;
         input.pelvis = PxTransform(PxVec3(0, 1, 0));
-        input.animatedPelvis = input.pelvis;
         for (size_t side = 0; side < input.feet.size(); ++side)
         {
             StandingSupportFoot& foot = input.feet[side];
             foot.available = foot.grounded = true;
             foot.sole = PxTransform(PxVec3(side == 0 ? -.1f : .1f, 0, 0));
-            foot.animatedSole = foot.sole;
             foot.length = 1.1f;
         }
         return input;
@@ -94,7 +92,8 @@ namespace
             Check(controller.Update(input, settings), "Missing contact does not stop the height controller");
         }
         const float low = controller.GetSnapshot().targetHeight;
-        Check(low < .95f && low > .9f && !input.feet[0].grounded,
+        const float nominal = controller.GetSnapshot().nominalHeight;
+        Check(std::abs(low - (nominal - settings.contactLowering)) < 1e-5f && !input.feet[0].grounded,
             "Persistent contact loss lowers within a bound without forging contact");
         Check((controller.GetSnapshot().soleTargets[0].p - input.feet[0].sole.p).magnitude() < 1e-6f,
             "A lost stance foot keeps reaching the floor instead of retracting with the lowered pelvis");
@@ -112,7 +111,7 @@ namespace
         StandingSupport controller;
         const StandingSupportSettings settings;
         StandingSupportInput input = StandingPose();
-        input.pelvis.p.x = .6f;
+        input.pelvis.p.x = .45f;
         for (unsigned step = 1; step < 30; ++step)
         {
             input.completedStep = step;

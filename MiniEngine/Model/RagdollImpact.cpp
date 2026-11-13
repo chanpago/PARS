@@ -176,6 +176,22 @@ namespace PARS
         return rigid.getLinearVelocity() + rigid.getAngularVelocity().cross(point - center);
     }
 
+    bool Ragdoll::GetBodyDynamics(size_t body, float& mass, PxVec3& inertia,
+        PxTransform& center, PxVec3& angularVelocity) const
+    {
+        if (body >= m_Bodies.size())
+        {
+            return false;
+        }
+        const PxRigidBody& rigid = *m_Bodies[body];
+        mass = rigid.getMass();
+        inertia = rigid.getMassSpaceInertiaTensor();
+        center = rigid.getGlobalPose() * rigid.getCMassLocalPose();
+        angularVelocity = rigid.getAngularVelocity();
+        return std::isfinite(mass) && mass > 0 && inertia.isFinite() &&
+            center.isSane() && angularVelocity.isFinite();
+    }
+
     bool Ragdoll::GetCharacterImpactCapsule(float radiusScale, PxTransform& pose, float& radius,
         float& halfLength, PxVec3& targetOffset, float heightScale) const
     {

@@ -50,6 +50,7 @@ namespace PARS
         bool SetPhysicsAsset(const PhysicsAsset& asset, std::string& error, bool restartSimulation = false);
         bool ClearPhysicsAsset();
         bool BuildPhysicsSkeleton(PhysicsSkeleton& skeleton, std::string& error) const;
+        void PrepareFootstepPlanning(FootstepInput& input, const FootstepSettings& settings) const;
         bool StartRagdoll(Math::Vector3 velocity, std::string& error);
         bool SetPhysicsMode(PhysicsAnimationMode mode, Math::Vector3 velocity, std::string& error);
         // 조인트 이름을 기준으로 드라이브 값만 복사한다. 다음 고정 스텝 전에 적용된다.
@@ -79,6 +80,7 @@ namespace PARS
         void UpdatePhysicsPose();
         void UpdateFootSupport();
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
+        bool BuildPhysicalFootIKLeg(size_t side, FootIKLegInput& leg) const;
         bool ApplyRecoveryTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         bool ApplyRecoveryFlailTargets(std::vector<Math::Matrix4>& target, float deltaTime, float impactVelocity);
         void CaptureRecoveryFlailDirection(const std::vector<RagdollBodyImpulse>& impacts);

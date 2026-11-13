@@ -8,6 +8,8 @@
 
 namespace PARS
 {
+    struct FootstepReachability;
+    struct FootstepSettings;
     enum class KneeHintSource
     {
         Animation,
@@ -58,7 +60,9 @@ namespace PARS
 
     // 발바닥의 앞 방향은 주어진 발 자세에서, 위 방향은 지지 평면에서 얻는다.
     bool MakeFootSoleTarget(const physx::PxVec3& position, const physx::PxVec3& normal,
-        const physx::PxTransform& animatedSole, physx::PxTransform& target);
+        const physx::PxTransform& referenceSole, physx::PxTransform& target);
+    bool MakeFootstepSoleMotion(const physx::PxTransform& start, const physx::PxVec3& position,
+        const physx::PxVec3& normal, float progress, physx::PxTransform& target);
     LegIKResult SolveTwoBoneIK(const TwoBoneIKInput& input);
 
     struct FootIKJointFrame
@@ -97,10 +101,38 @@ namespace PARS
     public:
         uint64_t revision = 0;
         std::array<FootIKLegInput, 2> legs;
+        physx::PxTransform plannedPelvis{physx::PxIdentity};
         // -1은 새 발딛기 없이 회복 중 양발 목표를 유지하는 경우다.
         int stepFoot = -1;
         bool enabled = false;
+        bool hasPelvisPlan = false;
     };
+
+    // 후보 검사와 실행 IK가 같은 실제 관절 프레임을 사용한다.
+    struct FootstepPlanningInput
+    {
+    public:
+        std::array<FootIKLegInput, 2> legs;
+        std::array<std::array<physx::PxTransform, 3>, 2> bones;
+        std::array<std::array<physx::PxVec3, 3>, 2> jointVelocities;
+        std::array<std::array<physx::PxVec3, 3>, 2> jointAccelerations;
+        std::array<physx::PxTransform, 2> soles;
+        std::array<physx::PxTransform, 2> supportSoles;
+        physx::PxVec3 pelvisVelocity{0};
+        physx::PxVec3 pelvisAngularVelocity{0};
+        physx::PxVec3 forward{0, 0, 1};
+        float maximumLowering = 0;
+        float loweringSpeed = 0;
+        float loweringScale = 0;
+        std::array<std::array<std::array<bool, 3>, 3>, 2> lockedAxes{};
+    };
+
+    LegIKResult SolveFootIKLeg(const FootIKLegInput& leg,
+        const std::array<physx::PxTransform, 3>& bones, const LegIKResult& previous);
+    FootstepReachability EvaluateFootstepReachability(const FootstepPlanningInput& input,
+        const FootstepSettings& settings, size_t side, const physx::PxVec3& position,
+        const physx::PxVec3& normal, float duration, float liftHeight);
+    physx::PxTransform InterpolateFootstepPelvis(const FootstepReachability& plan, float progress);
 
     enum class FootstepIKStatus
     {
@@ -121,7 +153,7 @@ namespace PARS
         std::array<LegIKResult, 2> legs;
     };
 
-    // 실제 부모 좌표에서 IK를 푼 뒤 애니메이션 부모 기준 목표로 되돌린다. 물리 바디는 옮기지 않는다.
+    // 실제 또는 계획 골반에서 IK를 풀어 관절 목표를 만든다. 물리 바디는 직접 옮기지 않는다.
     class FootstepIK
     {
     public:

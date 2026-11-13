@@ -124,6 +124,238 @@ namespace PARS
 
     // target은 본 노드별 월드 공간 목표 행렬 배열 
     // 참조로 받으르모 함수 마지막에서 이 배열의 다리관련 행렬을 수정
+    namespace
+    {
+        PxTransform ToFootstepFrame(const Matrix4& matrix)
+        {
+            const PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(PhysicsBoneFrame(matrix));
+            return PxTransform(PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
+                PxQuat(frame.rotation.x, frame.rotation.y, frame.rotation.z, frame.rotation.w));
+        }
+
+        Matrix4 FromFootstepFrame(const PxTransform& frame)
+        {
+            return Matrix4(OrthogonalTransform(
+                Quaternion(DirectX::XMVectorSet(frame.q.x, frame.q.y, frame.q.z, frame.q.w)),
+                Vector3(frame.p.x, frame.p.y, frame.p.z)));
+        }
+    }
+
+    bool SkeletalMeshComponent::BuildPhysicalFootIKLeg(size_t side, FootIKLegInput& leg) const
+    {
+        leg = {};
+        const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
+        if (side >= sample.feet.size() || !m_PhysicsAsset)
+        {
+            return false;
+        }
+        const FootSoleSample& foot = sample.feet[side];
+        const FootLegSetup& setup = foot.leg;
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        if (!setup.available || !foot.available || setup.hipNode < 0 || setup.kneeNode < 0 ||
+            setup.ankleNode < 0 || static_cast<size_t>(setup.hipNode) >= m_PhysicsSkeleton.parents.size() ||
+            static_cast<size_t>(setup.kneeNode) >= m_PhysicsSkeleton.parents.size() ||
+            static_cast<size_t>(setup.ankleNode) >= m_PhysicsSkeleton.parents.size())
+        {
+            return false;
+        }
+        leg.hipNode = setup.hipNode;
+        leg.kneeNode = setup.kneeNode;
+        leg.ankleNode = setup.ankleNode;
+        leg.thighLength = setup.thighLength;
+        leg.calfLength = setup.calfLength;
+        leg.referenceBendInHip = setup.referenceBendInHip;
+        for (int parent = m_PhysicsSkeleton.parents[setup.hipNode]; parent >= 0;
+            parent = m_PhysicsSkeleton.parents[parent])
+        {
+            const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), parent);
+            if (body != nodes.end())
+            {
+                leg.anchorNode = parent;
+                leg.actualAnchor = ToFootstepFrame(m_Ragdoll.GetBoneWorld(static_cast<size_t>(body - nodes.begin())));
+                break;
+            }
+        }
+        if (leg.anchorNode < 0)
+        {
+            return false;
+        }
+        const std::array<int, 4> chain{leg.anchorNode, leg.hipNode, leg.kneeNode, leg.ankleNode};
+        std::array<const PhysicsConstraint*, 3> constraints{};
+        for (size_t joint = 0; joint < constraints.size(); ++joint)
+        {
+            if (std::find(nodes.begin(), nodes.end(), chain[joint + 1]) == nodes.end())
+            {
+                return false;
+            }
+            const std::string& parentName = m_PhysicsSkeleton.names[chain[joint]];
+            const std::string& childName = m_PhysicsSkeleton.names[chain[joint + 1]];
+            const int parentBody = m_PhysicsAsset->FindBody(parentName);
+            const int childBody = m_PhysicsAsset->FindBody(childName);
+            const int constraintIndex = m_PhysicsAsset->FindConstraint(parentName, childName);
+            if (parentBody < 0 || childBody < 0 || constraintIndex < 0)
+            {
+                return false;
+            }
+            const PhysicsConstraint& constraint = m_PhysicsAsset->constraints[constraintIndex];
+            if (constraint.parentBone != parentName || constraint.childBone != childName)
+            {
+                return false;
+            }
+            constraints[joint] = &constraint;
+            leg.joints[joint].parentInBone = ToFootstepFrame(
+                m_PhysicsAsset->bodies[parentBody].GetLocalTransform() * constraint.parentFrame.GetTransform());
+            leg.joints[joint].childInBone = ToFootstepFrame(
+                m_PhysicsAsset->bodies[childBody].GetLocalTransform() * constraint.childFrame.GetTransform());
+        }
+        const bool articulation = m_Ragdoll.UsesArticulation();
+        leg.clampJointRotation = [constraints, articulation](size_t joint, const PxQuat& rotation) -> PxQuat
+        {
+            const Quaternion targetRotation(DirectX::XMVectorSet(rotation.x, rotation.y, rotation.z, rotation.w));
+            const Quaternion limited = articulation ? ClampArticulationDriveTarget(*constraints[joint], targetRotation) :
+                ClampD6DriveTarget(*constraints[joint], targetRotation);
+            DirectX::XMFLOAT4 value;
+            DirectX::XMStoreFloat4(&value, limited);
+            return PxQuat(value.x, value.y, value.z, value.w);
+        };
+        leg.soleInBone = ToFootstepFrame(foot.soleInBone);
+        leg.targetSole = ToFootstepFrame(foot.soleWorld);
+        leg.available = leg.actualAnchor.isSane() && leg.soleInBone.isSane() && leg.targetSole.isSane();
+        return leg.available;
+    }
+
+    void SkeletalMeshComponent::PrepareFootstepPlanning(FootstepInput& input, const FootstepSettings& settings) const
+    {
+        input.evaluateReachability = {};
+        if (!IsActiveRagdoll() || !m_PhysicsAsset)
+        {
+            return;
+        }
+        struct BodyDynamics
+        {
+        public:
+            PxTransform center{PxIdentity};
+            PxVec3 inertia{0};
+            PxVec3 angularVelocity{0};
+            float mass = 0;
+        };
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        std::vector<BodyDynamics> dynamics(nodes.size());
+        for (size_t body = 0; body < nodes.size(); ++body)
+        {
+            BodyDynamics& value = dynamics[body];
+            if (!m_Ragdoll.GetBodyDynamics(body, value.mass, value.inertia, value.center, value.angularVelocity))
+            {
+                return;
+            }
+        }
+        FootstepPlanningInput planning;
+        for (size_t side = 0; side < planning.legs.size(); ++side)
+        {
+            FootIKLegInput& leg = planning.legs[side];
+            if (!BuildPhysicalFootIKLeg(side, leg))
+            {
+                return;
+            }
+            planning.soles[side] = leg.targetSole;
+            planning.supportSoles[side] = ToFootstepFrame(m_FootSupport.GetSnapshot().feet[side].supportSoleWorld);
+            const std::array<int, 4> chain{leg.anchorNode, leg.hipNode, leg.kneeNode, leg.ankleNode};
+            for (size_t joint = 0; joint < 3; ++joint)
+            {
+                const size_t parentBody = static_cast<size_t>(
+                    std::find(nodes.begin(), nodes.end(), chain[joint]) - nodes.begin());
+                const size_t childBody = static_cast<size_t>(
+                    std::find(nodes.begin(), nodes.end(), chain[joint + 1]) - nodes.begin());
+                if (parentBody >= nodes.size() || childBody >= nodes.size())
+                {
+                    return;
+                }
+                const PxTransform parent = ToFootstepFrame(m_Ragdoll.GetBoneWorld(parentBody));
+                const PxTransform frame = parent * leg.joints[joint].parentInBone;
+                planning.bones[side][joint] = ToFootstepFrame(m_Ragdoll.GetBoneWorld(childBody));
+                planning.jointVelocities[side][joint] = frame.q.rotateInv(
+                    dynamics[childBody].angularVelocity - dynamics[parentBody].angularVelocity);
+                planning.jointAccelerations[side][joint] = PxVec3(0);
+                const int constraintIndex = m_PhysicsAsset->FindConstraint(
+                    m_PhysicsSkeleton.names[chain[joint]], m_PhysicsSkeleton.names[chain[joint + 1]]);
+                const PhysicsConstraint& constraint = m_PhysicsAsset->constraints[constraintIndex];
+                const std::array<PhysicsJointMotion, 3> motions{constraint.twist, constraint.swingY, constraint.swingZ};
+                for (size_t axis = 0; axis < 3; ++axis)
+                {
+                    const PhysicsAngularDrive& drive = constraint.drives[constraint.useSlerpDrive ? 0 : axis];
+                    planning.lockedAxes[side][joint][axis] = motions[axis] == PhysicsJointMotion::Locked;
+                    if (motions[axis] == PhysicsJointMotion::Locked || !drive.enabled ||
+                        drive.maxTorque <= 0 || drive.GetStiffness() <= 0)
+                    {
+                        continue;
+                    }
+                    PxVec3 localAxis(0);
+                    localAxis[axis] = 1;
+                    const PxVec3 worldAxis = frame.q.rotate(localAxis);
+                    float inertia = 0;
+                    float gravityTorque = 0;
+                    // 움직이는 관절 아래의 바디 질량과 평행축 항으로 보수적인 회전 관성을 구한다.
+                    for (size_t body = 0; body < nodes.size(); ++body)
+                    {
+                        int ancestor = nodes[body];
+                        while (ancestor >= 0 && ancestor != chain[joint + 1])
+                        {
+                            ancestor = m_PhysicsSkeleton.parents[ancestor];
+                        }
+                        if (ancestor < 0)
+                        {
+                            continue;
+                        }
+                        const BodyDynamics& value = dynamics[body];
+                        const PxVec3 axisInMass = value.center.q.rotateInv(worldAxis);
+                        const PxVec3 radius = value.center.p - frame.p;
+                        const float along = radius.dot(worldAxis);
+                        inertia += value.inertia.x * axisInMass.x * axisInMass.x +
+                            value.inertia.y * axisInMass.y * axisInMass.y +
+                            value.inertia.z * axisInMass.z * axisInMass.z +
+                            value.mass * (std::max)(0.0f, radius.magnitudeSquared() - along * along);
+                        gravityTorque += radius.cross(PxVec3(0, -9.81f * value.mass, 0)).dot(worldAxis);
+                    }
+                    if (inertia <= 1e-6f)
+                    {
+                        continue;
+                    }
+                    const float torqueAcceleration = (std::max)(0.0f, drive.maxTorque - PxAbs(gravityTorque)) / inertia;
+                    const float responseAcceleration = drive.useAcceleration ?
+                        drive.GetStiffness() : drive.GetStiffness() / inertia;
+                    planning.jointAccelerations[side][joint][axis] = (std::min)(settings.maximumJointAcceleration,
+                        (std::min)(torqueAcceleration, responseAcceleration));
+                }
+            }
+        }
+        if (planning.legs[0].anchorNode != planning.legs[1].anchorNode)
+        {
+            return;
+        }
+        const PxTransform pelvis = planning.legs[0].actualAnchor;
+        const size_t root = static_cast<size_t>(
+            std::find(nodes.begin(), nodes.end(), planning.legs[0].anchorNode) - nodes.begin());
+        planning.pelvisVelocity = m_Ragdoll.GetBodyPointVelocity(root, pelvis.p);
+        planning.pelvisAngularVelocity = dynamics[root].angularVelocity;
+        const PxVec3 leftHip = (pelvis * planning.legs[0].joints[0].parentInBone).p;
+        const PxVec3 rightHip = (pelvis * planning.legs[1].joints[0].parentInBone).p;
+        // 양 고관절의 실제 연결점을 사용해 애니메이션과 독립적인 몸의 수평 앞 방향을 만든다.
+        planning.forward = (rightHip - leftHip).cross(PxVec3(0, 1, 0));
+        if (planning.forward.normalize() < 1e-6f)
+        {
+            return;
+        }
+        planning.maximumLowering = m_StandingSupportSettings.maximumLowering;
+        planning.loweringSpeed = m_StandingSupportSettings.loweringSpeed;
+        planning.loweringScale = m_StandingSupportSettings.stepLoweringScale;
+        input.evaluateReachability = [planning, settings](size_t side, const PxVec3& position,
+            const PxVec3& normal, float duration, float liftHeight) -> FootstepReachability
+        {
+            return EvaluateFootstepReachability(planning, settings, side, position, normal, duration, liftHeight);
+        };
+    }
+
+
     void SkeletalMeshComponent::ApplyFootstepIKTargets(std::vector<Matrix4>& target, float deltaTime)
     {
         // IK를 실행할 수 있는 상태인지 확인. 발 지지 정보와 발딛기 상태를 가져옴 
@@ -170,99 +402,15 @@ namespace PARS
         standing.velocity = sample.hasCenterOfMassVelocity ? sample.centerOfMassVelocity : PxVec3(0);
         std::array<RagdollSupportContact, 2> contacts;
 
-		// 다리별 IK 입력을 준비하고, 서있기 보정 입력과 접촉 정보를 준비함
+        // 다리별 IK 입력을 준비하고, 서있기 보정 입력과 접촉 정보를 준비함
         for (size_t side = 0; side < input.legs.size(); ++side)
         {
-            /*
-            hipsNode : 허벅지가 시작하는 본
-			kneeNode : 무릎이 시작하는 본
-			ankleNode : 발목이 시작하는 본
-			thighLength : 허벅지 길이
-			caalfLength : 종아리 길이
-			referenceBendInHip : 허벅지 본 기준의 기준 무릎 굽힘 방향
-            */
             const FootSoleSample& foot = sample.feet[side];
-            const FootLegSetup& setup = foot.leg;
             FootIKLegInput& leg = input.legs[side];
-            leg.hipNode = setup.hipNode;
-            leg.kneeNode = setup.kneeNode;
-            leg.ankleNode = setup.ankleNode;
-            leg.thighLength = setup.thighLength;
-            leg.calfLength = setup.calfLength;
-            leg.referenceBendInHip = setup.referenceBendInHip;
-            if (!setup.available || !foot.available || setup.hipNode < 0 ||
-                setup.kneeNode < 0 || setup.ankleNode < 0 ||
-                size_t(setup.hipNode) >= target.size() || size_t(setup.kneeNode) >= target.size() ||
-                size_t(setup.ankleNode) >= target.size() || m_PhysicsSkeleton.parents.size() != target.size())
+            if (!BuildPhysicalFootIKLeg(side, leg))
             {
                 continue;
             }
-
-            // 세 본의 실제 바디와 연결된 가장 가까운 물리 부모가 있어야 관절 PD로 구동할 수 있다.
-            if (std::find(nodes.begin(), nodes.end(), setup.hipNode) == nodes.end() ||
-                std::find(nodes.begin(), nodes.end(), setup.kneeNode) == nodes.end() ||
-                std::find(nodes.begin(), nodes.end(), setup.ankleNode) == nodes.end())
-            {
-                continue;
-            }
-            // 다리를 지탱하는 실제 물리 부모를 찾음
-            for (int parent = m_PhysicsSkeleton.parents[setup.hipNode]; parent >= 0; parent = m_PhysicsSkeleton.parents[parent])
-            {
-                const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), parent);
-                if (body != nodes.end())
-                {
-                    leg.anchorNode = parent;
-                    leg.actualAnchor = toPx(m_Ragdoll.GetBoneWorld(size_t(body - nodes.begin())));
-                    break;
-                }
-            }
-            if (leg.anchorNode < 0 || !m_PhysicsAsset)
-            {
-                continue;
-            }
-            // 물리 구동과 동일한 PA 관절 프레임을 본 좌표계로 옮겨 제한을 포함한 IK에 전달한다.
-            const std::array<int, 4> chain{leg.anchorNode, setup.hipNode, setup.kneeNode, setup.ankleNode};
-            std::array<const PhysicsConstraint*, 3> constraints{};
-            bool validJoints = true;
-            for (size_t jointIndex = 0; jointIndex < constraints.size(); ++jointIndex)
-            {
-                const std::string& parentName = m_PhysicsSkeleton.names[chain[jointIndex]];
-                const std::string& childName = m_PhysicsSkeleton.names[chain[jointIndex + 1]];
-                const int parentBody = m_PhysicsAsset->FindBody(parentName);
-                const int childBody = m_PhysicsAsset->FindBody(childName);
-                const int constraintIndex = m_PhysicsAsset->FindConstraint(parentName, childName);
-                if (parentBody < 0 || childBody < 0 || constraintIndex < 0)
-                {
-                    validJoints = false;
-                    break;
-                }
-                const PhysicsConstraint& constraint = m_PhysicsAsset->constraints[constraintIndex];
-                if (constraint.parentBone != parentName || constraint.childBone != childName)
-                {
-                    validJoints = false;
-                    break;
-                }
-                constraints[jointIndex] = &constraint;
-                leg.joints[jointIndex].parentInBone = toPx(m_PhysicsAsset->bodies[parentBody].GetLocalTransform() *
-                    constraint.parentFrame.GetTransform());
-                leg.joints[jointIndex].childInBone = toPx(m_PhysicsAsset->bodies[childBody].GetLocalTransform() *
-                    constraint.childFrame.GetTransform());
-            }
-            if (!validJoints)
-            {
-                continue;
-            }
-            const bool articulation = m_Ragdoll.UsesArticulation();
-            leg.clampJointRotation = [constraints, articulation](size_t jointIndex, const PxQuat& rotation) -> PxQuat
-            {
-                const PhysicsConstraint& constraint = *constraints[jointIndex];
-                const Quaternion targetRotation(DirectX::XMVectorSet(rotation.x, rotation.y, rotation.z, rotation.w));
-                const Quaternion limited = articulation ? ClampArticulationDriveTarget(constraint, targetRotation) :
-                    ClampD6DriveTarget(constraint, targetRotation);
-                DirectX::XMFLOAT4 value;
-                DirectX::XMStoreFloat4(&value, limited);
-                return PxQuat(value.x, value.y, value.z, value.w);
-            };
 
             // 다리별로 기본 발바닥목표를 설정
             leg.soleInBone = toPx(foot.soleInBone);
@@ -300,25 +448,13 @@ namespace PARS
             support.actualSole = toPx(foot.soleWorld);
             support.supportNormal = foot.contact.support.GetNormal();
 
-            // 입력 목표 포즈의 발바닥을 계산
-            support.animatedSole = rigidTargets[leg.ankleNode] * leg.soleInBone;
 
-            // IK좌표 변환의 핵심
-            /*
-			일단 기본적으로 목표(애니메이션 트랙데이터) 를 실제 물리 바디의 부모 좌표계로 쉽게 변환하기 위해 쓰는 toPhysical 변환이다.
-            목표 고관절의 월드변환은 목표 루트로부터 쭉 곱해지는데 여기서 행렬의 결합법칙이 작용하므로 
-			목표 고관절의 월드변환 = 목표 루트 * ... * 목표 고관절 부모 * 목표 고관절
-			물리 고관절의 월드변환 = toPhysical * 목표 루트 * ... * 목표 고관절
-								= 물리 루트 * ... * 물리 고관절 부모 * 물리 고관절
-            그냥 목표로 적용되어있던 관절을 루트만 바꿔서 물리로 바꿔주기위한 도움 변수 행렬이다 
-            */
-            const PxTransform toPhysical = leg.actualAnchor * rigidTargets[leg.anchorNode].getInverse();
 
-            // 물리 엉덩이본과 물리 골반이랑 위치차이를 구한다.
-            support.hipOffset = (toPhysical * rigidTargets[leg.hipNode]).p - leg.actualAnchor.p;
+            const std::vector<int>::const_iterator hipBody = std::find(nodes.begin(), nodes.end(), leg.hipNode);
+            const PxTransform actualHip = toPx(m_Ragdoll.GetBoneWorld(static_cast<size_t>(hipBody - nodes.begin())));
+            support.hipOffset = actualHip.p - leg.actualAnchor.p;
             support.length = leg.thighLength + leg.calfLength;
             standing.pelvis = leg.actualAnchor;
-            standing.animatedPelvis = rigidTargets[leg.anchorNode];
             const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), foot.boneNode);
 
             // 지지 보정에는 유예 중인 마지막 지지면을 함께 사용한다. 측정 충격량은 재사용하지 않는다.
@@ -338,6 +474,71 @@ namespace PARS
             }
         }
 
+        // 회복 중 골반 기준은 실제 물리 자세와 고관절 연결점에서 얻는다.
+        const bool physicalRecovery = m_Recovery.GetSnapshot().state == RecoveryState::Recovery || step.IsInProgress();
+        if (physicalRecovery && input.legs[0].available && input.legs[1].available)
+        {
+            const int anchor = input.legs[0].anchorNode;
+            const PxTransform actual = input.legs[0].actualAnchor;
+            PxTransform desired = actual;
+            standing.hasPelvisPlan = step.IsInProgress() && step.reachability.reachable;
+            if (standing.hasPelvisPlan)
+            {
+                desired = InterpolateFootstepPelvis(step.reachability, step.motion.commandProgress);
+                standing.plannedPelvis = desired;
+                input.hasPelvisPlan = true;
+                input.plannedPelvis = desired;
+            }
+            else
+            {
+                const PxVec3 hipCenter = ((actual * input.legs[0].joints[0].parentInBone).p +
+                    (actual * input.legs[1].joints[0].parentInBone).p) * .5f;
+                PxVec3 up = actual.p - hipCenter;
+                if (up.normalize() > 1e-6f)
+                {
+                    const PxVec3 vertical(0, 1, 0);
+                    PxVec3 axis = up.cross(vertical);
+                    const float sine = axis.normalize();
+                    if (sine > 1e-6f)
+                    {
+                        const float angle = std::atan2(sine, up.dot(vertical));
+                        desired.q = (PxQuat(angle, axis) * actual.q).getNormalized();
+                    }
+                }
+            }
+            const PxTransform delta = desired * rigidTargets[anchor].getInverse();
+            for (size_t node = 0; node < rigidTargets.size(); ++node)
+            {
+                int ancestor = static_cast<int>(node);
+                while (ancestor >= 0 && ancestor != anchor)
+                {
+                    ancestor = m_PhysicsSkeleton.parents[ancestor];
+                }
+                if (ancestor != anchor)
+                {
+                    continue;
+                }
+                rigidTargets[node] = delta * rigidTargets[node];
+                target[node] = FromFootstepFrame(rigidTargets[node]) *
+                    Invert(PhysicsBoneFrame(target[node])) * target[node];
+            }
+        }
+        // IK의 시작 자세도 애니메이션 대신 실제 다리에서 가져온다.
+        for (const FootIKLegInput& leg : input.legs)
+        {
+            if (!leg.available)
+            {
+                continue;
+            }
+            const PxTransform toTarget = rigidTargets[leg.anchorNode] * leg.actualAnchor.getInverse();
+            const std::array<int, 3> chain{leg.hipNode, leg.kneeNode, leg.ankleNode};
+            for (int node : chain)
+            {
+                const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), node);
+                rigidTargets[node] = toTarget * toPx(m_Ragdoll.GetBoneWorld(static_cast<size_t>(body - nodes.begin())));
+            }
+        }
+
         // 이동 중인 발은 제외하고 지지 역할의 현재 또는 유예 접촉만 전달한다.
         m_Ragdoll.SetSupportContacts(contacts);
 
@@ -346,7 +547,7 @@ namespace PARS
         {
             /*
             m_StandingSupport.Update는 다음을 고려한다.
-            - 애니메이션이 요구하는 골반의 발 위 높이
+            - 실제 다리 길이와 관절 연결점으로 계산한 골반 높이
             - 발딛기 중 필요한 골반 낮추기
             - 지지할 발의 접촉이 끊겼을때 재접촉을 위한 낮추기
             - 다리 기링와 수평 거리로 결정되는 도달 범위
@@ -371,12 +572,12 @@ namespace PARS
         // 실제 양쪽 다리 IK를 계산
         if (!m_FootstepIK.Apply(input, m_PhysicsSkeleton.parents, rigidTargets))
         {
-            // IK 입력이 부족하면 기본 애니메이션 목표를 유지하고 실패 사유를 디버그에 남긴다.
+            // IK 입력이 부족하면 실패 사유를 남기고 호출자에게 처리를 넘긴다.
             // Recovery 호출자는 이 실패를 감지해 패시브 물리로 전환하므로 Idle 목표를 구동하지 않는다.
             return;
         }
 
-		// IK 결과를 원래 target에 반영. correctedNodesd 에 있는 본만 갱신
+        // IK 결과를 원래 target에 반영. correctedNodesd 에 있는 본만 갱신
         for (int node : m_FootstepIK.GetSnapshot().correctedNodes)
         {
             const PxTransform& frame = rigidTargets[node];
@@ -473,9 +674,7 @@ namespace PARS
             }
         }
         const float weight = m_RootSupportRelease == RootSupportRelease::None ? grace.GetSupportWeight(balance) : 0;
-        const bool idle = !m_AnimInstance->IsBlending() &&
-            m_AnimInstance->GetAnimationName(m_AnimInstance->GetCurrentAnimationIndex()) == "Idle";
-        m_Ragdoll.SetFootDrivenSupport(IsActiveRagdoll() && idle && m_RootSupportRelease == RootSupportRelease::None);
+        m_Ragdoll.SetFootDrivenSupport(IsActiveRagdoll() && m_RootSupportRelease == RootSupportRelease::None);
         if (m_Ragdoll.SetRootSupport(weight, false, error))
         {
             return true;
