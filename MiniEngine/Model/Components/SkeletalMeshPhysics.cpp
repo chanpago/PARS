@@ -220,21 +220,49 @@ namespace PARS
             {
                 continue;
             }
-            const std::function<bool(int, int)> linked = [&](int parent, int child) -> bool
+            // 물리 구동과 동일한 PA 관절 프레임을 본 좌표계로 옮겨 제한을 포함한 IK에 전달한다.
+            const std::array<int, 4> chain{leg.anchorNode, setup.hipNode, setup.kneeNode, setup.ankleNode};
+            std::array<const PhysicsConstraint*, 3> constraints{};
+            bool validJoints = true;
+            for (size_t jointIndex = 0; jointIndex < constraints.size(); ++jointIndex)
             {
-                return std::any_of(m_PhysicsAsset->constraints.begin(), m_PhysicsAsset->constraints.end(),
-                    [&](const PhysicsConstraint& joint) -> bool
-                    {
-                    return joint.parentBone == m_PhysicsSkeleton.names[parent] &&
-                        joint.childBone == m_PhysicsSkeleton.names[child];
-                });
-            };
-            // PA에 힙, 허벅지, 무릎, 발목이 연결되어 있는지 확인
-            if (!linked(leg.anchorNode, setup.hipNode) || !linked(setup.hipNode, setup.kneeNode) ||
-                !linked(setup.kneeNode, setup.ankleNode))
+                const std::string& parentName = m_PhysicsSkeleton.names[chain[jointIndex]];
+                const std::string& childName = m_PhysicsSkeleton.names[chain[jointIndex + 1]];
+                const int parentBody = m_PhysicsAsset->FindBody(parentName);
+                const int childBody = m_PhysicsAsset->FindBody(childName);
+                const int constraintIndex = m_PhysicsAsset->FindConstraint(parentName, childName);
+                if (parentBody < 0 || childBody < 0 || constraintIndex < 0)
+                {
+                    validJoints = false;
+                    break;
+                }
+                const PhysicsConstraint& constraint = m_PhysicsAsset->constraints[constraintIndex];
+                if (constraint.parentBone != parentName || constraint.childBone != childName)
+                {
+                    validJoints = false;
+                    break;
+                }
+                constraints[jointIndex] = &constraint;
+                leg.joints[jointIndex].parentInBone = toPx(m_PhysicsAsset->bodies[parentBody].GetLocalTransform() *
+                    constraint.parentFrame.GetTransform());
+                leg.joints[jointIndex].childInBone = toPx(m_PhysicsAsset->bodies[childBody].GetLocalTransform() *
+                    constraint.childFrame.GetTransform());
+            }
+            if (!validJoints)
             {
                 continue;
             }
+            const bool articulation = m_Ragdoll.UsesArticulation();
+            leg.clampJointRotation = [constraints, articulation](size_t jointIndex, const PxQuat& rotation) -> PxQuat
+            {
+                const PhysicsConstraint& constraint = *constraints[jointIndex];
+                const Quaternion targetRotation(DirectX::XMVectorSet(rotation.x, rotation.y, rotation.z, rotation.w));
+                const Quaternion limited = articulation ? ClampArticulationDriveTarget(constraint, targetRotation) :
+                    ClampD6DriveTarget(constraint, targetRotation);
+                DirectX::XMFLOAT4 value;
+                DirectX::XMStoreFloat4(&value, limited);
+                return PxQuat(value.x, value.y, value.z, value.w);
+            };
 
             // 다리별로 기본 발바닥목표를 설정
             leg.soleInBone = toPx(foot.soleInBone);

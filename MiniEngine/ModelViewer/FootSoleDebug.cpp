@@ -525,7 +525,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             settings.liftHeightScale, settings.minimumLiftHeight);
         ImGui::TextWrapped(u8"설정은 다음 발딛기부터 적용됩니다. 하강 중 수평 착지 목표를 고정하고, 계획 시간이 끝나도 닿지 않으면 제한된 속도와 깊이로 더 내립니다. 실제 접촉을 확인해 종료합니다.");
         ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
-        ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동/지지 다리의 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
+        ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 관절 제한을 반영한 이동/지지 다리의 IK 목표 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
         const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();
         ImGui::Text(u8"IK → 관절 PD: %s", PARS::FootstepIKStatusLabel(ik.status));
         if (ik.status == PARS::FootstepIKStatus::Applied)
@@ -536,12 +536,21 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 const float actualError = (ToPx(Vector3(sample.feet[side].soleWorld.GetW())) - leg.requestedSole.p).magnitude();
                 ImGui::Text(u8"%s (%s): IK 도달 오차 %.2fcm / 실제 발 목표 오차 %.2fcm%s", FootLabel(int(side)),
                     int(side) == ik.stepFoot ? u8"이동" : u8"지지", leg.reachError * 100, actualError * 100,
-                    leg.reachLimited ? u8" / 다리 길이 제한" : "");
+                    leg.reachLimited ? u8" / 도달 제한" : "");
                 ImGui::Text(u8"  무릎 Hint: %s / 발목 목표 (%.3f, %.3f, %.3f) m",
                     PARS::KneeHintSourceLabel(leg.hintSource), leg.requestedAnkle.x, leg.requestedAnkle.y, leg.requestedAnkle.z);
+                if (leg.jointLimitsApplied)
+                {
+                    ImGui::Text(u8"  관절 제한 IK: %s / 반복 %u", leg.limitConverged ? u8"위치·평면 목표 허용 오차 이내" : u8"목표 오차 남음",
+                        static_cast<unsigned>(leg.limitIterations));
+                    ImGui::Text(u8"  제한 직후 → 다리 재계산: 위치 %.2f → %.2fcm / 평면 %.2f → %.2f도",
+                        leg.initialLimitedReachError * 100, leg.reachError * 100,
+                        XMConvertToDegrees(leg.initialLimitedTiltError), XMConvertToDegrees(leg.soleTiltError));
+                    ImGui::Text(u8"  발끝 방향 목표 오차: %.2f도", XMConvertToDegrees(leg.soleYawError));
+                }
             }
             ImGui::Text(u8"기존 관절 제한의 최대 목표 수정각 (전신): %.2f도", XMConvertToDegrees(mesh.GetRagdoll().GetMaxTargetClampAngle()));
-            ImGui::TextWrapped(u8"IK 도달 오차는 다리 길이로 제한한 결과입니다. 이후 PA 관절 제한과 실제 물리 추종 오차는 별도이며, IK 표시만으로 착지나 회복 성공을 뜻하지 않습니다.");
+            ImGui::TextWrapped(u8"IK는 PA 관절 제한 안에서 위치와 발바닥 정렬을 먼저 맞추고 발끝 방향을 보정합니다. 표시한 정렬 오차는 계산된 목표의 오차이며 실제 물리 추종 오차와는 별개입니다.");
         }
         ImGui::TreePop();
     }

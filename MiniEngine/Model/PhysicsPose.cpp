@@ -175,6 +175,12 @@ namespace PARS
         {
             return q;
         }
+        return ClampD6DriveTarget(joint, q);
+    }
+
+    Quaternion ClampD6DriveTarget(const PhysicsConstraint& joint, Quaternion rotation)
+    {
+        Quaternion q = Normalize(rotation);
         XMFLOAT4 v;
         XMStoreFloat4(&v, q);
         if (v.w < 0)
@@ -193,7 +199,8 @@ namespace PARS
             s.w = -s.w;
         }
         float x = norm > 1e-7f ? 2 * std::atan2(v.x, v.w) : 0;
-        float y = 4 * std::atan2(s.y, 1 + s.w), z = 4 * std::atan2(s.z, 1 + s.w);
+        float y = 4 * std::atan2(s.y, 1 + s.w);
+        float z = 4 * std::atan2(s.z, 1 + s.w);
         if (joint.twist == PhysicsJointMotion::Locked)
         {
             x = 0;
@@ -230,7 +237,9 @@ namespace PARS
                 z /= r;
             }
         }
-        const float ty = std::tan(y * .25f), tz = std::tan(z * .25f), r2 = ty * ty + tz * tz;
+        const float ty = std::tan(y * .25f);
+        const float tz = std::tan(z * .25f);
+        const float r2 = ty * ty + tz * tz;
         const Quaternion swing(XMVectorSet(0, 2 * ty / (1 + r2), 2 * tz / (1 + r2), (1 - r2) / (1 + r2)));
         return Normalize(swing * Quaternion(Vector3(kXUnitVector), x));
     }

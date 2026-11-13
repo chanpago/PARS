@@ -23,6 +23,8 @@ namespace PARS
     // PA 오프셋을 적용한 뒤, 부모 조인트 좌표계에서 표현한 자식 조인트의 목표 회전이다.
     Math::Quaternion EvaluateJointDriveTarget(const PhysicsConstraint& joint,
         const Math::Matrix4& parentBodyTarget, const Math::Matrix4& childBodyTarget, bool clampToLimits = true);
+    // IK와 D6 구동에서 같은 트위스트·스윙 제한을 적용한다.
+    Math::Quaternion ClampD6DriveTarget(const PhysicsConstraint& joint, Math::Quaternion rotation);
     // 최단 회전의 축 * 각도(rad). Articulation 런타임과 비교 보고서가 같은 좌표를 사용한다.
     Math::Vector3 JointRotationVector(Math::Quaternion rotation);
     Math::Quaternion ClampArticulationDriveTarget(const PhysicsConstraint& joint, Math::Quaternion rotation);

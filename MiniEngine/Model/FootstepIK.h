@@ -3,6 +3,7 @@
 #include "foundation/PxTransform.h"
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace PARS
@@ -41,9 +42,19 @@ namespace PARS
         physx::PxTransform solvedSole{physx::PxIdentity};
         physx::PxVec3 requestedAnkle{0};
         physx::PxVec3 bendDirection{0};
+        // 물리 구동과 동일한 관절 좌표계의 제한 적용 후 회전이다.
+        std::array<physx::PxQuat, 3> jointRotations{
+            physx::PxQuat(physx::PxIdentity), physx::PxQuat(physx::PxIdentity), physx::PxQuat(physx::PxIdentity)};
         float reachError = 0;
+        float initialLimitedReachError = 0;
+        float initialLimitedTiltError = 0;
+        float soleTiltError = 0; // 목표 발바닥 법선과의 각도 오차(rad)
+        float soleYawError = 0; // 발바닥 정렬 후 남은 발끝 방향 오차(rad)
+        uint32_t limitIterations = 0;
         bool valid = false;
         bool reachLimited = false;
+        bool jointLimitsApplied = false;
+        bool limitConverged = false;
     };
 
     // 발바닥의 앞 방향은 애니메이션에서, 위 방향은 지지 평면에서 얻는다.
@@ -51,9 +62,19 @@ namespace PARS
         const physx::PxTransform& animatedSole, physx::PxTransform& target);
     LegIKResult SolveTwoBoneIK(const TwoBoneIKInput& input);
 
+    struct FootIKJointFrame
+    {
+    public:
+        // PA 바디 오프셋까지 포함한 본 기준 관절 프레임이다.
+        physx::PxTransform parentInBone{physx::PxIdentity};
+        physx::PxTransform childInBone{physx::PxIdentity};
+    };
+
     struct FootIKLegInput
     {
     public:
+        // 고관절·무릎·발목 순서이며, 실제 물리 구동의 제한 함수를 호출한다.
+        std::function<physx::PxQuat(size_t, const physx::PxQuat&)> clampJointRotation;
         int anchorNode = -1;
         int hipNode = -1;
         int kneeNode = -1;
@@ -65,6 +86,7 @@ namespace PARS
         physx::PxTransform actualAnchor{physx::PxIdentity};
         physx::PxTransform soleInBone{physx::PxIdentity};
         physx::PxTransform targetSole{physx::PxIdentity};
+        std::array<FootIKJointFrame, 3> joints;
         // 지지 중인 Toe의 월드 회전 목표다. 본의 로컬 위치와 길이는 IK 후에도 보존한다.
         physx::PxQuat toeTargetRotation{physx::PxIdentity};
         bool available = false;
@@ -75,9 +97,9 @@ namespace PARS
     {
     public:
         uint64_t revision = 0;
+        std::array<FootIKLegInput, 2> legs;
         // -1은 새 발딛기 없이 회복 중 양발 목표를 유지하는 경우다.
         int stepFoot = -1;
-        std::array<FootIKLegInput, 2> legs;
         bool enabled = false;
     };
 
