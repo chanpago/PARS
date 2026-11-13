@@ -698,7 +698,8 @@
       "swingY": "limited",
       "swingYLimit": 0.19053177535533905,
       "swingZ": "limited",
-      "swingZLimit": 0.14569386839866638,
+      "swingZMax": 0.14569386839866638,
+      "swingZMin": -0.14569386839866638,
       "twist": "limited",
       "twistMax": 0.30368727445602417,
       "twistMin": -0.30368727445602417
@@ -760,7 +761,8 @@
       "swingY": "limited",
       "swingYLimit": 0.19053177535533905,
       "swingZ": "limited",
-      "swingZLimit": 0.14569386839866638,
+      "swingZMax": 0.14569386839866638,
+      "swingZMin": -0.14569386839866638,
       "twist": "limited",
       "twistMax": 0.30368727445602417,
       "twistMin": -0.30368727445602417
@@ -822,7 +824,8 @@
       "swingY": "limited",
       "swingYLimit": 0.19053177535533905,
       "swingZ": "limited",
-      "swingZLimit": 0.14569386839866638,
+      "swingZMax": 0.14569386839866638,
+      "swingZMin": -0.14569386839866638,
       "twist": "limited",
       "twistMax": 0.30368727445602417,
       "twistMin": -0.30368727445602417
@@ -884,7 +887,8 @@
       "swingY": "limited",
       "swingYLimit": 0.6544984579086304,
       "swingZ": "limited",
-      "swingZLimit": 0.4210015535354614,
+      "swingZMax": 0.4210015535354614,
+      "swingZMin": -0.4210015535354614,
       "twist": "limited",
       "twistMax": 0.6859144568443298,
       "twistMin": -0.6859144568443298
@@ -946,7 +950,8 @@
       "swingY": "limited",
       "swingYLimit": 0.4363323152065277,
       "swingZ": "limited",
-      "swingZLimit": 0.2806239128112793,
+      "swingZMax": 0.2806239128112793,
+      "swingZMin": -0.2806239128112793,
       "twist": "limited",
       "twistMax": 0.45727628469467163,
       "twistMin": -0.45727628469467163
@@ -1008,7 +1013,8 @@
       "swingY": "limited",
       "swingYLimit": 0.5235987901687622,
       "swingZ": "limited",
-      "swingZLimit": 0.6108652353286743,
+      "swingZMax": 0.6108652353286743,
+      "swingZMin": -0.6108652353286743,
       "twist": "limited",
       "twistMax": 0.13962633907794952,
       "twistMin": -0.13962633907794952
@@ -1070,7 +1076,8 @@
       "swingY": "limited",
       "swingYLimit": 1.5707963705062866,
       "swingZ": "limited",
-      "swingZLimit": 1.5707963705062866,
+      "swingZMax": 1.5707963705062866,
+      "swingZMin": -1.5707963705062866,
       "twist": "limited",
       "twistMax": 1.0192723274230957,
       "twistMin": -1.5969762802124023
@@ -1132,7 +1139,8 @@
       "swingY": "limited",
       "swingYLimit": 0.5235987901687622,
       "swingZ": "limited",
-      "swingZLimit": 0.3839724361896515,
+      "swingZMax": 0.3839724361896515,
+      "swingZMin": -0.3839724361896515,
       "twist": "limited",
       "twistMax": 2.5237462520599365,
       "twistMin": -0.013962633907794952
@@ -1194,7 +1202,8 @@
       "swingY": "limited",
       "swingYLimit": 1.4500881433486938,
       "swingZ": "limited",
-      "swingZLimit": 0.5235987901687622,
+      "swingZMax": 0.5235987901687622,
+      "swingZMin": -0.5235987901687622,
       "twist": "limited",
       "twistMax": 0.7853981852531433,
       "twistMin": -0.7853981852531433
@@ -1256,7 +1265,8 @@
       "swingY": "limited",
       "swingYLimit": 0.5235987901687622,
       "swingZ": "limited",
-      "swingZLimit": 0.6108652353286743,
+      "swingZMax": 0.6108652353286743,
+      "swingZMin": -0.6108652353286743,
       "twist": "limited",
       "twistMax": 0.13962633907794952,
       "twistMin": -0.13962633907794952
@@ -1318,7 +1328,8 @@
       "swingY": "limited",
       "swingYLimit": 1.5707963705062866,
       "swingZ": "limited",
-      "swingZLimit": 1.5707963705062866,
+      "swingZMax": 1.5707963705062866,
+      "swingZMin": -1.5707963705062866,
       "twist": "limited",
       "twistMax": 1.5969762802124023,
       "twistMin": -1.0192723274230957
@@ -1380,7 +1391,8 @@
       "swingY": "limited",
       "swingYLimit": 0.5235987901687622,
       "swingZ": "limited",
-      "swingZLimit": 0.3839724361896515,
+      "swingZMax": 0.3839724361896515,
+      "swingZMin": -0.3839724361896515,
       "twist": "limited",
       "twistMax": 2.5237462520599365,
       "twistMin": -0.013962633907794952
@@ -1442,7 +1454,8 @@
       "swingY": "limited",
       "swingYLimit": 1.4500881433486938,
       "swingZ": "limited",
-      "swingZLimit": 0.5235987901687622,
+      "swingZMax": 0.5235987901687622,
+      "swingZMin": -0.5235987901687622,
       "twist": "limited",
       "twistMax": 0.7853981852531433,
       "twistMin": -0.7853981852531433
@@ -1504,7 +1517,8 @@
       "swingY": "limited",
       "swingYLimit": 1.4486232995986938,
       "swingZ": "limited",
-      "swingZLimit": 0.6544390916824341,
+      "swingZMax": 0.6544390916824341,
+      "swingZMin": -0.6544390916824341,
       "twist": "limited",
       "twistMax": 0.6475171446800232,
       "twistMin": -0.815068781375885
@@ -1566,7 +1580,8 @@
       "swingY": "limited",
       "swingYLimit": 0.0872664600610733,
       "swingZ": "limited",
-      "swingZLimit": 0.0872664600610733,
+      "swingZMax": 0.0872664600610733,
+      "swingZMin": -0.0872664600610733,
       "twist": "limited",
       "twistMax": 3.1398472785949707,
       "twistMin": -0.01745329238474369
@@ -1626,9 +1641,10 @@
         ]
       },
       "swingY": "limited",
-      "swingYLimit": 0.1745329201221466,
+      "swingYLimit": 0.5235987901687622,
       "swingZ": "limited",
-      "swingZLimit": 0.1745329201221466,
+      "swingZMax": 0.3490658402442932,
+      "swingZMin": -0.22689279913902283,
       "twist": "limited",
       "twistMax": 0.6981316804885864,
       "twistMin": -0.6981316804885864
@@ -1690,7 +1706,8 @@
       "swingY": "limited",
       "swingYLimit": 1.4486232995986938,
       "swingZ": "limited",
-      "swingZLimit": 0.6544390916824341,
+      "swingZMax": 0.6544390916824341,
+      "swingZMin": -0.6544390916824341,
       "twist": "limited",
       "twistMax": 0.815068781375885,
       "twistMin": -0.6475171446800232
@@ -1752,7 +1769,8 @@
       "swingY": "limited",
       "swingYLimit": 0.0872664600610733,
       "swingZ": "limited",
-      "swingZLimit": 0.0872664600610733,
+      "swingZMax": 0.0872664600610733,
+      "swingZMin": -0.0872664600610733,
       "twist": "limited",
       "twistMax": 3.1398472785949707,
       "twistMin": -0.01745329238474369
@@ -1814,7 +1832,8 @@
       "swingY": "limited",
       "swingYLimit": 0.1745329201221466,
       "swingZ": "limited",
-      "swingZLimit": 0.1745329201221466,
+      "swingZMax": 0.22689279913902283,
+      "swingZMin": -0.3490658402442932,
       "twist": "limited",
       "twistMax": 0.6981316804885864,
       "twistMin": -0.6981316804885864
@@ -1876,7 +1895,8 @@
       "swingY": "locked",
       "swingYLimit": 0.0872664600610733,
       "swingZ": "locked",
-      "swingZLimit": 0.0872664600610733,
+      "swingZMax": 0.0872664600610733,
+      "swingZMin": -0.0872664600610733,
       "twist": "limited",
       "twistMax": 1.0471975803375244,
       "twistMin": 0.0
@@ -1938,7 +1958,8 @@
       "swingY": "locked",
       "swingYLimit": 0.0872664600610733,
       "swingZ": "locked",
-      "swingZLimit": 0.0872664600610733,
+      "swingZMax": 0.0872664600610733,
+      "swingZMin": -0.0872664600610733,
       "twist": "limited",
       "twistMax": 1.0471975803375244,
       "twistMin": 0.0
@@ -1946,5 +1967,5 @@
   ],
   "driveUnits": "mode-dependent-radians-seconds-Nm",
   "units": "metres",
-  "version": 5
+  "version": 6
 }
