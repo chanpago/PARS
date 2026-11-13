@@ -610,11 +610,12 @@ namespace PARS
             }
             else if (name.find("UpLeg") != std::string::npos)
             {
-                parentAxes = AnatomicalAxes(-up, -left);
-                childAxes = AnatomicalAxes(x, -left);
-                // 걷기의 스윙 Y 최대 77.5도와 동시 발생하는 Z 회전을 수용한다.
-                // 측면 반각과 중심은 유지하고 굽힘 방향에 애니메이션용 여유만 추가한다.
-                cone = {55.314192f, -9.524431f * side, 83, 37.496596f};
+                // T포즈에서 양쪽 고관절의 +X는 무릎, +Y는 캐릭터 오른쪽, +Z는 뒤쪽을 향한다.
+                // 실제 허벅지 방향에 직교하도록 보정한 같은 축을 부모와 자식에 적용한다.
+                parentAxes = AnatomicalAxes(x, -left);
+                childAxes = parentAxes;
+                // 부모 좌표계의 기울기 보정을 제거하고, 제한각 수치는 직접 조정할 수 있게 유지한다.
+                cone = {0, 0, 83, 37.496596f};
                 twistMin = isLeft ? -46.7f : -37.1f;
                 twistMax = isLeft ? 37.1f : 46.7f;
             }
