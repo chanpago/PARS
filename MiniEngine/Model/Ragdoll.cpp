@@ -1,5 +1,6 @@
 ﻿#include "Ragdoll.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #if defined(_M_X64)
 #include "PhysicsWorld.h"
@@ -38,6 +39,9 @@ namespace PARS
 #if defined(_M_X64)
     namespace
     {
+        // word1의 0은 일반 형상이며, PA 구성마다 별도 번호를 부여한다.
+        std::atomic<uint32_t> NextPAFilterGroup{1};
+
         PxTransform ToPx(const Matrix4& matrix)
         {
             const PARS::PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(matrix);
@@ -389,6 +393,20 @@ namespace PARS
                 actor->setLinearVelocity(initialVelocity);
                 m_Bodies.push_back(actor);
                 m_BoneNodes.push_back(node);
+            }
+        }
+        // D6와 Articulation 모두 같은 PA의 형상을 식별할 수 있도록 표시한다.
+        // 이 번호는 형상과 함께 유지되므로 활성·대기 구성을 교환해도 다시 지정할 필요가 없다.
+        const uint32_t paFilterGroup = NextPAFilterGroup.fetch_add(1, std::memory_order_relaxed);
+        for (physx::PxRigidBody* body : m_Bodies)
+        {
+            std::vector<physx::PxShape*> shapes(body->getNbShapes());
+            body->getShapes(shapes.data(), static_cast<physx::PxU32>(shapes.size()));
+            for (physx::PxShape* shape : shapes)
+            {
+                physx::PxFilterData filter = shape->getSimulationFilterData();
+                filter.word1 = paFilterGroup;
+                shape->setSimulationFilterData(filter);
             }
         }
         for (const PARS::PhysicsConstraint& data : m_Asset.constraints)
