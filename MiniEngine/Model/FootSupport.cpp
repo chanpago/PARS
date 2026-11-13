@@ -496,9 +496,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     // 최소 좌우 간격도 Idle 오프셋과 같은 회전 기준에서 검사한다.
     input.supportRight = PxVec3(forward.z, 0, -forward.x);
 
-    // 저장한 Idle 발 본 자세를 캐릭터 로컬의 발바닥 위치와 방향으로 변환한다.
+    // 저장한 Idle 발 본 자세를 캐릭터 로컬의 발바닥 위치로 변환한다.
     std::array<PxVec3, 2> referenceFeet{PxVec3(0), PxVec3(0)};
-    std::array<PxVec3, 2> referenceForwards{PxVec3(0, 0, 1), PxVec3(0, 0, 1)};
 
     // 원본 Idle 기준을 읽고, 아래에서 COM 진행 방향으로 같은 회전을 적용한다.
     if (input.hasReference)
@@ -508,12 +507,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
             // 앞서 구한 로컬 발바닥 변환에 월드 발 m_IdleFootBones[side] 을 곱해 로컬 발바닥 위치를 구한다
             const Matrix4 sole = m_IdleFootBones[side] * m_Snapshot.feet[side].soleInBone;
 
-            // 발마다 다른 Idle의 발끝 방향도 보존한다.
             referenceFeet[side] = ToPx(Vector3(sole.GetW()));
-            referenceForwards[side] = ToPx(Vector3(sole.GetZ()));
-            referenceForwards[side].y = 0;
-            input.hasReference = input.hasReference && referenceFeet[side].isFinite() &&
-                referenceForwards[side].isFinite() && referenceForwards[side].normalize() > 1e-6f;
+            input.hasReference = input.hasReference && referenceFeet[side].isFinite();
         }
     }
 
@@ -538,10 +533,9 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.normalImpulse = foot.contact.normalImpulseVector.magnitude();
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
 
-        // 양발 중점 기준의 Idle 오프셋과 발끝 방향을 함께 회전한다.
+        // 양발 중점 기준의 Idle 위치 오프셋만 COM 진행 방향으로 회전한다.
         const PxVec3 offset = referenceFeet[side] - midpoint;
         target.stanceOffset = input.supportRight * offset.x + forward * offset.z;
-        target.stanceForward = input.supportRight * referenceForwards[side].x + forward * referenceForwards[side].z;
     }
 
     // 균형을 회복하기위해 발을 어디에 딛을지 결정하고 발딛기의 진행 상태를 관리

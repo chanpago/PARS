@@ -48,7 +48,7 @@ namespace
             return result;
         }
         if (!foot.available || !stance.available || !foot.position.isFinite() ||
-            !stance.position.isFinite() || !foot.stanceOffset.isFinite() || !foot.stanceForward.isFinite())
+            !stance.position.isFinite() || !foot.stanceOffset.isFinite())
         {
             return result;
         }
@@ -68,15 +68,6 @@ namespace
         {
             return result;
         }
-        PxVec3 forward = foot.stanceForward;
-        forward.y = 0;
-        const float forwardLength = forward.magnitude();
-        if (!std::isfinite(forwardLength) || forwardLength <= 1e-6f)
-        {
-            return result;
-        }
-        forward /= forwardLength;
-
         // 기울어진 지지발 중심의 높이를 지면 높이로 쓰지 않는다.
         // 중심의 수평 위치는 유지하고 실제 접촉 위치와 법선으로 착지면의 기준 높이를 구한다.
         PxVec3 stanceOnGround = stance.position;
@@ -139,7 +130,6 @@ namespace
         }
         result.position = stanceOnGround + delta;
         result.normal = normal;
-        result.forward = forward;
         result.travelDistance = HorizontalDistance(foot.position, result.position);
         result.stanceDistance = delta.magnitude();
         result.valid = result.position.isFinite() && std::isfinite(result.travelDistance);
@@ -615,7 +605,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
         state.target = candidate.position;
         state.targetNormal = candidate.normal;
-        state.targetForward = candidate.forward;
     }
     state.hasTarget = true;
     state.reason = state.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;

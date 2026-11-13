@@ -67,11 +67,10 @@ namespace
 
     constexpr size_t LegJointCount = 3;
     constexpr size_t LegVariableCount = LegJointCount * 3;
-    constexpr size_t LegErrorCount = 7;
+    constexpr size_t LegErrorCount = 6;
     constexpr float PositionTolerance = .001f;
     constexpr float TiltTolerance = PxPi / 360.0f;
     constexpr float TiltWeight = 2.0f;
-    constexpr float HeadingWeight = .2f;
 
     struct LimitedLegPose
     {
@@ -83,8 +82,7 @@ namespace
         PxVec3 tiltError{0};
         float reachError = 0;
         float tiltAngle = 0;
-        float yawError = 0;
-        float primaryCost = 0;
+        float cost = 0;
     };
 
     PxVec3 RotationVector(PxQuat rotation)
@@ -137,25 +135,17 @@ namespace
         const PxQuat alignPlane = FromTo(actualUp, targetUp, leg.targetSole.q.rotate(PxVec3(1, 0, 0)));
         result.tiltError = RotationVector(alignPlane);
         result.tiltAngle = result.tiltError.magnitude();
-        // 발바닥 법선을 맞춘 뒤 남는 회전만 발끝 방향 오차로 분리한다.
-        const PxVec3 actualForward = alignPlane.rotate(result.sole.q.rotate(PxVec3(0, 0, 1)));
-        const PxVec3 targetForward = leg.targetSole.q.rotate(PxVec3(0, 0, 1));
-        result.yawError = std::atan2(targetUp.dot(actualForward.cross(targetForward)), actualForward.dot(targetForward));
-        result.primaryCost = positionWeight * positionWeight * result.positionError.magnitudeSquared() +
+        // 위치와 발바닥 법선만 맞춘다. 법선 축을 중심으로 한 발끝 방향 회전은 목표에 포함하지 않는다.
+        result.cost = positionWeight * positionWeight * result.positionError.magnitudeSquared() +
             TiltWeight * TiltWeight * result.tiltError.magnitudeSquared();
-        return std::isfinite(result.primaryCost) && std::isfinite(result.yawError);
+        return std::isfinite(result.cost);
     }
 
-    std::array<float, LegErrorCount> LimitedLegErrors(const LimitedLegPose& pose, float positionWeight, float headingWeight)
+    std::array<float, LegErrorCount> LimitedLegErrors(const LimitedLegPose& pose, float positionWeight)
     {
         return {pose.positionError.x * positionWeight, pose.positionError.y * positionWeight,
             pose.positionError.z * positionWeight, pose.tiltError.x * TiltWeight,
-            pose.tiltError.y * TiltWeight, pose.tiltError.z * TiltWeight, pose.yawError * headingWeight};
-    }
-
-    float LimitedLegCost(const LimitedLegPose& pose, float headingWeight)
-    {
-        return pose.primaryCost + headingWeight * headingWeight * pose.yawError * pose.yawError;
+            pose.tiltError.y * TiltWeight, pose.tiltError.z * TiltWeight};
     }
 
     bool SolveLegIncrement(const float jacobian[LegErrorCount][LegVariableCount],
@@ -225,22 +215,19 @@ namespace
         return true;
     }
 
-    bool RefineLimitedLeg(const FootIKLegInput& leg, float positionWeight, bool refineHeading,
-        float maximumReachError, float maximumTiltError, LimitedLegPose& state, uint32_t& iterations)
+    bool RefineLimitedLeg(const FootIKLegInput& leg, float positionWeight, LimitedLegPose& state, uint32_t& iterations)
     {
         const float differenceStep = .002f;
-        const float headingWeight = refineHeading ? HeadingWeight : 0.0f;
-        const uint32_t maximumIterations = refineHeading ? 8u : 24u;
+        const uint32_t maximumIterations = 24;
         float damping = .01f;
         for (uint32_t iteration = 0; iteration < maximumIterations; ++iteration)
         {
-            if ((!refineHeading && state.reachError <= PositionTolerance && state.tiltAngle <= TiltTolerance) ||
-                (refineHeading && std::abs(state.yawError) <= TiltTolerance))
+            if (state.reachError <= PositionTolerance && state.tiltAngle <= TiltTolerance)
             {
                 break;
             }
             ++iterations;
-            const std::array<float, LegErrorCount> error = LimitedLegErrors(state, positionWeight, headingWeight);
+            const std::array<float, LegErrorCount> error = LimitedLegErrors(state, positionWeight);
             float jacobian[LegErrorCount][LegVariableCount]{};
             for (size_t variable = 0; variable < LegVariableCount; ++variable)
             {
@@ -258,15 +245,12 @@ namespace
                 {
                     return false;
                 }
-                const std::array<float, LegErrorCount> plusError = LimitedLegErrors(plus, positionWeight, headingWeight);
-                const std::array<float, LegErrorCount> minusError = LimitedLegErrors(minus, positionWeight, headingWeight);
-                for (size_t task = 0; task < LegErrorCount - 1; ++task)
+                const std::array<float, LegErrorCount> plusError = LimitedLegErrors(plus, positionWeight);
+                const std::array<float, LegErrorCount> minusError = LimitedLegErrors(minus, positionWeight);
+                for (size_t task = 0; task < LegErrorCount; ++task)
                 {
                     jacobian[task][variable] = (plusError[task] - minusError[task]) / (2.0f * differenceStep);
                 }
-                // 뒤쪽을 향할 때 -180도와 +180도 사이의 불연속을 미분으로 오인하지 않는다.
-                jacobian[LegErrorCount - 1][variable] = headingWeight *
-                    std::remainder(plus.yawError - minus.yawError, PxTwoPi) / (2.0f * differenceStep);
             }
             std::array<float, LegVariableCount> increment{};
             if (!SolveLegIncrement(jacobian, error, damping, increment))
@@ -303,8 +287,7 @@ namespace
                 {
                     return false;
                 }
-                if (candidate.reachError <= maximumReachError && candidate.tiltAngle <= maximumTiltError &&
-                    LimitedLegCost(candidate, headingWeight) < LimitedLegCost(state, headingWeight))
+                if (candidate.cost < state.cost)
                 {
                     state = candidate;
                     damping = PxMax(.0001f, damping * .5f);
@@ -354,22 +337,13 @@ namespace
         if (previous.valid && previous.jointLimitsApplied)
         {
             LimitedLegPose warm;
-            if (EvaluateLimitedLeg(leg, previous.jointRotations, positionWeight, warm) &&
-                (warm.primaryCost < state.primaryCost ||
-                    (warm.primaryCost == state.primaryCost && std::abs(warm.yawError) < std::abs(state.yawError))))
+            if (EvaluateLimitedLeg(leg, previous.jointRotations, positionWeight, warm) && warm.cost <= state.cost)
             {
                 state = warm;
             }
         }
         uint32_t iterations = 0;
-        if (!RefineLimitedLeg(leg, positionWeight, false, PX_MAX_F32, PX_MAX_F32, state, iterations))
-        {
-            return false;
-        }
-        // 위치와 발바닥 정렬을 먼저 풀고, 그 오차를 악화시키지 않는 범위에서만 발끝 방향을 맞춘다.
-        const float maximumReachError = PxMax(state.reachError, PositionTolerance) + 1e-5f;
-        const float maximumTiltError = PxMax(state.tiltAngle, TiltTolerance) + 1e-5f;
-        if (!RefineLimitedLeg(leg, positionWeight, true, maximumReachError, maximumTiltError, state, iterations))
+        if (!RefineLimitedLeg(leg, positionWeight, state, iterations))
         {
             return false;
         }
@@ -380,7 +354,6 @@ namespace
         result.jointRotations = state.rotations;
         result.reachError = state.reachError;
         result.soleTiltError = state.tiltAngle;
-        result.soleYawError = std::abs(state.yawError);
         result.limitIterations = iterations;
         result.jointLimitsApplied = true;
         result.limitConverged = state.reachError <= PositionTolerance && state.tiltAngle <= TiltTolerance;

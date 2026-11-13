@@ -218,9 +218,9 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
             ik.status == PARS::FootstepIKStatus::Applied && ik.revision == sample.contactRevision &&
             ik.stepFoot == roles.movableFoot && ik.legs[roles.movableFoot].valid)
         {
-            // 새 목표 출력이 잠시 멈춰도 저장된 최종 착지점은 유지한다. 회전은 제어가 요청한 발바닥 목표와 같다.
+            // 새 목표 출력이 잠시 멈춰도 저장된 최종 착지점은 유지한다. 회전은 관절 제한을 반영한 IK 자세를 사용한다.
             // 공중 이동 궤적의 높이는 포함하지 않는다.
-            const PxTransform target(step.target, ik.legs[roles.movableFoot].requestedSole.q);
+            const PxTransform target(step.target, ik.legs[roles.movableFoot].solvedSole.q);
             LandingFoot(lines, sample.feet[roles.movableFoot], target);
         }
     }
@@ -546,11 +546,10 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                     ImGui::Text(u8"  제한 직후 → 다리 재계산: 위치 %.2f → %.2fcm / 평면 %.2f → %.2f도",
                         leg.initialLimitedReachError * 100, leg.reachError * 100,
                         XMConvertToDegrees(leg.initialLimitedTiltError), XMConvertToDegrees(leg.soleTiltError));
-                    ImGui::Text(u8"  발끝 방향 목표 오차: %.2f도", XMConvertToDegrees(leg.soleYawError));
                 }
             }
             ImGui::Text(u8"기존 관절 제한의 최대 목표 수정각 (전신): %.2f도", XMConvertToDegrees(mesh.GetRagdoll().GetMaxTargetClampAngle()));
-            ImGui::TextWrapped(u8"IK는 PA 관절 제한 안에서 위치와 발바닥 정렬을 먼저 맞추고 발끝 방향을 보정합니다. 표시한 정렬 오차는 계산된 목표의 오차이며 실제 물리 추종 오차와는 별개입니다.");
+            ImGui::TextWrapped(u8"IK는 PA 관절 제한 안에서 위치와 발바닥 정렬을 맞춥니다. 발끝을 COM 진행 방향으로 돌리는 목표는 없습니다. 표시한 정렬 오차는 계산된 목표의 오차이며 실제 물리 추종 오차와는 별개입니다.");
         }
         ImGui::TreePop();
     }

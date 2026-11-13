@@ -49,7 +49,6 @@ namespace PARS
         float initialLimitedReachError = 0;
         float initialLimitedTiltError = 0;
         float soleTiltError = 0; // 목표 발바닥 법선과의 각도 오차(rad)
-        float soleYawError = 0; // 발바닥 정렬 후 남은 발끝 방향 오차(rad)
         uint32_t limitIterations = 0;
         bool valid = false;
         bool reachLimited = false;
@@ -57,7 +56,7 @@ namespace PARS
         bool limitConverged = false;
     };
 
-    // 발바닥의 앞 방향은 애니메이션에서, 위 방향은 지지 평면에서 얻는다.
+    // 발바닥의 앞 방향은 주어진 발 자세에서, 위 방향은 지지 평면에서 얻는다.
     bool MakeFootSoleTarget(const physx::PxVec3& position, const physx::PxVec3& normal,
         const physx::PxTransform& animatedSole, physx::PxTransform& target);
     LegIKResult SolveTwoBoneIK(const TwoBoneIKInput& input);
