@@ -49,7 +49,7 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
     if (!geometry.valid || geometry.articulation != articulation || geometry.selected != selected || previous.twist != joint.twist ||
         previous.swingY != joint.swingY || previous.swingZ != joint.swingZ || previous.childBone != joint.childBone ||
         previous.twistMin != joint.twistMin || previous.twistMax != joint.twistMax ||
-        previous.swingYLimit != joint.swingYLimit || previous.swingZLimit != joint.swingZLimit ||
+        previous.swingYLimit != joint.swingYLimit || previous.swingZMin != joint.swingZMin || previous.swingZMax != joint.swingZMax ||
         float(LengthSquare(geometry.twistReference - twistReference)) != 0)
     {
         geometry.articulation = articulation;
@@ -178,8 +178,8 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
     {
         // 회전 벡터의 단독 축 범위다. D6 원뿔로 그리면 다른 제한을 표시하게 된다.
         const Motion motions[] = {joint.twist, joint.swingY, joint.swingZ};
-        const float lows[] = {joint.twistMin, -joint.swingYLimit, -joint.swingZLimit};
-        const float highs[] = {joint.twistMax, joint.swingYLimit, joint.swingZLimit};
+        const float lows[] = {joint.twistMin, -joint.swingYLimit, joint.swingZMin};
+        const float highs[] = {joint.twistMax, joint.swingYLimit, joint.swingZMax};
         const Vector3 axes[] = {x, y, z};
         const Vector3 swingYReference = GetSwingYDisplayReference(joint);
         const Vector3 swingZReference = GetSwingZDisplayReference(joint);
@@ -195,19 +195,35 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
     }
     if (joint.swingY == Motion::Limited && joint.swingZ == Motion::Limited)
     {
-        // 이 SDK는 ConeLimitHelperTanLess를 사용한다. 스윙 각도 좌표에서 타원을 구한 뒤
-        // tan(angle/4)로 변환하며, 반대 순서로 계산하지 않는다.
+        // 대칭 범위는 SDK의 ConeLimitHelperTanLess와 같은 각도 타원을 사용한다.
+        // 비대칭 범위는 축별 경계를 구한 뒤 같은 tan(angle/4) 변환을 적용한다.
         // 경계는 순수 스윙 쿼터니언을 로컬 X축에 적용해 구한다.
-        const std::function<Math::Vector3(float)> cone = [&](float angle) -> Math::Vector3
+        const std::function<Math::Vector3(float)> boundary = [&](float angle) -> Math::Vector3
         {
-            const float sy = std::tan(joint.swingYLimit * std::cos(angle) * .25f);
-            const float sz = std::tan(joint.swingZLimit * std::sin(angle) * .25f);
+            float swingY = joint.swingYLimit * std::cos(angle);
+            float swingZ = joint.swingZMax * std::sin(angle);
+            if (joint.HasAsymmetricSwingZLimit())
+            {
+                // 비대칭 D6는 스윙 각도 좌표의 사각 경계를 따라 그린다.
+                const float edge = angle * 4 / XM_2PI;
+                const int side = edge < 4 ? static_cast<int>(edge) : 3;
+                const float amount = edge - static_cast<float>(side);
+                const float lowY[] = {-joint.swingYLimit, joint.swingYLimit, joint.swingYLimit, -joint.swingYLimit};
+                const float highY[] = {joint.swingYLimit, joint.swingYLimit, -joint.swingYLimit, -joint.swingYLimit};
+                const float lowZ[] = {joint.swingZMin, joint.swingZMin, joint.swingZMax, joint.swingZMax};
+                const float highZ[] = {joint.swingZMin, joint.swingZMax, joint.swingZMax, joint.swingZMin};
+                swingY = lowY[side] + (highY[side] - lowY[side]) * amount;
+                swingZ = lowZ[side] + (highZ[side] - lowZ[side]) * amount;
+            }
+            const float sy = std::tan(swingY * .25f);
+            const float sz = std::tan(swingZ * .25f);
             const float norm = 1 + sy * sy + sz * sz;
             return Quaternion(XMVectorSet(0, 2 * sy / norm, 2 * sz / norm, (2 - norm) / norm)) * (x * radius);
         };
         for (int step = 0; step < segments; ++step)
         {
-            const Vector3 a = cone(step * XM_2PI / segments), b = cone((step + 1) * XM_2PI / segments);
+            const Vector3 a = boundary(step * XM_2PI / segments);
+            const Vector3 b = boundary((step + 1) * XM_2PI / segments);
             fill(origin, a, b, red, opacity);
             line(a, b, red, width);
             if (step % (segments / 4) == 0)
@@ -227,9 +243,9 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
     {
         const bool aboutY = joint.swingZ == Motion::Locked;
         const Motion motion = aboutY ? joint.swingY : joint.swingZ;
-        const float limit = motion == Motion::Free ? XM_PI : aboutY ? joint.swingYLimit
-                                                                    : joint.swingZLimit;
-        sector(origin, aboutY ? y : z, x * radius, -limit, limit, motion == Motion::Free ? opacity * .35f : opacity, red);
+        const float low = motion == Motion::Free ? -XM_PI : aboutY ? -joint.swingYLimit : joint.swingZMin;
+        const float high = motion == Motion::Free ? XM_PI : aboutY ? joint.swingYLimit : joint.swingZMax;
+        sector(origin, aboutY ? y : z, x * radius, low, high, motion == Motion::Free ? opacity * .35f : opacity, red);
     }
     else if (joint.swingY == Motion::Free && joint.swingZ == Motion::Free)
     {
@@ -243,7 +259,7 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
         // 한 스윙축은 자유롭고 다른 축은 제한되면, D6는 자식 X축의 고도각(asin)을 제한하고
         // 방위각은 자유롭게 둔다. 허용되는 구면 띠를 표시한다.
         const bool limitedY = joint.swingY == Motion::Limited;
-        const float limit = Min(limitedY ? joint.swingYLimit : joint.swingZLimit, XM_PIDIV2);
+        const float limit = Min(limitedY ? joint.swingYLimit : joint.swingZMax, XM_PIDIV2);
         const std::function<Math::Vector3(float, float)> band = [&](float elevation, float azimuth) -> Math::Vector3
         {
             const float a = radius * std::cos(elevation) * std::cos(azimuth);

@@ -150,7 +150,11 @@ void RunPhysicsAssetTests()
     PhysicsConstraint joint;
     joint.parentBone = original.bodies[0].bone; joint.childBone = original.bodies[1].bone;
     joint.SetWorldFrame(parentBody, childBody, jointWorld);
-    joint.twistMin = -.65f; joint.twistMax = .8f; joint.swingYLimit = .4f; joint.swingZLimit = .9f;
+    joint.twistMin = -.65f;
+    joint.twistMax = .8f;
+    joint.swingYLimit = .4f;
+    joint.swingZMin = -.35f;
+    joint.swingZMax = .9f;
     joint.swingY = PhysicsJointMotion::Locked; joint.swingZ = PhysicsJointMotion::Free;
     joint.enableCollision = true;
     joint.drives[0] = PhysicsAngularDrive{};
@@ -193,7 +197,8 @@ void RunPhysicsAssetTests()
         SameFrame(savedJoint.childFrame.GetTransform(), joint.childFrame.GetTransform()) &&
         savedJoint.twist == joint.twist && savedJoint.swingY == joint.swingY && savedJoint.swingZ == joint.swingZ &&
         savedJoint.twistMin == joint.twistMin && savedJoint.twistMax == joint.twistMax &&
-        savedJoint.swingYLimit == joint.swingYLimit && savedJoint.swingZLimit == joint.swingZLimit && savedJoint.enableCollision,
+        savedJoint.swingYLimit == joint.swingYLimit && savedJoint.swingZMin == joint.swingZMin &&
+        savedJoint.swingZMax == joint.swingZMax && savedJoint.enableCollision,
         "Joint round trip preserves frames, radians, all motion modes and collision setting");
     Check(loaded.FindConstraint(joint.childBone, joint.parentBone) == 0, "Joint pair lookup ignores order");
     PhysicsAsset invalid = loaded;
@@ -279,6 +284,30 @@ void RunPhysicsAssetTests()
         invalid = loaded; invalid.constraints[0].swingYLimit = angle;
         Check(!invalid.Validate(error), "Reject zero, pi and non-finite swing limits");
     }
+    for (float angle : {-DirectX::XM_PI, DirectX::XM_PI, std::numeric_limits<float>::infinity(),
+             std::numeric_limits<float>::quiet_NaN()})
+    {
+        invalid = loaded;
+        invalid.constraints[0].swingZMin = angle;
+        Check(!invalid.Validate(error), "Reject invalid Z minimum");
+        invalid = loaded;
+        invalid.constraints[0].swingZMax = angle;
+        Check(!invalid.Validate(error), "Reject invalid Z maximum");
+    }
+    invalid = loaded;
+    invalid.constraints[0].swingZMin = invalid.constraints[0].swingZMax;
+    Check(!invalid.Validate(error), "Reject equal Z endpoints");
+    invalid.constraints[0].swingZMin += .1f;
+    Check(!invalid.Validate(error), "Reject reversed Z endpoints");
+    invalid = loaded;
+    invalid.constraints[0].swingZMin = .1f;
+    invalid.constraints[0].swingZMax = .3f;
+    Check(invalid.Validate(error), "Z endpoints may both lie on the same side of zero");
+    invalid.constraints[0].swingY = PhysicsJointMotion::Free;
+    invalid.constraints[0].swingZ = PhysicsJointMotion::Limited;
+    Check(!invalid.Validate(error), "D6 rejects an asymmetric Z limit combined with free Y");
+    invalid.constraints[0].drives[0].useAcceleration = true;
+    Check(invalid.Validate(error), "Articulation supports asymmetric Z with free Y");
     invalid = loaded;
     PhysicsConstraint second = joint; second.parentBone = joint.childBone; second.childBone = invalid.bodies[2].bone;
     invalid.constraints.push_back(second);
@@ -292,7 +321,32 @@ void RunPhysicsAssetTests()
         std::ofstream output(path);
         output << value.dump();
     };
-    Check(saved.at("version").get<int>() == 5, "Per-body materials use PA version 5");
+    Check(saved.at("version").get<int>() == 6 && !saved["constraints"][0].contains("swingZLimit"),
+        "PA version 6 stores separate Z endpoints without a stale symmetric limit");
+    nlohmann::json legacyLimits = saved;
+    legacyLimits["version"] = 5;
+    for (nlohmann::json& entry : legacyLimits["constraints"])
+    {
+        entry["swingZLimit"] = entry.at("swingZMax");
+        entry.erase("swingZMin");
+        entry.erase("swingZMax");
+    }
+    writeJson(legacyLimits);
+    Check(loaded.Load(path, error) && loaded.constraints[0].swingZMin == -.9f && loaded.constraints[0].swingZMax == .9f,
+        "Legacy v5 Z half-angle loads with exactly the same symmetric bounds");
+    nlohmann::json missingZ = saved;
+    missingZ["constraints"][0].erase("swingZMin");
+    writeJson(missingZ);
+    Check(!loaded.Load(path, error) && loaded.constraints[0].swingZMin == -.9f,
+        "A missing v6 Z endpoint rejects the load without changing the existing PA");
+    missingZ = saved;
+    missingZ["constraints"][0]["swingZMin"] = 1.0f;
+    writeJson(missingZ);
+    Check(!loaded.Load(path, error) && loaded.constraints[0].swingZMax == .9f,
+        "Reversed v6 Z bounds cannot replace the existing PA");
+    writeJson(saved);
+    Check(loaded.Load(path, error) && loaded.constraints[0].swingZMin == -.35f,
+        "Restore the asymmetric Z interval after legacy and invalid loads");
     nlohmann::json corruptMaterial = saved;
     corruptMaterial["bodies"][1]["material"]["frictionCombine"] = "unknown";
     writeJson(corruptMaterial);
@@ -310,7 +364,7 @@ void RunPhysicsAssetTests()
         defaultsLoaded.bodies[1].material.dynamicFriction == .5f && defaultsLoaded.bodies[1].material.restitution == .1f &&
         defaultsLoaded.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Average,
         "Omitted material uses the original shared material values");
-    nlohmann::json legacyMaterial = saved;
+    nlohmann::json legacyMaterial = legacyLimits;
     legacyMaterial["version"] = 4;
     for (nlohmann::json& body : legacyMaterial["bodies"])
     {
@@ -338,7 +392,7 @@ void RunPhysicsAssetTests()
     corruptJoint["constraints"][0]["drives"][0]["type"] = "acceleration";
     writeJson(corruptJoint);
     Check(!loaded.Load(path, error), "Acceleration files must supply frequency and ratio instead of legacy gains");
-    nlohmann::json legacyForce = saved;
+    nlohmann::json legacyForce = legacyLimits;
     legacyForce["version"] = 3;
     legacyForce["driveUnits"] = "Nm-radians-seconds";
     for (nlohmann::json& entry : legacyForce["constraints"])
@@ -352,7 +406,7 @@ void RunPhysicsAssetTests()
     Check(loaded.Load(path, error) && !loaded.constraints[0].drives[0].useAcceleration &&
         loaded.constraints[0].drives[0].GetStiffness() == 135.0f && loaded.constraints[0].drives[0].GetDamping() == 12.0f,
         "Legacy v3 torque gains remain force drives rather than becoming acceleration gains");
-    nlohmann::json legacy = saved;
+    nlohmann::json legacy = legacyLimits;
     legacy["version"] = 2;
     legacy.erase("driveUnits");
     for (nlohmann::json& entry : legacy["constraints"])
@@ -366,7 +420,7 @@ void RunPhysicsAssetTests()
     Check(loaded.Load(path, error) && loaded.bodies.size() == 3 && loaded.constraints.empty(),
         "Legacy version 1 body-only file loads and clears previous joints");
     writeJson(saved);
-    Check(loaded.Load(path, error), "Restore version 5 asset");
+    Check(loaded.Load(path, error), "Restore version 6 asset");
     original.bodies[0].radius = -1;
     Check(!original.Save(path, error), "Reject negative radius before overwriting saved asset");
     Check(loaded.Load(path, error) && loaded.bodies[0].radius == .12f, "Failed save preserves previous file");

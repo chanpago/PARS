@@ -1050,7 +1050,10 @@ void RunActiveRagdollTests()
     Check(Difference(EvaluateJointDriveTarget(hinge, excessive[0], excessive[1] * child.GetLocalTransform()), Quaternion(Vector3(kXUnitVector), .9f)) < .001f,
         "Hinge target respects asymmetric twist endpoints");
     PhysicsConstraint cone;
-    cone.twist = PhysicsJointMotion::Locked; cone.swingYLimit = .45f; cone.swingZLimit = .7f;
+    cone.twist = PhysicsJointMotion::Locked;
+    cone.swingYLimit = .45f;
+    cone.swingZMin = -.7f;
+    cone.swingZMax = .7f;
     const Math::Quaternion diagonal = EvaluateJointDriveTarget(cone, Matrix4(kIdentity), Pose(Vector3(kZero), Quaternion(Normalize(Vector3(0, 1, 1)), 1.5f)));
     XMFLOAT4 q; XMStoreFloat4(&q, diagonal);
     const float y = 4 * std::atan2(q.y, 1 + q.w), z = 4 * std::atan2(q.z, 1 + q.w);
@@ -1139,7 +1142,9 @@ void RunActiveRagdollTests()
     PARS::PhysicsConstraint& ballJoint = ball.constraints[0];
     ballJoint.useSlerpDrive = true;
     ballJoint.swingY = ballJoint.swingZ = PhysicsJointMotion::Limited;
-    ballJoint.swingYLimit = ballJoint.swingZLimit = 1.2f;
+    ballJoint.swingYLimit = 1.2f;
+    ballJoint.swingZMin = -1.2f;
+    ballJoint.swingZMax = 1.2f;
     ballJoint.drives[0] = PhysicsAngularDrive{};
     ballJoint.drives[0].enabled = true;
     ballJoint.drives[0].stiffness = 720;

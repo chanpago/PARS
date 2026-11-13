@@ -414,14 +414,18 @@ namespace PARS
             joint->setMotion(PxD6Axis::eSWING1, Motion(data.swingY));
             joint->setMotion(PxD6Axis::eSWING2, Motion(data.swingZ));
             joint->setTwistLimit(PxJointAngularLimitPair(data.twistMin, data.twistMax));
-            joint->setSwingLimit(PxJointLimitCone(data.swingYLimit, data.swingZLimit));
-            if (data.swingY == PhysicsJointMotion::Limited && data.swingZ == PhysicsJointMotion::Limited)
+            if (!data.HasAsymmetricSwingZLimit())
             {
-                // PhysX는 원뿔과 피라미드 제한을 동시에 지원한다(ExtD6Joint.cpp).
-                // 바깥쪽 경계는 큰 충격에 대응하는 솔버 제약 행을 추가한다.
-                // 타원을 줄이거나 에디터에 표시되는 원뿔을 변경하지는 않는다.
+                const float swingZHalfRange = (data.swingZMax - data.swingZMin) * .5f;
+                joint->setSwingLimit(PxJointLimitCone(data.swingYLimit, swingZHalfRange));
+            }
+            if (data.HasAsymmetricSwingZLimit() ||
+                (data.swingY == PhysicsJointMotion::Limited && data.swingZ == PhysicsJointMotion::Limited))
+            {
+                // 비대칭 Z는 축별 최소·최대 경계를 사용한다.
+                // 대칭인 기존 PA는 원뿔과 바깥쪽 보조 경계를 함께 유지한다.
                 joint->setPyramidSwingLimit(PxJointLimitPyramid(
-                    -data.swingYLimit, data.swingYLimit, -data.swingZLimit, data.swingZLimit));
+                    -data.swingYLimit, data.swingYLimit, data.swingZMin, data.swingZMax));
             }
             joint->setConstraintFlag(PxConstraintFlag::eCOLLISION_ENABLED, data.enableCollision);
             joint->setConstraintFlag(PxConstraintFlag::eVISUALIZATION, true);
@@ -851,8 +855,8 @@ namespace PARS
             if (m_Articulation)
             {
                 const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
-                const float lower[] = {data.twistMin, -data.swingYLimit, -data.swingZLimit};
-                const float upper[] = {data.twistMax, data.swingYLimit, data.swingZLimit};
+                const float lower[] = {data.twistMin, -data.swingYLimit, data.swingZMin};
+                const float upper[] = {data.twistMax, data.swingYLimit, data.swingZMax};
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     const float position = m_ArticulationJoints[i]->getJointPosition(PxArticulationAxis::Enum(axis));
@@ -883,14 +887,16 @@ namespace PARS
             {
                 result = PxMax(result, PxMax(data.twistMin - twist, twist - data.twistMax));
             }
-            if (data.swingY == PhysicsJointMotion::Limited && data.swingZ == PhysicsJointMotion::Limited)
+            if (data.swingY == PhysicsJointMotion::Limited && data.swingZ == PhysicsJointMotion::Limited &&
+                !data.HasAsymmetricSwingZLimit())
             {
                 // 각 좌표가 개별 제한 이내여도 대각선 스윙은 실제 타원형 원뿔을 벗어날 수 있다.
                 // 이 SDK의 ConeLimitHelperTanLess가 사용하는 각도 타원을 기준으로
                 // 방사 방향의 각도 초과량을 측정한다.
                 // 이는 오차 지표이며 솔버의 접촉 법선은 아니다.
                 const float y = joint->getSwingYAngle(), z = joint->getSwingZAngle();
-                const float ny = y / data.swingYLimit, nz = z / data.swingZLimit;
+                const float ny = y / data.swingYLimit;
+                const float nz = z / data.swingZMax;
                 const float ellipseRadius = std::sqrt(ny * ny + nz * nz);
                 if (ellipseRadius > 1)
                 {
@@ -910,7 +916,10 @@ namespace PARS
                 }
                 if (data.swingZ != PhysicsJointMotion::Free)
                 {
-                    result = PxMax(result, PxAbs(joint->getSwingZAngle()) - (data.swingZ == PhysicsJointMotion::Locked ? 0 : data.swingZLimit));
+                    const float angle = joint->getSwingZAngle();
+                    const float lower = data.swingZ == PhysicsJointMotion::Locked ? 0 : data.swingZMin;
+                    const float upper = data.swingZ == PhysicsJointMotion::Locked ? 0 : data.swingZMax;
+                    result = PxMax(result, PxMax(lower - angle, angle - upper));
                 }
             }
             if (worstJoint && result > previous)

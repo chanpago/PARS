@@ -95,7 +95,7 @@ namespace PARS
             result.angles = {vector.x, vector.y, vector.z};
             result.excess[0] = AxisExcess(vector.x, joint.twist, joint.twistMin, joint.twistMax);
             result.excess[1] = AxisExcess(vector.y, joint.swingY, -joint.swingYLimit, joint.swingYLimit);
-            result.excess[2] = AxisExcess(vector.z, joint.swingZ, -joint.swingZLimit, joint.swingZLimit);
+            result.excess[2] = AxisExcess(vector.z, joint.swingZ, joint.swingZMin, joint.swingZMax);
             return result;
         }
         Quaternion q = Normalize(rotation);
@@ -121,12 +121,13 @@ namespace PARS
             4 * std::atan2(swing.y, 1 + swing.w), 4 * std::atan2(swing.z, 1 + swing.w)};
         result.excess[0] = AxisExcess(result.angles[0], joint.twist, joint.twistMin, joint.twistMax);
         result.excess[1] = AxisExcess(result.angles[1], joint.swingY, -joint.swingYLimit, joint.swingYLimit);
-        result.excess[2] = AxisExcess(result.angles[2], joint.swingZ, -joint.swingZLimit, joint.swingZLimit);
-        if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited)
+        result.excess[2] = AxisExcess(result.angles[2], joint.swingZ, joint.swingZMin, joint.swingZMax);
+        if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited &&
+            !joint.HasAsymmetricSwingZLimit())
         {
             const float y = result.angles[1], z = result.angles[2];
             const float radius = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) +
-                z * z / (joint.swingZLimit * joint.swingZLimit));
+                z * z / (joint.swingZMax * joint.swingZMax));
             if (radius > 1)
             {
                 result.excess[3] = std::sqrt(y * y + z * z) * (1 - 1 / radius);

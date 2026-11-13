@@ -81,7 +81,8 @@ namespace PARS
                 Invert(parentBody) * Matrix4(parentNeutral * Matrix3(rotation), pivot));
             joint.childFrame = PhysicsJointFrame::FromTransform(Invert(childBody) * Matrix4(childNeutral, pivot));
             joint.swingYLimit = XMConvertToRadians(cone.halfY);
-            joint.swingZLimit = XMConvertToRadians(cone.halfZ);
+            joint.swingZMin = -XMConvertToRadians(cone.halfZ);
+            joint.swingZMax = XMConvertToRadians(cone.halfZ);
             joint.twistMin = XMConvertToRadians(twistMin);
             joint.twistMax = XMConvertToRadians(twistMax);
         }
@@ -131,8 +132,8 @@ namespace PARS
         XMStoreFloat3(&position, JointRotationVector(rotation));
         float values[] = {position.x, position.y, position.z};
         const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
-        const float lower[] = {joint.twistMin, -joint.swingYLimit, -joint.swingZLimit};
-        const float upper[] = {joint.twistMax, joint.swingYLimit, joint.swingZLimit};
+        const float lower[] = {joint.twistMin, -joint.swingYLimit, joint.swingZMin};
+        const float upper[] = {joint.twistMax, joint.swingYLimit, joint.swingZMax};
         for (int axis = 0; axis < 3; ++axis)
         {
             if (motions[axis] == PhysicsJointMotion::Locked)
@@ -215,13 +216,14 @@ namespace PARS
         }
         else if (joint.swingZ == PhysicsJointMotion::Limited)
         {
-            z = std::max(-joint.swingZLimit, std::min(joint.swingZLimit, z));
+            z = std::max(joint.swingZMin, std::min(joint.swingZMax, z));
         }
-        if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited)
+        if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited &&
+            !joint.HasAsymmetricSwingZLimit())
         {
             // 스윙 각도 좌표에서 PhysX ConeLimitHelperTanLess의 타원과 일치하도록 처리한다.
             // 각 축을 따로 제한하는 것만으로는 대각선 방향의 범위 초과를 잡을 수 없다.
-            const float r = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) + z * z / (joint.swingZLimit * joint.swingZLimit));
+            const float r = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) + z * z / (joint.swingZMax * joint.swingZMax));
             if (r > 1)
             {
                 y /= r;

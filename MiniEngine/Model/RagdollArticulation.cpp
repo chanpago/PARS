@@ -228,8 +228,8 @@ namespace PARS
                 // 현재 PhysX의 구면 관절은 회전 벡터 좌표와 축별 제한을 쓴다.
                 const PxVec3 position = RotationVector((parentLink->getGlobalPose() * parentFrame).q.getConjugate() * (pose * childFrame).q);
                 const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
-                const float lower[] = {data.twistMin, -data.swingYLimit, -data.swingZLimit};
-                const float upper[] = {data.twistMax, data.swingYLimit, data.swingZLimit};
+                const float lower[] = {data.twistMin, -data.swingYLimit, data.swingZMin};
+                const float upper[] = {data.twistMax, data.swingYLimit, data.swingZMax};
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     // 잠긴 축도 3축 구면 관절의 내부 제한으로 처리해 회전 좌표의 순서를 유지한다.

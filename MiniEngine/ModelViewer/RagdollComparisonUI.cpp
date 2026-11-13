@@ -381,8 +381,8 @@ void RagdollComparisonRunner::DrawJointResults()
         m_FollowLatest = false;
     }
     const PhysicsJointMotion motions[] = {config.twist, config.swingY, config.swingZ};
-    const float minimum[] = {config.twistMin, -config.swingYLimit, -config.swingZLimit};
-    const float maximum[] = {config.twistMax, config.swingYLimit, config.swingZLimit};
+    const float minimum[] = {config.twistMin, -config.swingYLimit, config.swingZMin};
+    const float maximum[] = {config.twistMax, config.swingYLimit, config.swingZMax};
     if (ImGui::BeginTable("Axis values", 10, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollX))
     {
         const char* headers[] = {u8"축", u8"허용 범위 (도)", u8"원본 (도)", u8"보정 목표 (도)", u8"실제 (도)",
@@ -401,7 +401,9 @@ void RagdollComparisonRunner::DrawJointResults()
             ImGui::TableNextColumn();
             if (axis == 3)
             {
-                ImGui::TextUnformatted(config.swingY == PhysicsJointMotion::Limited && config.swingZ == PhysicsJointMotion::Limited ? u8"두 축 타원 제한" : u8"적용 안 됨");
+                const bool cone = !asset.UsesArticulation() && !config.HasAsymmetricSwingZLimit() &&
+                    config.swingY == PhysicsJointMotion::Limited && config.swingZ == PhysicsJointMotion::Limited;
+                ImGui::TextUnformatted(cone ? u8"두 축 타원 제한" : u8"적용 안 됨");
             }
             else if (motions[axis] == PhysicsJointMotion::Limited)
             {

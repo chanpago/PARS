@@ -318,6 +318,7 @@ namespace PARS
             error = "Too many physics joints.";
             return false;
         }
+        const bool articulation = UsesArticulation();
         std::set<std::pair<std::string, std::string>> pairs;
         for (const PARS::PhysicsConstraint& joint : constraints)
         {
@@ -359,12 +360,16 @@ namespace PARS
                 error = "SLERP drive requires all three angular axes unlocked.";
             }
             if (!std::isfinite(joint.twistMin) || !std::isfinite(joint.twistMax) ||
-                !std::isfinite(joint.swingYLimit) || !std::isfinite(joint.swingZLimit) ||
+                !std::isfinite(joint.swingYLimit) || !std::isfinite(joint.swingZMin) || !std::isfinite(joint.swingZMax) ||
                 joint.twistMin <= -DirectX::XM_PI || joint.twistMax >= DirectX::XM_PI || joint.twistMin >= joint.twistMax ||
                 joint.swingYLimit <= 0 || joint.swingYLimit >= DirectX::XM_PI ||
-                joint.swingZLimit <= 0 || joint.swingZLimit >= DirectX::XM_PI)
+                joint.swingZMin <= -DirectX::XM_PI || joint.swingZMax >= DirectX::XM_PI || joint.swingZMin >= joint.swingZMax)
             {
                 error = "Invalid joint angular limits (radians, strictly between -pi and pi).";
+            }
+            if (!articulation && joint.HasAsymmetricSwingZLimit() && joint.swingY == PhysicsJointMotion::Free)
+            {
+                error = u8"D6의 비대칭 Z 제한에는 Y축 잠금 또는 제한이 필요합니다.";
             }
             if (!error.empty())
             {
@@ -386,7 +391,7 @@ namespace PARS
             const std::wstring destination = WidePath(path);
             temporary = destination + L".tmp";
             json root;
-            root["version"] = 5;
+            root["version"] = 6;
             root["driveUnits"] = "mode-dependent-radians-seconds-Nm";
             root["units"] = "metres";
             root["angleUnits"] = "radians";
@@ -424,7 +429,8 @@ namespace PARS
                 entry["twistMin"] = joint.twistMin;
                 entry["twistMax"] = joint.twistMax;
                 entry["swingYLimit"] = joint.swingYLimit;
-                entry["swingZLimit"] = joint.swingZLimit;
+                entry["swingZMin"] = joint.swingZMin;
+                entry["swingZMax"] = joint.swingZMax;
                 entry["enableCollision"] = joint.enableCollision;
                 entry["driveMode"] = joint.useSlerpDrive ? "slerp" : "swingTwist";
                 entry["drives"] = json::array();
@@ -478,7 +484,7 @@ namespace PARS
             json root;
             input >> root;
             const int version = root.at("version").get<int>();
-            if ((version < 1 || version > 5) || root.at("units").get<std::string>() != "metres")
+            if ((version < 1 || version > 6) || root.at("units").get<std::string>() != "metres")
             {
                 throw std::runtime_error("Unsupported PhysicsAsset version or units.");
             }
@@ -559,7 +565,18 @@ namespace PARS
                     joint.twistMin = entry.at("twistMin").get<float>();
                     joint.twistMax = entry.at("twistMax").get<float>();
                     joint.swingYLimit = entry.at("swingYLimit").get<float>();
-                    joint.swingZLimit = entry.at("swingZLimit").get<float>();
+                    if (version >= 6)
+                    {
+                        joint.swingZMin = entry.at("swingZMin").get<float>();
+                        joint.swingZMax = entry.at("swingZMax").get<float>();
+                    }
+                    else
+                    {
+                        // 이전 PA의 대칭 반각을 같은 최소·최대 범위로 읽는다.
+                        const float swingZLimit = entry.at("swingZLimit").get<float>();
+                        joint.swingZMin = -swingZLimit;
+                        joint.swingZMax = swingZLimit;
+                    }
                     joint.enableCollision = entry.at("enableCollision").get<bool>();
                     if (version >= 3)
                     {

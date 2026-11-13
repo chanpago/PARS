@@ -172,6 +172,7 @@ namespace
 void RunWorldTests();
 void RunCharacterMovementTests();
 void RunPhysicsAssetTests();
+void RunJointLimitTests();
 void RunRagdollTests();
 void RunAnatomicalLimitTests();
 void RunActiveRagdollTests();
@@ -187,6 +188,13 @@ void RunSupportAnkleDriveTests();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--joint-limits-only") == 0)
+    {
+        RunPhysicsAssetTests();
+        RunJointLimitTests();
+        RunRagdollComparisonTests();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--flail-only") == 0)
     {
         RunRecoveryFlailTests();
@@ -247,6 +255,7 @@ int main(int argc, char** argv)
     RunRagdollReuseTests(true);
     RunAnatomicalLimitTests();
     RunActiveRagdollTests();
+    RunJointLimitTests();
     RunSupportAnkleDriveTests();
     RunRagdollComparisonTests();
     return 0;

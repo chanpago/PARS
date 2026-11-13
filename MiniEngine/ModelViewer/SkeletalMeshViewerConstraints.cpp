@@ -262,7 +262,7 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     ImGui::TextDisabled(articulation ? u8"위치 잠금 | 회전 벡터 X/Y/Z" : u8"위치 잠금 | X 트위스트, Y/Z 스윙");
     ImGui::TextWrapped(articulation ?
         u8"Articulation은 부모 관절 좌표계에서 상대 회전을 회전 벡터 X/Y/Z로 나누어 제한합니다. 부채꼴은 각 축만 회전할 때의 범위이며, 세 축을 함께 회전할 때의 전체 허용 영역을 뜻하지 않습니다." :
-        u8"스윙 값은 부모 좌표계 기준 원뿔의 반각입니다. 좌표계 회전에 따라 허용 범위가 치우칠 수 있어 0도가 기준 자세와 같지 않을 수 있습니다. 두 좌표계를 함께 이동하면 이 보정을 유지합니다.");
+        u8"스윙 범위는 부모 관절 좌표계 기준입니다. Z 최소·최대가 대칭이면 원뿔, 비대칭이면 축별 경계를 사용합니다. 0도가 기준 자세와 같지 않을 수 있으며 두 좌표계를 함께 이동하면 이 보정을 유지합니다.");
     changed |= EditMotion(articulation ? u8"회전 X" : u8"트위스트 X", joint.twist);
     ImGui::BeginDisabled(joint.twist != PhysicsJointMotion::Limited);
     changed |= EditAngle(u8"최소각", joint.twistMin, -179.9f, XMConvertToDegrees(joint.twistMax) - .1f);
@@ -274,7 +274,8 @@ void SkeletalMeshViewer::DrawConstraintPanel()
     ImGui::EndDisabled();
     changed |= EditMotion(articulation ? u8"회전 Z" : u8"스윙 Z", joint.swingZ);
     ImGui::BeginDisabled(joint.swingZ != PhysicsJointMotion::Limited);
-    changed |= EditAngle(u8"Z 제한각", joint.swingZLimit, .1f, 179.9f);
+    changed |= EditAngle(u8"Z 최소각", joint.swingZMin, -179.9f, XMConvertToDegrees(joint.swingZMax) - .1f);
+    changed |= EditAngle(u8"Z 최대각", joint.swingZMax, XMConvertToDegrees(joint.swingZMin) + .1f, 179.9f);
     ImGui::EndDisabled();
     ImGui::BeginDisabled(articulation);
     changed |= ImGui::Checkbox(u8"연결된 바디끼리 충돌", &joint.enableCollision);
