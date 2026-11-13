@@ -438,7 +438,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         ImGui::TextWrapped(u8"밝은 파랑 윤곽: 최종 착지 발바닥 위치·크기 / 화살표: 발끝 방향. 새 목표 계산이 잠시 멈춰도 마지막 착지 목표를 유지합니다.");
         ImGui::Text(u8"상태: %s", PARS::FootstepPhaseLabel(step.phase));
         ImGui::TextWrapped(u8"사유: %s", PARS::FootstepReasonLabel(step.reason));
-        ImGui::Text(u8"빨강 지지발: %s / 파랑 이동 가능 발: %s",
+        ImGui::Text(u8"빨강 지지발: %s / 파랑 이동발: %s",
             FootLabel(displayRoles.supportFoot), FootLabel(displayRoles.movableFoot));
         ImGui::Text(u8"발딛기 역할 고정: %s / 거리 기준 이동 후보: %s", roles.locked ? "ON" : "OFF", FootLabel(step.rawBlueFoot));
         if (step.transfer.active && !step.IsInProgress())
@@ -490,6 +490,16 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             else
             {
                 ImGui::Text(u8"%s 후보: %s", FootLabel(static_cast<int>(side)), PARS::FootstepReasonLabel(target.reason));
+                if (target.reason == PARS::FootstepReason::InsufficientTime && target.reachability.requiredDuration > 0)
+                {
+                    ImGui::Text(u8"  가장 짧은 필요 시간 추정 %.3fs / 이동 시간 %.3fs",
+                        target.reachability.requiredDuration, settings.stepDuration);
+                }
+                else if (target.reason == PARS::FootstepReason::MinimumDistanceConflict)
+                {
+                    ImGui::Text(u8"  현재 발과 예측 COM 사이에 지지발 최소거리 %.1fcm를 확보할 지점이 없습니다.",
+                        settings.minimumStanceDistance * 100);
+                }
             }
         }
         if (step.IsInProgress())

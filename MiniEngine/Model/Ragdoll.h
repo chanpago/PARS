@@ -210,6 +210,7 @@ namespace PARS
         physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
         bool GetBodyDynamics(size_t body, float& mass, physx::PxVec3& inertia,
             physx::PxTransform& center, physx::PxVec3& angularVelocity) const;
+        float GetJointDriveMaxTorque(size_t joint, size_t axis) const;
         float GetImpactRootMass() const;
         float GetCharacterCapsuleMass() const;
         void GetCharacterCapsuleContacts(std::vector<PhysicsCapsuleContact>& contacts) const;

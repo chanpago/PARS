@@ -320,7 +320,13 @@ namespace PARS
                     {
                         continue;
                     }
-                    const float torqueAcceleration = (std::max)(0.0f, drive.maxTorque - PxAbs(gravityTorque)) / inertia;
+                    // 설정 파일의 값 대신 현재 물리 모터에 적용된 상한을 읽는다.
+                    // 토크 제한을 해제한 구동을 계획 단계에서 다시 제한하지 않는다.
+                    const float maximumTorque = m_Ragdoll.GetJointDriveMaxTorque(
+                        static_cast<size_t>(constraintIndex), axis);
+                    const float torqueAcceleration = maximumTorque == PX_MAX_F32 ?
+                        settings.maximumJointAcceleration :
+                        (std::max)(0.0f, maximumTorque - PxAbs(gravityTorque)) / inertia;
                     const float responseAcceleration = drive.useAcceleration ?
                         drive.GetStiffness() : drive.GetStiffness() / inertia;
                     planning.jointAccelerations[side][joint][axis] = (std::min)(settings.maximumJointAcceleration,

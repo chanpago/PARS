@@ -152,6 +152,7 @@ namespace
         }
         float rejectedFraction = 1.0f;
         float acceptedFraction = -1.0f;
+        FootstepReachability shortestRejected;
         bool timeRejected = false;
         const std::function<bool(float)> evaluate = [&](float fraction) -> bool
         {
@@ -165,7 +166,16 @@ namespace
                 (std::max)(settings.minimumLiftHeight, distance * settings.liftHeightScale));
             const FootstepReachability reach = input.evaluateReachability(
                 side, position, normal, settings.stepDuration, liftHeight);
-            timeRejected = timeRejected || reach.timeLimited;
+            if (reach.timeLimited || reach.requiredDuration > settings.stepDuration + 1e-6f)
+            {
+                timeRejected = true;
+                // 시작하지 못한 경우에도 가장 짧은 시간 추정치를 남겨 중단 원인을 확인한다.
+                if (std::isfinite(reach.requiredDuration) && reach.requiredDuration > 0 &&
+                    (shortestRejected.requiredDuration <= 0 || reach.requiredDuration < shortestRejected.requiredDuration))
+                {
+                    shortestRejected = reach;
+                }
+            }
             if (!reach.reachable || !reach.pelvisStart.isSane() || !reach.pelvisTarget.isSane() ||
                 !std::isfinite(reach.requiredDuration) || reach.requiredDuration < 0)
             {
@@ -197,6 +207,7 @@ namespace
         if (acceptedFraction < 0)
         {
             result.reason = timeRejected ? FootstepReason::InsufficientTime : FootstepReason::Unreachable;
+            result.reachability = shortestRejected;
             return result;
         }
         if (acceptedFraction < 1.0f)
@@ -234,12 +245,13 @@ FootstepRoles FootstepSnapshot::GetRoles() const
         const FootstepRoles roles{transfer.supportFoot, 1 - transfer.supportFoot, !transfer.ready};
         return roles.IsValid() ? roles : FootstepRoles{};
     }
-    if (phase == FootstepPhase::Idle && rawBlueFoot >= 0 && rawBlueFoot < 2 && candidates[rawBlueFoot].valid)
+    if (phase == FootstepPhase::Idle && hasPrediction && rawBlueFoot >= 0 && rawBlueFoot < 2 &&
+        supportFoot == 1 - rawBlueFoot)
     {
-        // 대기 중에는 반대 발의 실제 지지를 확인한 이동 후보만 역할로 표시한다.
+        // 접지와 COM으로 고른 역할은 착지 후보의 성공 여부와 별개로 표시한다.
         return FootstepRoles{1 - rawBlueFoot, rawBlueFoot, false};
     }
-    // 중단·비활성·유효 후보 없음 상태에서 이전 발을 이동 가능한 발로 표시하지 않는다.
+    // 중단·비활성·판단 정보 없음 상태에서 이전 역할을 표시하지 않는다.
     return FootstepRoles{};
 }
 

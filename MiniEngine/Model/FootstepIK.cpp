@@ -413,6 +413,26 @@ namespace
         return limit > 1e-6f ? std::sqrt(acceleration / limit) : PX_MAX_F32;
     }
 
+    float EstimateJointTravelDuration(float travel, float initialVelocity, float speedLimit, float accelerationLimit)
+    {
+        const float speed = PxAbs(initialVelocity);
+        if (travel <= 1e-5f && speed <= 1e-4f)
+        {
+            return 0;
+        }
+        if (accelerationLimit <= 1e-6f)
+        {
+            return PX_MAX_F32;
+        }
+        // 현재 속도의 제동 여유와 전체 관절 이동량으로 시간을 추정한다.
+        // 서로 다른 IK 해의 차분을 실제 가속도로 취급하면 출발 직후 모든 후보가 탈락할 수 있다.
+        const float brakingTime = speed / accelerationLimit;
+        const float distance = travel + .5f * speed * brakingTime;
+        const float motionTime = (std::max)(1.5f * distance / speedLimit,
+            std::sqrt(6.0f * distance / accelerationLimit));
+        return brakingTime + motionTime;
+    }
+
     FootstepReachability EvaluatePelvisPlan(const FootstepPlanningInput& input,
         const FootstepSettings& settings, size_t moving, const PxVec3& position,
         const PxVec3& normal, float duration, float liftHeight, const PxTransform& pelvisTarget)
@@ -456,10 +476,9 @@ namespace
         }
         // 끝점뿐 아니라 들어 올리고 내려놓는 궤적 전체를 같은 제한 IK로 검사한다.
         constexpr size_t Samples = 8;
-        const float dt = duration / static_cast<float>(Samples);
         std::array<LegIKResult, 2> previous;
         std::array<std::array<PxQuat, 3>, 2> rotations;
-        std::array<std::array<PxVec3, 3>, 2> velocities = input.jointVelocities;
+        std::array<std::array<PxVec3, 3>, 2> travels;
         for (size_t side = 0; side < input.legs.size(); ++side)
         {
             PxTransform parent = input.legs[side].actualAnchor;
@@ -467,7 +486,18 @@ namespace
             {
                 rotations[side][joint] = ((parent.q * input.legs[side].joints[joint].parentInBone.q).getConjugate() *
                     input.bones[side][joint].q * input.legs[side].joints[joint].childInBone.q).getNormalized();
+                travels[side][joint] = PxVec3(0);
                 parent = input.bones[side][joint];
+            }
+            // 첫 샘플도 실제 관절 자세에서 이어 풀어 불필요한 해 전환을 줄인다.
+            previous[side].jointRotations = rotations[side];
+            previous[side].valid = true;
+            previous[side].jointLimitsApplied = true;
+            PxVec3 direction = input.bones[side][2].p - input.bones[side][0].p;
+            PxVec3 bend = input.bones[side][1].p - input.bones[side][0].p;
+            if (Unit(direction) && ProjectHint(bend, direction))
+            {
+                previous[side].bendDirection = bend;
             }
         }
 
@@ -500,11 +530,8 @@ namespace
                 }
                 for (size_t joint = 0; joint < 3; ++joint)
                 {
-                    const PxVec3 velocity = RotationVector(
-                        solved.jointRotations[joint] * rotations[side][joint].getConjugate()) / dt;
-                    // 첫 구간과 마지막 구간은 현재 속도 및 착지 정지까지의 제동도 포함한다.
-                    const float interval = sample == 1 ? dt * .5f : dt;
-                    const PxVec3 acceleration = (velocity - velocities[side][joint]) / interval;
+                    const PxVec3 rotationDelta = RotationVector(
+                        solved.jointRotations[joint] * rotations[side][joint].getConjugate());
                     for (size_t axis = 0; axis < 3; ++axis)
                     {
                         // 잠긴 축의 작은 실제 오차는 물리 구속이 복원하며 구동 이동 시간에 포함하지 않는다.
@@ -512,19 +539,15 @@ namespace
                         {
                             continue;
                         }
-                        timeScale = (std::max)(timeScale, PxAbs(velocity[axis]) / settings.maximumJointSpeed);
+                        travels[side][joint][axis] += PxAbs(rotationDelta[axis]);
                         const float limit = (std::min)(settings.maximumJointAcceleration,
                             input.jointAccelerations[side][joint][axis]);
-                        timeScale = (std::max)(timeScale,
-                            AccelerationTimeScale(PxAbs(acceleration[axis]), limit));
-                        if (sample == Samples)
-                        {
-                            timeScale = (std::max)(timeScale,
-                                AccelerationTimeScale(2.0f * PxAbs(velocity[axis]) / dt, limit));
-                        }
+                        const float requiredDuration = EstimateJointTravelDuration(travels[side][joint][axis],
+                            input.jointVelocities[side][joint][axis], settings.maximumJointSpeed, limit);
+                        timeScale = (std::max)(timeScale, requiredDuration < PX_MAX_F32 * (std::min)(duration, 1.0f) ?
+                            requiredDuration / duration : PX_MAX_F32);
                     }
                     rotations[side][joint] = solved.jointRotations[joint];
-                    velocities[side][joint] = velocity;
                 }
                 previous[side] = solved;
             }
@@ -614,13 +637,23 @@ FootstepReachability PARS::EvaluateFootstepReachability(const FootstepPlanningIn
     const float sign = PxAbs(heading) > 1e-4f ? (heading > 0 ? 1.0f : -1.0f) :
         (side == 0 ? 1.0f : -1.0f);
     const PxVec3 tiltAxis = PxVec3(0, 1, 0).cross(direction).getNormalized();
+    const float rotationBudget = (std::min)(settings.maximumPelvisAngularSpeed * duration / 1.5f,
+        settings.maximumPelvisAngularAcceleration * duration * duration / 6.0f);
+    const float yawLimit = (std::min)(settings.maximumPelvisYaw, rotationBudget);
+    const float tiltLimit = (std::min)(settings.maximumPelvisTilt, rotationBudget);
     const std::array<float, 9> yawScales{0, .5f, 1, -.5f, -1, 0, .5f, 1, -.5f};
     const std::array<float, 9> tiltScales{0, 0, 0, 0, 0, 1, 1, 1, 1};
     for (size_t attempt = 0; attempt < yawScales.size(); ++attempt)
     {
-        const PxQuat yaw(yawScales[attempt] * sign * settings.maximumPelvisYaw, PxVec3(0, 1, 0));
-        const PxQuat tilt(tiltScales[attempt] * settings.maximumPelvisTilt, tiltAxis);
+        const PxQuat yaw(yawScales[attempt] * sign * yawLimit, PxVec3(0, 1, 0));
+        const PxQuat tilt(tiltScales[attempt] * tiltLimit, tiltAxis);
         target.q = (tilt * yaw * start.q).getNormalized();
+        // 고정된 큰 각도만 시도하면 짧은 시간 예산에서 모든 회전 보조가 탈락한다.
+        const float angle = RotationVector(target.q * start.q.getConjugate()).magnitude();
+        if (angle > rotationBudget)
+        {
+            target.q = InterpolateRotation(start.q, target.q, rotationBudget / angle);
+        }
         const FootstepReachability candidate = EvaluatePelvisPlan(
             input, settings, side, position, normal, duration, liftHeight, target);
         if (candidate.reachable && (!best.reachable || candidate.requiredDuration < best.requiredDuration))

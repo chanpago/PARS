@@ -36,6 +36,39 @@ namespace PARS
     }
 #endif
 
+    float Ragdoll::GetJointDriveMaxTorque(size_t joint, size_t axis) const
+    {
+#if defined(_M_X64)
+        if (!m_DrivesEnabled || joint >= m_Asset.constraints.size() || axis >= 3)
+        {
+            return 0;
+        }
+        if (m_Articulation)
+        {
+            if (joint >= m_ArticulationJoints.size() || !m_ArticulationJoints[joint])
+            {
+                return 0;
+            }
+            const std::array<PxArticulationAxis::Enum, 3> axes{
+                PxArticulationAxis::eTWIST, PxArticulationAxis::eSWING1, PxArticulationAxis::eSWING2};
+            const PxArticulationDrive drive = m_ArticulationJoints[joint]->getDriveParams(axes[axis]);
+            return drive.stiffness > 0 ? drive.maxForce : 0;
+        }
+        if (joint < m_Joints.size() && m_Joints[joint])
+        {
+            const std::array<PxD6Drive::Enum, 3> axes{
+                PxD6Drive::eTWIST, PxD6Drive::eSWING1, PxD6Drive::eSWING2};
+            const PxD6Drive::Enum index = m_Asset.constraints[joint].useSlerpDrive ? PxD6Drive::eSLERP : axes[axis];
+            const PxD6JointDrive drive = m_Joints[joint]->getDrive(index);
+            return drive.stiffness > 0 ? drive.forceLimit : 0;
+        }
+#else
+        (void)joint;
+        (void)axis;
+#endif
+        return 0;
+    }
+
     void Ragdoll::SetDrivesEnabled(bool enabled)
     {
         m_DrivesEnabled = enabled && IsSimulating();
