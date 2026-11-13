@@ -42,6 +42,10 @@ bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>* models,
         }
     }
     m_Mesh->GetAnimInstance().PlayAnimation(0);
+    // 관절 편집은 애니메이션을 멈추고 기준 T포즈에서 시작한다.
+    m_Mesh->GetAnimInstance().SetPlaying(false);
+    const Model& model = *m_Mesh->GetSkeletalMesh();
+    m_EditPose.assign(model.m_SceneGraph.get(), model.m_SceneGraph.get() + model.m_NumNodes);
     BuildSkeleton();
     m_World.BeginPlay();
     m_World.Tick(0);
