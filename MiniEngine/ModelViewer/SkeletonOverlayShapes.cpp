@@ -24,18 +24,6 @@ namespace
         return Vector3(kXUnitVector);
     }
 
-    Vector3 GetSwingZDisplayReference(const PARS::PhysicsConstraint& joint)
-    {
-        const std::string::size_type colon = joint.childBone.find_last_of(':');
-        const char* bone = joint.childBone.c_str() + (colon == std::string::npos ? 0 : colon + 1);
-        if (std::strcmp(bone, "LeftFoot") == 0 || std::strcmp(bone, "RightFoot") == 0)
-        {
-            // 발목의 Z 회전은 아래쪽인 로컬 -Y를 부채꼴과 바늘의 0도 기준으로 사용한다.
-            return Vector3(0, -1, 0);
-        }
-        return Vector3(kXUnitVector);
-    }
-
     constexpr uint32_t BoxVertices = 36;
     constexpr int CapsuleSides = 32, CapsuleHemisphere = 10, CapsuleRings = CapsuleHemisphere * 2 + 1;
     constexpr uint32_t CapsuleVertices = CapsuleSides * CapsuleRings * 6;
@@ -110,10 +98,10 @@ void SkeletonOverlay::ConstraintLimits(const PARS::PhysicsConstraint& joint, con
     {
         const Math::Vector3 angles = PARS::JointRotationVector(relative);
         const Vector3 swingYReference = GetSwingYDisplayReference(joint);
-        const Vector3 swingZReference = GetSwingZDisplayReference(joint);
         pointer(Quaternion(x, angles.GetX()) * twistReference, .062f);
         pointer(Quaternion(y, angles.GetY()) * swingYReference, .08f);
-        pointer(Quaternion(z, angles.GetZ()) * swingZReference, .1f);
+        // Z 회전의 바늘과 부채꼴은 로컬 +X를 공유하며, 발목에서는 정강이 아래쪽이다.
+        pointer(Quaternion(z, angles.GetZ()) * x, .1f);
         return;
     }
     pointer(relative * x, .1f);
@@ -182,8 +170,7 @@ void SkeletonOverlay::BuildConstraintGeometry(const PARS::PhysicsConstraint& joi
         const float highs[] = {joint.twistMax, joint.swingYLimit, joint.swingZMax};
         const Vector3 axes[] = {x, y, z};
         const Vector3 swingYReference = GetSwingYDisplayReference(joint);
-        const Vector3 swingZReference = GetSwingZDisplayReference(joint);
-        const Vector3 starts[] = {twistReference * .062f, swingYReference * .08f, swingZReference * radius};
+        const Vector3 starts[] = {twistReference * .062f, swingYReference * .08f, x * radius};
         const Vector3 colors[] = {red, green, Vector3(.3f, .55f, 1)};
         for (int axis = 0; axis < 3; ++axis)
         {
