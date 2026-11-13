@@ -736,14 +736,11 @@ namespace PARS
             else if (step.motion.valid && step.stepFoot >= 0 && step.stepFoot < 2)
             {
                 PxTransform sole(PxIdentity);
-
-                /*
-				step.motion.position : 발딛기 궤적에 따라 계산된 발바닥 위치
-				step.targetNormal : 목표 발바닥의 위 방향을 정할 지면 법선
-				animatedSoles[step.stepFoot] : 발의 전방 방향을 얻을 애니메이션 기준 자세
-                sole : 계산 결과를 받을 위치,회전 변환
-                */
-                if (MakeFootSoleTarget(step.motion.position, step.targetNormal, animatedSoles[step.stepFoot], sole))
+                // 플래너가 위치와 함께 확정한 수평 방향을 사용해 착지 잠금 이후에도 회전을 유지한다.
+                const float targetYaw = std::atan2(step.targetForward.x, step.targetForward.z);
+                const PxTransform directedSole(PxVec3(0), PxQuat(targetYaw, PxVec3(0, 1, 0)));
+                // 회전된 Idle 발끝 방향에 실제 지면 법선을 적용하고 이동발의 IK 목표만 갱신한다.
+                if (MakeFootSoleTarget(step.motion.position, step.targetNormal, directedSole, sole))
                 {
                     // 성공하면 이동할 발의 목표를 갱신
                     m_RecoverySoles[step.stepFoot] = sole;

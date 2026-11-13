@@ -48,7 +48,7 @@ namespace
             return result;
         }
         if (!foot.available || !stance.available || !foot.position.isFinite() ||
-            !stance.position.isFinite() || !foot.stanceOffset.isFinite())
+            !stance.position.isFinite() || !foot.stanceOffset.isFinite() || !foot.stanceForward.isFinite())
         {
             return result;
         }
@@ -68,6 +68,14 @@ namespace
         {
             return result;
         }
+        PxVec3 forward = foot.stanceForward;
+        forward.y = 0;
+        const float forwardLength = forward.magnitude();
+        if (!std::isfinite(forwardLength) || forwardLength <= 1e-6f)
+        {
+            return result;
+        }
+        forward /= forwardLength;
 
         // 기울어진 지지발 중심의 높이를 지면 높이로 쓰지 않는다.
         // 중심의 수평 위치는 유지하고 실제 접촉 위치와 법선으로 착지면의 기준 높이를 구한다.
@@ -131,6 +139,7 @@ namespace
         }
         result.position = stanceOnGround + delta;
         result.normal = normal;
+        result.forward = forward;
         result.travelDistance = HorizontalDistance(foot.position, result.position);
         result.stanceDistance = delta.magnitude();
         result.valid = result.position.isFinite() && std::isfinite(result.travelDistance);
@@ -410,10 +419,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.motion.elapsedTime = static_cast<float>((std::min)(double(elapsedSteps) * input.fixedDeltaTime, double(state.motion.duration)));
         state.motion.progress = (std::min)(state.motion.elapsedTime / state.motion.duration, 1.0f);
 
-        // 진행률이 설정된 시점에 도달하면 착지 목표의 수평위치를 고정
+        // 진행률이 설정된 시점에 도달하면 착지 목표의 수평 위치와 방향을 함께 고정한다.
         if (state.motion.progress >= state.motion.landingLockProgress)
         {
-            // 하강 막바지에는 직전 유효 목표의 수평 위치를 유지해 움직이는 착지점을 쫓지 않는다.
+            // 하강 막바지에는 직전 유효 목표의 위치와 방향을 유지한다.
             state.motion.landingTargetLocked = true;
         }
     }
@@ -580,8 +589,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         ++state.startCount;
     }
 
-    // 착지 마무리 전에는 최신 후보를 추종하고, 이후에는 고정한 수평 위치의 지면 높이만 갱신한다.
-    // 착지 목표갱신 또는 수평위치 고정
+    // 착지 마무리 전에는 최신 위치와 방향을 추종하고, 이후에는 지면 높이와 법선만 갱신한다.
     const FootstepTarget& candidate = state.candidates[state.stepFoot];
     if (state.motion.landingTargetLocked)
     {
@@ -607,6 +615,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
         state.target = candidate.position;
         state.targetNormal = candidate.normal;
+        state.targetForward = candidate.forward;
     }
     state.hasTarget = true;
     state.reason = state.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;

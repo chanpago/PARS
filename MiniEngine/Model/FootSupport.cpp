@@ -334,6 +334,8 @@ void PARS::FootSupport::ResetFootstep()
     m_FootstepPlanner.Reset();
     m_BufferGrace.Reset();
     m_HasIdleReference = false;
+    m_FootstepForward = PxVec3(0, 0, 1);
+    m_HasFootstepForward = false;
     m_Snapshot.footstep = {};
 }
 
@@ -406,6 +408,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     if (m_IdleReferenceRevision != m_Snapshot.contactRevision || !idle)
     {
         m_HasIdleReference = false;
+        m_HasFootstepForward = false;
         m_IdleReferenceRevision = m_Snapshot.contactRevision;
     }
 
@@ -460,19 +463,44 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.completedStep = m_Snapshot.completedPhysicsStep;
     input.revision = m_Snapshot.contactRevision;
 
-    // 캐릭터의 의도된 수평 방향을 사용한다. 충격에 의한 골반의 순간 회전은 기준 방향에 섞지 않는다.
-    // 현재 캐릭터가 보고있는 수평 방향을 구한다
+    // 첫 발 배치 방향은 캐릭터의 수평 방향으로 준비한다.
     const Matrix4 component(mesh.GetComponentTransform());
     PxVec3 forward = ToPx(Vector3(component.GetZ()));
     forward.y = 0;
     input.hasReference = m_HasIdleReference && forward.isFinite() && forward.normalize() > 1e-6f;
+
+    if (!input.active || !input.automaticSupport || !idle || input.rootReleased || input.outsideBufferReleased)
+    {
+        m_HasFootstepForward = false;
+    }
+    else if (input.hasReference)
+    {
+        if (!m_HasFootstepForward)
+        {
+            m_FootstepForward = forward;
+            m_HasFootstepForward = true;
+        }
+        // COM 속도는 발 배치에만 반영한다. 골반이나 캐릭터의 회전 목표는 바꾸지 않는다.
+        // 수평 속도가 사실상 0이면 마지막 유효 방향을 유지한다.
+        if (input.hasVelocity && input.velocity.isFinite())
+        {
+            const PxVec3 horizontalVelocity(input.velocity.x, 0, input.velocity.z);
+            const float horizontalSpeed = horizontalVelocity.magnitude();
+            if (std::isfinite(horizontalSpeed) && horizontalSpeed > 1e-6f)
+            {
+                m_FootstepForward = horizontalVelocity / horizontalSpeed;
+            }
+        }
+        forward = m_FootstepForward;
+    }
+    // 최소 좌우 간격도 Idle 오프셋과 같은 회전 기준에서 검사한다.
     input.supportRight = PxVec3(forward.z, 0, -forward.x);
 
-    // 저장한 Idle 발 본 자세를 발바닥 위치로 변환
-    // Idle 기분 왼발, 오른발의 발바닥 중심 위치를 담을 배열
+    // 저장한 Idle 발 본 자세를 캐릭터 로컬의 발바닥 위치와 방향으로 변환한다.
     std::array<PxVec3, 2> referenceFeet{PxVec3(0), PxVec3(0)};
+    std::array<PxVec3, 2> referenceForwards{PxVec3(0, 0, 1), PxVec3(0, 0, 1)};
 
-    // idle자세의 발 간격을 현재 캐릭터 방향에 맞춰 준비함
+    // 원본 Idle 기준을 읽고, 아래에서 COM 진행 방향으로 같은 회전을 적용한다.
     if (input.hasReference)
     {
         for (size_t side = 0; side < m_Feet.size(); ++side)
@@ -480,9 +508,12 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
             // 앞서 구한 로컬 발바닥 변환에 월드 발 m_IdleFootBones[side] 을 곱해 로컬 발바닥 위치를 구한다
             const Matrix4 sole = m_IdleFootBones[side] * m_Snapshot.feet[side].soleInBone;
 
-            // 위치 성분만 꺼내서 배열에 저장
+            // 발마다 다른 Idle의 발끝 방향도 보존한다.
             referenceFeet[side] = ToPx(Vector3(sole.GetW()));
-            input.hasReference = input.hasReference && referenceFeet[side].isFinite();
+            referenceForwards[side] = ToPx(Vector3(sole.GetZ()));
+            referenceForwards[side].y = 0;
+            input.hasReference = input.hasReference && referenceFeet[side].isFinite() &&
+                referenceForwards[side].isFinite() && referenceForwards[side].normalize() > 1e-6f;
         }
     }
 
@@ -507,9 +538,10 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.normalImpulse = foot.contact.normalImpulseVector.magnitude();
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
 
-        // idle기준 발배치 오프셋을 현재 캐릭터 방향으로 돌림
+        // 양발 중점 기준의 Idle 오프셋과 발끝 방향을 함께 회전한다.
         const PxVec3 offset = referenceFeet[side] - midpoint;
         target.stanceOffset = input.supportRight * offset.x + forward * offset.z;
+        target.stanceForward = input.supportRight * referenceForwards[side].x + forward * referenceForwards[side].z;
     }
 
     // 균형을 회복하기위해 발을 어디에 딛을지 결정하고 발딛기의 진행 상태를 관리
@@ -562,6 +594,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         m_Contacts = {};
         m_FootstepPlanner.Reset();
         m_HasIdleReference = false;
+        m_HasFootstepForward = false;
         return;
     }
 

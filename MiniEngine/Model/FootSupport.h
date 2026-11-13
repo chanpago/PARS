@@ -304,8 +304,10 @@ namespace PARS
         uint64_t m_ContactRevision = 0; // 자체의 접촉 이력버전
         std::array<FootSoleSettings, 2> m_Settings;
         FootstepSettings m_FootstepSettings; // 발 이동에 대한 세팅값
+        physx::PxVec3 m_FootstepForward{0, 0, 1}; // COM 수평 속도로 정한 마지막 유효 발 배치 방향
         float m_BufferScale = 2.0f;          // 지지영역 A를 확장해 완충 영역 B를 만드는 배율. 2배면 반지름이 두배
         bool m_HasIdleReference = false;     // idle기준 자세를 저장했는지. 기준의 존재 여부
+        bool m_HasFootstepForward = false;   // 저속에서 유지할 발 배치 방향이 준비되었는지
         bool m_Initialized = false;          // 발 지지 계산에 필요한 기본 정보를 준비했는지. prepare()에서 필요한 정보를 준비했는지 표현
     };
 }

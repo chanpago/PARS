@@ -19,7 +19,7 @@ namespace PARS
         float liftHeightScale = .15f;   // 발 이동 거리에 비례해 들어 올리는 높이를 정하는 비율
         float stepDuration = .15f;       // 발 이동 목표 궤적의 진행시간
         float minimumLiftHeight = .03f; // 발을 들어 올리는 최고 높이를 계산할 때 사용하는 최소값
-        float landingLockProgress = .75f; // 하강 중 착지 목표의 수평 위치를 고정할 시간 진행률
+        float landingLockProgress = .75f; // 하강 중 착지 목표의 수평 위치와 방향을 고정할 시간 진행률
         float landingLoweringSpeed = .05f; // 계획 시간이 끝나도 접촉하지 못한 발의 추가 하강 속도(m/s)
         float maximumLandingLowering = .03f; // 실제 접촉면 아래로 내릴 제어 목표의 최대 깊이(m)
         float supportLoadRatio = .5f;   // 착지 후 다음 지지발에 필요한 수직 하중 / 전신 체중
@@ -71,6 +71,7 @@ namespace PARS
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
+        physx::PxVec3 stanceForward{0, 0, 1}; // 발 배치와 같은 기준으로 회전한 Idle 발바닥의 전방 방향
         float calfLength = 0;
         float normalImpulse = 0;
         bool available = false;
@@ -110,6 +111,7 @@ namespace PARS
         physx::PxVec3 raw{0};
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0};
+        physx::PxVec3 forward{0, 0, 1}; // 지면 기울기를 적용하기 전의 수평 착지 방향
         float travelDistance = 0;
         float stanceDistance = 0;
         bool valid = false;
@@ -197,6 +199,7 @@ namespace PARS
         physx::PxVec3 predictedCom{0};                    // 발딛기 필요 여부를 판단할 미래 COM 위치. XZ는 현재 COM과 속도로 예측하고 Y는 지면 투영 높이
         physx::PxVec3 target{0};                          // 착지면 위 목표 위치(m). 착지 마무리부터 XZ를 고정하며 추가 하강은 motion에만 적용
         physx::PxVec3 targetNormal{0};                    // 최신 착지 목표 평면의 법선. 발바닥 목표 방향을 지면에 맞출 때 사용
+        physx::PxVec3 targetForward{0, 0, 1};              // 착지 목표의 수평 전방 방향. 착지 마무리부터 위치와 함께 고정
         physx::PxVec3 startPosition{0};                   // 발딛기 시작 순간 움직일 발의 실제 발바닥 월드 위치(m). 이동 궤적의 시작점
         physx::PxVec3 initialTarget{0};                   // 발딛기 시작 순간의 최초 착지 목표 월드 위치(m). 이후 목표가 갱신돼도 유지
         float initialDistance = 0;                        // 시작 위치에서 최초 착지 목표까지의 수평 거리(m). 발 들기 높이와 골반 낮추기 계산에 사용
