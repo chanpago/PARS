@@ -614,9 +614,9 @@ void PhysicsDemo::RenderUI()
         bool paused = m_GameWorld.IsPhysicsPaused();
         bool slowMotion = m_GameWorld.GetPhysicsTimeScale() < 1.0f;
         ImGui::TextUnformatted(paused ? u8"월드 일시정지" : u8"시뮬레이션 중");
-        if (ImGui::Checkbox(u8"느리게 (0.25배)", &slowMotion))
+        if (ImGui::Checkbox(u8"느리게 (0.1배, F)", &slowMotion))
         {
-            m_GameWorld.SetPhysicsTimeScale(slowMotion ? 0.25f : 1.0f);
+            m_GameWorld.SetPhysicsTimeScale(slowMotion ? 0.1f : 1.0f);
         }
         if (ImGui::Checkbox(u8"월드 일시정지", &paused))
         {

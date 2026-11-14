@@ -1312,6 +1312,25 @@ void ModelViewer::Update(float deltaT)
         DebugZoom.Increment();
     }
 
+    // 메시 뷰어의 카메라 맞춤과 텍스트 입력에는 F 단축키를 양보한다.
+    // 물리 고정 간격은 유지하고 게임 시간의 진행 속도만 바꾼다.
+    if (!(m_MeshViewer && m_MeshViewer->WantsInput()) &&
+        !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_F, false))
+    {
+        const float timeScale = m_World.GetPhysicsTimeScale() < 1.0f ? 1.0f : 0.1f;
+        m_World.SetPhysicsTimeScale(timeScale);
+    }
+
+#if defined(_M_X64)
+    // 기존 더미 리셋 버튼과 같은 초기화 경로를 단축키에서도 사용한다.
+    if (m_ImpactTest && !(m_MeshViewer && m_MeshViewer->WantsInput()) &&
+        !(m_Comparison && m_Comparison->IsShowingScene()) &&
+        !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_G, false))
+    {
+        m_ImpactTest->Reset();
+    }
+#endif
+
     // 현재 렌더 타깃의 세로/가로 비율을 카메라 투영에 반영한다.
     m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
     // 조작 가능 여부, 카메라 조준 방향, 이동/달리기 입력을 설정한다. 실제 이동은 아래 World::Tick에서 처리한다.
@@ -1759,7 +1778,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
             {
                 if (m_ImpactTest)
                 {
-                    if (ImGui::Button(u8"더미 리셋"))
+                    if (ImGui::Button(u8"더미 리셋 (G)"))
                     {
                         m_ImpactTest->Reset();
                     }
@@ -1937,6 +1956,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                         ResetMapCharacter();
                     }
                     ImGui::TextWrapped(m_FreeCamera ? u8"자유 카메라: WASD + Q/E 이동. Tab: 캐릭터 조작." : u8"캐릭터: WASD 이동, Shift 달리기. Tab: 자유 카메라.");
+                    ImGui::Text(u8"F: 0.1배속 / 정상 속도 전환 | 현재 %.1f배 | G: 더미 리셋", m_World.GetPhysicsTimeScale());
                     ImGui::TextWrapped(u8"우클릭 유지로 시점 이동·조준, 조준 중 좌클릭 또는 R로 구를 발사합니다. 애니메이션 버튼으로 수동 미리보기를 시작합니다.");
                 }
                 else

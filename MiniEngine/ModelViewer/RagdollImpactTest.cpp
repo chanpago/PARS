@@ -481,7 +481,7 @@ void RagdollImpactTest::DrawUI(Character* player)
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button(u8"더미 초기화"))
+        if (ImGui::Button(u8"더미 초기화 (G)"))
         {
             Reset();
         }
