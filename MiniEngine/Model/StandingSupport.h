@@ -39,7 +39,7 @@ namespace PARS
         float length = 0;
         bool available = false;
         bool grounded = false;
-        bool supporting = true;
+        bool hasMotionTarget = false;
         bool contactGraceActive = false;
     };
 

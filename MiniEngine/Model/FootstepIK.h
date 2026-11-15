@@ -71,9 +71,8 @@ namespace PARS
     {
     public:
         uint64_t revision = 0;
-        // -1은 새 발딛기 없이 회복 중 양발 목표를 유지하는 경우다.
-        int stepFoot = -1;
         std::array<FootIKLegInput, 2> legs;
+        std::array<bool, 2> motionTargets{};
         bool enabled = false;
     };
 
@@ -92,8 +91,8 @@ namespace PARS
         uint64_t revision = 0;
         std::vector<int> correctedNodes;
         FootstepIKStatus status = FootstepIKStatus::Inactive;
-        int stepFoot = -1;
         std::array<LegIKResult, 2> legs;
+        std::array<bool, 2> motionTargets{};
     };
 
     // 실제 부모 좌표에서 IK를 푼 뒤 애니메이션 부모 기준 목표로 되돌린다. 물리 바디는 옮기지 않는다.

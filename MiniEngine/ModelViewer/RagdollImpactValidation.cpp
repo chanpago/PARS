@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <cmath>
 #include <functional>
+#include <array>
 
 // 기준과 후보에서 같은 바닥·애니메이션·입력을 사용하는 실제 캐릭터 검증이다.
 bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
@@ -59,6 +60,11 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         bool secondShot = false;
         unsigned entries = 0;
         unsigned returns = 0;
+        unsigned footCommands = 0;
+        unsigned confirmedTakeoffs = 0;
+        unsigned confirmedLandings = 0;
+        std::array<bool, 2> commandObserved{};
+        std::array<bool, 2> takeoffObserved{};
         PhysicsAnimationMode previousMode = mesh.GetPhysicsMode();
         for (uint32_t frame = 0; frame < 900; ++frame)
         {
@@ -156,6 +162,25 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 check(foot.available && foot.boneNode >= 0 && body < nodes.size(), "Measure actual foot sole");
                 PhysicsGroundContact contact;
                 const bool grounded = mesh.GetRagdoll().GetBodyGroundContact(body, contact);
+                const FootstepCommand& command = support.footstep.feet[side];
+                if (command.justStarted)
+                {
+                    ++footCommands;
+                    commandObserved[side] = true;
+                    takeoffObserved[side] = false;
+                }
+                if (commandObserved[side] && !takeoffObserved[side] &&
+                    (!grounded || (foot.contact.hasSample && !foot.contact.grounded)))
+                {
+                    takeoffObserved[side] = true;
+                    ++confirmedTakeoffs;
+                }
+                if (command.justLanded)
+                {
+                    check(takeoffObserved[side], "Completed footstep includes an observed physical takeoff");
+                    ++confirmedLandings;
+                    commandObserved[side] = false;
+                }
                 const Matrix4 actualSole = mesh.GetRagdoll().GetBoneWorld(body) * foot.soleInBone;
                 const Matrix4 targetSole = PhysicsBoneFrame(targets[foot.boneNode]) * foot.soleInBone;
                 const Vector3 actualPosition(actualSole.GetW());
@@ -184,6 +209,13 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         }
         world.SetPhysicsPaused(true);
         report << "entries=" << entries << " returns=" << returns << std::endl;
+        report << "foot_commands=" << footCommands << " physical_takeoffs=" << confirmedTakeoffs
+            << " confirmed_landings=" << confirmedLandings << std::endl;
+        if (scenario == 1 && footCommands > 0)
+        {
+            check(confirmedTakeoffs > 0 && confirmedLandings > 0,
+                "A requested recovery step physically lifts and lands the foot");
+        }
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors");
         check(scenario == 0 ? !seenActive : seenActive, "Impact is required to enter active ragdoll");
         if (scenario == 1 || scenario == 2 || scenario == 4 || scenario == 5)
@@ -287,7 +319,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         world.SetPhysicsTimeScale(1);
         samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
         events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
-        states << "frame,mode,blending,zone,stable_time,step_count,impact\n";
+        states << "frame,mode,blending,zone,stable_time,step_count,impact,physics_step,requested_foot,load_left,load_right,confirm_left,confirm_right,impulse_left,impulse_right,normal_y_left,normal_y_right,grounded_left,grounded_right,started_left,started_right,landed_left,landed_right\n";
         capsules << "frame,time,mode,root_x,root_y,root_z,present,mass,radius,half_length,x,y,z,cyan_lines\n";
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
@@ -373,7 +405,15 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
             states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()
                 << ',' << static_cast<int>(dummySupport.balance.zone) << ',' << dummyMesh.GetKinematicStableTime()
-                << ',' << dummySupport.footstep.startCount << ',' << dummy->GetMesh().GetRagdoll().GetExternalImpactImpulse() << '\n';
+                << ',' << dummySupport.footstep.startCount << ',' << dummy->GetMesh().GetRagdoll().GetExternalImpactImpulse()
+                << ',' << dummySupport.completedPhysicsStep << ',' << dummySupport.footstep.requestedFoot
+                << ',' << dummySupport.footstep.loadTransfer.loadRatios[0] << ',' << dummySupport.footstep.loadTransfer.loadRatios[1]
+                << ',' << dummySupport.footstep.loadTransfer.confirmationTimes[0] << ',' << dummySupport.footstep.loadTransfer.confirmationTimes[1]
+                << ',' << dummySupport.feet[0].contact.normalImpulse << ',' << dummySupport.feet[1].contact.normalImpulse
+                << ',' << dummySupport.feet[0].contact.normal.y << ',' << dummySupport.feet[1].contact.normal.y
+                << ',' << dummySupport.feet[0].contact.grounded << ',' << dummySupport.feet[1].contact.grounded
+                << ',' << dummySupport.footstep.feet[0].justStarted << ',' << dummySupport.footstep.feet[1].justStarted
+                << ',' << dummySupport.footstep.feet[0].justLanded << ',' << dummySupport.footstep.feet[1].justLanded << '\n';
             for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
             {
                 ++eventCount;

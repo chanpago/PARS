@@ -105,7 +105,7 @@ namespace PARS
                 - COM 정보: 현재 질량중심, 전체 질량, COM 속도.
                 - 발 정보: 실제 접촉 상태, 발바닥 위치, 레이로 얻은 지면 투영점.
                 - 균형 판단: A 영역, COM의 지면 투영과 A 내부 여부, A/B 기준 골반 지지계수 weight.
-                - 발딛기 판단: 지지발·움직일 발 후보, 예측 COM, 발딛기 필요 여부, 착지 목표와 발딛기 진행 상태.
+                - 발딛기 판단: 예측 COM, 발딛기 필요 여부, 발별 명령 대상·착지 목표·진행 상태.
             */
             // 현재 몸과 발의 상태를 읽고, 균형 판단과 발딛기 계획을 m_Snapshot에 갱신하는함수
             m_FootSupport.Update(*this, *physics);
@@ -155,7 +155,6 @@ namespace PARS
         // IK와 서있기 보정의 공통입력을 준비함
         FootstepIKInput input;
         input.enabled = true;
-        input.stepFoot = step.IsInProgress() ? step.stepFoot : -1;
         input.revision = sample.contactRevision;
 
 
@@ -163,7 +162,7 @@ namespace PARS
         StandingSupportInput standing;
         standing.enabled = m_Ragdoll.UsesFootDrivenSupport();
         standing.stepping = step.IsInProgress();
-        standing.stepDistance = step.initialDistance;
+        standing.stepDistance = step.GetMaximumInitialDistance();
         standing.deltaTime = deltaTime;
         standing.revision = sample.contactRevision;
         standing.completedStep = sample.completedPhysicsStep;
@@ -247,8 +246,9 @@ namespace PARS
             StandingSupportFoot& support = standing.feet[side];
             support.available = leg.available;
 
-            // 지지역할을 하는발과 실제 접지를 구분함
-            support.supporting = input.stepFoot != static_cast<int>(side);
+            // 명령 여부와 접촉 측정은 독립적이며 제어에 요구할 하중은 아래에서 별도로 정한다.
+            support.hasMotionTarget = step.feet[side].IsInProgress();
+            input.motionTargets[side] = support.hasMotionTarget;
             support.grounded = foot.contact.hasSample && foot.contact.grounded;
             support.contactGraceActive = foot.contact.hasSample && !support.grounded && foot.contact.support.IsValid();
 
@@ -279,16 +279,18 @@ namespace PARS
             standing.animatedPelvis = rigidTargets[leg.anchorNode];
             const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), foot.boneNode);
 
-            // 지지 보정에는 유예 중인 마지막 지지면을 함께 사용한다. 측정 충격량은 재사용하지 않는다.
+            // 하중 보상에는 실제 접지한 발과 그 지면을 전달한다.
             contacts[side].body = body != nodes.end() ? static_cast<int>(body - nodes.begin()) : -1;
-            contacts[side].supporting = support.supporting && foot.contact.support.IsValid();
+            contacts[side].grounded = support.grounded;
+            // 접촉 측정은 유지하되 이륙 명령에 몸을 지탱할 하중 목표를 함께 부여하지 않는다.
+            contacts[side].loadWeight = support.hasMotionTarget ? 0.0f : 1.0f;
             contacts[side].position = foot.contact.support.GetPosition();
             contacts[side].normal = foot.contact.support.GetNormal();
             contacts[side].ankleDriveBoost = m_StandingSupportSettings.ankleDriveBoost;
             contacts[side].ankleDriveBlendTime = m_StandingSupportSettings.ankleDriveBlendTime;
         }
 
-        // 이동 중인 발은 제외하고 지지 역할의 현재 또는 유예 접촉만 전달한다.
+        // 실제 접촉만 전달한다. 이동 명령과 접촉 유예로 하중을 만들어 내지 않는다.
         m_Ragdoll.SetSupportContacts(contacts);
 
         // 발 기반 지지에서는 기본 발 목표에 서 있기 보정을 더함
@@ -346,17 +348,18 @@ namespace PARS
             return;
         }
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
-        const FootstepRoles roles = sample.GetDisplayRoles();
-        if (!roles.IsValid())
+        for (size_t side = 0; side < sample.feet.size(); ++side)
         {
-            return;
-        }
-        const int supportNode = sample.feet[roles.supportFoot].boneNode;
-        const int stepNode = sample.feet[roles.movableFoot].boneNode;
-        if (supportNode >= 0 && stepNode >= 0)
-        {
-            m_ModelInstance.SetNodeDebugColor(uint32_t(supportNode), DirectX::XMFLOAT4(1, 0, 0, 1));
-            m_ModelInstance.SetNodeDebugColor(uint32_t(stepNode), DirectX::XMFLOAT4(0, 0, 1, 1));
+            const FootSoleSample& foot = sample.feet[side];
+            if (foot.boneNode < 0)
+            {
+                continue;
+            }
+            const bool commanded = sample.footstep.feet[side].IsInProgress();
+            const bool grounded = foot.contact.hasSample && foot.contact.grounded;
+            const DirectX::XMFLOAT4 color(commanded ? 0.0f : .4f, grounded ? 1.0f : .4f,
+                commanded ? 1.0f : .4f, 1.0f);
+            m_ModelInstance.SetNodeDebugColor(static_cast<uint32_t>(foot.boneNode), color);
         }
     }
 

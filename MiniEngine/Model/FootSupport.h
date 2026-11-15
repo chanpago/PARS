@@ -85,23 +85,6 @@ namespace PARS
     struct FootSupportSnapshot
     {
     public:
-        FootstepRoles GetDisplayRoles() const
-        {
-            const FootstepRoles roles = footstep.GetRoles();
-            if (!roles.IsValid())
-            {
-                return {};
-            }
-            const FootSoleSample& support = feet[roles.supportFoot];
-            if (!support.available || !support.contact.hasSample || !support.contact.support.IsValid())
-            {
-                // 짧은 접촉 상실은 유예하고, 만료되면 확정한 제어 역할을 유지한 채 색만 숨긴다.
-                return {};
-            }
-            return roles;
-        }
-
-    public:
         std::array<FootSoleSample, 2> feet; // 발 두개를 모아놓은 array
         std::vector<physx::PxVec3> hull;    // 현재 발에서 계산한 지지 영역 A
         FootSupportBalance balance;         // 현재 COM이 지지영역 A와 완충 영역 B를 기준으로 어디에 있는지 저장
@@ -111,7 +94,6 @@ namespace PARS
         uint64_t completedPhysicsStep = 0;  // 결과가 속한 완료 물리 스텝번호. 회복제어와 발딛기 제어가 같은 물리결과를 중복 처리하지않도록 사용하는 값
         uint64_t contactRevision = 0;       // 접촉 이력이 초기화 됐는지 구분하는 번호. 물리월드 변경, 물리 시간 초기화, 래그돌의 접촉 무효화 등으로 기존 접촉 이력을 버려야할때 증가. 회적제어와 IK등은 이 값의 변경을 감지해 이전 상태를 초기화
         std::string message;
-        FootSupportCandidates candidates;       // 지지발과 움직일 발의 후보
         physx::PxVec3 centerOfMass{0};          // 전신 질량중심의 월드 위치
         physx::PxVec3 projectedCenterOfMass{0}; // 지면 높이에 투영한 COM
         physx::PxVec3 centerOfMassVelocity{0};  // 전신 COM의 속도. 미래 COM 예측, 회복 종료 시 수평 속도 검사, 서있기 제어의 감쇠 등에 사용
@@ -143,6 +125,8 @@ namespace PARS
         void Reset();
         // 명시적으로 자동 지지를 재설정할 때 기존 해제 래치와 발 판단을 함께 초기화한다.
         void ResetFootstep();
+        // 물리 모드 전환으로 접촉 캐시가 비워져도 최초 충격 위치를 전달한다.
+        void RecordImpact(const physx::PxVec3& position);
         void UpdateBufferGrace(bool enabled);
         // PA 적용 시에만 저장한 발 바디의 연결·형상 변경 여부를 확인한다.
         void OnPhysicsAssetChanged(const PhysicsAsset& asset);
@@ -196,10 +180,12 @@ namespace PARS
         uint64_t m_RagdollRevision = 0; // 마지막으로 확인한 래그돌 접촉
         uint64_t m_ContactStep = 0;     // 마지막으로 확인한 물리스텝
         uint64_t m_ContactRevision = 0; // 자체의 접촉 이력버전
+        physx::PxVec3 m_PendingImpactPosition{0};
         std::array<FootSoleSettings, 2> m_Settings;
         FootstepSettings m_FootstepSettings; // 발 이동에 대한 세팅값
         float m_BufferScale = 2.0f;          // 지지영역 A를 확장해 완충 영역 B를 만드는 배율. 2배면 반지름이 두배
         bool m_HasIdleReference = false;     // idle기준 자세를 저장했는지. 기준의 존재 여부
         bool m_Initialized = false;          // 발 지지 계산에 필요한 기본 정보를 준비했는지. prepare()에서 필요한 정보를 준비했는지 표현
+        bool m_HasPendingImpact = false;
     };
 }

@@ -21,7 +21,8 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
     for (size_t side = 0; side < m_SupportContacts.size(); ++side)
     {
         const RagdollSupportContact& contact = m_SupportContacts[side];
-        valid[side] = contact.supporting && contact.body >= 0 &&
+        valid[side] = contact.grounded && contact.body >= 0 &&
+            std::isfinite(contact.loadWeight) && contact.loadWeight > 0 &&
             static_cast<size_t>(contact.body) < m_Bodies.size() && contact.position.isFinite() &&
             contact.normal.isFinite() && contact.normal.y >= .70710678f;
         if (valid[side])
@@ -47,7 +48,20 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
 
         const float lengthSquared = span.x * span.x + span.z * span.z;
         const float right = lengthSquared > 1e-8f ? PxClamp((relative.x * span.x + relative.z * span.z) / lengthSquared, 0.0f, 1.0f) : .5f;
-        m_SupportLoads.fractions = {1.0f - right, right};
+        const float leftWeight = (1.0f - right) * PxClamp(m_SupportContacts[0].loadWeight, 0.0f, 1.0f);
+        const float rightWeight = right * PxClamp(m_SupportContacts[1].loadWeight, 0.0f, 1.0f);
+        const float totalWeight = leftWeight + rightWeight;
+        if (totalWeight > 1e-6f)
+        {
+            m_SupportLoads.fractions = {leftWeight / totalWeight, rightWeight / totalWeight};
+        }
+        else
+        {
+            const float leftAvailability = PxClamp(m_SupportContacts[0].loadWeight, 0.0f, 1.0f);
+            const float rightAvailability = PxClamp(m_SupportContacts[1].loadWeight, 0.0f, 1.0f);
+            const float availability = leftAvailability + rightAvailability;
+            m_SupportLoads.fractions = {leftAvailability / availability, rightAvailability / availability};
+        }
     }
     else
     {

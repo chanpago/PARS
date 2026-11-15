@@ -215,83 +215,6 @@ namespace
         std::puts("PASS: A/B centroid, expansion, radial weight, boundaries, transforms and invalid input");
     }
 
-    void TestFootSupportCandidates()
-    {
-        using namespace PARS;
-        std::array<std::vector<PxVec3>, 2> feet{{
-            {{-.2f, 0, -.1f}, {-.1f, 0, -.1f}, {-.1f, 0, .1f}, {-.2f, 0, .1f}},
-            {{.1f, 0, -.1f}, {.2f, 0, -.1f}, {.2f, 0, .1f}, {.1f, 0, .1f}}}};
-        std::vector<PxVec3> points = feet[0];
-        points.insert(points.end(), feet[1].begin(), feet[1].end());
-        const std::vector<PxVec3> hull = BuildFootSupportHull(points);
-        const FootSupportCandidates left = EvaluateFootSupportCandidates(hull, PxVec3(-.12f, 3, 0), feet, FootSupportZone::Inside);
-        const FootSupportCandidates right = EvaluateFootSupportCandidates(hull, PxVec3(.12f, -3, 0), feet, FootSupportZone::Inside);
-        Check(left.support == 0 && left.step == 1 && right.support == 1 && right.step == 0,
-            "Candidate uses horizontal COM distance and assigns opposite feet");
-        Check(EvaluateFootSupportCandidates(hull, PxVec3(0), feet, FootSupportZone::Inside).support == 0 &&
-                EvaluateFootSupportCandidates(hull, PxVec3(0), feet, FootSupportZone::Inside, 1).support == 1,
-            "Initial tie is deterministic and an existing candidate survives a tie");
-        Check(EvaluateFootSupportCandidates(hull, PxVec3(.003f, 0, 0), feet, FootSupportZone::Inside, 0).support == 0 &&
-                EvaluateFootSupportCandidates(hull, PxVec3(.02f, 0, 0), feet, FootSupportZone::Inside, 0).support == 1,
-            "Small COM noise retains the candidate; clear transfer switches it");
-        // 실제 영역 판정을 연결해 A~B 허용과 B 경계 차단을 함께 검증한다.
-        for (const float direction : {-1.0f, 1.0f})
-        {
-            const PxVec3 com(.25f * direction, 0, 0);
-            const FootSupportBalance balance = EvaluateFootSupportBalance(hull, com);
-            const FootSupportCandidates candidate = EvaluateFootSupportCandidates(hull, com, feet, balance.zone);
-            Check(balance.zone == FootSupportZone::Buffer && candidate.support == (direction < 0 ? 0 : 1) &&
-                    candidate.step == 1 - candidate.support,
-                "COM between A and B keeps a support and stepping candidate on either side");
-            for (const float distance : {.4f, .41f})
-            {
-                const PxVec3 outside(distance * direction, 0, 0);
-                const FootSupportBalance released = EvaluateFootSupportBalance(hull, outside);
-                Check(released.zone == FootSupportZone::Outside &&
-                        EvaluateFootSupportCandidates(hull, outside, feet, released.zone).step == -1,
-                    "B boundary and exterior still clear candidates");
-            }
-        }
-        const PxVec3 scaledCom(.5f, 0, 0);
-        Check(EvaluateFootSupportCandidates(hull, scaledCom, feet,
-                  EvaluateFootSupportBalance(hull, scaledCom, 2).zone).step == -1 &&
-                EvaluateFootSupportCandidates(hull, scaledCom, feet,
-                  EvaluateFootSupportBalance(hull, scaledCom, 3).zone).step == 0,
-            "Candidate eligibility uses the caller's current B scale");
-        Check(EvaluateFootSupportCandidates(hull, PxVec3(0), feet, FootSupportZone::Invalid).step == -1 &&
-                EvaluateFootSupportCandidates(hull, PxVec3(std::numeric_limits<float>::quiet_NaN()), feet,
-                    FootSupportZone::Inside).step == -1 &&
-                EvaluateFootSupportCandidates({}, PxVec3(0), feet, FootSupportZone::Inside).step == -1,
-            "Invalid zone, nonfinite COM and missing support still clear candidates");
-        std::array<std::vector<PxVec3>, 2> missing = feet;
-        missing[0].resize(2);
-        Check(EvaluateFootSupportCandidates(hull, PxVec3(0), missing, FootSupportZone::Inside).support == -1 &&
-                EvaluateFootSupportCandidates(hull, PxVec3(.25f, 0, 0), missing, FootSupportZone::Buffer).step == -1,
-            "Two valid foot polygons are required; a missing foot has no candidate pair");
-        physx::PxVec3 (*const transform)(physx::PxVec3) = [](PxVec3 point) -> physx::PxVec3
-        {
-            return PxVec3(10 - point.z, point.y + 4, -7 + point.x);
-        };
-        std::array<std::vector<physx::PxVec3>, 2> moved = feet;
-        for (std::vector<physx::PxVec3>& foot : moved)
-        {
-            for (physx::PxVec3& point : foot)
-            {
-                point = transform(point);
-            }
-        }
-        std::vector<physx::PxVec3> movedHull = hull;
-        for (physx::PxVec3& point : movedHull)
-        {
-            point = transform(point);
-        }
-        const FootSupportCandidates relocated = EvaluateFootSupportCandidates(movedHull,
-            transform(PxVec3(-.12f, 0, 0)), moved, FootSupportZone::Inside);
-        Check(relocated.support == left.support && std::abs(relocated.distances[0] - left.distances[0]) < 1e-5f,
-            "World translation and yaw preserve foot identity and COM distance");
-        std::puts("PASS: COM foot candidates, switching hysteresis, validity and world transforms");
-    }
-
     float SimulateAtRate(int fps, double seconds)
     {
         PhysicsWorld world;
@@ -335,9 +258,9 @@ int main(int argc, char** argv)
         TestStandingSupport();
         return 0;
     }
-    if (argc == 2 && std::strcmp(argv[1], "--foot-candidates-only") == 0)
+    if (argc == 2 && std::strcmp(argv[1], "--foot-command-only") == 0)
     {
-        TestFootSupportCandidates();
+        TestFootstepPlanner();
         return 0;
     }
     TestFramePerformance();
@@ -349,7 +272,6 @@ int main(int argc, char** argv)
     TestApproachingImpact();
     TestFootSupportHull();
     TestFootSupportBalance();
-    TestFootSupportCandidates();
     TestFootstepPlanner();
     TestFootstepIK();
     TestStandingSupport();

@@ -229,7 +229,7 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
     }
     m_Snapshot = {};
     m_Snapshot.revision = input.revision;
-    m_Snapshot.stepFoot = input.stepFoot;
+    m_Snapshot.motionTargets = input.motionTargets;
     if (!input.enabled)
     {
         return false;
@@ -247,10 +247,6 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         }
     }
     m_Snapshot.status = FootstepIKStatus::InvalidLeg;
-    if (input.stepFoot < -1 || input.stepFoot > 1)
-    {
-        return false;
-    }
     for (const PARS::FootIKLegInput& leg : input.legs)
     {
         if (!leg.available || !Ancestor(parents, leg.anchorNode, leg.hipNode) ||

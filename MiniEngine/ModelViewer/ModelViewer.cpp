@@ -1782,7 +1782,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     }
                     ImGui::SameLine();
                 }
-                if (ImGui::Button(m_FootCandidateDebugVisible ? u8"발 역할 표시 끄기" : u8"발 역할 표시"))
+                if (ImGui::Button(m_FootCandidateDebugVisible ? u8"발 상태 표시 끄기" : u8"발 상태 표시"))
                 {
                     SetFootCandidateDebugVisible(!m_FootCandidateDebugVisible);
                 }
@@ -1793,43 +1793,24 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 }
                 if (m_FootCandidateDebugVisible)
                 {
-                    void (*const drawRoles)(PARS::Character*, const char*) = [](PARS::Character* character, const char* label) -> void
+                    void (*const drawFootStates)(PARS::Character*, const char*) = [](PARS::Character* character, const char* label) -> void
                     {
                         if (!character)
                         {
                             return;
                         }
                         const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
-                        const PARS::FootstepRoles roles = sample.GetDisplayRoles();
                         ImGui::TextUnformatted(label);
-                        if (roles.IsValid())
+                        for (size_t side = 0; side < sample.feet.size(); ++side)
                         {
-                            const char* const feet[] = {u8"왼발", u8"오른발"};
-                            ImGui::TextColored(ImVec4(1, .15f, .15f, 1), u8"지지발: %s", feet[roles.supportFoot]);
-                            ImGui::SameLine();
-                            ImGui::TextColored(ImVec4(.2f, .45f, 1, 1), roles.locked ? u8"이동발: %s" : u8"이동 가능 발: %s",
-                                feet[roles.movableFoot]);
-                            if (roles.locked)
-                            {
-                                ImGui::TextUnformatted(u8"발딛기 역할 유지: 착지 처리까지 고정");
-                            }
-                        }
-                        else if (sample.footstep.GetRoles().IsValid())
-                        {
-                            ImGui::TextUnformatted(u8"발 역할 표시 없음: 지지발 접촉 무효");
-                        }
-                        else
-                        {
-                            ImGui::TextWrapped(u8"발 역할 없음: %s", PARS::FootstepReasonLabel(sample.footstep.reason));
-                        }
-                        if (sample.candidates.support >= 0)
-                        {
-                            ImGui::Text(u8"COM 거리: 왼발 %.1f / 오른발 %.1f cm",
-                                sample.candidates.distances[0] * 100, sample.candidates.distances[1] * 100);
+                            const PARS::FootContactSample& contact = sample.feet[side].contact;
+                            ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
+                                contact.hasSample && contact.grounded ? "ON" : "OFF",
+                                sample.footstep.feet[side].IsInProgress() ? "ON" : "OFF");
                         }
                     };
-                    drawRoles(GetPreviewCharacter(), u8"플레이어 발 역할");
-                    drawRoles(m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr, u8"더미 발 역할");
+                    drawFootStates(GetPreviewCharacter(), u8"플레이어 발 상태");
+                    drawFootStates(m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr, u8"더미 발 상태");
                 }
                 if (m_ImpactTest && !m_ImpactTest->GetStatusMessage().empty())
                 {

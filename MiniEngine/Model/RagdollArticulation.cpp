@@ -812,7 +812,7 @@ namespace PARS
         for (size_t side = 0; side < m_SupportContacts.size(); ++side)
         {
             const RagdollSupportContact& contact = m_SupportContacts[side];
-            if (m_FootDrivenSupport && contact.supporting && m_SupportLoads.forces[side].y > 0 &&
+            if (m_FootDrivenSupport && contact.grounded && m_SupportLoads.forces[side].y > 0 &&
                 contact.ankleDriveBoost > 0 && std::isfinite(contact.ankleDriveBlendTime) && contact.ankleDriveBlendTime > 0)
             {
                 const float blend = deltaTime > 0 ? deltaTime / (contact.ankleDriveBlendTime + deltaTime) : 0;
@@ -832,7 +832,7 @@ namespace PARS
                 const int childBody = m_Asset.FindBody(data.childBone);
                 for (size_t side = 0; side < m_SupportContacts.size(); ++side)
                 {
-                    if (m_SupportContacts[side].supporting && m_SupportContacts[side].body == childBody)
+                    if (m_SupportContacts[side].grounded && m_SupportContacts[side].body == childBody)
                     {
                         ankleDriveScale = m_SupportLoads.ankleDriveScales[side];
                     }

@@ -66,7 +66,7 @@ void RunSupportAnkleDriveTests()
     for (size_t side = 0; side < contacts.size(); ++side)
     {
         contacts[side].body = static_cast<int>(side + 1);
-        contacts[side].supporting = true;
+        contacts[side].grounded = true;
         contacts[side].position = PxVec3(side == 0 ? -.2f : .2f, 0, 0);
         contacts[side].ankleDriveBlendTime = 0;
     }
@@ -98,7 +98,21 @@ void RunSupportAnkleDriveTests()
     check(std::abs(shared.stiffness / baseline.stiffness - 1.25f) < 1e-5f &&
             std::abs(shared.damping / baseline.damping - 1.25f) < 1e-5f,
         "Half body weight increases both actual PhysX PD coefficients by one quarter");
-    contacts[1].supporting = false;
+    contacts[0].loadWeight = 0;
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Release intended load without erasing real foot contact");
+    check(contacts[0].grounded && ragdoll.GetSupportLoads().fractions[0] == 0 &&
+            ragdoll.GetSupportLoads().fractions[1] == 1 && ragdoll.GetSupportLoads().forces[0].y == 0 &&
+            joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == baseline.stiffness,
+        "A grounded foot preparing takeoff does not also receive a standing load target or ankle boost");
+    contacts[0].loadWeight = .25f;
+    ragdoll.SetSupportContacts(contacts);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error) &&
+            std::abs(ragdoll.GetSupportLoads().fractions[0] - .2f) < 1e-5f &&
+            std::abs(ragdoll.GetSupportLoads().fractions[1] - .8f) < 1e-5f,
+        "A partial load request redistributes expected support while preserving total body weight");
+    contacts[0].loadWeight = 1;
+    contacts[1].grounded = false;
     ragdoll.SetSupportContacts(contacts);
     check(ragdoll.UpdateDriveTargets(pose, 0, error), "Transfer support to one foot");
     const PxArticulationDrive single = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);

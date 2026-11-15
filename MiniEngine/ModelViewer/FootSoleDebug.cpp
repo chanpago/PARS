@@ -190,16 +190,17 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     if (m_ShowLandingFoot)
     {
         const PARS::FootstepSnapshot& step = sample.footstep;
-        const PARS::FootstepRoles roles = step.GetRoles();
         const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();
-        if (step.IsInProgress() && roles.IsValid() &&
-            ik.status == PARS::FootstepIKStatus::Applied && ik.revision == sample.contactRevision &&
-            ik.stepFoot == roles.movableFoot && ik.legs[roles.movableFoot].valid)
+        for (size_t side = 0; side < step.feet.size(); ++side)
         {
-            // 새 목표 출력이 잠시 멈춰도 저장된 최종 착지점은 유지한다. 회전은 제어가 요청한 발바닥 목표와 같다.
-            // 공중 이동 궤적의 높이는 포함하지 않는다.
-            const PxTransform target(step.target, ik.legs[roles.movableFoot].requestedSole.q);
-            LandingFoot(lines, sample.feet[roles.movableFoot], target);
+            const PARS::FootstepCommand& command = step.feet[side];
+            if (command.IsInProgress() && ik.status == PARS::FootstepIKStatus::Applied &&
+                ik.revision == sample.contactRevision && ik.legs[side].valid)
+            {
+                // 발마다 마지막 착지점을 보존하며 이동 궤적의 높이는 포함하지 않는다.
+                const PxTransform target(command.target.position, ik.legs[side].requestedSole.q);
+                LandingFoot(lines, sample.feet[side], target);
+            }
         }
     }
     if (m_ShowFootstep)
@@ -232,23 +233,25 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
             Point(lines, ToMath(target.position), TargetColor, .025f);
             Line(lines, ToMath(target.position), ToMath(target.position + target.normal * .08f), TargetColor);
         }
-        if (step.hasTarget && step.stepFoot >= 0 && step.stepFoot < 2)
+        for (size_t side = 0; side < step.feet.size(); ++side)
         {
-            const Vector3 foot(sample.feet[step.stepFoot].soleWorld.GetW());
-            // 연결선은 목표의 대응 관계다. 실제 발 이동 궤적을 뜻하지 않는다.
-            Line(lines, foot, ToMath(step.target), TargetColor);
-            ProjectionMarker(lines, ToMath(step.target), TargetColor, true);
-            Point(lines, foot, TargetColor, .03f);
-        }
-        if (step.motion.valid && step.stepFoot >= 0 && step.stepFoot < 2)
-        {
-            const Vector3 goal = ToMath(step.motion.position);
-            const Vector3 foot(sample.feet[step.stepFoot].soleWorld.GetW());
-            Point(lines, goal, MotionTargetColor, .035f);
-            Line(lines, goal - Vector3(0, .025f, 0), goal + Vector3(0, .025f, 0), MotionTargetColor);
-            // 지면 착지점과 높이를 더한 목표를 분리해 표시한다. 실제 발 궤적을 그리는 선은 아니다.
-            Line(lines, ToMath(step.target), goal, MotionTargetColor);
-            Line(lines, foot, goal, MotionTargetColor);
+            const PARS::FootstepCommand& command = step.feet[side];
+            const Vector3 foot(sample.feet[side].soleWorld.GetW());
+            if (command.hasTarget)
+            {
+                // 연결선은 목표의 대응 관계이며 실제 이동 궤적을 뜻하지 않는다.
+                Line(lines, foot, ToMath(command.target.position), TargetColor);
+                ProjectionMarker(lines, ToMath(command.target.position), TargetColor, true);
+                Point(lines, foot, TargetColor, .03f);
+            }
+            if (command.motion.valid)
+            {
+                const Vector3 goal = ToMath(command.motion.position);
+                Point(lines, goal, MotionTargetColor, .035f);
+                Line(lines, goal - Vector3(0, .025f, 0), goal + Vector3(0, .025f, 0), MotionTargetColor);
+                Line(lines, ToMath(command.target.position), goal, MotionTargetColor);
+                Line(lines, foot, goal, MotionTargetColor);
+            }
         }
         const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();
         if (ik.status == PARS::FootstepIKStatus::Applied)
@@ -256,7 +259,7 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
             for (size_t side = 0; side < ik.legs.size(); ++side)
             {
                 const PARS::LegIKResult& leg = ik.legs[side];
-                const PxU32 color = int(side) == ik.stepFoot ? IKStepColor : IKSupportColor;
+                const PxU32 color = ik.motionTargets[side] ? IKStepColor : IKSupportColor;
                 Line(lines, ToMath(leg.hip.p), ToMath(leg.knee.p), color);
                 Line(lines, ToMath(leg.knee.p), ToMath(leg.ankle.p), color);
                 Point(lines, ToMath(leg.knee.p), color, .025f);
@@ -360,8 +363,6 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
     if (ImGui::TreeNodeEx(u8"발딛기 판단 / 착지 목표", ImGuiTreeNodeFlags_DefaultOpen))
     {
         const PARS::FootstepSnapshot& step = sample.footstep;
-        const PARS::FootstepRoles roles = step.GetRoles();
-        const PARS::FootstepRoles displayRoles = sample.GetDisplayRoles();
         PARS::FootstepSettings& settings = support.GetFootstepSettings();
         const PARS::RecoverySnapshot& recovery = mesh.GetRecoverySnapshot();
         const PARS::RecoverySettings& recoverySettings = mesh.GetRecoverySettings();
@@ -412,20 +413,23 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             ImGui::TextWrapped(u8"골반을 직접 들어 올리는 힘 없이 지지 다리의 자세와 관절 토크로 높이를 조절합니다. 지지발 IK 목표에는 골반 오차 보정이 포함되므로 실제 발바닥 고정점과 다를 수 있습니다.");
         }
         ImGui::Checkbox(u8"발딛기 판단·목표 3D 표시", &m_ShowFootstep);
-        ImGui::Checkbox(u8"파란 발 착지 윤곽 표시", &m_ShowLandingFoot);
+        ImGui::Checkbox(u8"발별 착지 윤곽 표시", &m_ShowLandingFoot);
         ImGui::TextWrapped(u8"밝은 파랑 윤곽: 최종 착지 발바닥 위치·크기 / 화살표: 발끝 방향. 새 목표 계산이 잠시 멈춰도 마지막 착지 목표를 유지합니다.");
-        ImGui::Text(u8"상태: %s", PARS::FootstepPhaseLabel(step.phase));
         ImGui::TextWrapped(u8"사유: %s", PARS::FootstepReasonLabel(step.reason));
-        ImGui::Text(u8"빨강 지지발: %s / 파랑 이동 가능 발: %s",
-            FootLabel(displayRoles.supportFoot), FootLabel(displayRoles.movableFoot));
-        ImGui::Text(u8"발딛기 역할 고정: %s / 거리 기준 이동 후보: %s", roles.locked ? "ON" : "OFF", FootLabel(step.rawBlueFoot));
-        if (step.transfer.active && !step.IsInProgress())
+        ImGui::Text(u8"현재 명령 대상: %s", FootLabel(step.requestedFoot));
+        ImGui::Text(u8"다음 발딛기 하중 조건: 체중 %.0f%% 이상을 %.3f초 연속 확인",
+            settings.supportLoadRatio * 100, settings.supportConfirmationTime);
+        if (step.loadTransfer.required && step.requestedFoot >= 0 && step.requestedFoot < 2)
         {
-            ImGui::Text(u8"착지 후 예측 지지 후보: %s / 하중 확인: %.3f / %.3f초",
-                FootLabel(step.transfer.candidateFoot), step.transfer.confirmationTime, settings.supportConfirmationTime);
-            ImGui::Text(u8"수직 하중 / 체중: 왼발 %.2f · 오른발 %.2f / 필요 %.2f",
-                step.transfer.loadRatios[0], step.transfer.loadRatios[1], settings.supportLoadRatio);
-            ImGui::Text(u8"다음 발 이동 허용: %s / 지지 후보 예측 %.2f초", step.transfer.ready ? "ON" : "OFF", settings.stepDuration);
+            const size_t receivingFoot = static_cast<size_t>(1 - step.requestedFoot);
+            ImGui::Text(u8"하중 확인 발: %s / 실측 %.0f%% / 연속 %.3f초 / 시작 허용 %s",
+                FootLabel(static_cast<int>(receivingFoot)), step.loadTransfer.loadRatios[receivingFoot] * 100,
+                step.loadTransfer.confirmationTimes[receivingFoot], step.loadTransfer.ready ? "ON" : "OFF");
+        }
+        if (step.hasImpact)
+        {
+            ImGui::Text(u8"마지막 루트 충격점 (%.3f, %.3f, %.3f) m", step.lastImpactPosition.x,
+                step.lastImpactPosition.y, step.lastImpactPosition.z);
         }
         ImGui::Text(u8"시작 %llu / 착지 %llu / 중단 %llu",
             static_cast<unsigned long long>(step.startCount), static_cast<unsigned long long>(step.landingCount),
@@ -441,7 +445,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         {
             ImGui::SetTooltip(u8"착지 목표가 이 간격보다 좁을 때만 바깥으로 보정합니다. 0%%이면 간격 보정을 끕니다.");
         }
-        ImGui::DragFloat(u8"발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
+        ImGui::DragFloat(u8"이륙 후 발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"최소 들기 높이 (m)", &settings.minimumLiftHeight, .005f, .01f, .3f, "%.3f");
         ImGui::DragFloat(u8"착지 수평 목표 고정 진행률", &settings.landingLockProgress, .01f, .5f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"착지 추가 하강 속도 (m/s)", &settings.landingLoweringSpeed, .005f, 0.0f, .3f, "%.3f");
@@ -459,8 +463,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             {
                 ImGui::Text(u8"%s 목표 (%.3f, %.3f, %.3f) m", FootLabel(static_cast<int>(side)),
                     target.position.x, target.position.y, target.position.z);
-                ImGui::Text(u8"  발 이동 %.2fm / 지지발 거리 %.2fm · 보폭 제한 %s / 간격 보정 %s / 교차 제한 %s",
-                    target.travelDistance, target.stanceDistance, target.lengthLimited ? "ON" : "OFF",
+                ImGui::Text(u8"  발 이동 %.2fm / 반대 발 거리 %.2fm · 보폭 제한 %s / 간격 보정 %s / 교차 제한 %s",
+                    target.travelDistance, target.separationDistance, target.lengthLimited ? "ON" : "OFF",
                     target.stanceWidthLimited ? "ON" : "OFF",
                     target.crossingLimited ? "ON" : "OFF");
             }
@@ -469,19 +473,29 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 ImGui::Text(u8"%s 후보: %s", FootLabel(static_cast<int>(side)), PARS::FootstepReasonLabel(target.reason));
             }
         }
-        if (step.IsInProgress())
+        for (size_t side = 0; side < step.feet.size(); ++side)
         {
-            ImGui::Text(u8"시작 시 이동 거리 %.2fm / 목표 출력 %s", step.initialDistance, step.hasTarget ? "ON" : "OFF");
-        }
-        if (step.IsInProgress() || step.phase == PARS::FootstepPhase::Landed)
-        {
-            const PARS::FootstepMotion& motion = step.motion;
+            const PARS::FootstepCommand& command = step.feet[side];
+            const PARS::FootContactSample& contact = sample.feet[side].contact;
+            ImGui::Text(u8"%s: %s / 실제 접지 %s / 이동 명령 %s", FootLabel(static_cast<int>(side)),
+                PARS::FootstepPhaseLabel(command.phase), contact.hasSample && contact.grounded ? "ON" : "OFF",
+                command.IsInProgress() ? "ON" : "OFF");
+            ImGui::TextWrapped(u8"  %s", PARS::FootstepReasonLabel(command.reason));
+            if (!command.IsInProgress() && command.phase != PARS::FootstepPhase::Landed)
+            {
+                continue;
+            }
+            ImGui::Text(u8"시작 시 이동 거리 %.2fm / 목표 출력 %s", command.initialDistance, command.hasTarget ? "ON" : "OFF");
+            const PARS::FootstepMotion& motion = command.motion;
+            ImGui::Text(u8"실제 이륙 확인 %s / 이륙 대기 %.3f초", command.hasTakenOff ? "ON" : "OFF", motion.takeoffElapsedTime);
             ImGui::Text(u8"계획 최고 높이 %.1fcm / 시작 시 종아리 상한 %.1fcm",
                 motion.initialHeight * 100, motion.heightLimit * 100);
             ImGui::Text(u8"이동 시간 %.2f / %.2fs · 시간 진행 %.1f%% / 실제 수평 진행 %.1f%% / 남은 거리 %.1fcm",
                 motion.elapsedTime, motion.duration, motion.progress * 100,
                 motion.measuredProgress * 100, motion.remainingDistance * 100);
+            ImGui::PushID(static_cast<int>(side));
             ImGui::ProgressBar(motion.progress, ImVec2(-1, 0));
+            ImGui::PopID();
             ImGui::Text(u8"착지 수평 목표 고정: %s / 추가 하강 %.2f / %.2fcm",
                 motion.landingTargetLocked ? "ON" : "OFF", motion.landingLowering * 100,
                 motion.maximumLandingLowering * 100);
@@ -503,7 +517,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             settings.liftHeightScale, settings.minimumLiftHeight);
         ImGui::TextWrapped(u8"설정은 다음 발딛기부터 적용됩니다. 하강 중 수평 착지 목표를 고정하고, 계획 시간이 끝나도 닿지 않으면 제한된 속도와 깊이로 더 내립니다. 실제 접촉을 확인해 종료합니다.");
         ImGui::TextWrapped(u8"청록: 예측 COM · 회색: 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
-        ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동/지지 다리의 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
+        ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동 명령 유무에 따른 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
         const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();
         ImGui::Text(u8"IK → 관절 PD: %s", PARS::FootstepIKStatusLabel(ik.status));
         if (ik.status == PARS::FootstepIKStatus::Applied)
@@ -513,7 +527,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 const PARS::LegIKResult& leg = ik.legs[side];
                 const float actualError = (ToPx(Vector3(sample.feet[side].soleWorld.GetW())) - leg.requestedSole.p).magnitude();
                 ImGui::Text(u8"%s (%s): IK 도달 오차 %.2fcm / 실제 발 목표 오차 %.2fcm%s", FootLabel(int(side)),
-                    int(side) == ik.stepFoot ? u8"이동" : u8"지지", leg.reachError * 100, actualError * 100,
+                    ik.motionTargets[side] ? u8"목표 이동" : u8"자세 유지", leg.reachError * 100, actualError * 100,
                     leg.reachLimited ? u8" / 다리 길이 제한" : "");
                 ImGui::Text(u8"  무릎 Hint: %s / 발목 목표 (%.3f, %.3f, %.3f) m",
                     PARS::KneeHintSourceLabel(leg.hintSource), leg.requestedAnkle.x, leg.requestedAnkle.y, leg.requestedAnkle.z);

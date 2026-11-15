@@ -320,6 +320,19 @@ namespace PARS
             // 모드 전환은 접촉 캐시를 비우므로 충격점과 바디별 충격량을 먼저 복사한다.
             std::vector<RagdollBodyImpulse> impacts;
             m_Ragdoll.CaptureExternalImpacts(impacts);
+            const int impactRoot = m_Ragdoll.GetImpactRootBody();
+            PxVec3 impactPosition(0);
+            float impactWeight = 0;
+            for (const RagdollBodyImpulse& bodyImpact : impacts)
+            {
+                const float weight = bodyImpact.impulse.magnitude();
+                if (impactRoot >= 0 && bodyImpact.body == static_cast<size_t>(impactRoot) &&
+                    bodyImpact.position.isFinite() && std::isfinite(weight) && weight > 1e-6f)
+                {
+                    impactPosition += bodyImpact.position * weight;
+                    impactWeight += weight;
+                }
+            }
             Character* character = dynamic_cast<Character*>(&GetOwner());
             const bool activated = character ? character->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_PhysicsError) :
                 SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, Vector3(kZero), m_PhysicsError);
@@ -340,6 +353,10 @@ namespace PARS
             m_KinematicRecoveryTimer.Reset();
             m_PendingRecoveryImpact = !interruptedStandingUp;
             m_Ragdoll.ApplyExternalImpacts(impacts);
+            if (impactWeight > 0)
+            {
+                m_FootSupport.RecordImpact(impactPosition / impactWeight);
+            }
             return m_Ragdoll.SetRootSupported(!interruptedStandingUp, m_PhysicsError);
         }
         // 낙상은 전용 기상 경로에서 처리하므로 기존 서기 복귀 타이머에서 제외한다.
@@ -543,7 +560,7 @@ namespace PARS
         // fallen : 골반 지지가 해제됐거나 발딛기가 중단
         // needsStep : 플래너가 예측 COM을 보고 발딛기가 필요하다고 판단
         // stepping : 발딛기가 이미 시작돼, 이륙 대기 또는 공중 단계인지
-        input.fallen = m_RootSupportRelease != RootSupportRelease::None || step.phase == FootstepPhase::Aborted;
+        input.fallen = m_RootSupportRelease != RootSupportRelease::None || step.aborted;
         input.needsStep = step.needsStep;
         input.stepping = step.IsInProgress();
 
@@ -729,43 +746,29 @@ namespace PARS
                 return false;
             }
 
-            // 발딛기를 시작하면 지지발의 기준을 현재 상태로 다시 잡음
-            // 이번 발딛기를 지탱할 왼발의 기본 목표
-            if (step.justStarted && step.supportFoot >= 0 && step.supportFoot < 2)
+            bool changedTargets = false;
+            for (size_t side = 0; side < step.feet.size(); ++side)
             {
-                m_RecoverySoles[step.supportFoot] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[step.supportFoot]) :
-                    ToRecoveryFrame(sample.feet[step.supportFoot].soleWorld);
-            }
-
-            // 움직이던 발이 착지하면 실제 착지 상태를 새 기준으로 저장
-            // 예를들어 계획한 착지 X위치가 0.4m인데 실제로 0.35m에 착지했다면, 평평한 지면에서는 실제 착지한 0.35를 바탕으로 새 기본 목표를 잡음
-            if (step.justLanded && step.stepFoot >= 0 && step.stepFoot < 2)
-            {
-                // 착지는 회복의 종료가 아니다. 착지한 발을 유지하며 COM 안정 조건을 계속 확인한다.
-                m_RecoverySoles[step.stepFoot] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[step.stepFoot]) :
-                    ToRecoveryFrame(sample.feet[step.stepFoot].soleWorld);
-            }
-
-            // 착지 전에는 움직이는 발의 목표를 궤적에 따라 갱신
-            else if (step.motion.valid && step.stepFoot >= 0 && step.stepFoot < 2)
-            {
-                PxTransform sole(PxIdentity);
-
-                /*
-                step.motion.position : 발딛기 궤적에 따라 계산된 발바닥 위치
-                step.targetNormal : 목표 발바닥의 위 방향을 정할 지면 법선
-                animatedSoles[step.stepFoot] : 발의 전방 방향을 얻을 애니메이션 기준 자세
-                sole : 계산 결과를 받을 위치,회전 변환
-                */
-                if (MakeFootSoleTarget(step.motion.position, step.targetNormal, animatedSoles[step.stepFoot], sole))
+                const FootstepCommand& command = step.feet[side];
+                changedTargets = changedTargets || command.justStarted || command.justLanded;
+                if (command.justLanded || (!command.IsInProgress() && sample.feet[side].contact.landed))
                 {
-                    // 성공하면 이동할 발의 목표를 갱신
-                    m_RecoverySoles[step.stepFoot] = sole;
+                    // 해당 발의 실제 착지점만 갱신하며 반대 발의 목표나 역할은 바꾸지 않는다.
+                    m_RecoverySoles[side] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[side]) :
+                        ToRecoveryFrame(sample.feet[side].soleWorld);
+                }
+                else if (command.motion.valid)
+                {
+                    PxTransform sole(PxIdentity);
+                    if (MakeFootSoleTarget(command.motion.position, command.target.normal, animatedSoles[side], sole))
+                    {
+                        m_RecoverySoles[side] = sole;
+                    }
                 }
             }
 
             // 시작,착지 때 목표 변화율 계산 이력을 초기화
-            if (m_Ragdoll.UsesFootDrivenSupport() && (step.justStarted || step.justLanded))
+            if (m_Ragdoll.UsesFootDrivenSupport() && changedTargets)
             {
                 // 이륙/착지 때 실제 발로 기준을 다시 잡는 차이를 목표 속도·가속도로 오인하지 않는다.
                 // 현재 물리 속도는 유지하므로 관절 PD의 제동은 계속 작동한다.

@@ -37,9 +37,10 @@ namespace PARS
         int body = -1;
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0, 1, 0};
+        float loadWeight = 1.0f; // 실제 접촉 여부와 별개로 이 발에 배정할 목표 하중의 가중치
         float ankleDriveBoost = 0;
         float ankleDriveBlendTime = .08f;
-        bool supporting = false;
+        bool grounded = false;
     };
 
     struct RagdollSupportLoads
