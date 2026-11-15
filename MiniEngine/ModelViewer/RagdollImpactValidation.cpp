@@ -18,13 +18,8 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
     std::ofstream report(path);
     std::ofstream samples(path + L".csv");
     std::ofstream feet(path + L".feet.csv");
-    std::ofstream flails(path + L".flail.csv");
     uint32_t validateFootAlignment = 0;
-    uint32_t validateFlail = 0;
-    uint32_t flailDirection = 0;
     CommandLineArgs::GetInteger(L"validatefootalignment", validateFootAlignment);
-    CommandLineArgs::GetInteger(L"validateflail", validateFlail);
-    CommandLineArgs::GetInteger(L"flaildirection", flailDirection);
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -38,19 +33,12 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         check(report.good() && samples.good() && feet.good() && scenario <= 5 && test.SetAutomaticSupport(true),
             "Prepare grounded automatic kinematic dummy");
         SkeletalMeshComponent& mesh = test.GetDummy()->GetMesh();
-        if (validateFlail)
-        {
-            check(mesh.GetRecoveryFlail().IsConfigured() && flails.good() && flailDirection <= 2,
-                "Both real flail clips and the Spine mask are configured");
-        }
         check(!mesh.IsRagdoll() && mesh.GetRagdoll().GetKinematicBodyCount() == mesh.GetRagdoll().GetBodyCount(),
             "Idle starts with every PA body kinematic");
         check(mesh.GetKinematicStableDuration() == 2.0f, "Default recovery duration is exactly two seconds");
         std::string error;
         check(player.StopRagdoll(error), "Place projectile source away from the dummy");
-        const Vector3 source = flailDirection == 1 ? Vector3(3.5f, 0, 0) :
-            flailDirection == 2 ? Vector3(2.0f, 0, -2.5f) : Vector3(3.5f, 0, -5.0f);
-        player.SetActorLocation(source + Vector3(0, player.GetCapsuleComponent().GetHalfHeight(), 0));
+        player.SetActorLocation(Vector3(3.5f, player.GetCapsuleComponent().GetHalfHeight(), -5.0f));
         PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());
         if (controller)
         {
@@ -64,7 +52,6 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         world.SetPhysicsTimeScale(1);
         samples << "frame,time,mode,blending,zone,stable_time,impact,step_count,bone,x,y,z,position_error,rotation_error\n";
         feet << "frame,time,mode,blending,side,grounded,root_x,root_y,root_z,sole_x,sole_y,sole_z,target_x,target_y,target_z\n";
-        flails << "frame,mode,recovery,layer_weight,front_weight,target_front_weight,phase,ik_status,clip\n";
         report << "fixed_dt=" << PhysicsWorld::FixedDeltaTime << " stable_duration=2 blend_duration="
             << mesh.GetRecoverySettings().blendDuration << " scenario=" << scenario << std::endl;
         bool seenActive = false;
@@ -72,9 +59,6 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         bool secondShot = false;
         unsigned entries = 0;
         unsigned returns = 0;
-        unsigned flailSteps = 0;
-        unsigned directionChecks = 0;
-        float frontWeightSum = 0;
         PhysicsAnimationMode previousMode = mesh.GetPhysicsMode();
         for (uint32_t frame = 0; frame < 900; ++frame)
         {
@@ -87,7 +71,6 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 secondShot = seenActive;
             }
             const float beforeTimer = mesh.GetKinematicStableTime();
-            const bool beforeFalling = mesh.IsFollowingFallingAnimation();
             const Vector3 beforeRoot = test.GetDummy()->GetActorLocation();
             Vector3 expectedRootOffset(kZero);
             bool beforeBothGrounded = true;
@@ -113,59 +96,9 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                     expectedRootOffset += (Vector3(actualSole.GetW()) - Vector3(targetSole.GetW())) * .5f;
                 }
             }
-            float expectedFrontWeight = -1;
-            if (validateFlail)
-            {
-                Vector3 center(kZero);
-                float mass = 0;
-                if (mesh.GetRagdoll().GetCenterOfMass(center, mass) && mass > 0 &&
-                    mesh.GetRagdoll().GetExternalImpactImpulse() >= mass * mesh.GetRecoverySettings().impactVelocity)
-                {
-                    std::vector<RagdollBodyImpulse> impacts;
-                    mesh.GetRagdoll().CaptureExternalImpacts(impacts);
-                    physx::PxVec3 impulse(0);
-                    for (const RagdollBodyImpulse& impact : impacts)
-                    {
-                        impulse += impact.impulse;
-                    }
-                    const Vector3 forward = mesh.GetComponentTransform().GetZ();
-                    const float impulseLength = std::hypot(impulse.x, impulse.z);
-                    const float forwardLength = std::hypot(static_cast<float>(forward.GetX()), static_cast<float>(forward.GetZ()));
-                    if (impulseLength > 1e-5f && forwardLength > 1e-5f)
-                    {
-                        expectedFrontWeight = .5f + .5f * Clamp((impulse.x / impulseLength) *
-                            (static_cast<float>(forward.GetX()) / forwardLength) + (impulse.z / impulseLength) *
-                            (static_cast<float>(forward.GetZ()) / forwardLength), -1.0f, 1.0f);
-                    }
-                }
-            }
             world.Tick(1.0f / 60.0f);
             test.Update();
             check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");
-            const RecoveryFlail& flail = mesh.GetRecoveryFlail();
-            flails << frame << ',' << static_cast<int>(mesh.GetPhysicsMode()) << ','
-                << static_cast<int>(mesh.GetRecoverySnapshot().state) << ',' << flail.GetWeight() << ','
-                << flail.GetFrontWeight() << ',' << flail.GetTargetFrontWeight() << ',' << flail.GetPhase() << ','
-                << static_cast<int>(mesh.GetFootstepIKSnapshot().status) << ','
-                << mesh.GetAnimInstance().GetCurrentAnimationIndex() << '\n';
-            if (flail.GetWeight() > 0)
-            {
-                ++flailSteps;
-                frontWeightSum += flail.GetFrontWeight();
-                if (validateFlail)
-                {
-                    check(mesh.IsActiveRagdoll() && mesh.GetRecoverySnapshot().state == RecoveryState::Recovery &&
-                        mesh.GetAnimInstance().GetCurrentAnimationIndex() == 0 &&
-                        mesh.GetFootstepIKSnapshot().status == FootstepIKStatus::Applied,
-                        "Upper-body flail keeps Active Ragdoll, Idle selection, Recovery, and leg IK active together");
-                    if (expectedFrontWeight >= 0)
-                    {
-                        ++directionChecks;
-                        check(std::abs(flail.GetTargetFrontWeight() - expectedFrontWeight) < 1e-4f,
-                            "The blend target matches the actual received horizontal contact impulse");
-                    }
-                }
-            }
             if (mesh.GetPhysicsMode() != previousMode)
             {
                 report << "transition_frame=" << frame << " from=" << static_cast<int>(previousMode)
@@ -180,23 +113,16 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 {
                     ++returns;
                     seenReturn = true;
-                    if (beforeFalling)
+                    check(beforeTimer >= 2.0f - 1.0f / 60.0f - .00001f, "Return requires the complete two-second interval");
+                    const Vector3 rootOffset = test.GetDummy()->GetActorLocation() - beforeRoot;
+                    const float alignmentError = float(Length(rootOffset - expectedRootOffset));
+                    report << "return_both_grounded=" << beforeBothGrounded
+                        << " root_dx=" << float(rootOffset.GetX()) << " root_dy=" << float(rootOffset.GetY())
+                        << " root_dz=" << float(rootOffset.GetZ()) << " sole_alignment_error=" << alignmentError << std::endl;
+                    if (validateFootAlignment)
                     {
-                        check(mesh.IsFollowingStandingUpAnimation(), "A fallen character returns through the separate standing-up animation");
-                    }
-                    else
-                    {
-                        check(beforeTimer >= 2.0f - 1.0f / 60.0f - .00001f, "Return requires the complete two-second interval");
-                        const Vector3 rootOffset = test.GetDummy()->GetActorLocation() - beforeRoot;
-                        const float alignmentError = float(Length(rootOffset - expectedRootOffset));
-                        report << "return_both_grounded=" << beforeBothGrounded
-                            << " root_dx=" << float(rootOffset.GetX()) << " root_dy=" << float(rootOffset.GetY())
-                            << " root_dz=" << float(rootOffset.GetZ()) << " sole_alignment_error=" << alignmentError << std::endl;
-                        if (validateFootAlignment)
-                        {
-                            check(beforeBothGrounded, "Kinematic handoff requires both actual ground contacts");
-                            check(alignmentError < .0001f, "Root translation matches both sole midpoints on all three axes");
-                        }
+                        check(beforeBothGrounded, "Kinematic handoff requires both actual ground contacts");
+                        check(alignmentError < .0001f, "Root translation matches both sole midpoints on all three axes");
                     }
                 }
                 previousMode = mesh.GetPhysicsMode();
@@ -260,18 +186,6 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         report << "entries=" << entries << " returns=" << returns << std::endl;
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors");
         check(scenario == 0 ? !seenActive : seenActive, "Impact is required to enter active ragdoll");
-        if (validateFlail)
-        {
-            check(scenario == 0 ? flailSteps == 0 : flailSteps > 0,
-                "Upper-body flail starts only when recovery is needed");
-            const float meanFrontWeight = flailSteps > 0 ? frontWeightSum / static_cast<float>(flailSteps) : .5f;
-            report << "flail_steps=" << flailSteps << " mean_front_weight=" << meanFrontWeight
-                << " direction=" << flailDirection << " measured_direction_checks=" << directionChecks << std::endl;
-            if (scenario != 0)
-            {
-                check(directionChecks > 0, "Validate the blend against real contact vectors rather than projectile launch direction");
-            }
-        }
         if (scenario == 1 || scenario == 2 || scenario == 4 || scenario == 5)
         {
             check(seenReturn, "Grounded projectile recovery returns to kinematic mode");
@@ -548,25 +462,6 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(support.GetSnapshot().hasCenterOfMass && !support.GetSnapshot().hull.empty() &&
                 !support.GetSnapshot().balance.bufferHull.empty(),
             "Reset prepares COM and A/B before the first physics step or render");
-        const std::function<bool()> useFootOnlyProjectionFixture = [&]() -> bool
-        {
-            // 아래 사각형 오프셋 시험은 Toe가 없는 PA의 호환성을 검사한다.
-            // Toe가 있으면 Foot 사각형을 옮겨도 Toe 투영은 실제 바디 아래에 남는 것이 정상이다.
-            PhysicsAsset footOnly = *dummy->GetMesh().GetPhysicsAsset();
-            for (size_t body = footOnly.bodies.size(); body-- > 0;)
-            {
-                const std::string& name = footOnly.bodies[body].bone;
-                const size_t separator = name.find_last_of(':');
-                const std::string leaf = name.substr(separator == std::string::npos ? 0 : separator + 1);
-                if (leaf == "LeftToeBase" || leaf == "RightToeBase")
-                {
-                    footOnly.RemoveBody(body);
-                }
-            }
-            std::string error;
-            return dummy->GetMesh().SetPhysicsAsset(footOnly, error);
-        };
-        check(useFootOnlyProjectionFixture(), "Use an explicitly toe-less PA only for legacy rectangle projection checks");
         world.SetPhysicsPaused(true);
         FootSoleDebug debug;
         debug.SetVisible(false);
@@ -751,7 +646,6 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(ragdoll.UsesFootDrivenSupport() && !ragdoll.IsRootAxisSupported(0) && !ragdoll.IsRootAxisSupported(1) &&
                 !ragdoll.IsRootAxisSupported(2) && ragdoll.IsRootAxisSupported(3),
             "Automatic Idle uses leg support, frees root translation and keeps rotation assistance");
-        check(useFootOnlyProjectionFixture(), "Use the toe-less projection fixture for synthetic rectangle displacement");
 
         // Deterministically exercise both release causes, and re-entry without rearming.
         world.SetPhysicsPaused(true);
@@ -780,7 +674,6 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(resetActive() && ragdoll.GetRootSupportWeight() == 1 &&
                 dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::None,
             "Dummy reset rearms support from its newly sampled grounded pose");
-        check(useFootOnlyProjectionFixture(), "Use the toe-less projection fixture for synthetic missing rays");
         support.GetSoleSettings(0).offset.y += 1;
         support.GetSoleSettings(1).offset.y += 1;
         singleStep();

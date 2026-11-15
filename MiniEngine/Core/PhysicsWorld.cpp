@@ -27,18 +27,6 @@ namespace
         PxFilterObjectAttributes attributes1, PxFilterData data1, PxPairFlags& pairFlags,
         const void* constantBlock, PxU32 constantBlockSize)
     {
-        // 발딛기 검증용: true로 바꾸거나 아래 if에 !를 붙이면 PA 내부 충돌을 끈다.
-        // word1이 같은 PA 바디끼리만 제외하며, 지면과 외부 캐릭터 충돌은 기존 정책을 따른다.
-        const bool disablePASelfCollision = false;
-        if (disablePASelfCollision)
-        {
-            const bool samePA = data0.word1 != 0 && data0.word1 == data1.word1;
-            if (samePA)
-            {
-                return PxFilterFlag::eSUPPRESS;
-            }
-        }
-
         const bool capsule0 = (data0.word3 & PhysicsWorld::CharacterCapsuleFilterFlag) != 0;
         const bool capsule1 = (data1.word3 & PhysicsWorld::CharacterCapsuleFilterFlag) != 0;
         if (capsule0 || capsule1)
@@ -254,7 +242,6 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
     const void* ignoredOwner) const
 {
     contact = {};
-    PxVec3 weightedPosition(0);
     if (!m_Scene || body.getScene() != m_Scene)
     {
         return false;
@@ -289,10 +276,7 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
                 contact.position += point.position;
                 contact.normal += normal;
                 ++contact.pointCount;
-                const float impulse = physx::PxMax(0.0f, point.impulse.dot(point.normal));
-                contact.normalImpulse += impulse;
-                contact.normalImpulseVector += normal * impulse;
-                weightedPosition += point.position * (normal.y * impulse);
+                contact.normalImpulse += physx::PxMax(0.0f, point.impulse.dot(point.normal));
             }
         }
     }
@@ -300,17 +284,8 @@ bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundConta
     {
         return false;
     }
-    if (contact.normalImpulseVector.y > 1e-8f)
-    {
-        contact.position = weightedPosition / contact.normalImpulseVector.y;
-        contact.normal = contact.normalImpulseVector.getNormalized();
-    }
-    else
-    {
-        // 무하중 접촉도 접지로 유지하되, 하중 중심을 계산할 수 없을 때만 점 평균을 쓴다.
-        contact.position /= static_cast<float>(contact.pointCount);
-        contact.normal.normalize();
-    }
+    contact.position /= float(contact.pointCount);
+    contact.normal.normalize();
     return true;
 }
 

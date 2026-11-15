@@ -781,13 +781,13 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 
 
     /*
-    idle,walk,run에 사용할 모델 데이터를 파일에서 읽어 models배열에 저장한다. 
+    idle,walk,run에 사용할 모델 데이터를 파일에서 읽어 models배열에 저장한다.
     가져오는 데이터는 다음과 같다.
     - 외형 정보: 메시, 재질, 텍스처
     - 본 정보: 본 목록과 계층, 스키닝 연결 정보, 역바인드 행렬
     - 애니메이션 정보: 시간에 따른 본의 위치·회전·크기 변화
 
-    완료되면 
+    완료되면
     models[0] → Idle 모델 데이터
     models[1] → Walking 모델 데이터
     models[2] → SlowRun 모델 데이터
@@ -950,9 +950,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "Projectile.settings.json");
         const std::shared_ptr<const Model> falling = Renderer::LoadModel(root + L"Converted/FallingDown/FallingDown.gltf", forceRebuild);
         const std::shared_ptr<const Model> standingUp = Renderer::LoadModel(root + L"Converted/StandingUp/StandingUp.gltf", forceRebuild);
-        const std::shared_ptr<const Model> flailFront = Renderer::LoadModel(root + L"Converted/FlailFront/FlailFront.gltf", forceRebuild);
-        const std::shared_ptr<const Model> flailBack = Renderer::LoadModel(root + L"Converted/FlailBack/FlailBack.gltf", forceRebuild);
-        if (!m_ImpactTest->Initialize(models[0], falling, standingUp, flailFront, flailBack, *mesh.GetPhysicsAsset()))
+        if (!m_ImpactTest->Initialize(models[0], falling, standingUp, *mesh.GetPhysicsAsset()))
         {
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
             m_ImpactTest.reset();

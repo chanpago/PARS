@@ -22,7 +22,6 @@ namespace PARS
         m_SkeletalMesh = std::move(mesh);
         m_ModelInstance = m_SkeletalMesh;
         m_AnimInstance->Initialize(m_SkeletalMesh);
-        m_RecoveryFlail.Clear();
         m_FallingAnimationIndex = UINT32_MAX;
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
@@ -127,7 +126,6 @@ namespace PARS
         }
         instance->Initialize(m_SkeletalMesh);
         m_AnimInstance = std::move(instance);
-        m_RecoveryFlail.Clear();
         m_FallingAnimationIndex = UINT32_MAX;
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;

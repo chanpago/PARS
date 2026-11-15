@@ -181,7 +181,6 @@ void RunPelvisDriveTests();
 void RunRagdollComparisonTests();
 void RunSpringArmTests();
 void RunRagdollRecoveryTests();
-void RunRecoveryFlailTests();
 
 void RunCharacterImpactTests();
 void RunSupportAnkleDriveTests();
@@ -193,11 +192,6 @@ int main(int argc, char** argv)
         RunPhysicsAssetTests();
         RunJointLimitTests();
         RunRagdollComparisonTests();
-        return 0;
-    }
-    if (argc == 2 && std::strcmp(argv[1], "--flail-only") == 0)
-    {
-        RunRecoveryFlailTests();
         return 0;
     }
     if (argc == 2 && std::strcmp(argv[1], "--ankle-support-only") == 0)
@@ -213,7 +207,6 @@ int main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--recovery-only") == 0)
     {
         RunRagdollRecoveryTests();
-        RunRecoveryFlailTests();
         return 0;
     }
     if (argc == 2 && (std::strcmp(argv[1], "--ragdoll-reuse-only") == 0 ||
@@ -246,7 +239,6 @@ int main(int argc, char** argv)
     TestLifecycle();
     TestPoseSampling();
     RunRagdollRecoveryTests();
-    RunRecoveryFlailTests();
     RunWorldTests();
     RunCharacterMovementTests();
     RunSpringArmTests();

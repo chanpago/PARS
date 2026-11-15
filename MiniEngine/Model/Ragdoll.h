@@ -31,23 +31,12 @@ namespace PARS
         physx::PxVec3 impulse{0};
     };
 
-    struct RagdollSupportPart
-    {
-    public:
-        physx::PxVec3 position{0};
-        physx::PxVec3 normal{0, 1, 0};
-        float fraction = 0;
-        int body = -1;
-    };
-
     struct RagdollSupportContact
     {
     public:
         int body = -1;
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0, 1, 0};
-        // body는 발목 구동을 찾는 Foot 바디다. 실제 반력은 아래 부위별 바디에 대응한다.
-        std::array<RagdollSupportPart, 2> parts;
         float ankleDriveBoost = 0;
         float ankleDriveBlendTime = .08f;
         bool supporting = false;
@@ -59,9 +48,6 @@ namespace PARS
         std::array<float, 2> fractions{};
         std::array<physx::PxVec3, 2> forces{physx::PxVec3(0), physx::PxVec3(0)};
         std::array<float, 2> ankleDriveScales{1.0f, 1.0f};
-        std::array<std::array<physx::PxVec3, 2>, 2> partForces{
-            std::array<physx::PxVec3, 2>{physx::PxVec3(0), physx::PxVec3(0)},
-            std::array<physx::PxVec3, 2>{physx::PxVec3(0), physx::PxVec3(0)}};
     };
 
     // 실행 중인 PhysX 객체를 소유한다. 소속 PhysicsWorld가 종료되기 전에 파괴해야 한다.
@@ -208,9 +194,6 @@ namespace PARS
         bool IsCharacterImpactBody(size_t body) const;
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;
         physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
-        bool GetBodyDynamics(size_t body, float& mass, physx::PxVec3& inertia,
-            physx::PxTransform& center, physx::PxVec3& angularVelocity) const;
-        float GetJointDriveMaxTorque(size_t joint, size_t axis) const;
         float GetImpactRootMass() const;
         float GetCharacterCapsuleMass() const;
         void GetCharacterCapsuleContacts(std::vector<PhysicsCapsuleContact>& contacts) const;

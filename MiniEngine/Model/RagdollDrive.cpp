@@ -36,39 +36,6 @@ namespace PARS
     }
 #endif
 
-    float Ragdoll::GetJointDriveMaxTorque(size_t joint, size_t axis) const
-    {
-#if defined(_M_X64)
-        if (!m_DrivesEnabled || joint >= m_Asset.constraints.size() || axis >= 3)
-        {
-            return 0;
-        }
-        if (m_Articulation)
-        {
-            if (joint >= m_ArticulationJoints.size() || !m_ArticulationJoints[joint])
-            {
-                return 0;
-            }
-            const std::array<PxArticulationAxis::Enum, 3> axes{
-                PxArticulationAxis::eTWIST, PxArticulationAxis::eSWING1, PxArticulationAxis::eSWING2};
-            const PxArticulationDrive drive = m_ArticulationJoints[joint]->getDriveParams(axes[axis]);
-            return drive.stiffness > 0 ? drive.maxForce : 0;
-        }
-        if (joint < m_Joints.size() && m_Joints[joint])
-        {
-            const std::array<PxD6Drive::Enum, 3> axes{
-                PxD6Drive::eTWIST, PxD6Drive::eSWING1, PxD6Drive::eSWING2};
-            const PxD6Drive::Enum index = m_Asset.constraints[joint].useSlerpDrive ? PxD6Drive::eSLERP : axes[axis];
-            const PxD6JointDrive drive = m_Joints[joint]->getDrive(index);
-            return drive.stiffness > 0 ? drive.forceLimit : 0;
-        }
-#else
-        (void)joint;
-        (void)axis;
-#endif
-        return 0;
-    }
-
     void Ragdoll::SetDrivesEnabled(bool enabled)
     {
         m_DrivesEnabled = enabled && IsSimulating();
@@ -334,7 +301,7 @@ namespace PARS
 
 
         // [4] 관절별 목표 회전/각속도를 PhysX 드라이브에 전달
-		// targets에는 각 관절의 목표 회전이 들어 있다(쿼터니언, 부모관절 기준 상대적 차이). 목표 각속도는 이전 목표와 이번 목표의 차이를 시간으로 나눠 계산한다.
+        // targets에는 각 관절의 목표 회전이 들어 있다(쿼터니언, 부모관절 기준 상대적 차이). 목표 각속도는 이전 목표와 이번 목표의 차이를 시간으로 나눠 계산한다.
         for (size_t i = 0; i < targets.size(); ++i)
         {
             const PxQuat q = ToPx(targets[i]);
@@ -360,18 +327,18 @@ namespace PARS
             if (history)
             {
                 // 이 식이 나오는 이유는 생각해보면,
-				// 이번목표 = delta * 이전목표 이니까(delta는 차이) 
+                // 이번목표 = delta * 이전목표 이니까(delta는 차이)
                 // 이번목표 * 이전목표역회전 = delta
-				// q가 이번목표 , m_DriveTargets[i]가 이전목표
+                // q가 이번목표 , m_DriveTargets[i]가 이전목표
                 PxQuat delta = q * ToPx(m_DriveTargets[i]).getConjugate();
 
                 // 같은 회전 변화라도, 더 짧게 도는 방향으로 각속도를 계산하려는것. 의도적으로 그런것이다.
                 // 현재처럼 한 고정 스텝 동안 목표가 조금씩 변하는 상황에서는 짧은 쪽으로 계산하는게 맞다
                 // w가 0보다 작으면 각도가 180도 이상이라는 뜻이므로 이때 모든 성분의 부호를 뒤집으면 같은 회전을 반대축으로 180이하만큼 도는 표현으로 바꿀 수 있다.
                 // 간단히 쿼터니언에 대해 정리하자면, 어느 축을 중심으로 몇도를 회전할지를 쿼터니언의 네 성분(x,y,z,w)로 표현함.
-				// 회전축이 길이 인 벡터 u = (ux, uy, uz)이고 회전각이 θ라면, 쿼터니언은 다음과 같이 표현됨:
-				// x = ux * sin(θ/2), y = uy * sin(θ/2), z = uz * sin(θ/2), w = cos(θ/2)
-                // 즉, xyz에는 회전축 방향을 담고, xyz의 크기와 w에 회전량을 담는 구조 
+                // 회전축이 길이 인 벡터 u = (ux, uy, uz)이고 회전각이 θ라면, 쿼터니언은 다음과 같이 표현됨:
+                // x = ux * sin(θ/2), y = uy * sin(θ/2), z = uz * sin(θ/2), w = cos(θ/2)
+                // 즉, xyz에는 회전축 방향을 담고, xyz의 크기와 w에 회전량을 담는 구조
                 if (delta.w < 0)
                 {
                     delta = -delta;

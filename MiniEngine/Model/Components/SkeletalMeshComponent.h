@@ -8,7 +8,6 @@
 #include "../FootSupport.h"
 #include "../FootstepIK.h"
 #include "../RagdollRecovery.h"
-#include "../RecoveryFlail.h"
 #include "../StandingSupport.h"
 
 namespace PARS
@@ -44,13 +43,11 @@ namespace PARS
         // 렌더링 시작 전이나 GPU가 유휴 상태일 때 에셋을 지정한다.
         bool SetSkeletalMesh(std::shared_ptr<const Model> mesh) override;
         bool SetAnimInstance(std::unique_ptr<AnimInstance> instance);
-        bool ConfigureRecoveryFlail(uint32_t frontAnimationIndex, uint32_t backAnimationIndex);
         // 검증된 복사본을 보관한다. 실행 중인 물리 월드에서는 키네마틱 바디를 즉시 등록한다.
         // 재생성을 허용하면 현재 본 자세와 물리 모드를 유지한다. 물리 스텝 밖에서 호출한다.
         bool SetPhysicsAsset(const PhysicsAsset& asset, std::string& error, bool restartSimulation = false);
         bool ClearPhysicsAsset();
         bool BuildPhysicsSkeleton(PhysicsSkeleton& skeleton, std::string& error) const;
-        void PrepareFootstepPlanning(FootstepInput& input, const FootstepSettings& settings) const;
         bool StartRagdoll(Math::Vector3 velocity, std::string& error);
         bool SetPhysicsMode(PhysicsAnimationMode mode, Math::Vector3 velocity, std::string& error);
         // 조인트 이름을 기준으로 드라이브 값만 복사한다. 다음 고정 스텝 전에 적용된다.
@@ -80,10 +77,7 @@ namespace PARS
         void UpdatePhysicsPose();
         void UpdateFootSupport();
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
-        bool BuildPhysicalFootIKLeg(size_t side, FootIKLegInput& leg) const;
         bool ApplyRecoveryTargets(std::vector<Math::Matrix4>& target, float deltaTime);
-        bool ApplyRecoveryFlailTargets(std::vector<Math::Matrix4>& target, float deltaTime, float impactVelocity);
-        void CaptureRecoveryFlailDirection(const std::vector<RagdollBodyImpulse>& impacts);
         void ResetRecovery();
         bool CaptureRecoveryBlendSource();
         void UpdateFootCandidateDebugColors();
@@ -143,10 +137,6 @@ namespace PARS
         const RecoverySettings& GetRecoverySettings() const
         {
             return m_RecoverySettings;
-        }
-        const RecoveryFlail& GetRecoveryFlail() const
-        {
-            return m_RecoveryFlail;
         }
         bool SetFallingAnimation(uint32_t animationIndex);
         bool IsFollowingFallingAnimation() const;
@@ -223,14 +213,10 @@ namespace PARS
         Ragdoll m_Ragdoll;
         FootstepIK m_FootstepIK;
         RagdollRecovery m_Recovery;
-        RecoveryFlail m_RecoveryFlail;
         KinematicRecoveryTimer m_KinematicRecoveryTimer;
         StandingSupport m_StandingSupport;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
-        std::vector<GraphNode> m_RecoveryFlailPose;
-        std::vector<GraphNode> m_RecoveryFlailFrontPose;
-        std::vector<GraphNode> m_RecoveryFlailBackPose;
         std::vector<GraphNode> m_KinematicBlendSource;
         std::vector<GraphNode> m_KinematicBlendPose;
         PhysicsSkeleton m_PhysicsSkeleton;
