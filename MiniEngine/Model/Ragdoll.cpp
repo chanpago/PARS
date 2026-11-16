@@ -595,7 +595,7 @@ namespace PARS
                 m_AnimatedLinearVelocity.resize(m_Bodies.size());
                 m_AnimatedAngularVelocity.resize(m_Bodies.size());
                 m_AnimatedLinearVelocity[i] = Vector3(linear.x, linear.y, linear.z);
-                const physx::PxVec3 angular = axis * (angle / float(PhysicsWorld::FixedDeltaTime));
+                const physx::PxVec3 angular = axis * PxMin(angle / float(PhysicsWorld::FixedDeltaTime), 20.0f);
                 m_AnimatedAngularVelocity[i] = Vector3(angular.x, angular.y, angular.z);
             }
             if (teleport)

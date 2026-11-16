@@ -290,8 +290,8 @@ namespace PARS
                 PxReal angle;
                 PxVec3 axis;
                 delta.toRadiansAndUnitAxis(angle, axis);
-                // 목표 회전의 변화율을 자르지 않고 속도 추종과 가속도 보상에 전달한다.
-                angular = axis * (angle / deltaTime);
+                // 회전 차이를 축/각도로 풀어 목표 각속도를 구하고 20 rad/s로 제한한다.
+                angular = axis * PxMin(angle / deltaTime, 20.0f);
             }
             // 동적 골반이 따라갈 목표를 설정한다. 골반을 이 위치로 순간이동시키는 호출은 아니다.
             m_SupportJoint->setDrivePosition(supportedPose);
@@ -353,8 +353,8 @@ namespace PARS
                 // 이걸 반으로 3축의 각속도에 대한 벡터를 angular에 저장한다
                 delta.toRadiansAndUnitAxis(angle, axis);
 
-                // 목표 회전의 변화율을 자르지 않고 속도 추종과 가속도 보상에 전달한다.
-                angular = axis * (angle / deltaTime);
+                // 회전 차이를 축/각도로 풀어 목표 각속도를 구하고 20 rad/s로 제한한다.
+                angular = axis * PxMin(angle / deltaTime, 20.0f);
 
                 // 이 SDK의 SWING_TWIST 제약 행은 부모 속도에서 자식 속도를 뺀 값을 사용한다.
                 // SLERP는 자식 속도에서 부모 속도를 뺀 값을 사용한다(ExtD6JointSolverPrep 참고).
