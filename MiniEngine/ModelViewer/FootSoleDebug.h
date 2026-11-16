@@ -13,8 +13,7 @@ class FootSoleDebug
 {
 public:
     void DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings = {});
-    void DrawContactOverlay(PARS::SkeletalMeshComponent* player,
-        PARS::SkeletalMeshComponent* dummy, float topInset) const;
+    void DrawContactOverlay(PARS::SkeletalMeshComponent* dummy, float topInset) const;
     void BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
 
 public:

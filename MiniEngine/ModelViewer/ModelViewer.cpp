@@ -1704,10 +1704,9 @@ void ModelViewer::RenderUI(GraphicsContext& context)
     }
     if (!(m_Comparison && m_Comparison->IsShowingScene()))
     {
-        const PARS::Character* player = GetPreviewCharacter();
         const PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
-        m_FootSoles.DrawContactOverlay(player ? &player->GetMesh() : nullptr,
-            dummy ? &dummy->GetMesh() : nullptr, m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
+        m_FootSoles.DrawContactOverlay(dummy ? &dummy->GetMesh() : nullptr,
+            m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
     }
     if (m_IsAiming)
     {

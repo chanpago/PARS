@@ -186,20 +186,18 @@ namespace
     }
 }
 
-void FootSoleDebug::DrawContactOverlay(PARS::SkeletalMeshComponent* player,
-    PARS::SkeletalMeshComponent* dummy, float topInset) const
+void FootSoleDebug::DrawContactOverlay(PARS::SkeletalMeshComponent* dummy, float topInset) const
 {
-    if (!player && !dummy)
+    if (!dummy)
     {
         return;
     }
     std::string text;
-    AppendLegContacts(player, u8"플레이어", text);
     AppendLegContacts(dummy, u8"더미", text);
     const bool touching = !text.empty();
     if (!touching)
     {
-        text = u8"이동 다리의 실제 자기 접촉: 없음";
+        text = u8"[더미] 이동 다리의 실제 자기 접촉: 없음";
     }
 
     // 툴바나 설정 창과 독립적인 화면 상단 표시이며 마우스 입력을 가로채지 않는다.
