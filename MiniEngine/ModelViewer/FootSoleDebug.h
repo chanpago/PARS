@@ -37,5 +37,6 @@ private:
     bool m_ShowCenterOfMass = true;
     bool m_ShowBuffer = true;
     bool m_ShowFootstep = true;
+    bool m_ShowLandingComClamp = true;
     bool m_ShowLandingFoot = true;
 };

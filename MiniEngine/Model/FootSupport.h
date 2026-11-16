@@ -163,6 +163,10 @@ namespace PARS
         {
             return m_FootstepSettings;
         }
+        const FootstepSettings& GetFootstepSettings() const
+        {
+            return m_FootstepSettings;
+        }
 
     public:
         static constexpr float RayLength = .2f;

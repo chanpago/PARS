@@ -121,6 +121,10 @@ namespace PARS
         {
             return m_Ragdoll;
         }
+        const Ragdoll& GetRagdoll() const
+        {
+            return m_Ragdoll;
+        }
         FootSupport& GetFootSupport()
         {
             return m_FootSupport;
