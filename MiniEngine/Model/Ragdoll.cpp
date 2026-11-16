@@ -612,7 +612,7 @@ namespace PARS
         if (poseChanged)
         {
             // 일시정지 중 순간이동에도 몸통 캡슐과 디버그 윤곽이 즉시 따라간다.
-            SyncCharacterCapsule();
+            SyncCharacterCapsule(true);
         }
         error.clear();
         return true;

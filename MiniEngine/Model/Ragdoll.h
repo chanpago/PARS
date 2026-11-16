@@ -89,7 +89,7 @@ namespace PARS
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
             float heightScale = 1.0f);
         // simulate() 직전에 몸통에서 캡슐로 자세·속도를 복사한다. 반작용은 몸통에 되돌리지 않는다.
-        void SyncCharacterCapsule();
+        void SyncCharacterCapsule(bool teleport = false);
         void RemoveCharacterCapsule();
         // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
         void SetCollisionEnabled(bool enabled);

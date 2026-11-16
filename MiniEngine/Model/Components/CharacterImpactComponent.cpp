@@ -33,7 +33,7 @@ namespace PARS
         Character& character = static_cast<Character&>(GetOwner());
         Ragdoll& ragdoll = character.GetMesh().GetRagdoll();
         const bool controlled = character.GetController() != nullptr;
-        // 컨트롤러가 있는 캐릭터에는 PA와 독립된 동적 충돌 캡슐을 만든다.
+        // 컨트롤러가 있는 캐릭터에는 본체의 시뮬레이션 모드를 따르는 독립 충돌 캡슐을 만든다.
         ragdoll.SetCharacterImpactEnabled(m_Settings.enabled &&
             (controlled || ragdoll.IsSimulating() || character.GetMesh().UsesAutomaticRagdoll()),
             static_cast<uint32_t>(character.GetHandle().id));
