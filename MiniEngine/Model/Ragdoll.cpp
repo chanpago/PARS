@@ -748,6 +748,18 @@ namespace PARS
 #endif
     }
 
+    bool Ragdoll::AreBodiesInContact(size_t first, size_t second) const
+    {
+#if defined(_M_X64)
+        return m_World && m_CollisionEnabled && first < m_Bodies.size() && second < m_Bodies.size() &&
+            m_World->HasContact(*m_Bodies[first], *m_Bodies[second]);
+#else
+        (void)first;
+        (void)second;
+        return false;
+#endif
+    }
+
     float Ragdoll::GetExternalImpactImpulse() const
     {
         float impulse = 0;

@@ -2,6 +2,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicsWorld.h"
 #include "imgui.h"
+#include <algorithm>
 #include <cmath>
 
 using namespace Math;
@@ -21,6 +22,72 @@ namespace
     const char* FootLabel(int foot)
     {
         return foot == 0 ? u8"왼발" : foot == 1 ? u8"오른발" : u8"없음";
+    }
+
+    void AppendLegContacts(PARS::SkeletalMeshComponent* mesh, const char* label, std::string& text)
+    {
+        if (!mesh || !mesh->GetRagdoll().IsSimulating())
+        {
+            return;
+        }
+        const PARS::Ragdoll& ragdoll = mesh->GetRagdoll();
+        const PARS::FootSupportSnapshot& sample = mesh->GetFootSupport().GetSnapshot();
+        const bool leftMoving = sample.footstep.feet[0].IsInProgress();
+        const bool rightMoving = sample.footstep.feet[1].IsInProgress();
+        if (!leftMoving && !rightMoving)
+        {
+            return;
+        }
+
+        const std::vector<int>& nodes = ragdoll.GetBoneNodes();
+        std::array<std::array<size_t, 3>, 2> bodies{};
+        for (size_t side = 0; side < bodies.size(); ++side)
+        {
+            const PARS::FootLegSetup& leg = sample.feet[side].leg;
+            const std::array<int, 3> legNodes{leg.hipNode, leg.kneeNode, leg.ankleNode};
+            for (size_t part = 0; part < legNodes.size(); ++part)
+            {
+                const std::vector<int>::const_iterator found = std::find(nodes.begin(), nodes.end(), legNodes[part]);
+                bodies[side][part] = static_cast<size_t>(found - nodes.begin());
+            }
+        }
+
+        const size_t movingSide = leftMoving ? 0 : 1;
+        const size_t otherSide = 1 - movingSide;
+        const char* const sideLabels[] = {u8"왼쪽", u8"오른쪽"};
+        const char* const partLabels[] = {u8"허벅지", u8"종아리", u8"발"};
+        PhysicsGroundContact ground;
+        const bool otherGrounded = ragdoll.GetBodyGroundContact(bodies[otherSide][2], ground);
+        // 양쪽에 이동 명령이 있거나 반대 발이 공중에 있으면 지지 중이라고 표시하지 않는다.
+        const char* otherRole = sample.footstep.feet[otherSide].IsInProgress() ? u8"이동하는" :
+            otherGrounded ? u8"지지하는" : u8"반대쪽";
+        for (size_t movingPart = 0; movingPart < bodies[movingSide].size(); ++movingPart)
+        {
+            for (size_t otherPart = 0; otherPart < bodies[otherSide].size(); ++otherPart)
+            {
+                if (!ragdoll.AreBodiesInContact(bodies[movingSide][movingPart], bodies[otherSide][otherPart]))
+                {
+                    continue;
+                }
+                if (!text.empty())
+                {
+                    text += '\n';
+                }
+                text += '[';
+                text += label;
+                text += u8"] 이동하는 다리의 (";
+                text += sideLabels[movingSide];
+                text += u8", ";
+                text += partLabels[movingPart];
+                text += u8")가 ";
+                text += otherRole;
+                text += u8" 다리의 (";
+                text += sideLabels[otherSide];
+                text += u8", ";
+                text += partLabels[otherPart];
+                text += u8")에 닿음";
+            }
+        }
     }
 
     Vector3 ToMath(const PxVec3& point)
@@ -117,6 +184,37 @@ namespace
             }
         }
     }
+}
+
+void FootSoleDebug::DrawContactOverlay(PARS::SkeletalMeshComponent* player,
+    PARS::SkeletalMeshComponent* dummy, float topInset) const
+{
+    if (!player && !dummy)
+    {
+        return;
+    }
+    std::string text;
+    AppendLegContacts(player, u8"플레이어", text);
+    AppendLegContacts(dummy, u8"더미", text);
+    const bool touching = !text.empty();
+    if (!touching)
+    {
+        text = u8"이동 다리의 실제 자기 접촉: 없음";
+    }
+
+    // 툴바나 설정 창과 독립적인 화면 상단 표시이며 마우스 입력을 가로채지 않는다.
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float wrapWidth = (std::max)(1.0f, (std::min)(1000.0f, viewport->Size.x - 48.0f));
+    const ImVec2 textSize = ImGui::CalcTextSize(text.c_str(), nullptr, false, wrapWidth);
+    const ImVec2 position(viewport->Pos.x + (viewport->Size.x - textSize.x) * .5f,
+        viewport->Pos.y + topInset + 14.0f);
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    draw->AddRectFilled(ImVec2(position.x - 12.0f, position.y - 6.0f),
+        ImVec2(position.x + textSize.x + 12.0f, position.y + textSize.y + 6.0f),
+        IM_COL32(12, 16, 22, 205), 5.0f);
+    const ImU32 color = touching ? IM_COL32(255, 192, 96, 255) : IM_COL32(200, 208, 220, 255);
+    draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), position, color,
+        text.c_str(), nullptr, wrapWidth);
 }
 
 void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<PxDebugLine>& lines) const

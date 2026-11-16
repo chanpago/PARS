@@ -1,6 +1,7 @@
 ﻿#include "PhysicsWorld.h"
 #include "../Model/FootSupportHull.h"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -95,6 +96,66 @@ namespace
         }
         Check(impulse.x > 0 && impulse.isFinite(), "Captured fallback impulse points into the receiver");
         std::puts("PASS: approaching collision, threshold, departing/missing source, ownership and collision policy");
+    }
+
+    void TestBodyPairContacts()
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize body contact scene");
+        PxRigidDynamic* first = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, 0)),
+            PxCapsuleGeometry(.2f, .2f), 2, "Moving leg");
+        PxRigidDynamic* second = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, .3f)),
+            PxCapsuleGeometry(.2f, .2f), 2, "Other leg");
+        PxRigidDynamic* distant = world.CreateDynamicBody(PxTransform(PxVec3(5, 3, 0)),
+            PxSphereGeometry(.2f), 2, "Distant body");
+        PxRigidDynamic* nearby = world.CreateDynamicBody(PxTransform(PxVec3(5.43f, 3, 0)),
+            PxSphereGeometry(.2f), 2, "Contact offset only");
+        Check(first && second && distant && nearby, "Create contact query bodies");
+        const std::array<PxRigidDynamic*, 4> bodies{first, second, distant, nearby};
+        int owner = 0;
+        for (PxRigidDynamic* body : bodies)
+        {
+            body->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+            body->userData = &owner;
+        }
+        Check(!world.HasContact(*first, *second), "Geometric overlap is not reported before a real physics contact");
+        world.Step();
+        Check(world.HasContact(*first, *second) && world.HasContact(*second, *first),
+            "Actual same-owner contact is available in either body order");
+        Check(!world.HasContact(*first, *first) && !world.HasContact(*first, *distant),
+            "Identical and unrelated bodies are excluded");
+        Check(!world.HasContact(*distant, *nearby), "A contact offset without touching or impulse is not a collision");
+
+        world.InvalidateContacts(*second);
+        Check(!world.HasContact(*first, *second), "Invalidated contacts do not remain visible");
+
+        // 접촉 해제를 솔버가 처리한 다음 다시 닿게 해 새 접촉 보고를 검증한다.
+        second->setGlobalPose(PxTransform(PxVec3(0, 3, 5)));
+        world.Step();
+        first->setGlobalPose(PxTransform(PxVec3(0, 3, 0)));
+        second->setGlobalPose(PxTransform(PxVec3(0, 3, .3f)));
+        first->setLinearVelocity(PxVec3(0));
+        second->setLinearVelocity(PxVec3(0));
+        world.Step();
+        Check(world.HasContact(*first, *second), "A new solver contact replaces invalidated data");
+        world.ResetClock();
+        Check(!world.HasContact(*first, *second), "Clock reset invalidates previous contact observations");
+        second->setGlobalPose(PxTransform(PxVec3(0, 3, 5)));
+        world.Step();
+        Check(!world.HasContact(*first, *second), "Separated bodies do not retain a contact message");
+
+        first->setGlobalPose(PxTransform(PxVec3(0, 3, 0)));
+        second->setGlobalPose(PxTransform(PxVec3(0, 3, .3f)));
+        first->setLinearVelocity(PxVec3(0));
+        second->setLinearVelocity(PxVec3(0));
+        world.Step();
+        Check(world.HasContact(*first, *second), "Contacts resume after clock reset");
+        PxShape* shape = nullptr;
+        second->getShapes(&shape, 1);
+        shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, false);
+        Check(!world.HasContact(*first, *second), "Disabling collisions hides cached contact immediately");
+        Check(world.GetErrorCount() == 0, "Contact queries introduce no PhysX errors");
+        std::puts("PASS: same-owner body contacts, proximity, collision disabling, invalidation and reset");
     }
 
     void TestFootSupportHull()
@@ -270,6 +331,7 @@ int main(int argc, char** argv)
     }
     TestFootProjectionRaycast();
     TestApproachingImpact();
+    TestBodyPairContacts();
     TestFootSupportHull();
     TestFootSupportBalance();
     TestFootstepPlanner();

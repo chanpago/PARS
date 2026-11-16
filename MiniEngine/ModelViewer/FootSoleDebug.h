@@ -8,11 +8,13 @@ namespace PARS
     class SkeletalMeshComponent;
 }
 
-// Draws the runtime snapshot. Visibility never controls physics sampling.
+// 실행 중인 물리 정보를 표시하며 표시 여부는 물리 관측에 영향을 주지 않는다.
 class FootSoleDebug
 {
 public:
     void DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings = {});
+    void DrawContactOverlay(PARS::SkeletalMeshComponent* player,
+        PARS::SkeletalMeshComponent* dummy, float topInset) const;
     void BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
 
 public:

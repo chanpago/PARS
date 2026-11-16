@@ -188,6 +188,7 @@ namespace PARS
         // 바디 질량중심의 실제 선속도를 질량으로 가중 평균한다. 단위는 m/s다.
         bool GetCenterOfMassVelocity(Math::Vector3& velocity) const;
         bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
+        bool AreBodiesInContact(size_t first, size_t second) const;
         float GetExternalImpactImpulse() const;
         void CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const;
         bool HasApproachingImpact(float minimumDeltaVelocity) const;

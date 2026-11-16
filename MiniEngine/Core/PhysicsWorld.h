@@ -160,6 +160,8 @@ public:
     PhysicsWorld& operator=(const PhysicsWorld&) = delete;
 
 public:
+    // 같은 소유자의 바디도 포함해 PhysX가 보고한 실제 접촉을 조회한다.
+    bool HasContact(const physx::PxRigidActor& first, const physx::PxRigidActor& second) const;
     bool GetGroundContact(const physx::PxRigidActor& body, PhysicsGroundContact& contact,
         const void* ignoredOwner = nullptr) const;
     void GetCharacterCapsuleContacts(const physx::PxRigidActor& body,
