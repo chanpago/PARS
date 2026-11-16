@@ -148,6 +148,9 @@ class ModelViewer : public GameCore::IGameApp
 public:
     ModelViewer(void)
     {
+#if defined(_M_X64)
+        m_FootSoles.SetVisible(false);
+#endif
     }
 
 public:
@@ -259,8 +262,9 @@ private:
     unique_ptr<SkeletalMeshViewer> m_MeshViewer;
 #if defined(_M_X64)
     unique_ptr<PhysicsDemo> m_PhysicsDemo;
-    // 더미가 보관하는 참조의 수명이 정렬 순서보다 우선한다.
+    // 더미 전용 표시 객체는 이를 참조하는 충격 테스트보다 먼저 생성한다.
     FootSoleDebug m_FootSoles;
+    FootSoleDebug m_DummyFootSoles;
     unique_ptr<RagdollImpactTest> m_ImpactTest;
     unique_ptr<RagdollComparisonRunner> m_Comparison;
     std::string m_MapError;
@@ -277,7 +281,7 @@ private:
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
     bool m_ActiveSupport = true;
-    bool m_FootCandidateDebugVisible = true;
+    bool m_FootCandidateDebugVisible = false;
     bool m_RagdollTestDone = false;
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
@@ -941,7 +945,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     if (m_PhysicsDemo && mesh.GetPhysicsAsset())
     {
         // 플레이어는 기본 키네마틱 상태로 시작하고, 몸통 캡슐은 공통 설정으로 생성한다.
-        m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_FootSoles);
+        m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_DummyFootSoles);
         m_ImpactTest->SetSpawnOrigin(m_PhysicsDemo->GetDummySpawnOrigin());
         const size_t impactDirectory = m_DefaultPAPath.find_last_of("/\\");
         m_ImpactTest->LoadBodyImpactSettings(*character,
@@ -1009,15 +1013,6 @@ void ModelViewer::SetFootCandidateDebugVisible(bool visible)
     {
         player->GetMesh().SetFootCandidateDebugVisible(visible);
     }
-#if defined(_M_X64)
-    if (m_ImpactTest)
-    {
-        if (PARS::Character* dummy = m_ImpactTest->GetDummy())
-        {
-            dummy->GetMesh().SetFootCandidateDebugVisible(visible);
-        }
-    }
-#endif
 }
 
 void ModelViewer::SelectPreview(uint32_t index)
@@ -1554,7 +1549,10 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     const PARS::Ragdoll& runtime = mesh.GetRagdoll();
     ImGui::Text(u8"PhysX: 바디 %zu개 / 관절 %zu개", runtime.GetBodyCount(), runtime.GetJointCount());
 #if defined(_M_X64)
-    m_FootSoles.DrawUI(mesh);
+    if (m_FootSoles.IsVisible())
+    {
+        m_FootSoles.DrawUI(mesh);
+    }
 #endif
     if (runtime.IsActive())
     {
@@ -1825,7 +1823,6 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                         }
                     };
                     drawFootStates(GetPreviewCharacter(), u8"플레이어 발 상태");
-                    drawFootStates(m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr, u8"더미 발 상태");
                 }
                 if (m_ImpactTest && !m_ImpactTest->GetStatusMessage().empty())
                 {

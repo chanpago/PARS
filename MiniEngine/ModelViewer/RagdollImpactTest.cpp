@@ -69,6 +69,7 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
     dummy->GetCharacterMovement().SetTickEnabled(false);
     dummy->GetCapsuleComponent().SetPhysicsEnabled(false);
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
+    mesh.SetFootCandidateDebugVisible(true);
     if (!mesh.SetSkeletalMesh(idle))
     {
         m_Message = u8"더미 메시를 초기화하지 못했습니다.";
@@ -601,11 +602,36 @@ void RagdollImpactTest::DrawUI(Character* player)
                     ragdoll.GetRootTargetHeight(), ragdoll.GetRootPositionError() * 100);
             }
             ImGui::TextUnformatted(u8"기준은 초기화 또는 마지막 발사 시점입니다.");
-            ImGui::PushID("ImpactDummy");
-            m_FootSoles.DrawUI(dummy->GetMesh(), [this]() -> void
+            bool footStatesVisible = mesh.IsFootCandidateDebugVisible();
+            if (ImGui::Button(footStatesVisible ? u8"더미 발 상태 표시 끄기" : u8"더미 발 상태 표시"))
             {
-                DrawDummySupportSettingsUI();
-            });
+                footStatesVisible = !footStatesVisible;
+                mesh.SetFootCandidateDebugVisible(footStatesVisible);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(m_FootSoles.IsVisible() ? u8"더미 발 디버그 끄기" : u8"더미 발 디버그 켜기"))
+            {
+                m_FootSoles.SetVisible(!m_FootSoles.IsVisible());
+            }
+            if (footStatesVisible)
+            {
+                ImGui::TextUnformatted(u8"더미 발 상태");
+                const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
+                for (size_t side = 0; side < step.feet.size(); ++side)
+                {
+                    const PARS::FootContactSample& contact = mesh.GetFootSupport().GetSnapshot().feet[side].contact;
+                    ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
+                        contact.hasSample && contact.grounded ? "ON" : "OFF", step.feet[side].IsInProgress() ? "ON" : "OFF");
+                }
+            }
+            ImGui::PushID("ImpactDummy");
+            if (m_FootSoles.IsVisible())
+            {
+                m_FootSoles.DrawUI(dummy->GetMesh(), [this]() -> void
+                {
+                    DrawDummySupportSettingsUI();
+                });
+            }
             ImGui::PopID();
         }
         if (!m_Message.empty())
