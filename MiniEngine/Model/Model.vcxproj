@@ -203,11 +203,30 @@
     <ClInclude Include="FootSupportHull.h" />
     <ClCompile Include="FootSupport.cpp" />
     <ClInclude Include="FootstepPlanner.h" />
-    <ClCompile Include="FootstepPlanner.cpp" />
+    <ClCompile Include="FootstepPlanner.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
     <ClInclude Include="FootstepIK.h" />
-    <ClCompile Include="FootstepIK.cpp" />
+    <ClCompile Include="FootstepIK.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
     <ClInclude Include="FootstepCollision.h" />
-    <ClCompile Include="FootstepCollision.cpp" />
+    <ClCompile Include="FootstepCollision.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
+    <ClCompile Include="FootstepPath.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
+    <ClInclude Include="FootstepPath.h" />
+    <ClCompile Include="FootstepCollisionBounds.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
+    <ClInclude Include="FootstepCollisionBounds.h" />
+    <ClCompile Include="FootstepAvoidance.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
+    <ClInclude Include="FootstepAvoidance.h" />
+    <ClInclude Include="FootstepInterval.h" />
     <ClInclude Include="RagdollRecovery.h" />
     <ClCompile Include="RagdollRecovery.cpp" />
     <ClCompile Include="RagdollRecoveryPose.cpp" />

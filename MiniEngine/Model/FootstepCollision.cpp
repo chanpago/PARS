@@ -1,4 +1,4 @@
-﻿#include "FootstepCollision.h"
+﻿#include "FootstepCollisionBounds.h"
 #include "geometry/PxGeometryQuery.h"
 #include <algorithm>
 #include <cmath>
@@ -27,9 +27,23 @@ namespace
         }
     }
 
-    bool ValidMotion(const FootstepCommand& command)
+    bool ValidMotion(const FootstepCommand& command, const FootstepPath& path)
     {
         const FootstepMotion& motion = command.motion;
+        if (path.enabled)
+        {
+            if (!std::isfinite(path.startTime) || path.startTime < 0 || !std::isfinite(path.duration) || path.duration <= 0)
+            {
+                return false;
+            }
+            for (const PxVec3& coefficient : path.coefficients)
+            {
+                if (!coefficient.isFinite())
+                {
+                    return false;
+                }
+            }
+        }
         return command.hasTarget && command.target.valid && motion.valid &&
             command.startPosition.isFinite() && command.takeoffPosition.isFinite() &&
             command.target.position.isFinite() && command.target.normal.isFinite() &&
@@ -43,39 +57,56 @@ namespace
             std::isfinite(motion.maximumLandingLowering) && motion.maximumLandingLowering >= 0;
     }
 
-    bool PredictLeg(const FootstepCollisionLeg& leg, float timeAhead,
-        std::array<PxTransform, 3>& shapes, PxVec3& solePosition, bool& reachLimited)
+    bool Sample(const FootstepCollisionInput& input, float time, uint32_t pairs,
+        FootstepCollisionSample& sample, std::array<std::array<PxTransform, 3>, 2>& shapes,
+        FootstepCollisionSnapshot& result)
     {
-        if (!leg.command.IsInProgress())
+        sample.timeAhead = time;
+        for (size_t side = 0; side < 2; ++side)
         {
-            // 지지 다리는 현재 실제 충돌체 위치를 쓴다. 골반과 지지 다리의 미래 운동은 다음 틱에 갱신한다.
-            for (size_t part = 0; part < shapes.size(); ++part)
+            LegIKResult solved;
+            if (!PredictFootstepLeg(input.legs[side], time, shapes[side], solved))
             {
-                shapes[part] = leg.shapes[part].actualPose;
+                return false;
             }
-            return true;
+            sample.solePositions[side] = solved.solvedSole.p;
+            sample.reachLimited = sample.reachLimited || solved.reachLimited;
+            if (input.legs[side].command.IsInProgress() && input.acceptsPose && !input.acceptsPose(side, solved))
+            {
+                result.jointLimited = true;
+            }
         }
-
-        TwoBoneIKInput pose = leg.pose;
-        const PxVec3 targetPosition = SampleFootstepPosition(leg.command, timeAhead);
-        if (!MakeFootSoleTarget(targetPosition, leg.command.target.normal, leg.pose.targetSole, pose.targetSole))
+        for (uint32_t left = 0; left < 3; ++left)
         {
-            return false;
+            for (uint32_t right = 0; right < 3; ++right)
+            {
+                const uint32_t pair = uint32_t(1) << (left * 3 + right);
+                if ((pairs & pair) == 0)
+                {
+                    continue;
+                }
+                ++result.queryCount;
+                if (PxGeometryQuery::overlap(input.legs[0].shapes[left].geometry.any(), shapes[0][left],
+                    input.legs[1].shapes[right].geometry.any(), shapes[1][right]))
+                {
+                    sample.overlapPairs |= pair;
+                }
+            }
         }
-        const LegIKResult solved = SolveTwoBoneIK(pose);
-        if (!solved.valid)
-        {
-            return false;
-        }
-        const std::array<PxTransform, 3> bones{solved.hip, solved.knee, solved.ankle};
-        for (size_t part = 0; part < shapes.size(); ++part)
-        {
-            shapes[part] = bones[part] * leg.shapes[part].inBone;
-        }
-        solePosition = solved.solvedSole.p;
-        reachLimited = reachLimited || solved.reachLimited;
+        sample.valid = true;
+        result.overlapPairs |= sample.overlapPairs;
+        result.reachLimited = result.reachLimited || sample.reachLimited;
         return true;
     }
+
+    struct Interval
+    {
+    public:
+        float begin = 0;
+        float end = 0;
+        uint32_t pairs = 0x1ff;
+        uint32_t depth = 0;
+    };
 }
 
 FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisionInput& input)
@@ -83,7 +114,7 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
     FootstepCollisionSnapshot result;
     result.completedStep = input.completedStep;
     result.revision = input.revision;
-    for (size_t side = 0; side < input.legs.size(); ++side)
+    for (size_t side = 0; side < 2; ++side)
     {
         result.moving[side] = input.legs[side].command.IsInProgress();
     }
@@ -92,13 +123,13 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
         return result;
     }
     result.status = FootstepCollisionStatus::Unavailable;
-    if (!std::isfinite(input.fixedDeltaTime) || input.fixedDeltaTime <= 0)
+    if (!std::isfinite(input.fixedDeltaTime) || input.fixedDeltaTime <= 0 ||
+        !std::isfinite(input.clearance) || input.clearance < 0)
     {
         return result;
     }
-
     float horizon = input.fixedDeltaTime;
-    for (size_t side = 0; side < input.legs.size(); ++side)
+    for (size_t side = 0; side < 2; ++side)
     {
         const FootstepCollisionLeg& leg = input.legs[side];
         for (const FootstepCollisionShape& shape : leg.shapes)
@@ -110,7 +141,7 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
         }
         if (result.moving[side])
         {
-            if (!ValidMotion(leg.command))
+            if (!ValidMotion(leg.command, leg.path))
             {
                 return result;
             }
@@ -118,39 +149,132 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
             horizon = (std::max)(horizon, GetFootstepRemainingTime(leg.command));
         }
     }
-
+    std::array<std::array<PxTransform, 3>, 2> shapes;
+    FootstepCollisionSample current;
+    if (!Sample(input, 0, 0x1ff, current, shapes, result))
+    {
+        return result;
+    }
+    result.fixedPoseBlocked = current.overlapPairs != 0;
+    std::array<std::array<float, 3>, 2> margins{};
+    for (size_t side = 0; side < 2; ++side)
+    {
+        for (size_t part = 0; part < 3; ++part)
+        {
+            float tracking = 0;
+            if (result.moving[side] && input.includeTrackingError)
+            {
+                const FootstepCollisionShape& shape = input.legs[side].shapes[part];
+                const PxTransform& target = shapes[side][part];
+                const float dot = PxClamp(PxAbs(target.q.getNormalized().dot(shape.actualPose.q.getNormalized())), 0.0f, 1.0f);
+                tracking = (target.p - shape.actualPose.p).magnitude() +
+                    2 * FootstepShapeRadius(shape) * std::sqrt(PxMax(0.0f, 1 - dot * dot));
+            }
+            result.maximumTrackingError = PxMax(result.maximumTrackingError, tracking);
+            // 추종 오차는 현재 관측 범위다. 미래 외력의 상한으로 간주하지 않고 매 물리 틱 갱신한다.
+            margins[side][part] = input.clearance * .5f + tracking + 1e-5f;
+        }
+    }
+    // 여섯 자세는 표시와 빠른 거절에 사용한다. 이 샘플들만으로 통과시키지 않는다.
     for (uint32_t index = 0; index < FootstepCollisionSampleCount; ++index)
     {
-        FootstepCollisionSample& sample = result.samples[index];
         const float fraction = static_cast<float>(index) / (FootstepCollisionSampleCount - 1);
-        sample.timeAhead = input.fixedDeltaTime + (horizon - input.fixedDeltaTime) * fraction;
-        std::array<std::array<PxTransform, 3>, 2> shapes;
-        for (size_t side = 0; side < input.legs.size(); ++side)
+        const float time = input.fixedDeltaTime + (horizon - input.fixedDeltaTime) * fraction;
+        if (!Sample(input, time, 0x1ff, result.samples[index], shapes, result))
         {
-            if (!PredictLeg(input.legs[side], sample.timeAhead, shapes[side],
-                sample.solePositions[side], sample.reachLimited))
-            {
-                return result;
-            }
+            return result;
         }
-        // 양발이 이동하는 경우도 같은 미래 시점끼리 비교하므로 자세당 최대 아홉 쌍이다.
-        for (uint32_t left = 0; left < 3; ++left)
+        ++result.sampleCount;
+    }
+    result.fixedPoseBlocked = result.fixedPoseBlocked || result.samples.back().overlapPairs != 0;
+    if (result.overlapPairs != 0)
+    {
+        result.status = FootstepCollisionStatus::Collision;
+        return result;
+    }
+    if (input.rejectInvalidPoses && (result.reachLimited || result.jointLimited))
+    {
+        result.status = FootstepCollisionStatus::Uncertain;
+        result.uncertainPairs = 0x1ff;
+        return result;
+    }
+    std::array<Interval, 20> stack;
+    stack[0].end = horizon;
+    uint32_t count = 1;
+    while (count > 0)
+    {
+        const Interval interval = stack[--count];
+        if (result.intervalCount >= input.maximumIntervals)
         {
-            for (uint32_t right = 0; right < 3; ++right)
+            result.budgetExhausted = true;
+            result.uncertainPairs |= interval.pairs;
+            for (uint32_t pending = 0; pending < count; ++pending)
             {
-                ++result.queryCount;
-                if (PxGeometryQuery::overlap(input.legs[0].shapes[left].geometry.any(), shapes[0][left],
-                    input.legs[1].shapes[right].geometry.any(), shapes[1][right]))
+                result.uncertainPairs |= stack[pending].pairs;
+            }
+            result.firstRiskTime = interval.begin;
+            break;
+        }
+        ++result.intervalCount;
+        const float middle = interval.begin + (interval.end - interval.begin) * .5f;
+        FootstepCollisionSample sample;
+        if (!Sample(input, middle, interval.pairs, sample, shapes, result))
+        {
+            return result;
+        }
+        if (sample.overlapPairs != 0)
+        {
+            result.firstRiskTime = middle;
+            result.status = FootstepCollisionStatus::Collision;
+            return result;
+        }
+        if (input.rejectInvalidPoses && (result.reachLimited || result.jointLimited))
+        {
+            result.status = FootstepCollisionStatus::Uncertain;
+            result.uncertainPairs = interval.pairs;
+            return result;
+        }
+        std::array<std::array<FootstepInterval::Transform, 3>, 2> bounds;
+        const bool bounded = BoundFootstepLeg(input.legs[0], interval.begin, interval.end, bounds[0]) &&
+            BoundFootstepLeg(input.legs[1], interval.begin, interval.end, bounds[1]);
+        uint32_t unresolved = interval.pairs;
+        if (bounded)
+        {
+            for (uint32_t left = 0; left < 3; ++left)
+            {
+                for (uint32_t right = 0; right < 3; ++right)
                 {
-                    sample.overlapPairs |= uint32_t(1) << (left * 3 + right);
+                    const uint32_t pair = uint32_t(1) << (left * 3 + right);
+                    if ((unresolved & pair) != 0 && SeparateFootstepShapes(
+                        input.legs[0].shapes[left], bounds[0][left], shapes[0][left], margins[0][left],
+                        input.legs[1].shapes[right], bounds[1][right], shapes[1][right], margins[1][right]))
+                    {
+                        unresolved &= ~pair;
+                    }
                 }
             }
         }
-        sample.valid = true;
-        ++result.sampleCount;
-        result.overlapPairs |= sample.overlapPairs;
-        result.reachLimited = result.reachLimited || sample.reachLimited;
+        if (unresolved == 0)
+        {
+            continue;
+        }
+        if (interval.depth >= 16 || interval.end - interval.begin <= 1e-6f)
+        {
+            result.uncertainPairs |= unresolved;
+            result.firstRiskTime = interval.begin;
+            break;
+        }
+        Interval later;
+        later.begin = middle;
+        later.end = interval.end;
+        later.pairs = unresolved;
+        later.depth = interval.depth + 1;
+        Interval earlier = later;
+        earlier.begin = interval.begin;
+        earlier.end = middle;
+        stack[count++] = later;
+        stack[count++] = earlier;
     }
-    result.status = FootstepCollisionStatus::Sampled;
+    result.status = result.uncertainPairs == 0 ? FootstepCollisionStatus::Clear : FootstepCollisionStatus::Uncertain;
     return result;
 }

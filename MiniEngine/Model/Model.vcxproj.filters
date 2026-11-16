@@ -156,6 +156,13 @@
     <ClCompile Include="FootstepIK.cpp" />
     <ClInclude Include="FootstepCollision.h" />
     <ClCompile Include="FootstepCollision.cpp" />
+    <ClCompile Include="FootstepPath.cpp" />
+    <ClInclude Include="FootstepPath.h" />
+    <ClCompile Include="FootstepCollisionBounds.cpp" />
+    <ClInclude Include="FootstepCollisionBounds.h" />
+    <ClCompile Include="FootstepAvoidance.cpp" />
+    <ClInclude Include="FootstepAvoidance.h" />
+    <ClInclude Include="FootstepInterval.h" />
     <ClInclude Include="RagdollRecovery.h" />
     <ClCompile Include="RagdollRecovery.cpp" />
     <ClCompile Include="RagdollRecoveryPose.cpp" />

@@ -273,16 +273,10 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         // 현재 물리 부모를 기준으로 풀되, 골반의 애니메이션 목표 자체는 덮어쓰지 않는다.
         const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
         TwoBoneIKInput solve;
-        solve.hip = toPhysical * pose[leg.hipNode];
-        solve.knee = toPhysical * pose[leg.kneeNode];
-        solve.ankle = toPhysical * pose[leg.ankleNode];
-        solve.soleInBone = leg.soleInBone;
-        solve.targetSole = leg.targetSole;
-        solve.thighLength = leg.thighLength;
-        solve.calfLength = leg.calfLength;
-        solve.referenceBend = solve.hip.q.rotate(leg.referenceBendInHip);
-        solve.hasPreviousBend = m_HasPreviousBend[side];
-        solve.previousBend = leg.actualAnchor.q.rotate(m_PreviousBendInAnchor[side]);
+        if (!BuildLegInput(input, side, pose, solve))
+        {
+            return false;
+        }
         PARS::LegIKResult& result = m_Snapshot.legs[side];
         result = SolveTwoBoneIK(solve);
         if (!result.valid)
@@ -316,6 +310,34 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         m_HasPreviousBend[side] = true;
     }
     m_Snapshot.status = FootstepIKStatus::Applied;
+    return true;
+}
+
+bool FootstepIK::BuildLegInput(const FootstepIKInput& input, size_t side,
+    const std::vector<PxTransform>& pose, TwoBoneIKInput& result) const
+{
+    if (side >= input.legs.size())
+    {
+        return false;
+    }
+    const FootIKLegInput& leg = input.legs[side];
+    if (!leg.available || leg.anchorNode < 0 || leg.hipNode < 0 || leg.kneeNode < 0 || leg.ankleNode < 0 ||
+        size_t(leg.anchorNode) >= pose.size() || size_t(leg.hipNode) >= pose.size() ||
+        size_t(leg.kneeNode) >= pose.size() || size_t(leg.ankleNode) >= pose.size())
+    {
+        return false;
+    }
+    const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
+    result.hip = toPhysical * pose[leg.hipNode];
+    result.knee = toPhysical * pose[leg.kneeNode];
+    result.ankle = toPhysical * pose[leg.ankleNode];
+    result.soleInBone = leg.soleInBone;
+    result.targetSole = leg.targetSole;
+    result.thighLength = leg.thighLength;
+    result.calfLength = leg.calfLength;
+    result.referenceBend = result.hip.q.rotate(leg.referenceBendInHip);
+    result.hasPreviousBend = input.revision == m_Snapshot.revision && m_HasPreviousBend[side];
+    result.previousBend = leg.actualAnchor.q.rotate(m_PreviousBendInAnchor[side]);
     return true;
 }
 

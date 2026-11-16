@@ -207,16 +207,23 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     {
         return u8"[더미] 목표 경로 예측: 이동 명령 없음";
     }
-    if (prediction.status != PARS::FootstepCollisionStatus::Sampled ||
+    if (prediction.status == PARS::FootstepCollisionStatus::Unavailable ||
+        prediction.status == PARS::FootstepCollisionStatus::Inactive ||
         prediction.revision != support.footstep.revision || prediction.completedStep != support.footstep.completedStep)
     {
         return u8"[더미] 목표 경로 예측: 검사 불가 (유효한 다리 자세·충돌 형상 필요)";
     }
 
-    char summary[256];
-    std::snprintf(summary, sizeof(summary), u8"[더미] 목표 경로 예측: %u개 자세 · %u쌍 검사 · %.3fms · %s",
-        prediction.sampleCount, prediction.queryCount, prediction.elapsedMilliseconds,
-        prediction.overlapPairs ? u8"겹침 예상" : u8"검사 지점 겹침 없음");
+    const PARS::FootstepAvoidanceSnapshot& avoidance = mesh.GetFootstepAvoidanceSnapshot();
+    const char* state = prediction.status == PARS::FootstepCollisionStatus::Collision ? u8"겹침 예상" :
+        prediction.status == PARS::FootstepCollisionStatus::Clear ? u8"계획 경로 구간 통과" : u8"미확인";
+    const char* route = avoidance.status == PARS::FootstepAvoidanceStatus::Detouring ? u8"우회 적용" :
+        avoidance.status == PARS::FootstepAvoidanceStatus::Failed ? u8"회피 실패" : u8"기존 경로";
+    char summary[512];
+    std::snprintf(summary, sizeof(summary),
+        u8"[더미] %s · %s · 후보 %u개 · 전체 %u구간 / %u쌍 · %.3fms · 추종 오차 %.1fcm",
+        route, state, avoidance.candidatesChecked, avoidance.totalIntervals, avoidance.totalQueries,
+        prediction.elapsedMilliseconds, prediction.maximumTrackingError * 100);
     std::string text = summary;
     if (prediction.assumesTakeoff)
     {
@@ -225,6 +232,18 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     if (prediction.reachLimited)
     {
         text += u8" (다리 도달 범위 제한 있음)";
+    }
+    if (prediction.jointLimited)
+    {
+        text += u8" (관절 각도 제한 있음)";
+    }
+    if (prediction.budgetExhausted || avoidance.searchBudgetExhausted)
+    {
+        text += u8" (검사 예산 도달)";
+    }
+    if (prediction.status == PARS::FootstepCollisionStatus::Uncertain)
+    {
+        text += u8"\n[미확인] 충돌 없음이 확인되지 않아 우회 후보로 채택하지 않음";
     }
 
     const size_t movingSide = prediction.moving[0] ? 0 : 1;
@@ -254,6 +273,14 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
                 sideLabels[movingSide], partLabels[movingPart], otherRole, sideLabels[otherSide], partLabels[otherPart]);
             text += message;
         }
+    }
+    const uint32_t remaining = prediction.overlapPairs & ~displayed;
+    if (remaining != 0)
+    {
+        char message[256];
+        std::snprintf(message, sizeof(message), u8"\n[구간 검사 · %.1fms 뒤] 표시 자세 사이에서 다리 겹침 예상",
+            prediction.firstRiskTime * 1000);
+        text += message;
     }
     return text;
 }
@@ -362,7 +389,7 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     if (m_ShowFootstep)
     {
         const PARS::FootstepCollisionSnapshot& prediction = mesh.GetFootstepCollisionSnapshot();
-        if (prediction.status == PARS::FootstepCollisionStatus::Sampled &&
+        if (prediction.sampleCount > 0 &&
             prediction.revision == sample.footstep.revision && prediction.completedStep == sample.footstep.completedStep)
         {
             for (size_t side = 0; side < prediction.moving.size(); ++side)

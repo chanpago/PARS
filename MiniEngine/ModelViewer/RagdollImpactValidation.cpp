@@ -336,7 +336,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         world.SetPhysicsTimeScale(1);
         samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
         events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
-        states << "frame,mode,blending,zone,stable_time,step_count,impact,physics_step,requested_foot,load_left,load_right,confirm_left,confirm_right,impulse_left,impulse_right,normal_y_left,normal_y_right,grounded_left,grounded_right,started_left,started_right,landed_left,landed_right\n";
+        states << "frame,mode,blending,zone,stable_time,step_count,impact,physics_step,requested_foot,load_left,load_right,confirm_left,confirm_right,impulse_left,impulse_right,normal_y_left,normal_y_right,grounded_left,grounded_right,started_left,started_right,landed_left,landed_right,avoidance,prediction,candidates,intervals,queries,prediction_ms,tracking_error,reach_limited,joint_limited,fixed_pose_blocked\n";
         capsules << "frame,time,mode,root_x,root_y,root_z,present,mass,radius,half_length,x,y,z,cyan_lines\n";
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
@@ -397,10 +397,10 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 check(contacts != 0 && !contactMessage.empty(), "Actual dummy leg contact triggers the pause");
                 const FootstepCollisionSnapshot prediction = dummy->GetMesh().GetFootstepCollisionSnapshot();
                 const FootstepSnapshot& step = dummy->GetMesh().GetFootSupport().GetSnapshot().footstep;
-                check(prediction.status == FootstepCollisionStatus::Sampled && prediction.sampleCount == 6 &&
-                    prediction.queryCount == 54 && prediction.completedStep == step.completedStep &&
+                check(prediction.status == FootstepCollisionStatus::Collision && prediction.sampleCount == 6 &&
+                    prediction.queryCount >= 63 && prediction.completedStep == step.completedStep &&
                     prediction.revision == step.revision,
-                    "The real dummy checks six planned poses against its runtime PA shapes on the current control tick");
+                    "The real dummy checks its runtime PA shapes on the current control tick");
                 check(prediction.overlapPairs != 0, "The enlarged-thigh fixture also overlaps on the predicted path");
                 report << "prediction_samples=" << prediction.sampleCount << " prediction_queries=" << prediction.queryCount
                     << " prediction_pairs=" << prediction.overlapPairs << " prediction_ms=" << prediction.elapsedMilliseconds
@@ -469,6 +469,8 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const float time = (frame + 1) / 60.0f;
             const SkeletalMeshComponent& dummyMesh = dummy->GetMesh();
             const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
+            const FootstepAvoidanceSnapshot& avoidance = dummyMesh.GetFootstepAvoidanceSnapshot();
+            const FootstepCollisionSnapshot& prediction = dummyMesh.GetFootstepCollisionSnapshot();
             states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()
                 << ',' << static_cast<int>(dummySupport.balance.zone) << ',' << dummyMesh.GetKinematicStableTime()
                 << ',' << dummySupport.footstep.startCount << ',' << dummy->GetMesh().GetRagdoll().GetExternalImpactImpulse()
@@ -479,7 +481,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 << ',' << dummySupport.feet[0].contact.normal.y << ',' << dummySupport.feet[1].contact.normal.y
                 << ',' << dummySupport.feet[0].contact.grounded << ',' << dummySupport.feet[1].contact.grounded
                 << ',' << dummySupport.footstep.feet[0].justStarted << ',' << dummySupport.footstep.feet[1].justStarted
-                << ',' << dummySupport.footstep.feet[0].justLanded << ',' << dummySupport.footstep.feet[1].justLanded << '\n';
+                << ',' << dummySupport.footstep.feet[0].justLanded << ',' << dummySupport.footstep.feet[1].justLanded
+                << ',' << static_cast<int>(avoidance.status) << ',' << static_cast<int>(prediction.status)
+                << ',' << avoidance.candidatesChecked << ',' << avoidance.totalIntervals << ',' << avoidance.totalQueries
+                << ',' << prediction.elapsedMilliseconds << ',' << prediction.maximumTrackingError
+                << ',' << prediction.reachLimited << ',' << prediction.jointLimited << ',' << prediction.fixedPoseBlocked << '\n';
             for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
             {
                 ++eventCount;

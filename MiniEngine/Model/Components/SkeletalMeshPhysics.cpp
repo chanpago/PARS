@@ -136,6 +136,7 @@ namespace PARS
             !m_HasRecoverySoles)
         {
             m_FootstepIK.Reset();
+            m_FootstepAvoidance.Reset();
             return;
         }
 
@@ -310,6 +311,7 @@ namespace PARS
             if (!m_StandingSupport.Update(standing, m_StandingSupportSettings))
             {
                 m_FootstepIK.Reset();
+                m_FootstepAvoidance.Reset();
                 return;
             }
 
@@ -321,15 +323,17 @@ namespace PARS
             }
         }
 
-        // 실제 양쪽 다리 IK를 계산
+        UpdateFootstepCollision(input, rigidTargets, deltaTime);
+
+        // 선택한 경로의 현재 발 목표로 실제 양쪽 다리 IK를 계산한다.
         if (!m_FootstepIK.Apply(input, m_PhysicsSkeleton.parents, rigidTargets))
         {
+            m_FootstepAvoidance.Reset();
+            m_FootstepCollision.status = FootstepCollisionStatus::Unavailable;
             // IK 입력이 부족하면 기본 애니메이션 목표를 유지하고 실패 사유를 디버그에 남긴다.
             // Recovery 호출자는 이 실패를 감지해 패시브 물리로 전환하므로 Idle 목표를 구동하지 않는다.
             return;
         }
-
-        UpdateFootstepCollision(input, deltaTime);
 
         // IK 결과를 원래 target에 반영. correctedNodesd 에 있는 본만 갱신
         for (int node : m_FootstepIK.GetSnapshot().correctedNodes)
@@ -343,11 +347,13 @@ namespace PARS
         }
     }
 
-    void SkeletalMeshComponent::UpdateFootstepCollision(const FootstepIKInput& input, float deltaTime)
+    void SkeletalMeshComponent::UpdateFootstepCollision(FootstepIKInput& input,
+        const std::vector<PxTransform>& sourcePose, float deltaTime)
     {
         const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
         if (!step.IsInProgress())
         {
+            m_FootstepAvoidance.Reset();
             return;
         }
         const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
@@ -356,24 +362,18 @@ namespace PARS
         prediction.revision = step.revision;
         prediction.fixedDeltaTime = deltaTime;
         const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
-        const FootstepIKSnapshot& ik = m_FootstepIK.GetSnapshot();
         for (size_t side = 0; side < prediction.legs.size(); ++side)
         {
             FootstepCollisionLeg& leg = prediction.legs[side];
             leg.command = step.feet[side];
             const FootIKLegInput& source = input.legs[side];
-            const LegIKResult& solved = ik.legs[side];
-            // 현재 제어 목표의 무릎 굽힘을 유지한 채 미래 발바닥 목표만 바꿔 다시 푼다.
-            leg.pose.hip = solved.hip;
-            leg.pose.knee = solved.knee;
-            leg.pose.ankle = solved.ankle;
-            leg.pose.targetSole = solved.requestedSole;
-            leg.pose.soleInBone = source.soleInBone;
-            leg.pose.thighLength = source.thighLength;
-            leg.pose.calfLength = source.calfLength;
-            leg.pose.referenceBend = solved.bendDirection;
-            leg.pose.previousBend = solved.bendDirection;
-            leg.pose.hasPreviousBend = solved.valid;
+            // 실제 IK와 동일한 원본 자세·부모 좌표·이전 무릎 힌트로 후보를 평가한다.
+            if (!m_FootstepIK.BuildLegInput(input, side, sourcePose, leg.pose))
+            {
+                m_FootstepAvoidance.Reset();
+                m_FootstepCollision.status = FootstepCollisionStatus::Unavailable;
+                return;
+            }
             const std::array<int, 3> legNodes{source.hipNode, source.kneeNode, source.ankleNode};
             for (size_t part = 0; part < legNodes.size(); ++part)
             {
@@ -387,7 +387,57 @@ namespace PARS
                     shape.geometry, shape.inBone, shape.actualPose);
             }
         }
-        m_FootstepCollision = PredictFootstepCollisions(prediction);
+        prediction.acceptsPose = [this, &input](size_t side, const LegIKResult& solved) -> bool
+        {
+            const FootIKLegInput& leg = input.legs[side];
+            const std::array<int, 4> chain{leg.anchorNode, leg.hipNode, leg.kneeNode, leg.ankleNode};
+            const std::array<PxTransform, 4> frames{leg.actualAnchor, solved.hip, solved.knee, solved.ankle};
+            std::array<Matrix4, 4> bodies;
+            for (size_t index = 0; index < chain.size(); ++index)
+            {
+                const int body = m_PhysicsAsset->FindBody(m_PhysicsSkeleton.names[chain[index]]);
+                if (body < 0)
+                {
+                    return false;
+                }
+                const PxTransform& frame = frames[index];
+                bodies[index] = Matrix4(OrthogonalTransform(
+                    Quaternion(DirectX::XMVectorSet(frame.q.x, frame.q.y, frame.q.z, frame.q.w)),
+                    Vector3(frame.p.x, frame.p.y, frame.p.z))) * m_PhysicsAsset->bodies[body].GetLocalTransform();
+            }
+            for (size_t index = 0; index < 3; ++index)
+            {
+                const int joint = m_PhysicsAsset->FindConstraint(m_PhysicsSkeleton.names[chain[index]],
+                    m_PhysicsSkeleton.names[chain[index + 1]]);
+                if (joint < 0)
+                {
+                    return false;
+                }
+                const PhysicsConstraint& constraint = m_PhysicsAsset->constraints[joint];
+                const Quaternion raw = EvaluateJointDriveTarget(constraint, bodies[index], bodies[index + 1], false);
+                const Quaternion limited = m_Ragdoll.UsesArticulation() ?
+                    ClampArticulationDriveTarget(constraint, raw) : ClampD6DriveTarget(constraint, raw);
+                const float dot = PxClamp(PxAbs(DirectX::XMVectorGetX(DirectX::XMVector4Dot(raw, limited))), 0.0f, 1.0f);
+                if (!std::isfinite(dot) || 2 * std::acos(dot) > .01f)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const Vector3 actorForward = GetOwner().GetActorTransform().GetBasis() * Vector3(0, 0, 1);
+        const PxVec3 forward(float(actorForward.GetX()), float(actorForward.GetY()), float(actorForward.GetZ()));
+        m_FootstepAvoidance.Update(prediction, forward);
+        const FootstepAvoidanceSnapshot& avoidance = m_FootstepAvoidance.GetSnapshot();
+        m_FootstepCollision = avoidance.collision;
+        for (size_t side = 0; side < input.legs.size(); ++side)
+        {
+            if (step.feet[side].IsInProgress())
+            {
+                input.legs[side].targetSole.p += SampleFootstepPath(avoidance.paths[side],
+                    GetPredictedFootstepFlightTime(step.feet[side], 0));
+            }
+        }
         m_FootstepCollision.elapsedMilliseconds = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - started).count();
     }

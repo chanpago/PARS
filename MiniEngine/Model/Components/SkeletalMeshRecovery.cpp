@@ -507,6 +507,7 @@ namespace PARS
 
     void SkeletalMeshComponent::ResetRecovery()
     {
+        m_FootstepAvoidance.Reset();
         m_FootstepCollision = {};
         m_Recovery.Reset();
         m_HasRecoverySoles = false;

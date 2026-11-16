@@ -100,6 +100,8 @@ namespace PARS
     {
     public:
         void Reset();
+        bool BuildLegInput(const FootstepIKInput& input, size_t side,
+            const std::vector<physx::PxTransform>& pose, TwoBoneIKInput& result) const;
         bool Apply(const FootstepIKInput& input, const std::vector<int32_t>& parents,
             std::vector<physx::PxTransform>& pose);
 
