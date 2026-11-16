@@ -39,6 +39,7 @@ namespace
 
 RagdollImpactTest::~RagdollImpactTest()
 {
+    ClearContactCheck();
     ClearProjectiles();
     if (PARS::Character* dummy = GetDummy())
     {
@@ -143,7 +144,34 @@ bool RagdollImpactTest::Reset()
     m_HipsReference = mesh.GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
     m_Message.clear();
+    ClearContactCheck();
     return true;
+}
+
+void RagdollImpactTest::SetContactCheckEnabled(bool enabled)
+{
+    if (m_ContactCheckEnabled != enabled)
+    {
+        m_ContactCheckEnabled = enabled;
+        m_PreviousLegContacts = 0;
+    }
+}
+
+void RagdollImpactTest::ResumeSimulation()
+{
+    // 직전 접촉 쌍은 유지해 P 직후 같은 접촉으로 다시 멈추지 않게 한다.
+    m_PausedLegContactMessage.clear();
+    m_World.SetPhysicsPaused(false);
+}
+
+void RagdollImpactTest::ClearContactCheck()
+{
+    if (!m_PausedLegContactMessage.empty())
+    {
+        ResumeSimulation();
+    }
+    m_LegContactMessage.clear();
+    m_PreviousLegContacts = 0;
 }
 
 bool RagdollImpactTest::SetAutomaticSupport(bool enabled)
@@ -430,7 +458,47 @@ void RagdollImpactTest::Update()
     {
         m_MaxHipsDisplacement = Max(m_MaxHipsDisplacement,
             float(Length(dummy->GetMesh().GetRagdoll().GetPosition() - m_HipsReference)));
+        const uint32_t contacts = m_FootSoles.GetLegContacts(&dummy->GetMesh(), m_LegContactMessage);
+        if (!m_World.IsPhysicsPaused())
+        {
+            m_PausedLegContactMessage.clear();
+            if (m_ContactCheckEnabled && (contacts & ~m_PreviousLegContacts) != 0)
+            {
+                m_PausedLegContactMessage = m_LegContactMessage;
+                m_World.SetPhysicsPaused(true);
+            }
+            m_PreviousLegContacts = contacts;
+        }
     }
+    else
+    {
+        ClearContactCheck();
+    }
+}
+
+void RagdollImpactTest::DrawContactOverlay(float topInset) const
+{
+    if (!GetDummy())
+    {
+        return;
+    }
+    const bool contactPaused = m_World.IsPhysicsPaused() && !m_PausedLegContactMessage.empty();
+    std::string text = contactPaused ? m_PausedLegContactMessage : m_LegContactMessage;
+    const bool touching = !text.empty();
+    if (!touching)
+    {
+        text = u8"[더미] 이동 다리의 실제 자기 접촉: 없음";
+    }
+    text += m_ContactCheckEnabled ? u8"\n접촉 확인 모드: 켜짐 (T: 끄기)" : u8"\n접촉 확인 모드: 꺼짐 (T: 켜기)";
+    if (contactPaused)
+    {
+        text += u8"\n다리 접촉으로 시뮬레이션 일시정지 · P: 재개";
+    }
+    else if (m_World.IsPhysicsPaused())
+    {
+        text += u8"\n시뮬레이션 일시정지 · P: 재개";
+    }
+    m_FootSoles.DrawContactOverlay(text, touching, topInset);
 }
 
 void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)

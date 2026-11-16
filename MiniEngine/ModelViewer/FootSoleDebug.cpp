@@ -24,11 +24,11 @@ namespace
         return foot == 0 ? u8"왼발" : foot == 1 ? u8"오른발" : u8"없음";
     }
 
-    void AppendLegContacts(PARS::SkeletalMeshComponent* mesh, const char* label, std::string& text)
+    uint32_t AppendLegContacts(PARS::SkeletalMeshComponent* mesh, const char* label, std::string& text)
     {
         if (!mesh || !mesh->GetRagdoll().IsSimulating())
         {
-            return;
+            return 0;
         }
         const PARS::Ragdoll& ragdoll = mesh->GetRagdoll();
         const PARS::FootSupportSnapshot& sample = mesh->GetFootSupport().GetSnapshot();
@@ -36,7 +36,7 @@ namespace
         const bool rightMoving = sample.footstep.feet[1].IsInProgress();
         if (!leftMoving && !rightMoving)
         {
-            return;
+            return 0;
         }
 
         const std::vector<int>& nodes = ragdoll.GetBoneNodes();
@@ -61,6 +61,7 @@ namespace
         // 양쪽에 이동 명령이 있거나 반대 발이 공중에 있으면 지지 중이라고 표시하지 않는다.
         const char* otherRole = sample.footstep.feet[otherSide].IsInProgress() ? u8"이동하는" :
             otherGrounded ? u8"지지하는" : u8"반대쪽";
+        uint32_t contacts = 0;
         for (size_t movingPart = 0; movingPart < bodies[movingSide].size(); ++movingPart)
         {
             for (size_t otherPart = 0; otherPart < bodies[otherSide].size(); ++otherPart)
@@ -69,6 +70,10 @@ namespace
                 {
                     continue;
                 }
+                // 이동/지지 역할이 바뀌어도 같은 왼쪽·오른쪽 부위는 같은 접촉으로 식별한다.
+                const size_t leftPart = movingSide == 0 ? movingPart : otherPart;
+                const size_t rightPart = movingSide == 0 ? otherPart : movingPart;
+                contacts |= uint32_t(1) << (leftPart * 3 + rightPart);
                 if (!text.empty())
                 {
                     text += '\n';
@@ -88,6 +93,7 @@ namespace
                 text += u8")에 닿음";
             }
         }
+        return contacts;
     }
 
     Vector3 ToMath(const PxVec3& point)
@@ -186,20 +192,14 @@ namespace
     }
 }
 
-void FootSoleDebug::DrawContactOverlay(PARS::SkeletalMeshComponent* dummy, float topInset) const
+uint32_t FootSoleDebug::GetLegContacts(PARS::SkeletalMeshComponent* dummy, std::string& text) const
 {
-    if (!dummy)
-    {
-        return;
-    }
-    std::string text;
-    AppendLegContacts(dummy, u8"더미", text);
-    const bool touching = !text.empty();
-    if (!touching)
-    {
-        text = u8"[더미] 이동 다리의 실제 자기 접촉: 없음";
-    }
+    text.clear();
+    return AppendLegContacts(dummy, u8"더미", text);
+}
 
+void FootSoleDebug::DrawContactOverlay(const std::string& text, bool touching, float topInset) const
+{
     // 툴바나 설정 창과 독립적인 화면 상단 표시이며 마우스 입력을 가로채지 않는다.
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float wrapWidth = (std::max)(1.0f, (std::min)(1000.0f, viewport->Size.x - 48.0f));

@@ -255,9 +255,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     uint32_t kinematicPlayer = 0;
     uint32_t modeCycles = 0;
     uint32_t incoming = 0;
+    uint32_t contactCheck = 0;
     CommandLineArgs::GetInteger(L"bodyimpactkinematic", kinematicPlayer);
     CommandLineArgs::GetInteger(L"bodyimpactmodes", modeCycles);
     CommandLineArgs::GetInteger(L"bodyimpactincoming", incoming);
+    CommandLineArgs::GetInteger(L"bodyimpactcontactcheck", contactCheck);
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -273,6 +275,21 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             "Open actual-character body impact validation");
         std::string error;
         check(test.Reset(), "Reset grounded Idle dummy with original automatic support");
+        if (contactCheck)
+        {
+            check(!test.IsContactCheckEnabled(), "Contact pause starts disabled");
+            // 검사 전용 복사본에서 허벅지 접촉을 유도하며 저장된 PA 파일은 수정하지 않는다.
+            PhysicsAsset contactAsset = *dummy->GetMesh().GetPhysicsAsset();
+            for (PhysicsBody& body : contactAsset.bodies)
+            {
+                if (body.bone.find("UpLeg") != std::string::npos)
+                {
+                    body.radius = .2f;
+                }
+            }
+            check(dummy->GetMesh().SetPhysicsAsset(contactAsset, error), "Prepare a repeatable physical thigh-contact fixture");
+            test.SetContactCheckEnabled(true);
+        }
         PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());
         check(controller != nullptr, "Use the normal player movement controller");
         controller->SetInputEnabled(true);
@@ -372,6 +389,40 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             }
             world.Tick(1.0f / 60.0f);
             test.Update();
+            if (contactCheck && world.IsPhysicsPaused())
+            {
+                FootSoleDebug debug;
+                std::string contactMessage;
+                const uint32_t contacts = debug.GetLegContacts(&dummy->GetMesh(), contactMessage);
+                check(contacts != 0 && !contactMessage.empty(), "Actual dummy leg contact triggers the pause");
+                const uint64_t pausedStep = world.GetPhysicsWorld()->GetStepCount();
+                const Vector3 pausedPosition = dummy->GetMesh().GetRagdoll().GetPosition();
+                for (uint32_t pausedFrame = 0; pausedFrame < 60; ++pausedFrame)
+                {
+                    world.Tick(1.0f / 60.0f);
+                    test.Update();
+                }
+                check(world.IsPhysicsPaused() && world.GetPhysicsWorld()->GetStepCount() == pausedStep &&
+                    float(Length(dummy->GetMesh().GetRagdoll().GetPosition() - pausedPosition)) < .00001f,
+                    "Contact pause preserves the physics step and dummy pose");
+                std::string retainedMessage;
+                check(debug.GetLegContacts(&dummy->GetMesh(), retainedMessage) == contacts && retainedMessage == contactMessage,
+                    "The contact description remains available while paused");
+                test.ResumeSimulation();
+                test.Update();
+                check(!world.IsPhysicsPaused(), "Resume does not immediately pause on the same contact");
+                test.SetContactCheckEnabled(false);
+                test.Update();
+                check(!world.IsPhysicsPaused(), "Disabling contact check allows an existing contact");
+                test.SetContactCheckEnabled(true);
+                test.Update();
+                check(world.IsPhysicsPaused(), "Enabling contact check rearms contact detection");
+                check(world.GetPhysicsWorld()->GetErrorCount() == 0, "Contact pause introduces no PhysX errors");
+                // 캡처 옵션에서는 마지막으로 멈춘 실제 접촉 장면을 표시한다.
+                controller->SetMoveInput(0, 0, false);
+                report << "PASS: dummy contact pause and resume" << std::endl;
+                return true;
+            }
             const Ragdoll& playerRagdoll = player.GetMesh().GetRagdoll();
             const Vector3 playerRoot = player.GetActorLocation();
             PxTransform capsulePose(PxIdentity);
@@ -456,6 +507,10 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         }
         controller->SetMoveInput(0, 0, false);
         world.SetPhysicsPaused(true);
+        if (contactCheck)
+        {
+            check(false, "Expected an actual leg contact before the frame limit");
+        }
         report << "events=" << eventCount << std::endl;
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors");
         report << "PASS: actual-character body impact recording" << std::endl;

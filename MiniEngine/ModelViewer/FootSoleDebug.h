@@ -1,7 +1,9 @@
 ﻿#pragma once
 
 #include "PhysicsWorld.h"
+#include <cstdint>
 #include <functional>
+#include <string>
 
 namespace PARS
 {
@@ -13,10 +15,11 @@ class FootSoleDebug
 {
 public:
     void DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings = {});
-    void DrawContactOverlay(PARS::SkeletalMeshComponent* dummy, float topInset) const;
+    void DrawContactOverlay(const std::string& text, bool touching, float topInset) const;
     void BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
 
 public:
+    uint32_t GetLegContacts(PARS::SkeletalMeshComponent* dummy, std::string& text) const;
     void SetVisible(bool visible)
     {
         m_Visible = visible;

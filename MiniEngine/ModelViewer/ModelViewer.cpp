@@ -1320,12 +1320,23 @@ void ModelViewer::Update(float deltaT)
     }
 
 #if defined(_M_X64)
-    // 기존 더미 리셋 버튼과 같은 초기화 경로를 단축키에서도 사용한다.
+    // 더미 검사 단축키는 메시 편집이나 텍스트 입력 중에는 처리하지 않는다.
     if (m_ImpactTest && !(m_MeshViewer && m_MeshViewer->WantsInput()) &&
         !(m_Comparison && m_Comparison->IsShowingScene()) &&
-        !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_G, false))
+        !ImGui::GetIO().WantTextInput)
     {
-        m_ImpactTest->Reset();
+        if (ImGui::IsKeyPressed(ImGuiKey_T, false))
+        {
+            m_ImpactTest->SetContactCheckEnabled(!m_ImpactTest->IsContactCheckEnabled());
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_P, false))
+        {
+            m_ImpactTest->ResumeSimulation();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_G, false))
+        {
+            m_ImpactTest->Reset();
+        }
     }
 #endif
 
@@ -1702,11 +1713,9 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         DrawMapSelection();
         return;
     }
-    if (!(m_Comparison && m_Comparison->IsShowingScene()))
+    if (m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
     {
-        const PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
-        m_FootSoles.DrawContactOverlay(dummy ? &dummy->GetMesh() : nullptr,
-            m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
+        m_ImpactTest->DrawContactOverlay(m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
     }
     if (m_IsAiming)
     {
