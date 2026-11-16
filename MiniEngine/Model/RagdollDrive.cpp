@@ -2,6 +2,7 @@
 #include "PhysicsPose.h"
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #if defined(_M_X64)
 #include "PhysicsWorld.h"
 using namespace physx;
@@ -36,6 +37,38 @@ namespace PARS
     }
 #endif
 
+    float Ragdoll::GetJointDriveStrength(const PhysicsConstraint& joint) const
+    {
+        std::string name = joint.childBone;
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) -> char
+        {
+            return static_cast<char>(std::tolower(value));
+        });
+        const bool arm = name.find("shoulder") != std::string::npos || name.find("clavicle") != std::string::npos ||
+            name.find("arm") != std::string::npos || name.find("hand") != std::string::npos ||
+            name.find("wrist") != std::string::npos || name.find("elbow") != std::string::npos;
+        return arm ? m_ArmDriveStrength : 1.0f;
+    }
+
+    bool Ragdoll::SetArmDriveStrength(float strength)
+    {
+        if (!std::isfinite(strength) || strength < 0 || strength > 1)
+        {
+            return false;
+        }
+        if (m_ArmDriveStrength == strength)
+        {
+            return true;
+        }
+        m_ArmDriveStrength = strength;
+        m_PreviousArticulationTargetVelocity.clear();
+        if (IsActive())
+        {
+            SetDrivesEnabled(m_DrivesEnabled);
+        }
+        return true;
+    }
+
     void Ragdoll::SetDrivesEnabled(bool enabled)
     {
         m_DrivesEnabled = enabled && IsSimulating();
@@ -48,17 +81,20 @@ namespace PARS
         for (size_t i = 0; i < m_Joints.size(); ++i)
         {
             const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
+            const float strength = GetJointDriveStrength(data);
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             m_Joints[i]->setAngularDriveConfig(data.useSlerpDrive ? PxD6AngularDriveConfig::eSLERP : PxD6AngularDriveConfig::eSWING_TWIST);
             for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
             {
                 const PARS::PhysicsAngularDrive& drive = data.drives[axis];
                 // 기존 PA의 힘 모드는 D6에서 유지한다. Articulation 모터는 아래에서 별도로 갱신한다.
-                const bool on = !m_Articulation && m_DrivesEnabled && Enabled(drive, motions[axis]);
+                const bool on = !m_Articulation && m_DrivesEnabled && strength > 0 && Enabled(drive, motions[axis]);
                 PxD6JointDrive motor;
                 if (on)
                 {
-                    motor = PxD6JointDrive(drive.GetStiffness(), drive.GetDamping(), drive.maxTorque, drive.useAcceleration);
+                    // 강성 배율을 낮추면서 감쇠비는 유지한다.
+                    motor = PxD6JointDrive(drive.GetStiffness() * strength, drive.GetDamping() * std::sqrt(strength),
+                        drive.maxTorque * strength, drive.useAcceleration);
                 }
                 m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], motor);
             }

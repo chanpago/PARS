@@ -137,6 +137,11 @@ namespace PARS
         {
             return m_DrivesEnabled;
         }
+        bool SetArmDriveStrength(float strength);
+        float GetArmDriveStrength() const
+        {
+            return m_ArmDriveStrength;
+        }
         void SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts);
         // 힘은 저장만 하며 양의 시간으로 드라이브를 갱신할 때 물리 스텝당 한 번 적용한다.
         void SetHorizontalSupportForce(const physx::PxVec3& force);
@@ -232,6 +237,9 @@ namespace PARS
         bool IsFinite() const;
 
     private:
+        float GetJointDriveStrength(const PhysicsConstraint& joint) const;
+
+    private:
         static constexpr float PelvisLinearFrequency = 30.0f;
         static constexpr float PelvisLinearDampingRatio = 1.0f;
         static constexpr float PelvisAngularFrequency = 16.0f;
@@ -263,6 +271,7 @@ namespace PARS
         int m_ArticulationRoot = -1;
         int m_SupportBody = -1;
         float m_RootSupportWeight = 0;
+        float m_ArmDriveStrength = 1.0f;
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;
         physx::PxVec3 m_HorizontalSupportForce{0};

@@ -430,11 +430,11 @@ void RunCharacterImpactTests()
     ragdoll.SetCharacterImpactEnabled(true, 100);
     for (size_t i = 0; i < names.size(); ++i)
     {
-        CheckImpact(ragdoll.IsCharacterImpactBody(i) == (i < 4 || i == 7),
-            "Root, torso, arms, hands and head are eligible; lower-body descendants are excluded");
+        CheckImpact(ragdoll.IsCharacterImpactBody(i) == (i < 2),
+            "Only root and torso receive capsule collisions; arms, hands, head and legs are excluded");
     }
     world.SweepCharacterCapsule(PxTransform(PxVec3(0, 3, 0)), 2, .1f, PxVec3(0), nullptr, hits);
-    CheckImpact(hits.size() == 5, "Ragdoll query flags expose exactly the five eligible upper bodies");
+    CheckImpact(hits.size() == 2, "Ragdoll query flags expose only the pelvis and spine");
     const PxRigidBody* rootBody = nullptr;
     for (const PhysicsCapsuleHit& hit : hits)
     {

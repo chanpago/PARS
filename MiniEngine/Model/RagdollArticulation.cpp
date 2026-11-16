@@ -479,6 +479,7 @@ namespace PARS
             }
             m_Standby->SetQueryOwner(m_QueryOwner);
             m_Standby->SetCollisionEnabled(m_CollisionEnabled);
+            m_Standby->SetArmDriveStrength(m_ArmDriveStrength);
             m_Standby->SetDrivesEnabled(simulate && m_DrivesEnabled);
             m_Standby->SetFootDrivenSupport(simulate && m_FootDrivenSupport);
             if (simulate && IsRootSupported() &&
@@ -504,6 +505,7 @@ namespace PARS
         }
         candidate.SetQueryOwner(m_QueryOwner);
         candidate.SetCollisionEnabled(m_CollisionEnabled);
+        candidate.SetArmDriveStrength(m_ArmDriveStrength);
         if (simulate)
         {
             candidate.SetArticulationVelocities(linear, angular);
@@ -652,9 +654,11 @@ namespace PARS
             // 골반 6개를 제외하고 관절 수 * 3개의 목표 각속도
             for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
             {
+                const float strength = GetJointDriveStrength(m_Asset.constraints[i]);
                 for (int axis = 0; axis < 3; ++axis)
                 {
-                    targetVelocity[6 + m_ArticulationDofOffsets[i] + axis] = m_ArticulationJoints[i]->getDriveVelocity(AngularAxes[axis]);
+                    targetVelocity[6 + m_ArticulationDofOffsets[i] + axis] = strength > 0 ?
+                        m_ArticulationJoints[i]->getDriveVelocity(AngularAxes[axis]) : 0;
                 }
             }
             
@@ -668,6 +672,16 @@ namespace PARS
                     targetAcceleration[axis] = accelerationWeight *
                         (targetVelocity[axis] - m_PreviousArticulationTargetVelocity[axis]) / deltaTime;
                 }
+            }
+        }
+
+        // 팔의 애니메이션 가속도 선행 보상도 같은 강도로 줄여 약한 PD를 우회하지 않게 한다.
+        for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
+        {
+            const float strength = GetJointDriveStrength(m_Asset.constraints[i]);
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                targetAcceleration[6 + m_ArticulationDofOffsets[i] + axis] *= strength;
             }
         }
 
@@ -749,7 +763,8 @@ namespace PARS
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     const PhysicsAngularDrive& drive = data.drives[data.useSlerpDrive ? 0 : axis];
-                    const bool driven = drive.enabled && drive.maxTorque > 0 && (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
+                    const bool driven = GetJointDriveStrength(data) > 0 && drive.enabled && drive.maxTorque > 0 &&
+                        (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
                     if (motions[axis] != PhysicsJointMotion::Locked && !driven)
                     {
                         freeAxes.push_back(6 + m_ArticulationDofOffsets[i] + axis);
@@ -842,6 +857,7 @@ namespace PARS
         {
             const PhysicsConstraint& data = m_Asset.constraints[i];
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
+            const float strength = GetJointDriveStrength(data);
             float ankleDriveScale = 1.0f;
             if (m_FootDrivenSupport)
             {
@@ -857,7 +873,8 @@ namespace PARS
             for (int axis = 0; axis < 3; ++axis)
             {
                 const PhysicsAngularDrive& drive = data.drives[data.useSlerpDrive ? 0 : axis];
-                const bool enabled = m_DrivesEnabled && drive.enabled && drive.maxTorque > 0 && motions[axis] != PhysicsJointMotion::Locked;
+                const bool enabled = m_DrivesEnabled && strength > 0 && drive.enabled && drive.maxTorque > 0 &&
+                    motions[axis] != PhysicsJointMotion::Locked;
                 const unsigned dof = m_ArticulationDofOffsets[i] + axis;
                 float feedForward = 0;
                 if (enabled && compensate)
@@ -888,8 +905,9 @@ namespace PARS
                 // 관성으로 Kp=I*omegaN^2, Kd=2*zeta*I*omegaN을 만들고 암시적 토크 드라이브에 전달한다.
                 const float inertia = enabled && drive.useAcceleration ? inertias[6 + dof] : 1.0f;
                 // 발목은 지지 하중에 맞춰 강성과 감쇠에 같은 배율을 적용해 회전 추종과 제동을 함께 높인다.
-                const PxArticulationDrive motor(enabled ? inertia * drive.GetStiffness() * ankleDriveScale : 0,
-                    enabled ? inertia * drive.GetDamping() * ankleDriveScale : 0, remainingTorque, PxArticulationDriveType::eFORCE);
+                const PxArticulationDrive motor(enabled ? inertia * drive.GetStiffness() * ankleDriveScale * strength : 0,
+                    enabled ? inertia * drive.GetDamping() * ankleDriveScale * std::sqrt(strength) : 0,
+                    remainingTorque, PxArticulationDriveType::eFORCE);
 
                 // 앞서 계산한 관성과 각 축에 대한 pd 구동식으로 motor값에 저장하고 관절 PD모터가 목표(target)을 얼마나 강하게 따라갈지 설정하는 함수
                 m_ArticulationJoints[i]->setDriveParams(AngularAxes[axis], motor);

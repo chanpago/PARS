@@ -134,6 +134,11 @@ namespace PARS
         {
             return false;
         }
+        // 플레이어 캡슐은 골반과 척추·가슴 바디에만 직접 충격을 전달한다.
+        if (static_cast<int>(body) != root && !IsSpine(m_Asset.bodies[body].bone))
+        {
+            return false;
+        }
         int current = static_cast<int>(body);
         for (size_t depth = 0; depth < m_Asset.bodies.size(); ++depth)
         {

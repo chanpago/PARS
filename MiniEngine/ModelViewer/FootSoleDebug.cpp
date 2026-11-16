@@ -807,6 +807,16 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         const PARS::StandingSupportSnapshot& standing = mesh.GetStandingSupportSnapshot();
         PARS::StandingSupportSettings& standingSettings = mesh.GetStandingSupportSettings();
         PARS::HorizontalBalanceSettings& horizontalSettings = mesh.GetHorizontalBalanceSettings();
+        float armStrengthPercent = mesh.GetArmDriveStrength() * 100.0f;
+        if (ImGui::SliderFloat(u8"팔 애니메이션 추종 강도", &armStrengthPercent,
+            0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp))
+        {
+            mesh.SetArmDriveStrength(armStrengthPercent * .01f);
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(u8"어깨·위팔·아래팔·손의 PD 강성 배율입니다. 감쇠비는 유지하며 0%%에서는 팔 구동을 끕니다. 활성 물리 상태에서 적용됩니다.");
+        }
         ImGui::Checkbox(u8"골반 XZ 직접 PD 보조", &horizontalSettings.enabled);
         if (horizontalSettings.enabled)
         {

@@ -56,6 +56,7 @@
     <ClCompile Include="RagdollReuseTests.cpp" />
     <ClCompile Include="ActiveRagdollTests.cpp" />
     <ClCompile Include="HorizontalBalanceRagdollTests.cpp" />
+    <ClCompile Include="ArmDriveTests.cpp" />
     <ClCompile Include="RagdollComparisonTests.cpp" />
     <ClCompile Include="..\Model\RagdollComparison.cpp" />
     <ClCompile Include="..\Model\RagdollComparisonReport.cpp" />

@@ -292,6 +292,7 @@ namespace PARS
         std::swap(m_HasSupportTarget, other.m_HasSupportTarget);
         std::swap(m_SupportHorizontal, other.m_SupportHorizontal);
         std::swap(m_RootSupportWeight, other.m_RootSupportWeight);
+        std::swap(m_ArmDriveStrength, other.m_ArmDriveStrength);
         std::swap(m_FootDrivenSupport, other.m_FootDrivenSupport);
         std::swap(m_SupportContacts, other.m_SupportContacts);
         std::swap(m_SupportLoads, other.m_SupportLoads);

@@ -46,6 +46,17 @@ namespace PARS
             return false;
         }
         candidate.SetQueryOwner(&GetOwner());
+        candidate.SetArmDriveStrength(m_ArmDriveStrength);
+        return true;
+    }
+
+    bool SkeletalMeshComponent::SetArmDriveStrength(float strength)
+    {
+        if (!m_Ragdoll.SetArmDriveStrength(strength))
+        {
+            return false;
+        }
+        m_ArmDriveStrength = strength;
         return true;
     }
 
