@@ -329,7 +329,7 @@ namespace PARS
                 error = u8"몸통 캡슐 형상을 준비하지 못했습니다.";
                 return false;
             }
-            // PA와 독립된 캡슐이며, 키네마틱 본체에서는 충돌 반작용으로 밀리지 않는다.
+            // PA 바디 목록과 Articulation에 넣지 않는다. 유한 질량은 이 독립 바디의 접촉 솔버에만 사용한다.
             m_CharacterCapsuleBody = m_World->CreateDynamicBody(pose, PxCapsuleGeometry(radius, halfLength), mass,
                 "Character collision capsule", m_Asset.bodies[root].material);
             if (!m_CharacterCapsuleBody)
@@ -360,16 +360,13 @@ namespace PARS
                 return false;
             }
             m_World->InvalidateContacts(*m_CharacterCapsuleBody);
-            if (!m_CharacterCapsuleBody->getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC))
-            {
-                m_CharacterCapsuleBody->wakeUp();
-            }
+            m_CharacterCapsuleBody->wakeUp();
         }
         error.clear();
         return true;
     }
 
-    void Ragdoll::SyncCharacterCapsule(bool teleport)
+    void Ragdoll::SyncCharacterCapsule()
     {
         const int root = GetImpactRootBody();
         if (!m_CharacterCapsuleBody || !IsActive() || root < 0)
@@ -378,40 +375,32 @@ namespace PARS
         }
         const PxRigidBody& body = *m_Bodies[root];
         const PxTransform pose = body.getGlobalPose() * m_CapsuleRootPose;
-        const bool wasKinematic = m_CharacterCapsuleBody->getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC);
+        PxVec3 linear = GetBodyPointVelocity(static_cast<size_t>(root), pose.p);
+        PxVec3 angular = body.getAngularVelocity();
         if (!IsSimulating())
         {
-            // 접촉 솔버가 캡슐을 밀어내지 않도록 본체와 같은 키네마틱 모드를 사용한다.
-            if (!wasKinematic)
-            {
-                m_CharacterCapsuleBody->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-            }
-            PxTransform capsuleTarget = pose;
+            // 키네마틱 속도는 simulate()에서 갱신되므로 현재 스텝의 목표로 직접 계산한다.
+            // 캡슐 중심의 회전 이동도 포함하되, 충돌 반작용은 애니메이션 본체로 돌려주지 않는다.
+            linear = PxVec3(0);
+            angular = PxVec3(0);
             PxTransform target(PxIdentity);
             const PxRigidDynamic* kinematic = body.is<PxRigidDynamic>();
             if (kinematic && kinematic->getKinematicTarget(target))
             {
-                capsuleTarget = target * m_CapsuleRootPose;
+                const PxTransform capsuleTarget = target * m_CapsuleRootPose;
+                const float deltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+                linear = (capsuleTarget.p - pose.p) / deltaTime;
+                PxQuat delta = capsuleTarget.q * pose.q.getConjugate();
+                if (delta.w < 0)
+                {
+                    delta = -delta;
+                }
+                float angle = 0;
+                PxVec3 axis(0);
+                delta.toRadiansAndUnitAxis(angle, axis);
+                angular = axis * (angle / deltaTime);
             }
-            if (!pose.isValid() || !capsuleTarget.isValid())
-            {
-                return;
-            }
-            if (teleport || !wasKinematic)
-            {
-                m_World->InvalidateContacts(*m_CharacterCapsuleBody);
-                m_CharacterCapsuleBody->setGlobalPose(pose);
-            }
-            // 평상시에는 위치를 덮어쓰지 않고 이번 스텝의 이동과 회전을 솔버에 전달한다.
-            m_CharacterCapsuleBody->setKinematicTarget(capsuleTarget);
-            return;
         }
-        if (wasKinematic)
-        {
-            m_CharacterCapsuleBody->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
-        }
-        const PxVec3 linear = GetBodyPointVelocity(static_cast<size_t>(root), pose.p);
-        const PxVec3 angular = body.getAngularVelocity();
         if (!pose.isValid() || !linear.isFinite() || !angular.isFinite())
         {
             return;

@@ -101,12 +101,11 @@ void RagdollImpactTest::DrawBodyImpactUI(PARS::Character* player)
     PARS::CharacterImpactComponent& component = player->GetCharacterImpact();
     PARS::CharacterImpactSettings settings = component.GetSettings();
     ImGui::Checkbox(u8"몸통 충돌 캡슐 표시", &m_BodyImpactCapsuleVisible);
-    ImGui::TextWrapped("%s", u8"청록색 윤곽: 몸통을 따라가는 충돌 캡슐. 키네마틱 플레이어의 캡슐은 더미와 부딪혀도 밀려나지 않습니다.");
+    ImGui::TextWrapped("%s", u8"청록색 윤곽: 몸통을 따라가는 독립 동적 충돌 캡슐.");
+    ImGui::TextWrapped("%s", u8"키네마틱과 래그돌에서 같은 질량·크기 설정을 사용합니다. 키네마틱 플레이어는 충돌 반작용으로 밀려나지 않습니다.");
     bool changed = ImGui::Checkbox(u8"몸통 캡슐 충돌 사용", &settings.enabled);
-    ImGui::BeginDisabled(!player->GetMesh().GetRagdoll().IsSimulating());
-    changed |= ImGui::InputFloat(u8"래그돌 모드 캡슐 질량 (kg)", &settings.collisionMass, 1, 10, "%.3f");
-    ImGui::EndDisabled();
-    ImGui::TextWrapped("%s", u8"키네마틱 모드에서는 캡슐 질량이 충돌에 영향을 주지 않습니다. 질량 설정은 래그돌 모드에서만 사용하며 본체의 총무게와 PD에는 포함하지 않습니다.");
+    changed |= ImGui::InputFloat(u8"충돌용 캡슐 질량 (kg)", &settings.collisionMass, 1, 10, "%.3f");
+    ImGui::TextWrapped("%s", u8"이 질량은 상대 상체와의 충돌에 사용하며, 본인 캐릭터의 총무게와 PD에는 포함하지 않습니다.");
     ImGui::Separator();
     ImGui::TextUnformatted(u8"캡슐 크기");
     changed |= ImGui::SliderFloat(u8"반경 배율", &settings.capsuleRadiusScale, .1f, 3.0f, u8"%.2f 배", ImGuiSliderFlags_AlwaysClamp);
@@ -157,7 +156,7 @@ void RagdollImpactTest::DrawBodyImpactUI(PARS::Character* player)
     float totalMass = 0;
     ragdoll.GetCenterOfMass(center, totalMass);
     ImGui::Text(u8"PA 골반 %.3f kg / 캐릭터 전체 %.3f kg", ragdoll.GetImpactRootMass(), totalMass);
-    ImGui::Text(u8"래그돌 모드용 캡슐 질량 설정 %.3f kg", ragdoll.GetCharacterCapsuleMass());
+    ImGui::Text(u8"독립 캡슐 충돌 질량 %.3f kg", ragdoll.GetCharacterCapsuleMass());
     ImGui::TextWrapped("%s", u8"캡슐의 충돌 반작용은 본인 골반으로 전달하지 않습니다. PA의 질량·질량중심·관성을 유지합니다.");
     const PARS::CharacterImpactSnapshot& current = component.GetSnapshot();
     const PARS::CharacterImpactSnapshot& last = component.GetLastImpact();
