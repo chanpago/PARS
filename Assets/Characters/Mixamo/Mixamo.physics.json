@@ -9,7 +9,7 @@
         0.09099999815225601
       ],
       "halfLength": 0.02500000037252903,
-      "mass": 8.154099464416504,
+      "mass": 12.0,
       "material": {
         "dynamicFriction": 0.5,
         "frictionCombine": "average",
@@ -96,7 +96,7 @@
         0.09099999815225601
       ],
       "halfLength": 0.04500000178813934,
-      "mass": 10.297992706298828,
+      "mass": 8.0,
       "material": {
         "dynamicFriction": 0.5,
         "frictionCombine": "average",
@@ -212,7 +212,7 @@
         0.03500000014901161
       ],
       "halfLength": 0.08500000089406967,
-      "mass": 1.9783000946044922,
+      "mass": 4.0,
       "material": {
         "dynamicFriction": 0.5,
         "frictionCombine": "average",
@@ -328,7 +328,7 @@
         0.03500000014901161
       ],
       "halfLength": 0.08500000089406967,
-      "mass": 1.9783000946044922,
+      "mass": 4.0,
       "material": {
         "dynamicFriction": 0.5,
         "frictionCombine": "average",
@@ -444,7 +444,7 @@
         0.03849999979138374
       ],
       "halfLength": 0.20000000298023224,
-      "mass": 3.1608998775482178,
+      "mass": 6.0,
       "material": {
         "dynamicFriction": 0.5,
         "frictionCombine": "average",
@@ -473,7 +473,7 @@
         0.027983034029603004
       ],
       "halfLength": 0.05000000074505806,
-      "mass": 0.850100040435791,
+      "mass": 2.0,
       "material": {
         "dynamicFriction": 0.800000011920929,
         "frictionCombine": "minimum",
@@ -531,7 +531,7 @@
         0.03849999979138374
       ],
       "halfLength": 0.20000000298023224,
-      "mass": 3.1608998775482178,
+      "mass": 6.0,
       "material": {
         "dynamicFriction": 0.5,
         "frictionCombine": "average",
@@ -560,7 +560,7 @@
         0.027304135262966156
       ],
       "halfLength": 0.05000000074505806,
-      "mass": 0.850100040435791,
+      "mass": 2.0,
       "material": {
         "dynamicFriction": 0.800000011920929,
         "frictionCombine": "minimum",
@@ -1643,7 +1643,7 @@
       "swingY": "limited",
       "swingYLimit": 0.8726646304130554,
       "swingZ": "limited",
-      "swingZMax": 0.3490658402442932,
+      "swingZMax": 0.4363323152065277,
       "swingZMin": -0.22689279913902283,
       "twist": "limited",
       "twistMax": 0.6981316804885864,
@@ -1833,7 +1833,7 @@
       "swingYLimit": 0.8726646304130554,
       "swingZ": "limited",
       "swingZMax": 0.22689279913902283,
-      "swingZMin": -0.3490658402442932,
+      "swingZMin": -0.4363323152065277,
       "twist": "limited",
       "twistMax": 0.6981316804885864,
       "twistMin": -0.6981316804885864
