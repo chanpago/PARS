@@ -4,6 +4,7 @@
 #include "imgui.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 using namespace Math;
 using namespace physx;
@@ -198,6 +199,65 @@ uint32_t FootSoleDebug::GetLegContacts(PARS::SkeletalMeshComponent* dummy, std::
     return AppendLegContacts(dummy, u8"더미", text);
 }
 
+std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponent& mesh) const
+{
+    const PARS::FootstepCollisionSnapshot& prediction = mesh.GetFootstepCollisionSnapshot();
+    const PARS::FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
+    if (!support.footstep.IsInProgress())
+    {
+        return u8"[더미] 목표 경로 예측: 이동 명령 없음";
+    }
+    if (prediction.status != PARS::FootstepCollisionStatus::Sampled ||
+        prediction.revision != support.footstep.revision || prediction.completedStep != support.footstep.completedStep)
+    {
+        return u8"[더미] 목표 경로 예측: 검사 불가 (유효한 다리 자세·충돌 형상 필요)";
+    }
+
+    char summary[256];
+    std::snprintf(summary, sizeof(summary), u8"[더미] 목표 경로 예측: %u개 자세 · %u쌍 검사 · %.3fms · %s",
+        prediction.sampleCount, prediction.queryCount, prediction.elapsedMilliseconds,
+        prediction.overlapPairs ? u8"겹침 예상" : u8"검사 지점 겹침 없음");
+    std::string text = summary;
+    if (prediction.assumesTakeoff)
+    {
+        text += u8" (들기 완료 후 이륙 가정)";
+    }
+    if (prediction.reachLimited)
+    {
+        text += u8" (다리 도달 범위 제한 있음)";
+    }
+
+    const size_t movingSide = prediction.moving[0] ? 0 : 1;
+    const size_t otherSide = 1 - movingSide;
+    const char* const sideLabels[] = {u8"왼쪽", u8"오른쪽"};
+    const char* const partLabels[] = {u8"허벅지", u8"종아리", u8"발"};
+    const char* otherRole = prediction.moving[otherSide] ? u8"이동하는" :
+        support.feet[otherSide].contact.grounded ? u8"지지하는" : u8"반대쪽";
+    uint32_t displayed = 0;
+    for (uint32_t index = 0; index < prediction.sampleCount; ++index)
+    {
+        const PARS::FootstepCollisionSample& sample = prediction.samples[index];
+        for (uint32_t pair = 0; pair < 9; ++pair)
+        {
+            const uint32_t bit = uint32_t(1) << pair;
+            if (!(sample.overlapPairs & bit) || (displayed & bit))
+            {
+                continue;
+            }
+            displayed |= bit;
+            const uint32_t movingPart = movingSide == 0 ? pair / 3 : pair % 3;
+            const uint32_t otherPart = movingSide == 0 ? pair % 3 : pair / 3;
+            char message[512];
+            std::snprintf(message, sizeof(message),
+                u8"\n[예측 %u/%u · %.0fms 뒤] 이동하는 다리의 (%s, %s)가 %s 다리의 (%s, %s)와 겹침 예상",
+                index + 1, prediction.sampleCount, sample.timeAhead * 1000,
+                sideLabels[movingSide], partLabels[movingPart], otherRole, sideLabels[otherSide], partLabels[otherPart]);
+            text += message;
+        }
+    }
+    return text;
+}
+
 void FootSoleDebug::DrawContactOverlay(const std::string& text, bool touching, float topInset) const
 {
     // 툴바나 설정 창과 독립적인 화면 상단 표시이며 마우스 입력을 가로채지 않는다.
@@ -301,6 +361,29 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     }
     if (m_ShowFootstep)
     {
+        const PARS::FootstepCollisionSnapshot& prediction = mesh.GetFootstepCollisionSnapshot();
+        if (prediction.status == PARS::FootstepCollisionStatus::Sampled &&
+            prediction.revision == sample.footstep.revision && prediction.completedStep == sample.footstep.completedStep)
+        {
+            for (size_t side = 0; side < prediction.moving.size(); ++side)
+            {
+                if (!prediction.moving[side])
+                {
+                    continue;
+                }
+                for (uint32_t index = 0; index < prediction.sampleCount; ++index)
+                {
+                    const PARS::FootstepCollisionSample& future = prediction.samples[index];
+                    const PxU32 color = future.overlapPairs ? OutsideColor : PredictionColor;
+                    const Vector3 position = ToMath(future.solePositions[side]);
+                    Point(lines, position, color, .018f);
+                    if (index > 0)
+                    {
+                        Line(lines, ToMath(prediction.samples[index - 1].solePositions[side]), position, color);
+                    }
+                }
+            }
+        }
         const std::vector<physx::PxVec3>& referenceHull = mesh.GetRecoveryReferenceHull();
         for (size_t i = 0; i < referenceHull.size(); ++i)
         {

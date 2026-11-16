@@ -13,6 +13,7 @@ using namespace physx;
 
 void TestFootstepPlanner();
 void TestFootstepIK();
+void TestFootstepCollision();
 void TestStandingSupport();
 
 namespace
@@ -316,6 +317,7 @@ int main(int argc, char** argv)
     {
         TestFootstepPlanner();
         TestFootstepIK();
+        TestFootstepCollision();
         TestStandingSupport();
         return 0;
     }
@@ -336,6 +338,7 @@ int main(int argc, char** argv)
     TestFootSupportBalance();
     TestFootstepPlanner();
     TestFootstepIK();
+    TestFootstepCollision();
     TestStandingSupport();
     const float reference = SimulateAtRate(60, 0.5);
     Check(std::abs(SimulateAtRate(30, 0.5) - reference) < 1e-5f, "30/60 FPS agree in flight");

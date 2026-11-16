@@ -2,6 +2,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
 
@@ -328,6 +329,8 @@ namespace PARS
             return;
         }
 
+        UpdateFootstepCollision(input, deltaTime);
+
         // IK 결과를 원래 target에 반영. correctedNodesd 에 있는 본만 갱신
         for (int node : m_FootstepIK.GetSnapshot().correctedNodes)
         {
@@ -338,6 +341,55 @@ namespace PARS
             // 원래 본의 스케일·전단은 보존하고 강체 목표 프레임만 교체한다.
             target[node] = corrected * Invert(PhysicsBoneFrame(target[node])) * target[node];
         }
+    }
+
+    void SkeletalMeshComponent::UpdateFootstepCollision(const FootstepIKInput& input, float deltaTime)
+    {
+        const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
+        if (!step.IsInProgress())
+        {
+            return;
+        }
+        const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+        FootstepCollisionInput prediction;
+        prediction.completedStep = step.completedStep;
+        prediction.revision = step.revision;
+        prediction.fixedDeltaTime = deltaTime;
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        const FootstepIKSnapshot& ik = m_FootstepIK.GetSnapshot();
+        for (size_t side = 0; side < prediction.legs.size(); ++side)
+        {
+            FootstepCollisionLeg& leg = prediction.legs[side];
+            leg.command = step.feet[side];
+            const FootIKLegInput& source = input.legs[side];
+            const LegIKResult& solved = ik.legs[side];
+            // 현재 제어 목표의 무릎 굽힘을 유지한 채 미래 발바닥 목표만 바꿔 다시 푼다.
+            leg.pose.hip = solved.hip;
+            leg.pose.knee = solved.knee;
+            leg.pose.ankle = solved.ankle;
+            leg.pose.targetSole = solved.requestedSole;
+            leg.pose.soleInBone = source.soleInBone;
+            leg.pose.thighLength = source.thighLength;
+            leg.pose.calfLength = source.calfLength;
+            leg.pose.referenceBend = solved.bendDirection;
+            leg.pose.previousBend = solved.bendDirection;
+            leg.pose.hasPreviousBend = solved.valid;
+            const std::array<int, 3> legNodes{source.hipNode, source.kneeNode, source.ankleNode};
+            for (size_t part = 0; part < legNodes.size(); ++part)
+            {
+                const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), legNodes[part]);
+                if (body == nodes.end())
+                {
+                    continue;
+                }
+                FootstepCollisionShape& shape = leg.shapes[part];
+                shape.available = m_Ragdoll.GetBodyCollisionShape(static_cast<size_t>(body - nodes.begin()),
+                    shape.geometry, shape.inBone, shape.actualPose);
+            }
+        }
+        m_FootstepCollision = PredictFootstepCollisions(prediction);
+        m_FootstepCollision.elapsedMilliseconds = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started).count();
     }
 
     void SkeletalMeshComponent::UpdateFootCandidateDebugColors()

@@ -206,6 +206,8 @@
     <ClCompile Include="FootstepPlanner.cpp" />
     <ClInclude Include="FootstepIK.h" />
     <ClCompile Include="FootstepIK.cpp" />
+    <ClInclude Include="FootstepCollision.h" />
+    <ClCompile Include="FootstepCollision.cpp" />
     <ClInclude Include="RagdollRecovery.h" />
     <ClCompile Include="RagdollRecovery.cpp" />
     <ClCompile Include="RagdollRecoveryPose.cpp" />

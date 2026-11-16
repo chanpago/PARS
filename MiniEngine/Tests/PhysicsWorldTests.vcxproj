@@ -49,6 +49,8 @@
     <ClCompile Include="..\Model\FootstepPlanner.cpp" />
     <ClCompile Include="FootstepIKTests.cpp" />
     <ClCompile Include="..\Model\FootstepIK.cpp" />
+    <ClCompile Include="FootstepCollisionTests.cpp" />
+    <ClCompile Include="..\Model\FootstepCollision.cpp" />
     <ClCompile Include="StandingSupportTests.cpp" />
     <ClCompile Include="..\Model\StandingSupport.cpp" />
     <ClCompile Include="..\Core\PhysicsWorld.cpp" />

@@ -7,6 +7,30 @@ namespace
 {
     constexpr float MinimumStepDistance = 1e-5f;
 
+    float LiftHeight(const FootstepMotion& motion, float elapsed)
+    {
+        const float t = PxClamp(elapsed / (.5f * motion.duration), 0.0f, 1.0f);
+        const float blend = t * t * (3.0f - 2.0f * t);
+        return motion.initialHeight * blend;
+    }
+
+    float SwingHeight(const FootstepMotion& motion, float progress)
+    {
+        return motion.initialHeight * .5f * (1.0f - std::cos(PxTwoPi * progress));
+    }
+
+    PxVec3 SwingPosition(const FootstepCommand& command, const PxVec3& takeoff, float progress)
+    {
+        const float blend = progress * progress * (3.0f - 2.0f * progress);
+        PxVec3 position = takeoff + (command.target.position - takeoff) * blend +
+            PxVec3(0, SwingHeight(command.motion, progress), 0);
+        // 이륙 때 이미 확보한 높이를 중복으로 더하지 않도록 구동과 예측에 같은 상한을 쓴다.
+        const float maximumHeight = (std::max)(command.startPosition.y, command.target.position.y) +
+            command.motion.initialHeight;
+        position.y = (std::min)(position.y, maximumHeight);
+        return position;
+    }
+
     bool ValidSettings(const FootstepSettings& s)
     {
         return std::isfinite(s.startPredictionTime) && s.startPredictionTime > 0 &&
@@ -295,6 +319,40 @@ void FootstepPlanner::Abort(FootstepReason reason)
     }
 }
 
+float PARS::GetFootstepRemainingTime(const FootstepCommand& command)
+{
+    if (command.hasTakenOff)
+    {
+        return (std::max)(0.0f, command.motion.duration - command.motion.elapsedTime);
+    }
+    return (std::max)(0.0f, .5f * command.motion.duration - command.motion.takeoffElapsedTime) +
+        command.motion.duration;
+}
+
+PxVec3 PARS::SampleFootstepPosition(const FootstepCommand& command, float timeAhead)
+{
+    const FootstepMotion& motion = command.motion;
+    PxVec3 takeoff = command.takeoffPosition;
+    float elapsed = motion.elapsedTime + timeAhead;
+    if (!command.hasTakenOff)
+    {
+        const float remainingLift = (std::max)(0.0f, .5f * motion.duration - motion.takeoffElapsedTime);
+        if (timeAhead <= remainingLift)
+        {
+            return command.startPosition + PxVec3(0, LiftHeight(motion, motion.takeoffElapsedTime + timeAhead), 0);
+        }
+        // 아직 확인되지 않은 실제 이륙 시점을 예언하지 않고, 들기 완료 후의 목표 경로를 검사한다.
+        takeoff = command.startPosition + PxVec3(0, motion.initialHeight, 0);
+        elapsed = timeAhead - remainingLift;
+    }
+    const float progress = PxClamp(elapsed / motion.duration, 0.0f, 1.0f);
+    PxVec3 position = SwingPosition(command, takeoff, progress);
+    const float overtime = (std::max)(0.0f, elapsed - motion.duration);
+    position.y -= (std::min)(motion.maximumLandingLowering,
+        motion.landingLowering + overtime * motion.landingLoweringSpeed);
+    return position;
+}
+
 void FootstepPlanner::UpdateMotion(FootstepCommand& command, const FootstepFootInput& foot, const FootstepInput& input)
 {
     FootstepMotion& motion = command.motion;
@@ -317,20 +375,13 @@ void FootstepPlanner::UpdateMotion(FootstepCommand& command, const FootstepFootI
     if (!command.hasTakenOff)
     {
         // 실제 이륙 전에는 수평으로 끌지 않고 위로 드는 목표를 유지한다.
-        const float liftProgress = PxClamp(motion.takeoffElapsedTime / (.5f * motion.duration), 0.0f, 1.0f);
-        const float liftBlend = liftProgress * liftProgress * (3.0f - 2.0f * liftProgress);
-        motion.height = motion.initialHeight * liftBlend;
+        motion.height = LiftHeight(motion, motion.takeoffElapsedTime);
         motion.position = command.startPosition + PxVec3(0, motion.height, 0);
         motion.valid = motion.position.isFinite();
         return;
     }
-    const float t = motion.progress;
-    const float blend = t * t * (3.0f - 2.0f * t);
-    motion.height = motion.initialHeight * .5f * (1.0f - std::cos(PxTwoPi * t));
-    motion.position = command.takeoffPosition + (command.target.position - command.takeoffPosition) * blend + PxVec3(0, motion.height, 0);
-    // 이륙 때 이미 확보한 높이를 중복으로 더해 최대 들기 높이를 넘지 않는다.
-    const float maximumHeight = (std::max)(command.startPosition.y, command.target.position.y) + motion.initialHeight;
-    motion.position.y = (std::min)(motion.position.y, maximumHeight);
+    motion.height = SwingHeight(motion, motion.progress);
+    motion.position = SwingPosition(command, command.takeoffPosition, motion.progress);
     if (motion.landingTargetLocked && !foot.grounded)
     {
         const double elapsed = static_cast<double>(input.completedStep - command.takeoffStep) * input.fixedDeltaTime;

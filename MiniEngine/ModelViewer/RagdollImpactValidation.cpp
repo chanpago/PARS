@@ -395,6 +395,16 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 std::string contactMessage;
                 const uint32_t contacts = debug.GetLegContacts(&dummy->GetMesh(), contactMessage);
                 check(contacts != 0 && !contactMessage.empty(), "Actual dummy leg contact triggers the pause");
+                const FootstepCollisionSnapshot prediction = dummy->GetMesh().GetFootstepCollisionSnapshot();
+                const FootstepSnapshot& step = dummy->GetMesh().GetFootSupport().GetSnapshot().footstep;
+                check(prediction.status == FootstepCollisionStatus::Sampled && prediction.sampleCount == 6 &&
+                    prediction.queryCount == 54 && prediction.completedStep == step.completedStep &&
+                    prediction.revision == step.revision,
+                    "The real dummy checks six planned poses against its runtime PA shapes on the current control tick");
+                check(prediction.overlapPairs != 0, "The enlarged-thigh fixture also overlaps on the predicted path");
+                report << "prediction_samples=" << prediction.sampleCount << " prediction_queries=" << prediction.queryCount
+                    << " prediction_pairs=" << prediction.overlapPairs << " prediction_ms=" << prediction.elapsedMilliseconds
+                    << std::endl;
                 const uint64_t pausedStep = world.GetPhysicsWorld()->GetStepCount();
                 const Vector3 pausedPosition = dummy->GetMesh().GetRagdoll().GetPosition();
                 for (uint32_t pausedFrame = 0; pausedFrame < 60; ++pausedFrame)
@@ -408,6 +418,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 std::string retainedMessage;
                 check(debug.GetLegContacts(&dummy->GetMesh(), retainedMessage) == contacts && retainedMessage == contactMessage,
                     "The contact description remains available while paused");
+                const FootstepCollisionSnapshot& retainedPrediction = dummy->GetMesh().GetFootstepCollisionSnapshot();
+                check(retainedPrediction.completedStep == prediction.completedStep &&
+                    retainedPrediction.overlapPairs == prediction.overlapPairs &&
+                    debug.GetLegPredictionText(dummy->GetMesh()).find(u8"겹침 예상") != std::string::npos,
+                    "The separate predicted-contact description remains inspectable while paused");
                 test.ResumeSimulation();
                 test.Update();
                 check(!world.IsPhysicsPaused(), "Resume does not immediately pause on the same contact");

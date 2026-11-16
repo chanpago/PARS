@@ -158,6 +158,7 @@ namespace PARS
     void SkeletalMeshComponent::FixedTickComponent(float deltaTime)
     {
         FramePerformance::Scope controlTiming(FramePerformance::Category::ParsControl);
+        m_FootstepCollision = {};
         if (!m_Ragdoll.IsActive())
         {
             return;
@@ -233,6 +234,7 @@ namespace PARS
                 // 목표 갱신에 실패하면 전신 패시브 물리 시뮬레이션으로 전환한다.
                 // 골반의 힘/토크 지지를 제거하면서 목표 갱신 오류 메시지는 보존한다.
                 m_FootstepIK.Reset();
+                m_FootstepCollision = {};
                 m_Ragdoll.SetDrivesEnabled(false);
                 std::string supportError;
                 m_Ragdoll.SetRootSupported(false, supportError);

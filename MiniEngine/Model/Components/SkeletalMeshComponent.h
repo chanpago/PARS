@@ -7,6 +7,7 @@
 #include "../Ragdoll.h"
 #include "../FootSupport.h"
 #include "../FootstepIK.h"
+#include "../FootstepCollision.h"
 #include "../RagdollRecovery.h"
 #include "../StandingSupport.h"
 
@@ -77,6 +78,7 @@ namespace PARS
         void UpdatePhysicsPose();
         void UpdateFootSupport();
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
+        void UpdateFootstepCollision(const FootstepIKInput& input, float deltaTime);
         bool ApplyRecoveryTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void ResetRecovery();
         bool CaptureRecoveryBlendSource();
@@ -129,6 +131,10 @@ namespace PARS
         const FootstepIKSnapshot& GetFootstepIKSnapshot() const
         {
             return m_FootstepIK.GetSnapshot();
+        }
+        const FootstepCollisionSnapshot& GetFootstepCollisionSnapshot() const
+        {
+            return m_FootstepCollision;
         }
         const RecoverySnapshot& GetRecoverySnapshot() const
         {
@@ -212,6 +218,7 @@ namespace PARS
         std::unique_ptr<const PhysicsAsset> m_PhysicsAsset;
         Ragdoll m_Ragdoll;
         FootstepIK m_FootstepIK;
+        FootstepCollisionSnapshot m_FootstepCollision;
         RagdollRecovery m_Recovery;
         KinematicRecoveryTimer m_KinematicRecoveryTimer;
         StandingSupport m_StandingSupport;

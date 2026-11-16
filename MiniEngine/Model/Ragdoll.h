@@ -19,6 +19,7 @@ namespace physx
     class PxArticulationJointReducedCoordinate;
     class PxArticulationCache;
     class PxShape;
+    class PxGeometryHolder;
 }
 
 namespace PARS
@@ -182,6 +183,8 @@ namespace PARS
             return m_BoneNodes;
         }
         Math::Matrix4 GetBoneWorld(size_t body) const;
+        bool GetBodyCollisionShape(size_t body, physx::PxGeometryHolder& geometry,
+            physx::PxTransform& inBone, physx::PxTransform& actualPose) const;
         Math::Vector3 GetPosition() const;
         // 실제 바디의 월드 질량중심을 질량으로 가중 평균한다. 바디가 없으면 false다.
         bool GetCenterOfMass(Math::Vector3& center, float& totalMass) const;

@@ -648,6 +648,36 @@ namespace PARS
         return Matrix4(kIdentity);
 #endif
     }
+    bool Ragdoll::GetBodyCollisionShape(size_t body, physx::PxGeometryHolder& geometry,
+        physx::PxTransform& inBone, physx::PxTransform& actualPose) const
+    {
+#if defined(_M_X64)
+        if (!m_CollisionEnabled || body >= m_Bodies.size() || body >= m_Asset.bodies.size() ||
+            m_Bodies[body]->getNbShapes() != 1)
+        {
+            return false;
+        }
+        PxShape* shape = nullptr;
+        m_Bodies[body]->getShapes(&shape, 1);
+        if (!shape || !shape->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) ||
+            shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE))
+        {
+            return false;
+        }
+        // 실제 바디에 연결된 형상의 크기와 로컬 오프셋을 그대로 복사한다.
+        geometry.storeAny(shape->getGeometry());
+        inBone = ToPx(m_Asset.bodies[body].GetLocalTransform()) * shape->getLocalPose();
+        actualPose = m_Bodies[body]->getGlobalPose() * shape->getLocalPose();
+        return inBone.isSane() && actualPose.isSane();
+#else
+        (void)body;
+        (void)geometry;
+        (void)inBone;
+        (void)actualPose;
+        return false;
+#endif
+    }
+
     Vector3 Ragdoll::GetPosition() const
     {
         return IsActive() ? Vector3(GetBoneWorld(0).GetW()) : Vector3(kZero);

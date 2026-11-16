@@ -20,6 +20,7 @@ public:
 
 public:
     uint32_t GetLegContacts(PARS::SkeletalMeshComponent* dummy, std::string& text) const;
+    std::string GetLegPredictionText(const PARS::SkeletalMeshComponent& mesh) const;
     void SetVisible(bool visible)
     {
         m_Visible = visible;

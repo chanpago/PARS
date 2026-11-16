@@ -81,6 +81,14 @@ namespace
         {
             ++input.completedStep;
             planner.Update(input, settings);
+            for (const FootstepCommand& command : planner.GetSnapshot().feet)
+            {
+                if (command.IsInProgress() && command.motion.valid)
+                {
+                    Check((SampleFootstepPosition(command, 0) - command.motion.position).magnitude() < 1e-5f,
+                        "Collision trajectory sampling at the current time matches the live drive target");
+                }
+            }
         }
     }
 

@@ -166,6 +166,10 @@ namespace PARS
         bool justLanded = false;
     };
 
+    // 현재 목표를 고정한 궤적 예측이다. 이륙 전에는 남은 들기 동작 후 이륙한다고 가정한다.
+    float GetFootstepRemainingTime(const FootstepCommand& command);
+    physx::PxVec3 SampleFootstepPosition(const FootstepCommand& command, float timeAhead);
+
     struct FootstepLoadTransfer
     {
     public:
