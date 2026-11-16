@@ -32,10 +32,26 @@ namespace
         settings.startPredictionTime = .3f;
         settings.landingPredictionTime = .3f;
         settings.stepDuration = .3f;
+        // 기존 간격 보정의 회귀 검사는 새 COM 제한과 분리한다.
+        settings.minimumStanceWidthRatio = .7f;
+        settings.landingComClampEnabled = false;
         // 연속 하중 판정 검사는 기본 튜닝과 분리해 하중 기준과 확인 시간을 명시한다.
         settings.supportLoadRatio = .5f;
         settings.supportConfirmationTime = .05f;
         return settings;
+    }
+
+    std::array<PxVec3, 4> SoleRectangle(const PxVec3& center, float halfWidth, float halfLength, float yaw = 0)
+    {
+        const std::array<PxVec3, 4> local{{PxVec3(-halfWidth, 0, -halfLength), PxVec3(halfWidth, 0, -halfLength),
+            PxVec3(halfWidth, 0, halfLength), PxVec3(-halfWidth, 0, halfLength)}};
+        const PxQuat rotation(yaw, PxVec3(0, 1, 0));
+        std::array<PxVec3, 4> result;
+        for (size_t corner = 0; corner < result.size(); ++corner)
+        {
+            result[corner] = center + rotation.rotate(local[corner]);
+        }
+        return result;
     }
 
     FootstepInput Standing()
@@ -69,6 +85,8 @@ namespace
             foot.contactPosition = foot.position;
             foot.normal = PxVec3(0, 1, 0);
             foot.stanceOffset = PxVec3(x, 0, 0);
+            foot.corners = SoleRectangle(foot.position, .04f, .1f);
+            foot.hasSoleRectangle = true;
             foot.calfLength = .45f;
             foot.normalImpulse = input.bodyWeight * .5f * input.fixedDeltaTime;
         }
@@ -622,6 +640,353 @@ namespace
         Check(planner.GetSnapshot().feet[0].justStarted, "Sufficient vertical reaction on a slope releases the next command");
     }
 
+    void TestLandingComGeometry()
+    {
+        const FootstepSettings settings;
+        const std::array<PxVec3, 9> displacements{{PxVec3(0), PxVec3(0, 0, .4f),
+            PxVec3(-.2f, 0, -.4f), PxVec3(.4f, 0, 0), PxVec3(-.4f, 0, -.2f),
+            PxVec3(-.4f, 0, -.1f), PxVec3(-.4f, 0, 0), PxVec3(-.8f, 0, -.2f), PxVec3(-.1f, 0, -.025f)}};
+        const std::array<PxVec3, 9> expected{{PxVec3(0), PxVec3(0, 0, .4f),
+            PxVec3(-.2f, 0, -.4f), PxVec3(.4f, 0, 0), PxVec3(-.4f, 0, -.2f),
+            PxVec3(-.36f, 0, -.18f), PxVec3(-.32f, 0, .16f), PxVec3(-.72f, 0, -.36f), PxVec3(-.09f, 0, -.045f)}};
+        Check(settings.landingComClampEnabled && Near(settings.minimumStanceWidthRatio, 0) && !settings.preventCrossing,
+            "Default placement uses supporting-foot geometry with independent width and crossing constraints disabled");
+        for (unsigned heading = 0; heading < 12; ++heading)
+        {
+            const PxQuat rotation(PxTwoPi * static_cast<float>(heading) / 12, PxVec3(0, 1, 0));
+            const PxVec3 translation(2, 0, -3);
+            for (unsigned mirror = 0; mirror < 2; ++mirror)
+            {
+                const float sign = mirror == 0 ? 1.0f : -1.0f;
+                const size_t selected = mirror == 0 ? 1 : 0;
+                for (size_t sample = 0; sample < displacements.size(); ++sample)
+                {
+                    FootstepPlanner planner;
+                    FootstepInput input = Standing();
+                    input.requestedFoot = -1;
+                    input.hasImpact = true;
+                    for (size_t side = 0; side < input.feet.size(); ++side)
+                    {
+                        FootstepFootInput& foot = input.feet[side];
+                        const float x = side == 0 ? -.3f : .3f;
+                        foot.position = PxVec3(x, .4f, 0);
+                        foot.contactPosition = foot.position;
+                        foot.stanceOffset = PxVec3(x, 0, 0);
+                        foot.corners = SoleRectangle(foot.position, .1f, .1f);
+                        for (PxVec3& corner : foot.corners)
+                        {
+                            corner = rotation.rotate(corner) + translation;
+                        }
+                        foot.position = rotation.rotate(foot.position) + translation;
+                        foot.contactPosition = rotation.rotate(foot.contactPosition) + translation;
+                        foot.stanceOffset = rotation.rotate(foot.stanceOffset);
+                    }
+                    input.impactPosition = input.feet[selected].position;
+                    input.com = rotation.rotate(input.com) + translation;
+                    const PxVec3 displacement(displacements[sample].x * sign, 0, displacements[sample].z);
+                    const PxVec3 corrected(expected[sample].x * sign, 0, expected[sample].z);
+                    input.velocity = rotation.rotate(displacement / settings.landingPredictionTime);
+                    input.velocity.y = 7;
+                    input.supportRight = rotation.rotate(input.supportRight);
+                    for (PxVec3& point : input.hull)
+                    {
+                        point = rotation.rotate(point) + translation;
+                    }
+                    const PxVec3 originalCom = input.com;
+                    const PxVec3 originalVelocity = input.velocity;
+                    planner.Update(input, settings);
+                    const FootstepSnapshot& state = planner.GetSnapshot();
+                    const FootstepTarget& target = state.candidates[selected];
+                    const FootstepLandingPrediction& landing = target.landingCom;
+                    const PxVec3 origin(input.com.x, .4f, input.com.z);
+                    Check(target.valid && landing.valid && landing.region.valid &&
+                            (landing.raw - origin - rotation.rotate(displacement)).magnitude() < 2e-5f &&
+                            (landing.clamped - origin - rotation.rotate(corrected)).magnitude() < 2e-5f,
+                        "Known foot-corner ray projections remain symmetric under heading, reflection and translation");
+                    Check(landing.limited == (sample >= 5) && landing.region.supportFoot == static_cast<int>(1 - selected) &&
+                            (target.raw - landing.clamped - input.feet[selected].stanceOffset).magnitude() < 2e-5f,
+                        "Only the opposite supporting rectangle restricts COM before the moving foot offset is added");
+                    Check(!IsInsideFootstepLandingRegion(landing.region, landing.clamped),
+                        "Corrected COM lies outside the open forbidden sector including projections before and beyond the foot");
+                    Check(sample != 0 || landing.direction == FootstepLandingDirection::None,
+                        "Zero displacement remains at the current COM without selecting a boundary");
+                    Check((input.com - originalCom).magnitude() == 0 &&
+                            (input.velocity - originalVelocity).magnitude() == 0 && state.requestedFoot == static_cast<int>(selected),
+                        "Ray correction preserves measured physical state and impact-nearest foot selection");
+                    if (sample >= 5)
+                    {
+                        Check(!state.candidates[1 - selected].landingCom.limited,
+                            "The other moving-foot candidate does not inherit the wrong supporting rectangle");
+                    }
+                }
+            }
+        }
+
+        const std::array<float, 3> lengths{{.06f, .1f, .18f}};
+        for (float halfLength : lengths)
+        {
+            for (unsigned direction = 0; direction < 72; ++direction)
+            {
+                FootstepPlanner planner;
+                FootstepInput input = Standing();
+                const float angle = PxTwoPi * static_cast<float>(direction) / 72;
+                input.velocity = PxVec3(std::sin(angle), 0, std::cos(angle));
+                input.feet[0].corners = SoleRectangle(input.feet[0].position, .04f, halfLength, .31f);
+                planner.Update(input, settings);
+                const FootstepLandingPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
+                Check(landing.valid && landing.region.valid && !IsInsideFootstepLandingRegion(landing.region, landing.clamped) &&
+                        (landing.clamped - landing.origin).magnitude() <= (landing.raw - landing.origin).magnitude() + 1e-6f,
+                    "Sampled predictions use rotated rectangles and enter the complement without increasing prediction distance");
+                Check(landing.limited || (landing.raw - landing.clamped).magnitude() == 0,
+                    "Allowed predictions and true corner-ray boundaries retain their original points");
+            }
+        }
+
+        const PxVec3 origin(0, .4f, 0);
+        const PxVec3 forward(0, 0, 1);
+        const std::array<PxVec3, 4> rectangle = SoleRectangle(PxVec3(-.3f, .4f, 0), .1f, .1f);
+        const FootstepLandingRegion initial = BuildFootstepLandingRegion(origin, rectangle, forward);
+        const FootstepLandingRegion shifted = BuildFootstepLandingRegion(PxVec3(.2f, .4f, .08f), rectangle, forward);
+        const FootstepLandingRegion longer = BuildFootstepLandingRegion(origin,
+            SoleRectangle(PxVec3(-.3f, .4f, 0), .1f, .2f), forward);
+        const FootstepLandingRegion rotated = BuildFootstepLandingRegion(origin,
+            SoleRectangle(PxVec3(-.3f, .4f, 0), .1f, .1f, .35f), forward);
+        Check(initial.valid && shifted.valid && longer.valid && rotated.valid &&
+                shifted.halfAngleRadians < initial.halfAngleRadians && longer.halfAngleRadians > initial.halfAngleRadians &&
+                (rotated.frontRay - initial.frontRay).magnitude() > .01f,
+            "COM position, actual foot dimensions and actual sole rotation determine changing boundaries without a fixed angle");
+        const std::array<FootstepLandingRegion, 4> regions{{initial, shifted, longer, rotated}};
+        for (const FootstepLandingRegion& region : regions)
+        {
+            const std::array<PxVec3, 2> rays{{region.frontRay, region.backRay}};
+            for (const PxVec3& ray : rays)
+            {
+                bool throughCorner = false;
+                for (const PxVec3& corner : region.corners)
+                {
+                    const PxVec3 delta = corner - region.origin;
+                    throughCorner = throughCorner || (std::abs(ray.x * delta.z - ray.z * delta.x) < 1e-5f && delta.dot(ray) > 0);
+                }
+                Check(throughCorner, "Every forbidden boundary is a ray through an actual supporting-foot corner");
+            }
+        }
+    }
+
+    void TestLandingComWorldPrecision()
+    {
+        const FootstepSettings settings;
+        const std::array<PxVec3, 3> translations{{PxVec3(0), PxVec3(3.5f, 0, -2.5f), PxVec3(-40, 0, 64)}};
+        const std::array<float, 5> distances{{.0001f, .000173f, .00137f, .02f, .4f}};
+        for (const PxVec3& translation : translations)
+        {
+            for (float distance : distances)
+            {
+                FootstepPlanner planner;
+                FootstepInput input = Standing();
+                input.com += translation;
+                input.velocity = PxVec3(-distance, 0, -distance * .17f) / settings.landingPredictionTime;
+                for (FootstepFootInput& foot : input.feet)
+                {
+                    foot.position += translation;
+                    foot.contactPosition += translation;
+                    for (PxVec3& corner : foot.corners)
+                    {
+                        corner += translation;
+                    }
+                }
+                planner.Update(input, settings);
+                const FootstepLandingPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
+                Check(landing.valid && landing.region.valid && !IsInsideFootstepLandingRegion(landing.region, landing.clamped),
+                    "Sub-millimetre predictions translated in world coordinates cannot round back inside a forbidden boundary");
+            }
+        }
+    }
+
+    void TestLandingComDisabledAndStart()
+    {
+        FootstepSettings enabled;
+        FootstepSettings disabled = enabled;
+        disabled.landingComClampEnabled = false;
+        FootstepPlanner clamped;
+        FootstepPlanner original;
+        FootstepInput input = Standing();
+        input.velocity = PxVec3(-.6f, 0, 0);
+        clamped.Update(input, enabled);
+        original.Update(input, disabled);
+        const FootstepSnapshot& a = clamped.GetSnapshot();
+        const FootstepSnapshot& b = original.GetSnapshot();
+        Check(a.needsStep && b.needsStep && a.feet[1].justStarted && b.feet[1].justStarted &&
+                (a.predictedCom - b.predictedCom).magnitude() == 0 && Near(a.predictedCom.x, -.36f) &&
+                IsInsideFootSupportHull(input.hull, a.candidates[1].landingCom.clamped),
+            "Start risk still uses raw 0.6-second prediction when the ray-corrected landing prediction is inside support");
+        const PxVec3 expected(-.12f, .4f, 0);
+        Check((b.feet[1].target.position - expected).magnitude() < 1e-6f && !b.candidates[1].landingCom.limited,
+            "Disabling corner-ray restriction restores original zero-width prediction plus Idle offset");
+        original.Reset();
+        input.supportRight.x = std::numeric_limits<float>::quiet_NaN();
+        disabled.landingComClampHysteresisDegrees = std::numeric_limits<float>::quiet_NaN();
+        original.Update(input, disabled);
+        Check(original.GetSnapshot().feet[1].justStarted &&
+                (original.GetSnapshot().feet[1].target.position - expected).magnitude() < 1e-6f,
+            "Disabled restriction cannot depend on a corner-ray basis or its hysteresis setting");
+
+        const std::array<float, 4> invalidHysteresis{{-1, 90, std::numeric_limits<float>::infinity(),
+            std::numeric_limits<float>::quiet_NaN()}};
+        for (float angle : invalidHysteresis)
+        {
+            FootstepPlanner planner;
+            enabled.landingComClampHysteresisDegrees = angle;
+            planner.Update(Standing(), enabled);
+            Check(planner.GetSnapshot().reason == FootstepReason::InvalidSettings,
+                "Boundary-choice hysteresis rejects negative, nonfinite and unbounded angles");
+        }
+        enabled = FootstepSettings();
+        for (unsigned missing = 0; missing < 5; ++missing)
+        {
+            FootstepPlanner planner;
+            input = Standing();
+            input.velocity = PxVec3(-.6f, 0, 0);
+            if (missing == 0)
+            {
+                input.feet[0].grounded = false;
+            }
+            else if (missing == 1)
+            {
+                input.feet[0].hasSoleRectangle = false;
+            }
+            else if (missing == 2)
+            {
+                input.feet[0].corners[0].x = std::numeric_limits<float>::quiet_NaN();
+            }
+            else if (missing == 3)
+            {
+                input.feet[0].corners.fill(input.feet[0].position);
+            }
+            else
+            {
+                input.com.x = input.feet[0].position.x;
+            }
+            planner.Update(input, enabled);
+            const FootstepLandingPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
+            Check(landing.valid && !landing.region.valid && !landing.limited &&
+                    (landing.clamped - landing.raw).magnitude() == 0,
+                "Missing ground, missing or degenerate geometry and COM inside the foot cannot fabricate a forbidden angle");
+            Check(missing != 4 || landing.region.containsCom,
+                "COM-inside-foot degeneracy remains explicitly distinguishable from a valid outside tangent sector");
+        }
+        clamped.Reset();
+        input = Standing();
+        input.supportRight.x = std::numeric_limits<float>::quiet_NaN();
+        clamped.Update(input, enabled);
+        Check(!clamped.GetSnapshot().IsInProgress(), "An invalid character basis cannot emit a corrected target");
+    }
+
+    void TestLandingComHistoryAndLock()
+    {
+        FootstepSettings settings;
+        settings.stepDuration = .4f;
+        FootstepPlanner planner;
+        FootstepInput input = Standing();
+        input.velocity = PxVec3(-1, 0, 0);
+        planner.Update(input, settings);
+        Check(planner.GetSnapshot().feet[1].landingComDirection == FootstepLandingDirection::Front,
+            "The first exact lateral tie deterministically chooses the front boundary");
+        for (unsigned jitter = 0; jitter < 8; ++jitter)
+        {
+            input.velocity.z = jitter % 2 == 0 ? -.01f : .01f;
+            Advance(planner, input, settings);
+            Check(planner.GetSnapshot().feet[1].target.landingCom.direction == FootstepLandingDirection::Front,
+                "Small side-axis jitter cannot alternate the active command between front and back");
+        }
+        input.velocity.z = -.2f;
+        Advance(planner, input, settings);
+        Check(planner.GetSnapshot().feet[1].landingComDirection == FootstepLandingDirection::Back,
+            "A clear rearward input outside the hysteresis band changes to the nearer back boundary");
+        input.velocity.z = 0;
+        Advance(planner, input, settings);
+        Check(planner.GetSnapshot().feet[1].target.landingCom.direction == FootstepLandingDirection::Back &&
+                planner.GetSnapshot().candidates[0].landingCom.direction == FootstepLandingDirection::None,
+            "Direction history belongs to the moving foot command and cannot leak into an idle foot candidate");
+        input.velocity = PxVec3(0);
+        Advance(planner, input, settings);
+        Check(planner.GetSnapshot().feet[1].target.landingCom.direction == FootstepLandingDirection::None &&
+                planner.GetSnapshot().feet[1].landingComDirection == FootstepLandingDirection::Back,
+            "Zero displacement introduces no direction while preserving the active command's prior choice");
+        input.velocity = PxVec3(-1, 0, 0);
+        input.feet[1].grounded = false;
+        Advance(planner, input, settings);
+        Advance(planner, input, settings, 17);
+        Check(!planner.GetSnapshot().feet[1].motion.landingTargetLocked,
+            "The corrected landing target stays editable before 75 percent flight progress");
+        const FootstepTarget lastEditable = planner.GetSnapshot().feet[1].target;
+        input.velocity = PxVec3(1, 0, .4f);
+        input.com.x = .1f;
+        Advance(planner, input, settings);
+        Check(planner.GetSnapshot().feet[1].motion.landingTargetLocked &&
+                (planner.GetSnapshot().feet[1].target.position - lastEditable.position).magnitude() == 0,
+            "Crossing the 75 percent threshold locks the previously accepted horizontal landing point");
+        input.com.z = .2f;
+        input.supportRight = PxVec3(0, 0, -1);
+        Advance(planner, input, settings, 7);
+        const FootstepCommand locked = planner.GetSnapshot().feet[1];
+        Check(Near(locked.target.position.x, lastEditable.position.x) &&
+                Near(locked.target.position.z, lastEditable.position.z) &&
+                (planner.GetSnapshot().candidates[1].landingCom.origin - lastEditable.landingCom.origin).magnitude() > .1f,
+            "Latest COM and character heading update debug candidates without moving the locked landing point");
+        input.feet[1].grounded = true;
+        Advance(planner, input, settings);
+        Check(planner.GetSnapshot().feet[1].justLanded &&
+                planner.GetSnapshot().feet[1].landingComDirection == FootstepLandingDirection::None,
+            "Actual landing clears direction history at command completion");
+        input.supportRight = PxVec3(1, 0, 0);
+        input.com = PxVec3(0, 1, 0);
+        input.velocity = PxVec3(-1, 0, 0);
+        Advance(planner, input, settings);
+        Check(planner.GetSnapshot().feet[1].justStarted &&
+                planner.GetSnapshot().feet[1].landingComDirection == FootstepLandingDirection::Front,
+            "A new command after landing starts a fresh front-back choice instead of inheriting the previous back choice");
+
+        for (unsigned interruption = 0; interruption < 6; ++interruption)
+        {
+            planner.Reset();
+            input = Standing();
+            input.velocity = PxVec3(-1, 0, -.2f);
+            planner.Update(input, settings);
+            Check(planner.GetSnapshot().feet[1].landingComDirection == FootstepLandingDirection::Back,
+                "Prepare a rearward command before testing history cleanup");
+            input.velocity.z = 0;
+            if (interruption == 0)
+            {
+                input.outsideBufferReleased = true;
+            }
+            else if (interruption == 1)
+            {
+                ++input.revision;
+            }
+            else if (interruption == 2)
+            {
+                input.active = false;
+            }
+            else if (interruption == 3)
+            {
+                settings.landingComClampEnabled = false;
+            }
+            else if (interruption == 4)
+            {
+                planner.Reset();
+            }
+            else
+            {
+                input.completedStep = 0;
+            }
+            Advance(planner, input, settings);
+            Check(planner.GetSnapshot().feet[1].landingComDirection ==
+                    (interruption == 1 || interruption >= 4 ? FootstepLandingDirection::Front : FootstepLandingDirection::None),
+                "Abort, contact revision, inactive mode, disabling, reset and clock rewind cannot retain an old direction choice");
+            settings.landingComClampEnabled = true;
+        }
+    }
+
     void TestTakeoffConfirmation()
     {
         FootstepPlanner planner;
@@ -674,5 +1039,9 @@ void TestFootstepPlanner()
     TestTakeoffConfirmation();
     TestLoadTransferAtRates();
     TestLoadTransferInterruptions();
+    TestLandingComGeometry();
+    TestLandingComWorldPrecision();
+    TestLandingComDisabledAndStart();
+    TestLandingComHistoryAndLock();
     std::printf("PASS: %u independent foot-command checks\n", checks);
 }

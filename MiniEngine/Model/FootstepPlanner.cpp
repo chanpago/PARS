@@ -1,5 +1,7 @@
 ﻿#include "FootstepPlanner.h"
 
+#include <limits>
+
 using namespace physx;
 using namespace PARS;
 
@@ -46,7 +48,10 @@ namespace
             std::isfinite(s.landingLoweringSpeed) && s.landingLoweringSpeed >= 0 &&
             std::isfinite(s.maximumLandingLowering) && s.maximumLandingLowering >= 0 &&
             std::isfinite(s.supportLoadRatio) && s.supportLoadRatio > 0 && s.supportLoadRatio <= 1 &&
-            std::isfinite(s.supportConfirmationTime) && s.supportConfirmationTime > 0;
+            std::isfinite(s.supportConfirmationTime) && s.supportConfirmationTime > 0 &&
+            (!s.landingComClampEnabled ||
+                (std::isfinite(s.landingComClampHysteresisDegrees) && s.landingComClampHysteresisDegrees >= 0 &&
+                    s.landingComClampHysteresisDegrees < 90));
     }
 
     float HorizontalDistance(const PxVec3& a, const PxVec3& b)
@@ -80,6 +85,62 @@ namespace
         }
     }
 
+    FootstepLandingPrediction PredictLandingCom(const FootstepInput& input, const FootstepSettings& settings,
+        const FootstepSnapshot& state, size_t movingFoot, FootstepLandingDirection previousDirection)
+    {
+        FootstepLandingPrediction result;
+        result.origin = PxVec3(input.com.x, state.groundPosition.y, input.com.z);
+        result.raw = PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime,
+            state.groundPosition.y, input.com.z + input.velocity.z * settings.landingPredictionTime);
+        result.clamped = result.raw;
+        result.enabled = settings.landingComClampEnabled;
+        result.valid = result.raw.isFinite();
+        if (!result.enabled || !result.valid)
+        {
+            return result;
+        }
+        const size_t supportFoot = 1 - movingFoot;
+        const FootstepFootInput& support = input.feet[supportFoot];
+        if (!support.available || !support.hasContactSample || !support.grounded || !support.hasSoleRectangle)
+        {
+            return result;
+        }
+        // 실제 접지한 반대 발의 사각형으로만 금지 구간을 만들며 고정 각도를 사용하지 않는다.
+        PxVec3 forward(-input.supportRight.z, 0, input.supportRight.x);
+        if (!forward.isFinite() || forward.normalize() <= 1e-6f)
+        {
+            result.valid = false;
+            return result;
+        }
+        result.region = BuildFootstepLandingRegion(result.origin, support.corners, forward);
+        result.region.supportFoot = static_cast<int>(supportFoot);
+        if (!IsInsideFootstepLandingRegion(result.region, result.raw))
+        {
+            return result;
+        }
+        const PxVec3 delta = result.raw - result.origin;
+        const PxVec3 frontRay = result.region.frontRay;
+        const PxVec3 backRay = result.region.backRay;
+        const PxVec3 front = frontRay * (std::max)(0.0f, delta.dot(frontRay));
+        const PxVec3 back = backRay * (std::max)(0.0f, delta.dot(backRay));
+        const float frontError = (delta - front).magnitudeSquared();
+        const float backError = (delta - back).magnitudeSquared();
+        const float tieTolerance = 1e-6f * delta.magnitudeSquared();
+        result.direction = frontError <= backError + tieTolerance ? FootstepLandingDirection::Front : FootstepLandingDirection::Back;
+        const float hysteresis = std::tan(settings.landingComClampHysteresisDegrees * PxPi / 180.0f);
+        const PxVec3 tangent(-result.region.centerRay.z, 0, result.region.centerRay.x);
+        if (previousDirection != FootstepLandingDirection::None &&
+            std::abs(delta.dot(tangent)) <= delta.dot(result.region.centerRay) * hysteresis)
+        {
+            // 발을 바라보는 부채꼴 이등분선 근처에서만 이전 경계 선택을 유지한다.
+            result.direction = previousDirection;
+        }
+        result.clamped = result.origin + (result.direction == FootstepLandingDirection::Front ? front : back);
+        result.limited = true;
+        result.valid = result.clamped.isFinite();
+        return result;
+    }
+
     FootstepTarget MakeTarget(const FootstepInput& input, const FootstepSettings& settings,
         const FootstepSnapshot& state, size_t side)
     {
@@ -103,8 +164,14 @@ namespace
         const PxVec3 normal = state.groundNormal;
         PxVec3 origin = state.feet[side].IsInProgress() ? state.feet[side].startPosition : foot.position;
         origin.y -= normal.dot(origin - state.groundPosition) / normal.y;
-        result.raw = PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime,
-            state.groundPosition.y, input.com.z + input.velocity.z * settings.landingPredictionTime);
+        const FootstepCommand& command = state.feet[side];
+        result.landingCom = PredictLandingCom(input, settings, state, side,
+            command.IsInProgress() ? command.landingComDirection : FootstepLandingDirection::None);
+        if (!result.landingCom.valid)
+        {
+            return result;
+        }
+        result.raw = result.landingCom.clamped;
         result.raw += PxVec3(foot.stanceOffset.x, 0, foot.stanceOffset.z) * settings.stanceScale;
         PxVec3 delta = result.raw - origin;
         delta -= normal * delta.dot(normal);
@@ -276,6 +343,111 @@ namespace
     }
 }
 
+FootstepLandingRegion PARS::BuildFootstepLandingRegion(const PxVec3& origin,
+    const std::array<PxVec3, 4>& corners, const PxVec3& forward)
+{
+    FootstepLandingRegion result;
+    result.origin = origin;
+    if (!origin.isFinite())
+    {
+        return result;
+    }
+    PxVec3 horizontalForward(forward.x, 0, forward.z);
+    if (!horizontalForward.isFinite() || horizontalForward.normalize() <= 1e-6f)
+    {
+        return result;
+    }
+    std::vector<PxVec3> points;
+    points.reserve(corners.size());
+    for (const PxVec3& corner : corners)
+    {
+        if (!corner.isFinite())
+        {
+            return result;
+        }
+        points.emplace_back(corner.x, origin.y, corner.z);
+    }
+    const std::vector<PxVec3> hull = BuildFootSupportHull(std::move(points));
+    if (hull.size() != corners.size())
+    {
+        return result;
+    }
+    PxVec3 center(0);
+    for (size_t index = 0; index < hull.size(); ++index)
+    {
+        result.corners[index] = hull[index];
+        center += hull[index] - origin;
+    }
+    result.containsCom = IsInsideFootSupportHull(hull, origin);
+    if (result.containsCom || center.normalize() <= 1e-6f)
+    {
+        // COM이 사각형 안이나 경계에 있으면 유일한 바깥 접선 부채꼴을 만들 수 없다.
+        return result;
+    }
+    float minimumAngle = PX_MAX_F32;
+    float maximumAngle = -PX_MAX_F32;
+    PxVec3 minimumRay(0);
+    PxVec3 maximumRay(0);
+    for (const PxVec3& corner : hull)
+    {
+        PxVec3 ray = corner - origin;
+        if (ray.normalize() <= 1e-6f)
+        {
+            return result;
+        }
+        // 발 중심 방향을 기준으로 비교해 월드 각도의 -180/180도 경계에서도 같은 끝점을 고른다.
+        const float cross = center.x * ray.z - center.z * ray.x;
+        const float angle = std::atan2(cross, center.dot(ray));
+        if (angle < minimumAngle)
+        {
+            minimumAngle = angle;
+            minimumRay = ray;
+        }
+        if (angle > maximumAngle)
+        {
+            maximumAngle = angle;
+            maximumRay = ray;
+        }
+    }
+    if (maximumAngle - minimumAngle <= 1e-6f || maximumAngle - minimumAngle >= PxPi)
+    {
+        return result;
+    }
+    result.centerRay = minimumRay + maximumRay;
+    if (result.centerRay.normalize() <= 1e-6f)
+    {
+        return result;
+    }
+    const bool minimumIsFront = minimumRay.dot(horizontalForward) + 1e-6f >= maximumRay.dot(horizontalForward);
+    result.frontRay = minimumIsFront ? minimumRay : maximumRay;
+    result.backRay = minimumIsFront ? maximumRay : minimumRay;
+    result.halfAngleRadians = (maximumAngle - minimumAngle) * .5f;
+    result.valid = true;
+    return result;
+}
+
+bool PARS::IsInsideFootstepLandingRegion(const FootstepLandingRegion& region, const PxVec3& point)
+{
+    if (!region.valid || !point.isFinite())
+    {
+        return false;
+    }
+    const PxVec3 delta(point.x - region.origin.x, 0, point.z - region.origin.z);
+    if (!delta.isFinite())
+    {
+        return false;
+    }
+    const float cross = region.frontRay.x * region.backRay.z - region.frontRay.z * region.backRay.x;
+    const float orientation = cross >= 0 ? 1.0f : -1.0f;
+    // 월드 위치에 작은 변위를 다시 더할 때 생기는 오차를 미터 단위 경계 거리로 처리한다.
+    const float tolerance = 1e-6f + std::numeric_limits<float>::epsilon() *
+        (std::abs(region.origin.x) + std::abs(region.origin.z)) * 2.0f;
+    const float frontDistance = orientation * (region.frontRay.x * delta.z - region.frontRay.z * delta.x);
+    const float backDistance = orientation * (delta.x * region.backRay.z - delta.z * region.backRay.x);
+    // COM 원점과 양쪽 경계는 허용하고 사각형을 향하는 열린 구간만 금지한다.
+    return frontDistance > tolerance && backDistance > tolerance;
+}
+
 bool FootstepSnapshot::IsInProgress() const
 {
     return feet[0].IsInProgress() || feet[1].IsInProgress();
@@ -316,6 +488,7 @@ void FootstepPlanner::Abort(FootstepReason reason)
         command.reason = reason;
         command.hasTarget = false;
         command.motion.valid = false;
+        command.landingComDirection = FootstepLandingDirection::None;
     }
 }
 
@@ -420,6 +593,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         command.justLanded = false;
         command.hasTarget = false;
         command.motion.valid = false;
+        if (!settings.landingComClampEnabled)
+        {
+            command.landingComDirection = FootstepLandingDirection::None;
+        }
     }
     if (input.active && input.automaticSupport && input.outsideBufferReleased)
     {
@@ -512,6 +689,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 command.phase = FootstepPhase::Landed;
                 command.reason = FootstepReason::Landed;
                 command.justLanded = true;
+                command.landingComDirection = FootstepLandingDirection::None;
                 command.motion.landingError = HorizontalDistance(foot.position, command.target.position);
                 command.motion.hasLandingError = std::isfinite(command.motion.landingError);
                 command.motion.remainingDistance = command.motion.landingError;
@@ -588,6 +766,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         if (!command.motion.landingTargetLocked && candidate.valid)
         {
             command.target = candidate;
+            if (candidate.landingCom.enabled && candidate.landingCom.direction != FootstepLandingDirection::None)
+            {
+                command.landingComDirection = candidate.landingCom.direction;
+            }
         }
         else if (command.motion.landingTargetLocked && state.hasGroundPlane)
         {

@@ -12,7 +12,7 @@ namespace PARS
         float startPredictionTime = .6f;
         float landingPredictionTime = .4f;
         float stanceScale = 1.0f;
-        float minimumStanceWidthRatio = .7f;
+        float minimumStanceWidthRatio = 0.0f;
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
         float crossingOffset = .1f;
         float liftHeightScale = .15f;
@@ -23,7 +23,9 @@ namespace PARS
         float maximumLandingLowering = .03f;
         float supportLoadRatio = .25f;
         float supportConfirmationTime = .01f;
+        float landingComClampHysteresisDegrees = 5.0f;
         bool preventCrossing = false;
+        bool landingComClampEnabled = true;
     };
 
     enum class FootstepPhase
@@ -68,11 +70,13 @@ namespace PARS
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
+        std::array<physx::PxVec3, 4> corners{physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0)};
         float calfLength = 0;
         float normalImpulse = 0;
         bool available = false;
         bool hasContactSample = false;
         bool grounded = false;
+        bool hasSoleRectangle = false;
     };
 
     struct FootstepInput
@@ -102,6 +106,46 @@ namespace PARS
         bool hasImpact = false;
     };
 
+    enum class FootstepLandingDirection
+    {
+        None,
+        Front,
+        Back
+    };
+
+    // 현재 COM에서 지지발 사각형의 양쪽 접선 꼭짓점으로 향하는 금지 부채꼴이다.
+    struct FootstepLandingRegion
+    {
+    public:
+        std::array<physx::PxVec3, 4> corners{physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0)};
+        physx::PxVec3 origin{0};
+        physx::PxVec3 frontRay{0};
+        physx::PxVec3 backRay{0};
+        physx::PxVec3 centerRay{0};
+        float halfAngleRadians = 0;
+        int supportFoot = -1;
+        bool valid = false;
+        bool containsCom = false;
+    };
+
+    FootstepLandingRegion BuildFootstepLandingRegion(const physx::PxVec3& origin,
+        const std::array<physx::PxVec3, 4>& corners, const physx::PxVec3& forward);
+    bool IsInsideFootstepLandingRegion(const FootstepLandingRegion& region, const physx::PxVec3& point);
+
+    // 착지용 예측은 시작 판정이나 실제 물리 상태와 구분해 저장한다.
+    struct FootstepLandingPrediction
+    {
+    public:
+        physx::PxVec3 origin{0};
+        physx::PxVec3 raw{0};
+        physx::PxVec3 clamped{0};
+        FootstepLandingRegion region;
+        FootstepLandingDirection direction = FootstepLandingDirection::None;
+        bool enabled = false;
+        bool limited = false;
+        bool valid = false;
+    };
+
     struct FootstepTarget
     {
     public:
@@ -111,6 +155,7 @@ namespace PARS
         physx::PxVec3 normal{0};
         float travelDistance = 0;
         float separationDistance = 0;
+        FootstepLandingPrediction landingCom;
         bool valid = false;
         bool lengthLimited = false;
         bool crossingLimited = false;
@@ -160,6 +205,7 @@ namespace PARS
         float initialDistance = 0;
         FootstepPhase phase = FootstepPhase::Idle;
         FootstepReason reason = FootstepReason::NotEvaluated;
+        FootstepLandingDirection landingComDirection = FootstepLandingDirection::None;
         bool hasTarget = false;
         bool hasTakenOff = false;
         bool justStarted = false;

@@ -487,6 +487,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.normal = foot.contact.normal;
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
         target.normalImpulse = foot.contact.normalImpulse;
+        target.corners = foot.corners;
+        target.hasSoleRectangle = foot.available;
 
         // idle기준 발배치 오프셋을 현재 캐릭터 방향으로 돌림
         const PxVec3 offset = referenceFeet[side] - midpoint;
