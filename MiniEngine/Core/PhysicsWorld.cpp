@@ -1228,7 +1228,8 @@ PxRigidDynamic* PhysicsWorld::CreateDynamicBody(const PxTransform& pose, const P
     body->setSolverIterationCounts(32, 8);
     body->setAngularDamping(.3f);
     body->setLinearDamping(.05f);
-    body->setMaxAngularVelocity(20);
+    // PhysX가 허용하는 유한 범위 안에서 각속도 상한을 사실상 해제한다.
+    body->setMaxAngularVelocity(1.0e15f);
     body->setMaxDepenetrationVelocity(3);
     m_Scene->addActor(*body);
     return body;
@@ -1268,7 +1269,8 @@ PxArticulationLink* PhysicsWorld::CreateArticulationLink(PxArticulationReducedCo
     link->setName(name);
     link->setLinearDamping(.05f);
     link->setAngularDamping(.3f);
-    link->setMaxAngularVelocity(20);
+    // PhysX가 허용하는 유한 범위 안에서 각속도 상한을 사실상 해제한다.
+    link->setMaxAngularVelocity(1.0e15f);
     link->setMaxDepenetrationVelocity(3);
     return link;
 }

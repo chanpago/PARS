@@ -237,7 +237,8 @@ namespace PARS
                     joint->setMotion(AngularAxes[axis], motion);
                     const bool locked = motions[axis] == PhysicsJointMotion::Locked;
                     joint->setLimitParams(AngularAxes[axis], PxArticulationLimit(locked ? -1e-6f : lower[axis], locked ? 1e-6f : upper[axis]));
-                    joint->setMaxJointVelocity(AngularAxes[axis], 20.0f);
+                    // 관절 속도 상한을 사실상 해제하고 각도 제한은 그대로 적용한다.
+                    joint->setMaxJointVelocity(AngularAxes[axis], 1.0e15f);
                     joint->setFrictionParams(AngularAxes[axis], PxJointFrictionParams(0, 0, 0));
                     joint->setJointPosition(AngularAxes[axis], position[axis]);
                     joint->setDriveTarget(AngularAxes[axis], position[axis]);
