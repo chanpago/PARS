@@ -623,6 +623,9 @@ namespace PARS
         const float supportWeight = m_RootSupportWeight;
         const float gravityWeight = m_FootDrivenSupport ? 1.0f : supportWeight;
         const unsigned count = 6 + m_Articulation->getDofs();
+        const bool horizontalSupport = m_FootDrivenSupport && m_Simulating && m_DrivesEnabled &&
+            m_CollisionEnabled && !IsRootAxisSupported(0) && !IsRootAxisSupported(2);
+        const PxVec3 horizontalForce = horizontalSupport ? m_HorizontalSupportForce : PxVec3(0);
         std::vector<float> targetVelocity(count, 0), targetAcceleration(count, 0);
         std::vector<float> contactForce(count, 0);
         const std::array<float, 2> previousAnkleScales = m_SupportLoads.ankleDriveScales;
@@ -780,6 +783,12 @@ namespace PARS
             m_Articulation->computeGravityCompensation(cache);
             m_Articulation->computeCoriolisCompensation(cache);
             contactForce = ComputeSupportGeneralizedForce();
+            // 골반 질량중심에 가하는 외력은 자유 루트의 선형 행에만 직접 기여한다.
+            // 같은 외력을 자유 가속도 계산에 포함해 관절 보상이 골반의 가속을 방해하지 않게 한다.
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                contactForce[axis] += horizontalForce[axis];
+            }
             ResolveFreeAcceleration(cache, count, freeAxes, gravityWeight, contactForce, targetAcceleration);
 
             // 이 부분에서 아티큘레이션의 루트 즉, 골반만 먼저 중력보상, 코리올리 원심력보상을 addTorque()로 적용한다.
@@ -806,6 +815,13 @@ namespace PARS
                 // addTorque는 누적되므로 설정 변경(deltaTime=0)에서는 적용하지 않는다.
                 m_Bodies[m_ArticulationRoot]->addTorque(rootTorque, PxForceMode::eFORCE, false);
             }
+        }
+
+        if (deltaTime > 0 && m_World && !horizontalForce.isZero() &&
+            m_HorizontalSupportStep != m_World->GetStepCount())
+        {
+            m_Bodies[m_ArticulationRoot]->addForce(horizontalForce, PxForceMode::eFORCE, true);
+            m_HorizontalSupportStep = m_World->GetStepCount();
         }
 
         // 하중이 바뀔 때 지지발의 강성과 감쇠를 서서히 바꾼다. 지지를 잃으면 기본값으로 돌아간다.

@@ -39,6 +39,10 @@ namespace PARS
     void Ragdoll::SetDrivesEnabled(bool enabled)
     {
         m_DrivesEnabled = enabled && IsSimulating();
+        if (!m_DrivesEnabled)
+        {
+            m_HorizontalSupportForce = physx::PxVec3(0);
+        }
 #if defined(_M_X64)
         const PxD6Drive::Enum axes[] = {PxD6Drive::eTWIST, PxD6Drive::eSWING1, PxD6Drive::eSWING2};
         for (size_t i = 0; i < m_Joints.size(); ++i)
@@ -417,6 +421,8 @@ namespace PARS
         m_FootDrivenSupport = enabled;
         m_SupportContacts = {};
         m_SupportLoads = {};
+        m_HorizontalSupportForce = physx::PxVec3(0);
+        m_HorizontalSupportStep = UINT64_MAX;
         ResetDriveTargetHistory();
         ConfigureRootSupportDrives();
     }
@@ -431,6 +437,11 @@ namespace PARS
             }
         }
         m_SupportContacts = contacts;
+    }
+
+    void Ragdoll::SetHorizontalSupportForce(const physx::PxVec3& force)
+    {
+        m_HorizontalSupportForce = force.isFinite() ? physx::PxVec3(force.x, 0, force.z) : physx::PxVec3(0);
     }
 
     bool Ragdoll::SetRootSupported(bool supported, std::string& error)

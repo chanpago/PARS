@@ -15,6 +15,7 @@ void TestFootstepPlanner();
 void TestFootstepIK();
 void TestFootstepCollision();
 void TestStandingSupport();
+void TestHorizontalBalance();
 
 namespace
 {
@@ -308,6 +309,11 @@ void TestFramePerformance();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--horizontal-balance-only") == 0)
+    {
+        TestHorizontalBalance();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--standing-support-only") == 0)
     {
         TestStandingSupport();
@@ -336,6 +342,7 @@ int main(int argc, char** argv)
     TestBodyPairContacts();
     TestFootSupportHull();
     TestFootSupportBalance();
+    TestHorizontalBalance();
     TestFootstepPlanner();
     TestFootstepIK();
     TestFootstepCollision();

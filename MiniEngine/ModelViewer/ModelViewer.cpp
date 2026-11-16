@@ -51,6 +51,8 @@
 #include "RagdollImpactTest.h"
 bool RunRagdollImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
     const std::wstring& path);
+bool RunHorizontalBalanceValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
+    const std::wstring& path);
 bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
     const std::wstring& path, uint32_t scenario, uint32_t frames);
 #include "RagdollComparisonRunner.h"
@@ -126,7 +128,7 @@ namespace
     {
         const wchar_t* const reportOptions[] =
         {
-            L"bodyimpacttest", L"impacttest", L"pelvistest", L"patransitiontest", L"pawalltest",
+            L"horizontalbalancetest", L"bodyimpacttest", L"impacttest", L"pelvistest", L"patransitiontest", L"pawalltest",
             L"ragdolltest", L"comparisontest", L"comparisonreturncapture", L"comparisoncapture", L"impactcapture"
         };
         std::wstring path;
@@ -456,6 +458,14 @@ void ModelViewer::Startup(void)
                     SetFreeCamera(true);
                     m_Camera.Update();
                 }
+            }
+            else if (CommandLineArgs::GetString(L"horizontalbalancetest", ragdollReport))
+            {
+                if (m_ImpactTest && GetPreviewCharacter())
+                {
+                    RunHorizontalBalanceValidation(*m_ImpactTest, m_World, *GetPreviewCharacter(), ragdollReport);
+                }
+                m_RagdollTestDone = true;
             }
             else if (CommandLineArgs::GetString(L"impacttest", ragdollReport))
             {

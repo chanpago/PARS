@@ -184,9 +184,15 @@ void RunRagdollRecoveryTests();
 
 void RunCharacterImpactTests();
 void RunSupportAnkleDriveTests();
+void RunHorizontalBalanceRagdollTests();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--horizontal-balance-only") == 0)
+    {
+        RunHorizontalBalanceRagdollTests();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--joint-limits-only") == 0)
     {
         RunPhysicsAssetTests();
@@ -249,6 +255,7 @@ int main(int argc, char** argv)
     RunActiveRagdollTests();
     RunJointLimitTests();
     RunSupportAnkleDriveTests();
+    RunHorizontalBalanceRagdollTests();
     RunRagdollComparisonTests();
     return 0;
 }

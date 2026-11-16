@@ -808,6 +808,8 @@ namespace PARS
     void Ragdoll::InvalidateContactState()
     {
         ++m_ContactRevision;
+        m_HorizontalSupportForce = physx::PxVec3(0);
+        m_HorizontalSupportStep = UINT64_MAX;
 #if defined(_M_X64)
         if (m_World)
         {

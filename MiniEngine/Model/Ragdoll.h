@@ -138,6 +138,12 @@ namespace PARS
             return m_DrivesEnabled;
         }
         void SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts);
+        // 힘은 저장만 하며 양의 시간으로 드라이브를 갱신할 때 물리 스텝당 한 번 적용한다.
+        void SetHorizontalSupportForce(const physx::PxVec3& force);
+        const physx::PxVec3& GetHorizontalSupportForce() const
+        {
+            return m_HorizontalSupportForce;
+        }
         bool UsesFootDrivenSupport() const
         {
             return m_FootDrivenSupport;
@@ -233,6 +239,7 @@ namespace PARS
 
     private:
         uint64_t m_ContactRevision = 0;
+        uint64_t m_HorizontalSupportStep = UINT64_MAX;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
@@ -258,6 +265,7 @@ namespace PARS
         float m_RootSupportWeight = 0;
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;
+        physx::PxVec3 m_HorizontalSupportForce{0};
         float m_MaxTargetClampAngle = 0;
         physx::PxTransform m_CapsuleRootPose{physx::PxIdentity};
         float m_CapsuleRadiusScale = 0;

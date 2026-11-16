@@ -515,6 +515,8 @@ namespace PARS
         m_RecoveryBlendSource.clear();
         m_FootstepIK.Reset();
         m_StandingSupport.Reset();
+        m_HorizontalBalance.Reset();
+        m_Ragdoll.SetHorizontalSupportForce(PxVec3(0));
         m_Ragdoll.SetSupportContacts({});
     }
 

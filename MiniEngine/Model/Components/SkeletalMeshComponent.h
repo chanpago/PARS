@@ -10,6 +10,7 @@
 #include "../FootstepAvoidance.h"
 #include "../RagdollRecovery.h"
 #include "../StandingSupport.h"
+#include "../HorizontalBalance.h"
 
 namespace PARS
 {
@@ -77,6 +78,7 @@ namespace PARS
         void UpdateKinematicPose(bool teleport);
         void UpdatePhysicsPose();
         void UpdateFootSupport();
+        void UpdateHorizontalBalance(float deltaTime);
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
             const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
@@ -179,6 +181,18 @@ namespace PARS
         {
             return m_StandingSupport.GetSnapshot();
         }
+        const HorizontalBalanceSnapshot& GetHorizontalBalanceSnapshot() const
+        {
+            return m_HorizontalBalance.GetSnapshot();
+        }
+        HorizontalBalanceSettings& GetHorizontalBalanceSettings()
+        {
+            return m_HorizontalBalanceSettings;
+        }
+        const HorizontalBalanceSettings& GetHorizontalBalanceSettings() const
+        {
+            return m_HorizontalBalanceSettings;
+        }
         StandingSupportSettings& GetStandingSupportSettings()
         {
             return m_StandingSupportSettings;
@@ -232,6 +246,7 @@ namespace PARS
         RagdollRecovery m_Recovery;
         KinematicRecoveryTimer m_KinematicRecoveryTimer;
         StandingSupport m_StandingSupport;
+        HorizontalBalance m_HorizontalBalance;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
         std::vector<GraphNode> m_KinematicBlendSource;
@@ -244,6 +259,7 @@ namespace PARS
         std::unique_ptr<const PhysicsAsset> m_PendingDriveSettings;
         RecoverySettings m_RecoverySettings;
         StandingSupportSettings m_StandingSupportSettings;
+        HorizontalBalanceSettings m_HorizontalBalanceSettings;
         std::array<physx::PxTransform, 2> m_RecoverySoles{
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};
         RootSupportRelease m_RootSupportRelease = RootSupportRelease::None;

@@ -17,7 +17,7 @@ namespace PARS
         float raisingSpeed = .25f;
         float reachReserve = .01f;
         float horizontalDampingTime = .1f;
-        float maximumHorizontalCorrection = .06f;
+        float maximumHorizontalCorrection = 0.0f; // 지지발의 XZ 목표 보정을 끈다.
         float horizontalFrequency = 4.0f;
         // 기존 관성 보상에 더하는 최대 배율 증가량이다. 0이면 하중별 증폭을 끈다.
         float ankleDriveBoost = .5f;

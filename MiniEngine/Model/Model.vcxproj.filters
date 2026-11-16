@@ -180,6 +180,11 @@
     <ClCompile Include="Components\SkeletalMeshPhysics.cpp">
       <Filter>Components</Filter>
     </ClCompile>
+    <ClCompile Include="Components\SkeletalMeshHorizontalBalance.cpp">
+      <Filter>Components</Filter>
+    </ClCompile>
+    <ClInclude Include="HorizontalBalance.h" />
+    <ClCompile Include="HorizontalBalance.cpp" />
     <ClInclude Include="PhysicsAsset.h" />
     <ClCompile Include="AnimInstance.cpp" />
     <ClInclude Include="AnimInstance.h" />

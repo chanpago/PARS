@@ -806,6 +806,22 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         ImGui::TextWrapped(u8"Recovery에서는 접촉이 잠시 끊겨도 양발 목표를 유지합니다. 연한 파랑 영역은 현재 양발 중심에 맞춘 애니메이션 기준 발 영역입니다.");
         const PARS::StandingSupportSnapshot& standing = mesh.GetStandingSupportSnapshot();
         PARS::StandingSupportSettings& standingSettings = mesh.GetStandingSupportSettings();
+        PARS::HorizontalBalanceSettings& horizontalSettings = mesh.GetHorizontalBalanceSettings();
+        ImGui::Checkbox(u8"골반 XZ 직접 PD 보조", &horizontalSettings.enabled);
+        if (horizontalSettings.enabled)
+        {
+            ImGui::SliderFloat(u8"수평 복원 고유각주파수 (rad/s)", &horizontalSettings.frequency,
+                .5f, 8.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat(u8"수평 감쇠비", &horizontalSettings.dampingRatio,
+                .2f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat(u8"최대 수평 보조 가속도 (m/s2)", &horizontalSettings.maximumAcceleration,
+                0.0f, 5.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        }
+        const PARS::HorizontalBalanceSnapshot& horizontal = mesh.GetHorizontalBalanceSnapshot();
+        ImGui::Text(u8"수평 보조: %s / 실측 지지 %.0f%% / 제한 %s",
+            horizontal.active ? "ON" : "OFF", horizontal.supportWeight * 100, horizontal.limited ? "ON" : "OFF");
+        ImGui::Text(u8"골반 명령 힘 X/Z %.1f / %.1f N · COM 오차 X/Z %.1f / %.1f cm",
+            horizontal.force.x, horizontal.force.z, horizontal.positionError.x * 100, horizontal.positionError.z * 100);
         ImGui::SliderFloat(u8"지지발 발목 최대 추가 강성·감쇠", &standingSettings.ankleDriveBoost,
             0.0f, 1.0f, "+%.2f", ImGuiSliderFlags_AlwaysClamp);
         if (ImGui::IsItemHovered())

@@ -15,6 +15,7 @@
     <ClCompile Include="FootSoleDebug.cpp" />
     <ClCompile Include="RagdollImpactTest.cpp" />
     <ClCompile Include="RagdollImpactValidation.cpp" />
+    <ClCompile Include="HorizontalBalanceValidation.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FootSoleDebug.h" />
