@@ -149,7 +149,7 @@ public:
     ModelViewer(void)
     {
 #if defined(_M_X64)
-        m_FootSoles.SetVisible(false);
+        m_PlayerFootSoles.SetVisible(false);
 #endif
     }
 
@@ -233,7 +233,7 @@ public:
     }
 
 private:
-    void SetFootCandidateDebugVisible(bool visible);
+    void SetPlayerFootDebugVisible(bool visible);
     PARS::PlayerController* GetPlayerController() const
     {
         return m_World.FindActor<PARS::PlayerController>(m_PlayerController);
@@ -263,7 +263,7 @@ private:
 #if defined(_M_X64)
     unique_ptr<PhysicsDemo> m_PhysicsDemo;
     // 더미 전용 표시 객체는 이를 참조하는 충격 테스트보다 먼저 생성한다.
-    FootSoleDebug m_FootSoles;
+    FootSoleDebug m_PlayerFootSoles;
     FootSoleDebug m_DummyFootSoles;
     unique_ptr<RagdollImpactTest> m_ImpactTest;
     unique_ptr<RagdollComparisonRunner> m_Comparison;
@@ -281,7 +281,7 @@ private:
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
     bool m_ActiveSupport = true;
-    bool m_FootCandidateDebugVisible = false;
+    bool m_PlayerFootDebugVisible = false;
     bool m_RagdollTestDone = false;
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
@@ -967,7 +967,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
 #endif
-    SetFootCandidateDebugVisible(m_FootCandidateDebugVisible);
+    SetPlayerFootDebugVisible(m_PlayerFootDebugVisible);
     GraphicsContext& context = GraphicsContext::Begin(L"Initialize Character Pose");
     // 현재 포즈의 스키닝 행렬 등 렌더 데이터를 준비하고, GPU 명령 완료를 기다린다.
     Renderer::UpdateWorldRenderData(m_World, context);
@@ -1007,9 +1007,12 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 #endif
 }
 
-void ModelViewer::SetFootCandidateDebugVisible(bool visible)
+void ModelViewer::SetPlayerFootDebugVisible(bool visible)
 {
-    m_FootCandidateDebugVisible = visible;
+    m_PlayerFootDebugVisible = visible;
+#if defined(_M_X64)
+    m_PlayerFootSoles.SetVisible(visible);
+#endif
     if (PARS::Character* player = GetPreviewCharacter())
     {
         player->GetMesh().SetFootCandidateDebugVisible(visible);
@@ -1550,9 +1553,9 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     const PARS::Ragdoll& runtime = mesh.GetRagdoll();
     ImGui::Text(u8"PhysX: 바디 %zu개 / 관절 %zu개", runtime.GetBodyCount(), runtime.GetJointCount());
 #if defined(_M_X64)
-    if (m_FootSoles.IsVisible())
+    if (m_PlayerFootSoles.IsVisible())
     {
-        m_FootSoles.DrawUI(mesh);
+        m_PlayerFootSoles.DrawUI(mesh);
     }
 #endif
     if (runtime.IsActive())
@@ -1801,33 +1804,47 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     }
                     ImGui::SameLine();
                 }
-                if (ImGui::Button(m_FootCandidateDebugVisible ? u8"발 상태 표시 끄기" : u8"발 상태 표시"))
+                PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
+                bool dummyFootStatesVisible = dummy && dummy->GetMesh().IsFootCandidateDebugVisible();
+                ImGui::BeginDisabled(!dummy);
+                if (ImGui::Button(dummyFootStatesVisible ? u8"더미 발 상태 표시 끄기" : u8"더미 발 상태 표시") && dummy)
                 {
-                    SetFootCandidateDebugVisible(!m_FootCandidateDebugVisible);
+                    dummyFootStatesVisible = !dummyFootStatesVisible;
+                    dummy->GetMesh().SetFootCandidateDebugVisible(dummyFootStatesVisible);
                 }
                 ImGui::SameLine();
-                if (ImGui::Button(m_FootSoles.IsVisible() ? u8"발 디버그 끄기" : u8"발 디버그 켜기"))
+                if (ImGui::Button(m_DummyFootSoles.IsVisible() ? u8"더미 발 디버그 끄기" : u8"더미 발 디버그 켜기"))
                 {
-                    m_FootSoles.SetVisible(!m_FootSoles.IsVisible());
+                    m_DummyFootSoles.SetVisible(!m_DummyFootSoles.IsVisible());
                 }
-                if (m_FootCandidateDebugVisible)
+                ImGui::EndDisabled();
+                if (ImGui::Button(m_PlayerFootDebugVisible ? u8"플레이어 발 상태·디버그 끄기###PlayerFootDebugToggle" :
+                    u8"플레이어 발 상태·디버그 켜기###PlayerFootDebugToggle"))
                 {
-                    void (*const drawFootStates)(PARS::Character*, const char*) = [](PARS::Character* character, const char* label) -> void
+                    SetPlayerFootDebugVisible(!m_PlayerFootDebugVisible);
+                }
+                void (*const drawFootStates)(PARS::Character*, const char*) = [](PARS::Character* character, const char* label) -> void
+                {
+                    if (!character)
                     {
-                        if (!character)
-                        {
-                            return;
-                        }
-                        const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
-                        ImGui::TextUnformatted(label);
-                        for (size_t side = 0; side < sample.feet.size(); ++side)
-                        {
-                            const PARS::FootContactSample& contact = sample.feet[side].contact;
-                            ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
-                                contact.hasSample && contact.grounded ? "ON" : "OFF",
-                                sample.footstep.feet[side].IsInProgress() ? "ON" : "OFF");
-                        }
-                    };
+                        return;
+                    }
+                    const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
+                    ImGui::TextUnformatted(label);
+                    for (size_t side = 0; side < sample.feet.size(); ++side)
+                    {
+                        const PARS::FootContactSample& contact = sample.feet[side].contact;
+                        ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
+                            contact.hasSample && contact.grounded ? "ON" : "OFF",
+                            sample.footstep.feet[side].IsInProgress() ? "ON" : "OFF");
+                    }
+                };
+                if (dummyFootStatesVisible)
+                {
+                    drawFootStates(dummy, u8"더미 발 상태");
+                }
+                if (m_PlayerFootDebugVisible)
+                {
                     drawFootStates(GetPreviewCharacter(), u8"플레이어 발 상태");
                 }
                 if (m_ImpactTest && !m_ImpactTest->GetStatusMessage().empty())
@@ -2203,7 +2220,7 @@ void ModelViewer::RenderScene(void)
         if (PARS::Character* character = GetPreviewCharacter())
         {
             std::vector<physx::PxDebugLine> lines;
-            m_FootSoles.BuildLines(character->GetMesh(), lines);
+            m_PlayerFootSoles.BuildLines(character->GetMesh(), lines);
             m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
         }
     }
