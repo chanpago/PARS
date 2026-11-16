@@ -285,6 +285,7 @@ private:
     bool m_RagdollTestDone = false;
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
+    bool m_ContactOverlayVisible = false;
     bool m_IsAiming = false;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
@@ -1711,7 +1712,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         DrawMapSelection();
         return;
     }
-    if (m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
+    if (m_ContactOverlayVisible && m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
     {
         m_ImpactTest->DrawContactOverlay(m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
     }
@@ -1785,6 +1786,11 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         if (ImGui::Begin(u8"캐릭터 애니메이션", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
 #if defined(_M_X64)
+            if (ImGui::Button(m_ContactOverlayVisible ? u8"상단 디버그 끄기###ContactOverlayToggle" :
+                u8"상단 디버그 켜기###ContactOverlayToggle"))
+            {
+                m_ContactOverlayVisible = !m_ContactOverlayVisible;
+            }
             if (!(m_Comparison && m_Comparison->IsShowingScene()))
             {
                 if (m_ImpactTest)
