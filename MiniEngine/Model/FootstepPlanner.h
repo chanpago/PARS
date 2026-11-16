@@ -12,11 +12,11 @@ namespace PARS
         float startPredictionTime = .6f;
         float landingPredictionTime = .4f;
         float stanceScale = 1.0f;
-        float minimumStanceWidthRatio = 0.0f;
+        float minimumStanceWidthRatio = .3f;
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
         float crossingOffset = .1f;
-        float liftHeightScale = .15f;
-        float stepDuration = .1f;
+        float liftHeightScale = .35f;
+        float stepDuration = .15f;
         float minimumLiftHeight = .03f;
         float landingLockProgress = .75f;
         float landingLoweringSpeed = .05f;
@@ -24,7 +24,7 @@ namespace PARS
         float supportLoadRatio = .25f;
         float supportConfirmationTime = .01f;
         float landingComClampHysteresisDegrees = 5.0f;
-        bool preventCrossing = false;
+        bool preventCrossing = true;
         bool landingComClampEnabled = true;
     };
 
