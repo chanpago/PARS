@@ -16,7 +16,7 @@ namespace PARS
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
         float crossingOffset = .1f;
         float liftHeightScale = .15f;
-        float stepDuration = .15f;
+        float stepDuration = .1f;
         float minimumLiftHeight = .03f;
         float landingLockProgress = .75f;
         float landingLoweringSpeed = .05f;
