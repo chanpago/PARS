@@ -1340,7 +1340,14 @@ void ModelViewer::Update(float deltaT)
         }
         if (ImGui::IsKeyPressed(ImGuiKey_P, false))
         {
-            m_ImpactTest->ResumeSimulation();
+            if (m_World.IsPhysicsPaused())
+            {
+                m_ImpactTest->ResumeSimulation();
+            }
+            else
+            {
+                m_World.SetPhysicsPaused(true);
+            }
         }
         if (ImGui::IsKeyPressed(ImGuiKey_G, false))
         {

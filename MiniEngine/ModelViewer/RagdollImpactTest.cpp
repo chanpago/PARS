@@ -503,6 +503,10 @@ void RagdollImpactTest::DrawContactOverlay(float topInset) const
     {
         text += u8"\n시뮬레이션 일시정지 · P: 재개";
     }
+    else
+    {
+        text += u8"\n시뮬레이션 중 · P: 일시정지";
+    }
     const bool predicted = dummy->GetMesh().GetFootstepCollisionSnapshot().overlapPairs != 0;
     m_FootSoles.DrawContactOverlay(text, touching || predicted, topInset);
 }
