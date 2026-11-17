@@ -31,20 +31,22 @@ namespace
         stream << "frame,physics_step,side,mode,root_release,recovery,phase,started,landed,moving,grounded,locked,"
             "enabled,limited,direction,prediction_valid,com_x,com_z,start_x,start_z,raw_x,raw_z,clamped_x,clamped_z,"
             "target_x,target_z,sole_x,sole_y,sole_z,leg_contacts,recovery_count,return_count,landing_error,falling,standing_up,"
-            "region_valid,support_foot,region_origin_x,region_origin_z,front_ray_x,front_ray_z,back_ray_x,back_ray_z,region_width_degrees\n";
+            "region_valid,support_foot,region_origin_x,region_origin_z,front_ray_x,front_ray_z,back_ray_x,back_ray_z,region_width_degrees,"
+            "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
     {
         const PARS::FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
         const PARS::RecoverySnapshot& recovery = mesh.GetRecoverySnapshot();
+        const PARS::FootstepComPrediction& start = support.footstep.startCom;
         FootSoleDebug debug;
         std::string contactText;
         const uint32_t contacts = debug.GetLegContacts(&mesh, contactText);
         for (size_t side = 0; side < support.feet.size(); ++side)
         {
             const PARS::FootstepCommand& command = support.footstep.feet[side];
-            const PARS::FootstepLandingPrediction& landing = support.footstep.candidates[side].landingCom;
+            const PARS::FootstepComPrediction& landing = support.footstep.candidates[side].landingCom;
             const Math::Vector3 sole(support.feet[side].soleWorld.GetW());
             // 현재 예측, 잠긴 명령 목표, 실제 발바닥과 회복 결과를 서로 다른 열로 기록한다.
             stream << frame << ',' << support.completedPhysicsStep << ',' << side
@@ -64,17 +66,30 @@ namespace
                 << ',' << landing.region.origin.x << ',' << landing.region.origin.z
                 << ',' << landing.region.frontRay.x << ',' << landing.region.frontRay.z
                 << ',' << landing.region.backRay.x << ',' << landing.region.backRay.z
-                << ',' << landing.region.halfAngleRadians * 360.0f / physx::PxPi << '\n';
+                << ',' << landing.region.halfAngleRadians * 360.0f / physx::PxPi
+                << ',' << start.raw.x << ',' << start.raw.z << ',' << start.limited
+                << ',' << start.region.valid << ',' << start.region.supportFoot
+                << ',' << PARS::IsInsideFootstepLandingRegion(start.region, support.footstep.predictedCom)
+                << ',' << support.footstep.needsStep << '\n';
         }
     }
 
-    bool LandingComDebugFollowsCurrentCom(const PARS::SkeletalMeshComponent& mesh)
+    bool LandingComDebugMatchesPrediction(const PARS::SkeletalMeshComponent& mesh)
     {
         Math::Vector3 center(Math::kZero);
         float mass = 0;
         if (!mesh.GetRagdoll().GetCenterOfMass(center, mass))
         {
             return false;
+        }
+        const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
+        if (step.hasPrediction && step.requestedFoot >= 0 && step.requestedFoot < static_cast<int>(step.feet.size()))
+        {
+            center = Math::Vector3(step.startCom.origin.x, step.startCom.origin.y, step.startCom.origin.z);
+            if (step.startCom.enabled && PARS::IsInsideFootstepLandingRegion(step.startCom.region, step.predictedCom))
+            {
+                return false;
+            }
         }
         FootSoleDebug debug;
         std::vector<physx::PxDebugLine> lines;
@@ -98,7 +113,7 @@ namespace
             maximumZ = (std::max)(maximumZ, (std::max)(line.pos0.z, line.pos1.z));
             ++regionLines;
         }
-        // 실제 렌더 명령의 원 중심을 검증한다. 원호 분할 오차만 허용한다.
+        // 예측이 있으면 같은 스텝의 원점을, 없으면 현재 COM의 미리보기 원점을 검증한다.
         const float tolerance = (std::max)(2e-5f, (maximumX - minimumX + maximumZ - minimumZ) * .001f);
         return regionLines >= 64 && std::abs((minimumX + maximumX) * .5f - float(center.GetX())) <= tolerance &&
             std::abs((minimumZ + maximumZ) * .5f - float(center.GetZ())) <= tolerance;
@@ -221,7 +236,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             if (validateLandingRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
                 mesh.GetFootSupport().GetSnapshot().footstep.hasGroundPlane))
             {
-                check(LandingComDebugFollowsCurrentCom(mesh), "Rendered landing region follows the current physical COM");
+                check(LandingComDebugMatchesPrediction(mesh), "Rendered region matches the cyan prediction without forbidden-sector penetration");
                 ++validatedDebugFrames;
             }
             check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");

@@ -269,24 +269,31 @@ namespace
     {
         const PARS::FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
         const PARS::FootstepSettings& settings = mesh.GetFootSupport().GetFootstepSettings();
+        const PARS::FootstepSnapshot& step = sample.footstep;
+        const bool hasPredictionRegion = step.hasPrediction && step.requestedFoot >= 0 &&
+            step.requestedFoot < static_cast<int>(step.feet.size());
         if (!currentCom.isFinite() || !std::isfinite(settings.landingComClampHysteresisDegrees) ||
             settings.landingComClampHysteresisDegrees < 0 ||
             settings.landingComClampHysteresisDegrees >= 90)
         {
             return;
         }
-        PxVec3 origin = currentCom;
-        if (sample.hasComProjection)
+        // 청록색 예측과 같은 물리 스텝의 원점·사각형을 사용해 표시 기준을 일치시킨다.
+        PxVec3 origin = hasPredictionRegion ? step.startCom.origin : currentCom;
+        if (!hasPredictionRegion)
         {
-            origin.y = sample.projectedCenterOfMass.y;
-        }
-        else if (sample.footstep.hasGroundPlane)
-        {
-            origin.y = sample.footstep.groundPosition.y;
-        }
-        else
-        {
-            return;
+            if (sample.hasComProjection)
+            {
+                origin.y = sample.projectedCenterOfMass.y;
+            }
+            else if (step.hasGroundPlane)
+            {
+                origin.y = step.groundPosition.y;
+            }
+            else
+            {
+                return;
+            }
         }
         const Matrix4 component(mesh.GetComponentTransform());
         PxVec3 forward = ToPx(Vector3(component.GetZ()));
@@ -300,8 +307,8 @@ namespace
         const PxU32 forbiddenColor = settings.landingComClampEnabled ? LandingComForbiddenColor : LandingComPreviewColor;
         const PxU32 allowedColor = settings.landingComClampEnabled ? LandingComAllowedColor : LandingComPreviewColor;
         const PxU32 hysteresisColor = settings.landingComClampEnabled ? LandingComHysteresisColor : LandingComPreviewColor;
-        int movingFoot = -1;
-        for (size_t side = 0; side < sample.footstep.feet.size(); ++side)
+        int movingFoot = hasPredictionRegion ? step.requestedFoot : -1;
+        for (size_t side = 0; movingFoot < 0 && side < step.feet.size(); ++side)
         {
             if (sample.footstep.feet[side].IsInProgress())
             {
@@ -318,14 +325,26 @@ namespace
             {
                 continue;
             }
-            std::array<PxVec3, 4> corners{};
-            bool grounded = false;
-            if (!CaptureLandingSole(mesh, sample.feet[side], corners, grounded) || (mesh.IsRagdoll() && !grounded))
+            if (hasPredictionRegion)
             {
-                continue;
+                regions[side] = step.startCom.region;
+                regions[side].origin = origin;
+                for (PxVec3& corner : regions[side].corners)
+                {
+                    corner.y = origin.y;
+                }
             }
-            // 명령 전에는 양발을 미리 보고, 명령 중에는 실제 반대쪽 지지발만 표시한다.
-            regions[side] = PARS::BuildFootstepLandingRegion(origin, corners, forward);
+            else
+            {
+                std::array<PxVec3, 4> corners{};
+                bool grounded = false;
+                if (!CaptureLandingSole(mesh, sample.feet[side], corners, grounded) || (mesh.IsRagdoll() && !grounded))
+                {
+                    continue;
+                }
+                // 시작 예측의 기준 발이 아직 없을 때만 현재 양발 구간을 미리 보여준다.
+                regions[side] = PARS::BuildFootstepLandingRegion(origin, corners, forward);
+            }
             visible[side] = regions[side].valid || regions[side].containsCom;
             if (visible[side])
             {
@@ -563,9 +582,15 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     if (m_ShowLandingComClamp && hasCurrentCom)
     {
         LandingComRegion(lines, mesh, currentCom);
-        for (const PARS::FootstepTarget& target : sample.footstep.candidates)
+        const PARS::FootstepSnapshot& step = sample.footstep;
+        for (size_t side = 0; side < step.candidates.size(); ++side)
         {
-            const PARS::FootstepLandingPrediction& landing = target.landingCom;
+            if (step.hasPrediction && step.requestedFoot >= 0 && step.requestedFoot != static_cast<int>(side))
+            {
+                continue;
+            }
+            const PARS::FootstepTarget& target = step.candidates[side];
+            const PARS::FootstepComPrediction& landing = target.landingCom;
             if (!landing.valid)
             {
                 continue;
@@ -629,7 +654,7 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
         const PARS::FootstepSnapshot& step = sample.footstep;
         if (step.hasPrediction)
         {
-            Line(lines, ToMath(sample.projectedCenterOfMass), ToMath(step.predictedCom), PredictionColor);
+            Line(lines, ToMath(step.startCom.origin), ToMath(step.predictedCom), PredictionColor);
             ProjectionMarker(lines, ToMath(step.predictedCom), PredictionColor, false);
         }
         for (size_t side = 0; side < sample.feet.size(); ++side)
@@ -742,11 +767,11 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
     ImGui::Checkbox(u8"지지 영역 A 표시 (Convex Hull)", &m_ShowHull);
     ImGui::Checkbox(u8"완충 영역 B 표시 (흰색 점선)", &m_ShowBuffer);
     ImGui::Checkbox(u8"질량중심 / 수직 투영 표시", &m_ShowCenterOfMass);
-    ImGui::Checkbox(u8"착지 COM 제한 구간 표시", &m_ShowLandingComClamp);
+    ImGui::Checkbox(u8"시작·착지 COM 제한 구간 표시", &m_ShowLandingComClamp);
     if (m_ShowLandingComClamp)
     {
         ImGui::TextWrapped(u8"빨강 빗금: 지지발 사각형을 향하는 금지 부채꼴 · 초록 경계: 허용 · 주황: 경계 선택 유지 · 파랑 화살표: 캐릭터 앞 방향");
-        ImGui::TextWrapped(u8"원의 중심은 현재 물리 COM의 지면 투영을 따라갑니다. COM에서 지지발 꼭짓점으로 향하는 두 바깥 레이가 금지 경계입니다. 명령 전에는 양발을 미리 보여줍니다.");
+        ImGui::TextWrapped(u8"청록색 시작 예측과 금지 구간은 같은 물리 스텝의 COM·지지발을 사용합니다. 이동할 발이 선택되면 반대 지지발의 구간을 표시하고, 선택 전에는 양발을 미리 보여줍니다.");
         if (!support.GetFootstepSettings().landingComClampEnabled)
         {
             ImGui::TextWrapped(u8"COM 제한 기능 OFF: 회색으로 설정 구간을 미리 보여줍니다.");
@@ -897,10 +922,10 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         {
             ImGui::SetTooltip(u8"착지 목표가 이 간격보다 좁을 때만 바깥으로 보정합니다. 0%%이면 간격 보정을 끕니다.");
         }
-        ImGui::Checkbox(u8"착지용 COM 예측의 지지발 방향 제한", &settings.landingComClampEnabled);
+        ImGui::Checkbox(u8"시작·착지 COM 예측의 지지발 방향 제한", &settings.landingComClampEnabled);
         ImGui::SliderFloat(u8"부채꼴 경계 선택 유지 반각 (도)", &settings.landingComClampHysteresisDegrees,
             0.0f, 30.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::TextWrapped(u8"금지 구간은 현재 COM과 실제 지지발 사각형으로 계산합니다. 금지 구간의 COM 예측을 가까운 경계로 투영하며, 이등분선 근처에서는 진행 중인 명령의 이전 경계를 유지합니다.");
+        ImGui::TextWrapped(u8"시작·착지 COM 예측을 지지발 금지 구간의 가까운 경계로 보정합니다. 발딛기 시작 여부도 청록색 보정점으로 판단하며, 이등분선 근처에서는 진행 중인 명령의 이전 경계를 유지합니다.");
         ImGui::DragFloat(u8"이륙 후 발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"최소 들기 높이 (m)", &settings.minimumLiftHeight, .005f, .01f, .3f, "%.3f");
         ImGui::DragFloat(u8"착지 수평 목표 고정 진행률", &settings.landingLockProgress, .01f, .5f, 1.0f, "%.2f");
@@ -909,15 +934,17 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         ImGui::Checkbox(u8"발 교차 억제 (경계 0.1m)", &settings.preventCrossing);
         if (step.hasPrediction)
         {
-            ImGui::Text(u8"시작 판정용 COM 예측 (%.3f, %.3f, %.3f) m / A %s", step.predictedCom.x,
+            ImGui::Text(u8"시작 판정용 COM 보정 예측 (%.3f, %.3f, %.3f) m / A %s", step.predictedCom.x,
                 step.predictedCom.y, step.predictedCom.z, step.needsStep ? u8"밖" : u8"안");
+            ImGui::Text(u8"  시작 예측 보정 %s / 원래 (%.3f, %.3f, %.3f) m", step.startCom.limited ? "ON" : "OFF",
+                step.startCom.raw.x, step.startCom.raw.y, step.startCom.raw.z);
         }
         for (size_t side = 0; side < step.candidates.size(); ++side)
         {
             const PARS::FootstepTarget& target = step.candidates[side];
             if (target.valid)
             {
-                const PARS::FootstepLandingPrediction& landing = target.landingCom;
+                const PARS::FootstepComPrediction& landing = target.landingCom;
                 ImGui::Text(u8"%s 착지 COM: 제한 %s / 보정 %s / %s", FootLabel(static_cast<int>(side)),
                     landing.enabled ? "ON" : "OFF", landing.limited ? "ON" : "OFF",
                     LandingDirectionLabel(landing.direction));
@@ -988,8 +1015,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         }
         ImGui::Text(u8"최고 높이 = min(max(시작 거리 x %.2f, %.2fm), 기준 종아리 길이)",
             settings.liftHeightScale, settings.minimumLiftHeight);
-        ImGui::TextWrapped(u8"COM 제한과 간격 설정은 다음 물리 스텝의 잠기지 않은 목표에 반영됩니다. 이동 시간·들기·하강 설정은 새 명령부터 적용됩니다. 수평 목표를 고정한 뒤에도 실제 접촉을 확인해 종료합니다.");
-        ImGui::TextWrapped(u8"노랑: 현재 COM · 청록: 시작 판정용 COM 예측 · 연보라: 착지용 원래 COM 예측 · 연두: 보정한 COM 예측 · 빨간 빗금: 지지발 방향의 금지 부채꼴");
+        ImGui::TextWrapped(u8"COM 제한은 다음 물리 스텝의 시작·착지 예측에 반영됩니다. 간격 설정은 잠기지 않은 착지 목표에, 이동 시간·들기·하강 설정은 새 명령부터 적용됩니다. 수평 목표를 고정한 뒤에도 실제 접촉을 확인해 종료합니다.");
+        ImGui::TextWrapped(u8"노랑: 현재 COM · 청록: 시작 판정용 보정 COM 예측 · 연보라: 착지용 원래 COM 예측 · 연두: 착지용 보정 COM 예측 · 빨간 빗금: 지지발 방향의 금지 부채꼴");
         ImGui::TextWrapped(u8"회색: 발 오프셋을 더한 원시 후보 · 주황 십자: 착지 후보 · 주황 원: 저장한 발의 목표 · 초록 선: 실제 접촉 법선");
         ImGui::TextWrapped(u8"분홍 십자: 높이를 더한 발 이동 목표. 노랑/연두: 이동 명령 유무에 따른 제한 적용 전 IK 자세. 보라 선: 무릎 굽힘 방향. 연결선은 실제 이동 궤적이 아닙니다.");
         const PARS::FootstepIKSnapshot& ik = mesh.GetFootstepIKSnapshot();

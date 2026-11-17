@@ -132,8 +132,8 @@ namespace PARS
         const std::array<physx::PxVec3, 4>& corners, const physx::PxVec3& forward);
     bool IsInsideFootstepLandingRegion(const FootstepLandingRegion& region, const physx::PxVec3& point);
 
-    // 착지용 예측은 시작 판정이나 실제 물리 상태와 구분해 저장한다.
-    struct FootstepLandingPrediction
+    // 시작·착지 예측의 원래 값과 보정 결과를 실제 물리 상태와 구분해 저장한다.
+    struct FootstepComPrediction
     {
     public:
         physx::PxVec3 origin{0};
@@ -155,7 +155,7 @@ namespace PARS
         physx::PxVec3 normal{0};
         float travelDistance = 0;
         float separationDistance = 0;
-        FootstepLandingPrediction landingCom;
+        FootstepComPrediction landingCom;
         bool valid = false;
         bool lengthLimited = false;
         bool crossingLimited = false;
@@ -239,6 +239,7 @@ namespace PARS
         uint64_t abortCount = 0;
         std::array<FootstepCommand, 2> feet;
         std::array<FootstepTarget, 2> candidates;
+        FootstepComPrediction startCom;
         physx::PxVec3 predictedCom{0};
         physx::PxVec3 groundPosition{0};
         physx::PxVec3 groundNormal{0, 1, 0};

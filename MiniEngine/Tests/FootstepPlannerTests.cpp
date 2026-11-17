@@ -32,12 +32,22 @@ namespace
         settings.startPredictionTime = .3f;
         settings.landingPredictionTime = .3f;
         settings.stepDuration = .3f;
+        settings.liftHeightScale = .15f;
         // 기존 간격 보정의 회귀 검사는 새 COM 제한과 분리한다.
         settings.minimumStanceWidthRatio = .7f;
         settings.landingComClampEnabled = false;
         // 연속 하중 판정 검사는 기본 튜닝과 분리해 하중 기준과 확인 시간을 명시한다.
         settings.supportLoadRatio = .5f;
         settings.supportConfirmationTime = .05f;
+        return settings;
+    }
+
+    FootstepSettings ComTestSettings()
+    {
+        FootstepSettings settings;
+        // COM 보정 자체의 검사는 기본 발 간격·교차 억제 튜닝과 분리한다.
+        settings.minimumStanceWidthRatio = 0;
+        settings.preventCrossing = false;
         return settings;
     }
 
@@ -642,15 +652,15 @@ namespace
 
     void TestLandingComGeometry()
     {
-        const FootstepSettings settings;
+        const FootstepSettings settings = ComTestSettings();
         const std::array<PxVec3, 9> displacements{{PxVec3(0), PxVec3(0, 0, .4f),
             PxVec3(-.2f, 0, -.4f), PxVec3(.4f, 0, 0), PxVec3(-.4f, 0, -.2f),
             PxVec3(-.4f, 0, -.1f), PxVec3(-.4f, 0, 0), PxVec3(-.8f, 0, -.2f), PxVec3(-.1f, 0, -.025f)}};
         const std::array<PxVec3, 9> expected{{PxVec3(0), PxVec3(0, 0, .4f),
             PxVec3(-.2f, 0, -.4f), PxVec3(.4f, 0, 0), PxVec3(-.4f, 0, -.2f),
             PxVec3(-.36f, 0, -.18f), PxVec3(-.32f, 0, .16f), PxVec3(-.72f, 0, -.36f), PxVec3(-.09f, 0, -.045f)}};
-        Check(settings.landingComClampEnabled && Near(settings.minimumStanceWidthRatio, 0) && !settings.preventCrossing,
-            "Default placement uses supporting-foot geometry with independent width and crossing constraints disabled");
+        Check(FootstepSettings().landingComClampEnabled,
+            "Supporting-foot COM restriction is enabled by default");
         for (unsigned heading = 0; heading < 12; ++heading)
         {
             const PxQuat rotation(PxTwoPi * static_cast<float>(heading) / 12, PxVec3(0, 1, 0));
@@ -697,7 +707,7 @@ namespace
                     planner.Update(input, settings);
                     const FootstepSnapshot& state = planner.GetSnapshot();
                     const FootstepTarget& target = state.candidates[selected];
-                    const FootstepLandingPrediction& landing = target.landingCom;
+                    const FootstepComPrediction& landing = target.landingCom;
                     const PxVec3 origin(input.com.x, .4f, input.com.z);
                     Check(target.valid && landing.valid && landing.region.valid &&
                             (landing.raw - origin - rotation.rotate(displacement)).magnitude() < 2e-5f &&
@@ -708,6 +718,13 @@ namespace
                         "Only the opposite supporting rectangle restricts COM before the moving foot offset is added");
                     Check(!IsInsideFootstepLandingRegion(landing.region, landing.clamped),
                         "Corrected COM lies outside the open forbidden sector including projections before and beyond the foot");
+                    const float horizonRatio = settings.startPredictionTime / settings.landingPredictionTime;
+                    Check(state.hasPrediction && state.startCom.region.supportFoot == static_cast<int>(1 - selected) &&
+                            (state.predictedCom - origin - rotation.rotate(corrected) * horizonRatio).magnitude() < 3e-5f &&
+                            !IsInsideFootstepLandingRegion(state.startCom.region, state.predictedCom),
+                        "Cyan start prediction uses the same supporting boundary with its own prediction horizon");
+                    Check(state.needsStep == !IsInsideFootSupportHull(input.hull, state.predictedCom),
+                        "The actual start decision uses the same corrected COM point as the cyan marker");
                     Check(sample != 0 || landing.direction == FootstepLandingDirection::None,
                         "Zero displacement remains at the current COM without selecting a boundary");
                     Check((input.com - originalCom).magnitude() == 0 &&
@@ -733,12 +750,15 @@ namespace
                 input.velocity = PxVec3(std::sin(angle), 0, std::cos(angle));
                 input.feet[0].corners = SoleRectangle(input.feet[0].position, .04f, halfLength, .31f);
                 planner.Update(input, settings);
-                const FootstepLandingPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
+                const FootstepComPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
                 Check(landing.valid && landing.region.valid && !IsInsideFootstepLandingRegion(landing.region, landing.clamped) &&
                         (landing.clamped - landing.origin).magnitude() <= (landing.raw - landing.origin).magnitude() + 1e-6f,
                     "Sampled predictions use rotated rectangles and enter the complement without increasing prediction distance");
                 Check(landing.limited || (landing.raw - landing.clamped).magnitude() == 0,
                     "Allowed predictions and true corner-ray boundaries retain their original points");
+                const FootstepSnapshot& state = planner.GetSnapshot();
+                Check(state.hasPrediction && !IsInsideFootstepLandingRegion(state.startCom.region, state.predictedCom),
+                    "Cyan predictions avoid the supporting-foot sector for every sampled sole rotation and velocity");
             }
         }
 
@@ -795,31 +815,38 @@ namespace
                     }
                 }
                 planner.Update(input, settings);
-                const FootstepLandingPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
+                const FootstepComPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
                 Check(landing.valid && landing.region.valid && !IsInsideFootstepLandingRegion(landing.region, landing.clamped),
                     "Sub-millimetre predictions translated in world coordinates cannot round back inside a forbidden boundary");
+                const FootstepSnapshot& state = planner.GetSnapshot();
+                Check(state.hasPrediction && state.startCom.region.valid &&
+                        !IsInsideFootstepLandingRegion(state.startCom.region, state.predictedCom),
+                    "Translated cyan predictions retain the same world-space boundary tolerance");
             }
         }
     }
 
     void TestLandingComDisabledAndStart()
     {
-        FootstepSettings enabled;
+        FootstepSettings enabled = ComTestSettings();
         FootstepSettings disabled = enabled;
         disabled.landingComClampEnabled = false;
         FootstepPlanner clamped;
         FootstepPlanner original;
         FootstepInput input = Standing();
-        input.velocity = PxVec3(-.6f, 0, 0);
+        input.velocity = PxVec3(-.5f, 0, 0);
         clamped.Update(input, enabled);
         original.Update(input, disabled);
         const FootstepSnapshot& a = clamped.GetSnapshot();
         const FootstepSnapshot& b = original.GetSnapshot();
-        Check(a.needsStep && b.needsStep && a.feet[1].justStarted && b.feet[1].justStarted &&
-                (a.predictedCom - b.predictedCom).magnitude() == 0 && Near(a.predictedCom.x, -.36f) &&
-                IsInsideFootSupportHull(input.hull, a.candidates[1].landingCom.clamped),
-            "Start risk still uses raw 0.6-second prediction when the ray-corrected landing prediction is inside support");
-        const PxVec3 expected(-.12f, .4f, 0);
+        Check(!a.needsStep && !a.IsInProgress() && a.startCount == 0 && b.needsStep && b.feet[1].justStarted &&
+                a.startCom.limited && Near(a.startCom.raw.x, -.3f) && Near(b.predictedCom.x, -.3f) &&
+                IsInsideFootSupportHull(input.hull, a.predictedCom) &&
+                !IsInsideFootstepLandingRegion(a.startCom.region, a.predictedCom),
+            "Correcting the cyan prediction inside support prevents a step that the original prediction would start");
+        Check((b.predictedCom - b.startCom.raw).magnitude() == 0 && !b.startCom.limited,
+            "Disabling restriction restores the raw start prediction as well as the raw landing prediction");
+        const PxVec3 expected(-.08f, .4f, 0);
         Check((b.feet[1].target.position - expected).magnitude() < 1e-6f && !b.candidates[1].landingCom.limited,
             "Disabling corner-ray restriction restores original zero-width prediction plus Idle offset");
         original.Reset();
@@ -840,7 +867,7 @@ namespace
             Check(planner.GetSnapshot().reason == FootstepReason::InvalidSettings,
                 "Boundary-choice hysteresis rejects negative, nonfinite and unbounded angles");
         }
-        enabled = FootstepSettings();
+        enabled = ComTestSettings();
         for (unsigned missing = 0; missing < 5; ++missing)
         {
             FootstepPlanner planner;
@@ -867,12 +894,16 @@ namespace
                 input.com.x = input.feet[0].position.x;
             }
             planner.Update(input, enabled);
-            const FootstepLandingPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
+            const FootstepComPrediction& landing = planner.GetSnapshot().candidates[1].landingCom;
             Check(landing.valid && !landing.region.valid && !landing.limited &&
                     (landing.clamped - landing.raw).magnitude() == 0,
                 "Missing ground, missing or degenerate geometry and COM inside the foot cannot fabricate a forbidden angle");
             Check(missing != 4 || landing.region.containsCom,
                 "COM-inside-foot degeneracy remains explicitly distinguishable from a valid outside tangent sector");
+            const FootstepSnapshot& state = planner.GetSnapshot();
+            Check(state.hasPrediction && !state.startCom.region.valid && !state.startCom.limited &&
+                    (state.predictedCom - state.startCom.raw).magnitude() == 0,
+                "Unavailable supporting geometry preserves the cyan prediction without inventing a forbidden sector");
         }
         clamped.Reset();
         input = Standing();
@@ -897,6 +928,8 @@ namespace
             Advance(planner, input, settings);
             Check(planner.GetSnapshot().feet[1].target.landingCom.direction == FootstepLandingDirection::Front,
                 "Small side-axis jitter cannot alternate the active command between front and back");
+            Check(planner.GetSnapshot().startCom.direction == FootstepLandingDirection::Front,
+                "The cyan prediction shares the active command's boundary history under small velocity jitter");
         }
         input.velocity.z = -.2f;
         Advance(planner, input, settings);
@@ -933,6 +966,10 @@ namespace
                 Near(locked.target.position.z, lastEditable.position.z) &&
                 (planner.GetSnapshot().candidates[1].landingCom.origin - lastEditable.landingCom.origin).magnitude() > .1f,
             "Latest COM and character heading update debug candidates without moving the locked landing point");
+        Check(planner.GetSnapshot().startCom.origin.x == input.com.x &&
+                planner.GetSnapshot().startCom.origin.z == input.com.z &&
+                !IsInsideFootstepLandingRegion(planner.GetSnapshot().startCom.region, planner.GetSnapshot().predictedCom),
+            "Locking the landing target does not freeze or bypass the cyan prediction correction");
         input.feet[1].grounded = true;
         Advance(planner, input, settings);
         Check(planner.GetSnapshot().feet[1].justLanded &&

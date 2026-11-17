@@ -85,21 +85,21 @@ namespace
         }
     }
 
-    FootstepLandingPrediction PredictLandingCom(const FootstepInput& input, const FootstepSettings& settings,
-        const FootstepSnapshot& state, size_t movingFoot, FootstepLandingDirection previousDirection)
+    FootstepComPrediction PredictCom(const FootstepInput& input, const FootstepSettings& settings,
+        float predictionTime, float projectionHeight, int movingFoot, FootstepLandingDirection previousDirection)
     {
-        FootstepLandingPrediction result;
-        result.origin = PxVec3(input.com.x, state.groundPosition.y, input.com.z);
-        result.raw = PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime,
-            state.groundPosition.y, input.com.z + input.velocity.z * settings.landingPredictionTime);
+        FootstepComPrediction result;
+        result.origin = PxVec3(input.com.x, projectionHeight, input.com.z);
+        result.raw = PxVec3(input.com.x + input.velocity.x * predictionTime,
+            projectionHeight, input.com.z + input.velocity.z * predictionTime);
         result.clamped = result.raw;
         result.enabled = settings.landingComClampEnabled;
         result.valid = result.raw.isFinite();
-        if (!result.enabled || !result.valid)
+        if (!result.valid || movingFoot < 0 || movingFoot >= static_cast<int>(input.feet.size()))
         {
             return result;
         }
-        const size_t supportFoot = 1 - movingFoot;
+        const size_t supportFoot = static_cast<size_t>(1 - movingFoot);
         const FootstepFootInput& support = input.feet[supportFoot];
         if (!support.available || !support.hasContactSample || !support.grounded || !support.hasSoleRectangle)
         {
@@ -109,12 +109,12 @@ namespace
         PxVec3 forward(-input.supportRight.z, 0, input.supportRight.x);
         if (!forward.isFinite() || forward.normalize() <= 1e-6f)
         {
-            result.valid = false;
+            result.valid = !result.enabled;
             return result;
         }
         result.region = BuildFootstepLandingRegion(result.origin, support.corners, forward);
         result.region.supportFoot = static_cast<int>(supportFoot);
-        if (!IsInsideFootstepLandingRegion(result.region, result.raw))
+        if (!result.enabled || !IsInsideFootstepLandingRegion(result.region, result.raw))
         {
             return result;
         }
@@ -165,7 +165,8 @@ namespace
         PxVec3 origin = state.feet[side].IsInProgress() ? state.feet[side].startPosition : foot.position;
         origin.y -= normal.dot(origin - state.groundPosition) / normal.y;
         const FootstepCommand& command = state.feet[side];
-        result.landingCom = PredictLandingCom(input, settings, state, side,
+        result.landingCom = PredictCom(input, settings, settings.landingPredictionTime, state.groundPosition.y,
+            static_cast<int>(side),
             command.IsInProgress() ? command.landingComDirection : FootstepLandingDirection::None);
         if (!result.landingCom.valid)
         {
@@ -585,6 +586,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.revision = input.revision;
     state.hasPrediction = false;
     state.needsStep = false;
+    state.startCom = {};
     state.candidates = {};
     state.loadTransfer.ready = false;
     for (FootstepCommand& command : state.feet)
@@ -641,14 +643,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.lastImpactPosition = input.impactPosition;
         state.hasImpact = true;
     }
-    state.predictedCom = PxVec3(input.com.x + input.velocity.x * settings.startPredictionTime,
-        input.projectionHeight, input.com.z + input.velocity.z * settings.startPredictionTime);
-    state.hasPrediction = state.predictedCom.isFinite();
-    const bool validArea = input.zone != FootSupportZone::Invalid && input.hull.size() >= 3;
-    state.needsStep = state.hasPrediction && validArea && !IsInsideFootSupportHull(input.hull, state.predictedCom);
-    state.reason = !state.hasPrediction ? FootstepReason::InvalidCom : !validArea ? FootstepReason::NoSupportArea :
-        state.needsStep ? FootstepReason::ValidTarget : FootstepReason::PredictedInside;
-
     for (size_t side = 0; side < state.feet.size(); ++side)
     {
         FootstepCommand& command = state.feet[side];
@@ -699,6 +693,24 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.candidates[side] = MakeTarget(input, settings, state, side);
     }
     state.requestedFoot = SelectRequestedFoot(input, state);
+    FootstepLandingDirection previousDirection = FootstepLandingDirection::None;
+    if (state.requestedFoot >= 0 && state.requestedFoot < static_cast<int>(state.feet.size()))
+    {
+        const FootstepCommand& command = state.feet[static_cast<size_t>(state.requestedFoot)];
+        if (command.IsInProgress())
+        {
+            previousDirection = command.landingComDirection;
+        }
+    }
+    // 발을 먼저 고른 뒤 같은 지지발 제한을 시작 예측과 실제 시작 판정에 함께 적용한다.
+    state.startCom = PredictCom(input, settings, settings.startPredictionTime, input.projectionHeight,
+        state.requestedFoot, previousDirection);
+    state.predictedCom = state.startCom.clamped;
+    state.hasPrediction = state.startCom.valid;
+    const bool validArea = input.zone != FootSupportZone::Invalid && input.hull.size() >= 3;
+    state.needsStep = state.hasPrediction && validArea && !IsInsideFootSupportHull(input.hull, state.predictedCom);
+    state.reason = !state.hasPrediction ? FootstepReason::InvalidCom : !validArea ? FootstepReason::NoSupportArea :
+        state.needsStep ? FootstepReason::ValidTarget : FootstepReason::PredictedInside;
     UpdateLoadTransfer(input, settings, consecutiveSample, state);
     for (size_t side = 0; side < state.feet.size(); ++side)
     {
