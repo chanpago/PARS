@@ -9,10 +9,11 @@ namespace PARS
     struct FootstepSettings
     {
     public:
+        FootstepRecoverySettings recovery;
         float startPredictionTime = .6f;
         float landingPredictionTime = .4f;
         float stanceScale = 1.0f;
-        float minimumStanceWidthRatio = .7f;
+        float minimumStanceWidthRatio = .0f;
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
         float crossingOffset = .1f;
         float liftHeightScale = .35f;
