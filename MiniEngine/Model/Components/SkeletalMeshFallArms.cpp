@@ -151,8 +151,9 @@ void SkeletalMeshComponent::InitializeFallArms()
         {
             continue;
         }
-        // 손바닥의 +Y는 손등 쪽이다. 좌우 손의 해부학적 방향 차이를 반영한다.
-        PxVec3 palmUp = radial.cross(fingers) * (side == 0 ? -1.0f : 1.0f);
+        // 손바닥 프레임의 +Y는 손등, -Y는 손바닥이다.
+        // PA 손 관절의 +Z가 손등을 향하는 것과 동일하게 좌우 부호를 맞춘다.
+        PxVec3 palmUp = radial.cross(fingers) * (side == 0 ? 1.0f : -1.0f);
         if (palmUp.normalize() < 1e-6f)
         {
             continue;
