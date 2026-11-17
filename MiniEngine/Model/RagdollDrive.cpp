@@ -53,11 +53,17 @@ namespace PARS
         }
         const float scale = name.find("left") != std::string::npos ? m_ArmDriveScales[0] :
             name.find("right") != std::string::npos ? m_ArmDriveScales[1] : 1.0f;
-        return m_ArmDriveStrength * scale;
+        const float strength = m_ArmDriveOverride >= 0 ? m_ArmDriveOverride : m_ArmDriveStrength;
+        return strength * scale;
     }
 
-    bool Ragdoll::SetArmDriveScales(const std::array<float, 2>& scales)
+    bool Ragdoll::SetArmDriveScales(const std::array<float, 2>& scales, float overrideStrength)
     {
+        if (!std::isfinite(overrideStrength) ||
+            (overrideStrength != -1.0f && (overrideStrength < 0 || overrideStrength > 1)))
+        {
+            return false;
+        }
         for (float scale : scales)
         {
             if (!std::isfinite(scale) || scale < 0 || scale > 1)
@@ -65,11 +71,12 @@ namespace PARS
                 return false;
             }
         }
-        if (m_ArmDriveScales == scales)
+        if (m_ArmDriveScales == scales && m_ArmDriveOverride == overrideStrength)
         {
             return true;
         }
         m_ArmDriveScales = scales;
+        m_ArmDriveOverride = overrideStrength;
         if (IsActive())
         {
             // 배율 변경은 목표 회전의 이력을 끊지 않는다.

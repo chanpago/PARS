@@ -17,7 +17,7 @@ namespace PARS
     {
     public:
         float predictionTime = .18f;
-        float blendInDuration = .14f;
+        float blendInDuration = .05f;
         float blendOutDuration = .22f;
         float maximumDuration = 1.6f;
         float contactGraceDuration = .06f;
@@ -26,6 +26,7 @@ namespace PARS
         float backwardReachRatio = .30f;
         float outwardReachRatio = .18f;
         float targetSpeed = 3.0f;
+        float trackingStrength = .8f;
         float braceDriveScale = .65f;
         float surfaceOffset = .005f;
         bool enabled = true;
@@ -70,6 +71,7 @@ namespace PARS
         std::array<FallArmSample, 2> arms;
         float deltaTime = 0;
         bool falling = false;
+        bool preparing = false;
         bool bodySettled = false;
     };
 
@@ -127,7 +129,7 @@ namespace PARS
     private:
         FallArmSnapshot m_Snapshot;
         bool m_HasSample = false;
-        bool m_WasFalling = false;
+        bool m_WasRequested = false;
     };
 
     const char* FallArmPhaseLabel(FallArmPhase phase);

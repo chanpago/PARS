@@ -138,8 +138,8 @@ namespace PARS
             return m_DrivesEnabled;
         }
         bool SetArmDriveStrength(float strength);
-        // 사용자 기본 강도에 곱하는 낙상 중 좌우 팔 배율이다.
-        bool SetArmDriveScales(const std::array<float, 2>& scales);
+        // 좌우 팔 배율과 임시 강도를 설정한다. -1은 사용자 기본 강도를 사용한다.
+        bool SetArmDriveScales(const std::array<float, 2>& scales, float overrideStrength = -1.0f);
         const std::array<float, 2>& GetArmDriveScales() const
         {
             return m_ArmDriveScales;
@@ -147,6 +147,15 @@ namespace PARS
         float GetArmDriveStrength() const
         {
             return m_ArmDriveStrength;
+        }
+        float GetEffectiveArmDriveStrength(size_t side) const
+        {
+            if (side >= m_ArmDriveScales.size())
+            {
+                return 0;
+            }
+            const float strength = m_ArmDriveOverride >= 0 ? m_ArmDriveOverride : m_ArmDriveStrength;
+            return strength * m_ArmDriveScales[side];
         }
         void SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts);
         // 힘은 저장만 하며 양의 시간으로 드라이브를 갱신할 때 물리 스텝당 한 번 적용한다.
@@ -278,6 +287,7 @@ namespace PARS
         int m_SupportBody = -1;
         float m_RootSupportWeight = 0;
         float m_ArmDriveStrength = 1.0f;
+        float m_ArmDriveOverride = -1.0f;
         std::array<float, 2> m_ArmDriveScales{1.0f, 1.0f};
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;

@@ -170,14 +170,21 @@ void SkeletalMeshComponent::ApplyFallArmTargets(std::vector<Matrix4>& target, fl
 {
     World* world = GetOwner().GetWorld();
     PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
-    if (!IsActiveRagdoll() || !physics || !m_FallArmSettings.enabled)
+    if (!IsActiveRagdoll() || !physics || !m_FallArmSettings.enabled ||
+        !std::isfinite(m_FallArmSettings.trackingStrength) || m_FallArmSettings.trackingStrength < 0 ||
+        m_FallArmSettings.trackingStrength > 1)
     {
         ResetFallArms();
         return;
     }
-    const bool falling = m_AutomaticRootSupport && IsFollowingFallingAnimation() &&
-        m_StandingUpState == StandingUpState::None && m_RootSupportRelease != RootSupportRelease::None;
-    if (!falling && !m_FallArmBrace.GetSnapshot().active)
+    const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
+    const bool canProtect = m_AutomaticRootSupport && m_StandingUpState == StandingUpState::None;
+    const bool falling = canProtect && IsFollowingFallingAnimation() && m_RootSupportRelease != RootSupportRelease::None;
+    // B 이탈 유예 중에도 팔은 즉시 준비한다. 골반 지지와 낙상 클립 전환은 기존 판정을 따른다.
+    const bool preparing = canProtect && m_RootSupportRelease == RootSupportRelease::None &&
+        support.balance.zone == FootSupportZone::Outside;
+    const bool requested = falling || preparing;
+    if (!requested && !m_FallArmBrace.GetSnapshot().active)
     {
         ResetFallArms();
         return;
@@ -194,10 +201,11 @@ void SkeletalMeshComponent::ApplyFallArmTargets(std::vector<Matrix4>& target, fl
     }
     FallArmInput input;
     // 발 샘플의 리비전은 물리 월드 시계 재설정과 래그돌 재생성을 함께 반영한다.
-    input.revision = m_FootSupport.GetSnapshot().contactRevision;
+    input.revision = support.contactRevision;
     input.completedStep = physics->GetStepCount();
     input.deltaTime = deltaTime;
     input.falling = falling;
+    input.preparing = preparing;
     for (size_t side = 0; side < input.arms.size(); ++side)
     {
         FallArmSample& arm = input.arms[side];
@@ -239,5 +247,13 @@ void SkeletalMeshComponent::ApplyFallArmTargets(std::vector<Matrix4>& target, fl
         const Matrix4 stretch = Invert(PhysicsBoneFrame(target[node])) * target[node];
         target[node] = ToMatrix(frames[node]) * stretch;
     }
-    m_Ragdoll.SetArmDriveScales({snapshot.arms[0].driveScale, snapshot.arms[1].driveScale});
+    if (requested)
+    {
+        m_Ragdoll.SetArmDriveScales({snapshot.arms[0].driveScale, snapshot.arms[1].driveScale}, m_FallArmSettings.trackingStrength);
+    }
+    else
+    {
+        // 회복하면 사용자 기본 강도를 복원하고, 남아 있는 팔 자세 보정만 부드럽게 해제한다.
+        m_Ragdoll.SetArmDriveScales({1.0f, 1.0f});
+    }
 }

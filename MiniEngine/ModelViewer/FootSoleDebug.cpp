@@ -850,7 +850,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         PARS::StandingSupportSettings& standingSettings = mesh.GetStandingSupportSettings();
         PARS::HorizontalBalanceSettings& horizontalSettings = mesh.GetHorizontalBalanceSettings();
         float armStrengthPercent = mesh.GetArmDriveStrength() * 100.0f;
-        if (ImGui::SliderFloat(u8"팔 애니메이션 추종 강도", &armStrengthPercent,
+        if (ImGui::SliderFloat(u8"기본 팔 애니메이션 추종 강도", &armStrengthPercent,
             0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp))
         {
             mesh.SetArmDriveStrength(armStrengthPercent * .01f);
@@ -869,8 +869,9 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             for (size_t side = 0; side < protection.arms.size(); ++side)
             {
                 const PARS::FallArmTarget& arm = protection.arms[side];
-                ImGui::Text(u8"%s: %s / 보정 %.0f%% / 실제 접촉 %s", side == 0 ? u8"왼팔" : u8"오른팔",
-                    PARS::FallArmPhaseLabel(arm.phase), arm.weight * 100, arm.touching ? "ON" : "OFF");
+                ImGui::Text(u8"%s: %s / 보정 %.0f%% / 추종 %.0f%% / 실제 접촉 %s", side == 0 ? u8"왼팔" : u8"오른팔",
+                    PARS::FallArmPhaseLabel(arm.phase), arm.weight * 100,
+                    mesh.GetRagdoll().GetEffectiveArmDriveStrength(side) * 100, arm.touching ? "ON" : "OFF");
             }
             ImGui::TextUnformatted(u8"팔 목표 표시: 주황=뻗기, 초록=접촉 후 버티기");
         }

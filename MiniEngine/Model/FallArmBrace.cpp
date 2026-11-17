@@ -72,6 +72,7 @@ namespace
             }
         }
         return std::isfinite(settings.reachRatio) && settings.reachRatio > 0 && settings.reachRatio < 1 &&
+            std::isfinite(settings.trackingStrength) && settings.trackingStrength >= 0 && settings.trackingStrength <= 1 &&
             std::isfinite(settings.braceDriveScale) && settings.braceDriveScale >= 0 && settings.braceDriveScale <= 1;
     }
 
@@ -120,7 +121,7 @@ void FallArmBrace::Reset()
 {
     m_Snapshot = {};
     m_HasSample = false;
-    m_WasFalling = false;
+    m_WasRequested = false;
 }
 
 bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& settings,
@@ -131,11 +132,12 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
         Reset();
         return false;
     }
-    if ((m_HasSample && input.revision != m_Snapshot.revision) || (input.falling && !m_WasFalling))
+    const bool protectionRequested = input.falling || input.preparing;
+    if ((m_HasSample && input.revision != m_Snapshot.revision) || (protectionRequested && !m_WasRequested))
     {
         Reset();
     }
-    m_WasFalling = input.falling;
+    m_WasRequested = protectionRequested;
     const float deltaTime = m_HasSample && input.completedStep == m_Snapshot.completedStep ? 0 : input.deltaTime;
     m_HasSample = true;
     m_Snapshot.revision = input.revision;
@@ -161,7 +163,7 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
         m_Snapshot.settledTime = input.bodySettled ? m_Snapshot.settledTime + deltaTime : 0;
         m_Snapshot.finished |= m_Snapshot.elapsedTime >= settings.maximumDuration || m_Snapshot.settledTime >= .2f;
     }
-    const bool reaching = input.falling && !m_Snapshot.finished;
+    const bool reaching = protectionRequested && !m_Snapshot.finished;
     std::array<bool, 2> valid{};
     PxVec3 direction(0);
     PxVec3 fallback(0);
@@ -375,7 +377,7 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
             target.solvedPalm = (toPhysical * pose[arm.setup.handNode] * arm.setup.palmInHand).p;
         }
     }
-    if (!input.falling && !m_Snapshot.active)
+    if (!protectionRequested && !m_Snapshot.active)
     {
         Reset();
     }
