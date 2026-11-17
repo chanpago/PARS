@@ -22,7 +22,7 @@ namespace PARS
         float maximumDuration = 1.6f;
         float contactGraceDuration = .06f;
         float reachRatio = .94f;
-        float forwardReachRatio = .65f;
+        float forwardReachRatio = .85f;
         float backwardReachRatio = .30f;
         float outwardReachRatio = .18f;
         float targetSpeed = 3.0f;

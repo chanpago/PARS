@@ -115,6 +115,29 @@ namespace
         const float length = delta.magnitude();
         return length > distance && length > 1e-6f ? from + delta * (distance / length) : to;
     }
+
+    void KeepHorizontalReach(const FallArmSetup& setup, const PxVec3& shoulder,
+        float reachRatio, PxTransform& palm)
+    {
+        const PxTransform wrist = palm * setup.palmInHand.getInverse();
+        const float length = setup.upperLength + setup.lowerLength;
+        const float margin = PxMin(length * 1e-4f, PxMin(setup.upperLength, setup.lowerLength) * .1f);
+        const float minimumReach = PxAbs(setup.upperLength - setup.lowerLength) + margin;
+        const float maximumReach = PxMax(minimumReach, length * reachRatio - margin);
+        PxVec3 horizontal = Horizontal(wrist.p - shoulder);
+        const float horizontalDistance = horizontal.magnitude();
+        const float maximumHorizontal = maximumReach * .98f;
+        if (horizontalDistance > maximumHorizontal)
+        {
+            horizontal *= maximumHorizontal / horizontalDistance;
+        }
+        // 먼 바닥을 향해 팔 전체를 축소하지 않고, 앞쪽 거리를 확보한 채 손 목표를 올린다.
+        // 어깨가 내려오면 필요한 높이 보정이 줄어들어 같은 목표가 지면으로 이어진다.
+        const float downwardReach = std::sqrt(PxMax(0.0f, maximumReach * maximumReach - horizontal.magnitudeSquared()));
+        const PxVec3 reachableWrist(shoulder.x + horizontal.x,
+            PxMax(wrist.p.y, shoulder.y - downwardReach), shoulder.z + horizontal.z);
+        palm.p += reachableWrist - wrist.p;
+    }
 }
 
 void FallArmBrace::Reset()
@@ -282,6 +305,7 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
             }
             if (hasRequest)
             {
+                KeepHorizontalReach(setup, shoulder.p, settings.reachRatio, requested);
                 target.phase = FallArmPhase::Reaching;
                 target.contactLostTime = 0;
             }
