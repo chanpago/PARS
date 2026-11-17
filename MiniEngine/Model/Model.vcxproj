@@ -203,6 +203,10 @@
     <ClInclude Include="FootSupportHull.h" />
     <ClCompile Include="FootSupport.cpp" />
     <ClInclude Include="FootstepPlanner.h" />
+    <ClInclude Include="FootstepRecovery.h" />
+    <ClCompile Include="FootstepRecovery.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
     <ClCompile Include="FootstepPlanner.cpp">
       <FloatingPointModel>Precise</FloatingPointModel>
     </ClCompile>

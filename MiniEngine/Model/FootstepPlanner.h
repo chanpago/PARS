@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "FootSupportHull.h"
+#include "FootstepRecovery.h"
 #include <array>
 #include <cstdint>
 
