@@ -1137,12 +1137,12 @@
         ]
       },
       "swingY": "limited",
-      "swingYLimit": 0.5235987901687622,
+      "swingYLimit": 0.03490658476948738,
       "swingZ": "limited",
-      "swingZMax": 0.3839724361896515,
-      "swingZMin": -0.3839724361896515,
+      "swingZMax": 0.01745329238474369,
+      "swingZMin": -0.01745329238474369,
       "twist": "limited",
-      "twistMax": 2.5237462520599365,
+      "twistMax": 2.96705961227417,
       "twistMin": -0.013962633907794952
     },
     {
@@ -1389,12 +1389,12 @@
         ]
       },
       "swingY": "limited",
-      "swingYLimit": 0.5235987901687622,
+      "swingYLimit": 0.03490658476948738,
       "swingZ": "limited",
-      "swingZMax": 0.3839724361896515,
-      "swingZMin": -0.3839724361896515,
+      "swingZMax": 0.01745329238474369,
+      "swingZMin": -0.01745329238474369,
       "twist": "limited",
-      "twistMax": 2.5237462520599365,
+      "twistMax": 2.96705961227417,
       "twistMin": -0.013962633907794952
     },
     {
