@@ -956,6 +956,15 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         {
             ImGui::SetTooltip(u8"어깨·위팔·아래팔·손의 PD 강성 배율입니다. 감쇠비는 유지하며 0%%에서는 팔 구동을 끕니다. 활성 물리 상태에서 적용됩니다.");
         }
+        bool fallingAnimationEnabled = mesh.IsFallingAnimationEnabled();
+        if (ImGui::Checkbox(u8"낙상 애니메이션 시퀀스", &fallingAnimationEnabled))
+        {
+            mesh.SetFallingAnimationEnabled(fallingAnimationEnabled);
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(u8"끄면 Falling Down 시퀀스를 생략하고 Idle을 기본 목표로 사용합니다. 손 뻗기와 착지 후 기상은 유지합니다.");
+        }
         PARS::FallArmSettings& fallArms = mesh.GetFallArmSettings();
         ImGui::Checkbox(u8"낙상 중 손 뻗기 / 버티기", &fallArms.enabled);
         if (fallArms.enabled)

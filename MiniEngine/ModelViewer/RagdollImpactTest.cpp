@@ -71,12 +71,13 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
     mesh.SetFootCandidateDebugVisible(true);
     mesh.SetArmDriveStrength(.1f);
+    mesh.SetFallingAnimationEnabled(false);
     if (!mesh.SetSkeletalMesh(idle))
     {
         m_Message = u8"더미 메시를 초기화하지 못했습니다.";
         return false;
     }
-    // 평소에는 Idle을 반복하고, 낙상과 착지 후 기상 클립을 순서대로 추종한다.
+    // 낙상 클립은 선택적으로 켤 수 있게 등록하고, 기본 상태에서는 Idle과 착지 후 기상을 사용한다.
     if (!mesh.SetAnimInstance(std::make_unique<AnimInstance>(mesh)) ||
         !mesh.GetAnimInstance().AddAnimation("Idle", idle) ||
         !mesh.GetAnimInstance().AddAnimation("Falling Down", falling) ||

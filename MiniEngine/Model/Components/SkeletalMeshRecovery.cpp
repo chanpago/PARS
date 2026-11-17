@@ -54,19 +54,37 @@ namespace PARS
         {
             return UpdateStandingUpAnimation(deltaTime);
         }
-        if (!IsActiveRagdoll() || !m_AutomaticRootSupport)
+        if (!IsFalling())
         {
             m_StandingUpStableTime = 0;
             m_StandingUpState = StandingUpState::None;
             return true;
         }
+        if (!m_FallingAnimationEnabled || m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount())
+        {
+            // 낙상 클립을 꺼도 물리 낙상과 착지 후 기상은 계속 처리한다.
+            if (IsFollowingFallingAnimation() || IsFollowingStandingUpAnimation())
+            {
+                // 재생 도중 끄거나 기상 중 다시 넘어지면 기본 Idle 목표로 돌아간다.
+                if (m_StandingIdleAnimationIndex < m_AnimInstance->GetAnimationCount())
+                {
+                    if (!m_AnimInstance->TransitionToAnimation(m_StandingIdleAnimationIndex, .05f, true))
+                    {
+                        m_PhysicsError = "Cannot return to idle after disabling the falling animation.";
+                        return false;
+                    }
+                    m_Ragdoll.ResetDriveTargetHistory();
+                }
+                else
+                {
+                    m_AnimInstance->SetPlaying(false);
+                }
+            }
+            return UpdateStandingUpAnimation(deltaTime);
+        }
         if (IsFollowingFallingAnimation())
         {
             return UpdateStandingUpAnimation(deltaTime);
-        }
-        if (m_RootSupportRelease == RootSupportRelease::None || m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount())
-        {
-            return true;
         }
 
         // 낙상은 한 번 재생하고 착지 후 기상을 기다린다. 위치와 회전 지지는 이미 해제된 상태다.
@@ -108,7 +126,10 @@ namespace PARS
             return true;
         }
 
-        if (m_AnimInstance->IsPlaying() || m_AnimInstance->IsBlending() || IsBlendingToKinematic())
+        // 낙상 시퀀스를 생략한 경우 반복 Idle의 종료를 기다리지 않는다.
+        const bool waitForClip = m_StandingUpState == StandingUpState::Kinematic ||
+            (m_FallingAnimationEnabled && IsFollowingFallingAnimation());
+        if ((waitForClip && m_AnimInstance->IsPlaying()) || m_AnimInstance->IsBlending() || IsBlendingToKinematic())
         {
             m_StandingUpStableTime = 0;
             return true;
@@ -130,12 +151,19 @@ namespace PARS
             float(Length(velocity)) <= m_RecoverySettings.maximumReturnSpeed;
         bool grounded = false;
         float groundHeight = -std::numeric_limits<float>::infinity();
+        const bool requireBodyContact = !m_FallingAnimationEnabled ||
+            m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount();
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
         for (size_t body = 0; body < m_Ragdoll.GetBodyCount(); ++body)
         {
             PhysicsGroundContact contact;
             if (m_Ragdoll.GetBodyGroundContact(body, contact))
             {
-                grounded = true;
+                // 클립의 종료 대기가 없을 때는 발만 닿은 채 기상 동작을 시작하지 않는다.
+                const bool footContact = body < nodes.size() &&
+                    (nodes[body] == support.feet[0].boneNode || nodes[body] == support.feet[1].boneNode);
+                grounded = grounded || !requireBodyContact || !footContact;
                 groundHeight = Max(groundHeight, contact.position.y);
             }
         }
@@ -360,7 +388,7 @@ namespace PARS
             return m_Ragdoll.SetRootSupported(!interruptedStandingUp, m_PhysicsError);
         }
         // 낙상은 전용 기상 경로에서 처리하므로 기존 서기 복귀 타이머에서 제외한다.
-        if (!IsActiveRagdoll() || IsFollowingFallingAnimation())
+        if (!IsActiveRagdoll() || IsFalling())
         {
             m_KinematicRecoveryTimer.Reset();
             return true;

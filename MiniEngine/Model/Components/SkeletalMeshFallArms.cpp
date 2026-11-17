@@ -181,7 +181,7 @@ void SkeletalMeshComponent::ApplyFallArmTargets(std::vector<Matrix4>& target, fl
     }
     const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
     const bool canProtect = m_AutomaticRootSupport && m_StandingUpState == StandingUpState::None;
-    const bool falling = canProtect && IsFollowingFallingAnimation() && m_RootSupportRelease != RootSupportRelease::None;
+    const bool falling = IsFalling();
     // B 이탈 유예 중에도 팔은 즉시 준비한다. 골반 지지와 낙상 클립 전환은 기존 판정을 따른다.
     const bool preparing = canProtect && m_RootSupportRelease == RootSupportRelease::None &&
         support.balance.zone == FootSupportZone::Outside;

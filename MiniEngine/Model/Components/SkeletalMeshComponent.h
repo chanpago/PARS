@@ -160,6 +160,19 @@ namespace PARS
             return m_RecoverySettings;
         }
         bool SetFallingAnimation(uint32_t animationIndex);
+        void SetFallingAnimationEnabled(bool enabled)
+        {
+            m_FallingAnimationEnabled = enabled;
+        }
+        bool IsFallingAnimationEnabled() const
+        {
+            return m_FallingAnimationEnabled;
+        }
+        bool IsFalling() const
+        {
+            return IsActiveRagdoll() && m_AutomaticRootSupport &&
+                m_StandingUpState == StandingUpState::None && m_RootSupportRelease != RootSupportRelease::None;
+        }
         bool IsFollowingFallingAnimation() const;
         bool SetStandingUpAnimation(uint32_t animationIndex, uint32_t idleAnimationIndex);
         bool IsFollowingStandingUpAnimation() const;
@@ -301,6 +314,7 @@ namespace PARS
         bool m_AutomaticRagdoll = false;
         bool m_PendingRecoveryImpact = false;
         bool m_FallArmsInitialized = false;
+        bool m_FallingAnimationEnabled = true;
         StandingUpState m_StandingUpState = StandingUpState::None;
     };
 }
