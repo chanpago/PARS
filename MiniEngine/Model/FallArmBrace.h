@@ -25,6 +25,7 @@ namespace PARS
         float forwardReachRatio = .85f;
         float backwardReachRatio = .30f;
         float outwardReachRatio = .18f;
+        // 접촉 전에는 몸통 기준 손 목표 변화에만 적용한다.
         float targetSpeed = 3.0f;
         float trackingStrength = .8f;
         float braceDriveScale = .65f;
@@ -79,6 +80,7 @@ namespace PARS
     {
     public:
         physx::PxTransform palm{physx::PxIdentity};
+        physx::PxTransform previousAnchor{physx::PxIdentity};
         physx::PxVec3 shoulder{0};
         physx::PxVec3 actualPalm{0};
         physx::PxVec3 solvedPalm{0};

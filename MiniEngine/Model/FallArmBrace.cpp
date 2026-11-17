@@ -244,6 +244,7 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
         const FallArmSample& arm = input.arms[side];
         const FallArmSetup& setup = arm.setup;
         FallArmTarget& target = m_Snapshot.arms[side];
+        const FallArmPhase previousPhase = target.phase;
         target.applied = false;
         target.touching = arm.touching;
         const PxTransform toPhysical = arm.actualAnchor * source[setup.anchorNode].getInverse();
@@ -305,6 +306,12 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
             }
             if (hasRequest)
             {
+                // 손이 지면에서 멀 때는 손바닥 면을 낙상 방향으로 향하게 한다.
+                // 팔 길이의 절반 이내로 접근하면 지면을 짚는 방향으로 점차 회전한다.
+                const PxVec3 groundNormal = requested.q.rotate(PxVec3(0, 1, 0));
+                const float clearance = PxMax(0.0f, groundNormal.dot(target.actualPalm - position));
+                const float facingWeight = PxClamp(clearance / (length * .5f), 0.0f, 1.0f);
+                requested.q = (requested.q * PxQuat(-PxHalfPi * facingWeight, PxVec3(1, 0, 0))).getNormalized();
                 KeepHorizontalReach(setup, shoulder.p, settings.reachRatio, requested);
                 target.phase = FallArmPhase::Reaching;
                 target.contactLostTime = 0;
@@ -314,9 +321,15 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
         {
             if (target.hasTarget)
             {
-                // 지면 후보가 바뀌어도 한 스텝의 목표 속도는 제한한다.
-                requested.p = Approach(target.palm.p, requested.p, settings.targetSpeed * deltaTime);
-                requested.q = BlendRotation(target.palm.q, requested.q, 1 - std::exp(-15 * deltaTime));
+                PxTransform previousPalm = target.palm;
+                if (previousPhase == FallArmPhase::Reaching && target.phase == FallArmPhase::Reaching)
+                {
+                    // 몸통 이동과 회전은 즉시 반영하고, 몸통 기준으로 팔을 뻗는 변화만 제한한다.
+                    previousPalm = arm.actualAnchor * target.previousAnchor.getInverse() * previousPalm;
+                }
+                // 접촉 중과 접촉 해제 유예 중에는 몸통에 따라 움직이지 않고 월드 접촉점을 유지한다.
+                requested.p = Approach(previousPalm.p, requested.p, settings.targetSpeed * deltaTime);
+                requested.q = BlendRotation(previousPalm.q, requested.q, 1 - std::exp(-15 * deltaTime));
             }
             target.palm = requested;
             target.hasTarget = true;
@@ -329,6 +342,7 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
             target.phase = FallArmPhase::Releasing;
             target.weight = PxMax(0.0f, target.weight - deltaTime / settings.blendOutDuration);
         }
+        target.previousAnchor = arm.actualAnchor;
         if (!target.hasTarget || target.weight <= 0)
         {
             target = {};
