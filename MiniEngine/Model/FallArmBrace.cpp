@@ -255,12 +255,12 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
         PxVec3 right = Horizontal(arm.actualAnchor.q.rotate(setup.rightInAnchor));
         if (!Normalize(right))
         {
-            right = PxVec3(direction.z, 0, -direction.x);
+            right = direction.cross(PxVec3(0, 1, 0));
         }
         PxVec3 forward = Horizontal(arm.actualAnchor.q.rotate(setup.forwardInAnchor));
         if (!Normalize(forward))
         {
-            forward = right.cross(PxVec3(0, 1, 0));
+            forward = PxVec3(0, 1, 0).cross(right);
         }
         const float opposite = PxMax(0.0f, -direction.dot(right) * sign);
         const float desiredWeight = reaching ? 1.0f - .65f * opposite : 0;

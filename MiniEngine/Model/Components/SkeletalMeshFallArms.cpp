@@ -86,7 +86,8 @@ void SkeletalMeshComponent::InitializeFallArms()
         return;
     }
     const PxVec3 up(0, 1, 0);
-    const PxVec3 forward = right.cross(up);
+    // PA와 같은 정면 기준을 쓴다. 왼쪽과 위쪽의 외적은 위쪽과 오른쪽의 외적과 같다.
+    const PxVec3 forward = up.cross(right);
     const std::vector<int>& bodies = m_Ragdoll.GetBoneNodes();
     for (size_t side = 0; side < m_FallArmSetups.size(); ++side)
     {
