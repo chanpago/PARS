@@ -47,7 +47,35 @@ namespace PARS
         const bool arm = name.find("shoulder") != std::string::npos || name.find("clavicle") != std::string::npos ||
             name.find("arm") != std::string::npos || name.find("hand") != std::string::npos ||
             name.find("wrist") != std::string::npos || name.find("elbow") != std::string::npos;
-        return arm ? m_ArmDriveStrength : 1.0f;
+        if (!arm)
+        {
+            return 1.0f;
+        }
+        const float scale = name.find("left") != std::string::npos ? m_ArmDriveScales[0] :
+            name.find("right") != std::string::npos ? m_ArmDriveScales[1] : 1.0f;
+        return m_ArmDriveStrength * scale;
+    }
+
+    bool Ragdoll::SetArmDriveScales(const std::array<float, 2>& scales)
+    {
+        for (float scale : scales)
+        {
+            if (!std::isfinite(scale) || scale < 0 || scale > 1)
+            {
+                return false;
+            }
+        }
+        if (m_ArmDriveScales == scales)
+        {
+            return true;
+        }
+        m_ArmDriveScales = scales;
+        if (IsActive())
+        {
+            // 배율 변경은 목표 회전의 이력을 끊지 않는다.
+            SetDrivesEnabled(m_DrivesEnabled);
+        }
+        return true;
     }
 
     bool Ragdoll::SetArmDriveStrength(float strength)

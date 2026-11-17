@@ -544,6 +544,9 @@ namespace PARS
 
     void SkeletalMeshComponent::DestroyPhysicsState()
     {
+        ResetFallArms();
+        m_FallArmsInitialized = false;
+        m_FallArmSetups = {};
         m_Ragdoll.Destroy();
         m_FootSupport.Reset();
         ResetRecovery();
@@ -729,6 +732,7 @@ namespace PARS
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
+        ResetFallArms();
         m_Ragdoll.SetDrivesEnabled(active);
         UpdatePhysicsPose();
         UpdateFootSupport();
@@ -810,6 +814,7 @@ namespace PARS
 
     void SkeletalMeshComponent::StopRagdoll()
     {
+        ResetFallArms();
         if (!IsRagdoll())
         {
             return;

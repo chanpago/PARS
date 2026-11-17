@@ -206,6 +206,13 @@
     <ClCompile Include="FootstepPlanner.cpp">
       <FloatingPointModel>Precise</FloatingPointModel>
     </ClCompile>
+    <ClInclude Include="FallArmBrace.h" />
+    <ClCompile Include="FallArmBrace.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
+    <ClCompile Include="Components\SkeletalMeshFallArms.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
     <ClInclude Include="FootstepIK.h" />
     <ClCompile Include="FootstepIK.cpp">
       <FloatingPointModel>Precise</FloatingPointModel>

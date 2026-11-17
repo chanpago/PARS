@@ -512,6 +512,23 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     {
         return;
     }
+    const PARS::FallArmSnapshot& protection = mesh.GetFallArmSnapshot();
+    for (const PARS::FallArmTarget& arm : protection.arms)
+    {
+        if (!arm.applied)
+        {
+            continue;
+        }
+        const PxU32 color = arm.phase == PARS::FallArmPhase::Bracing ? 0xff55ee88 : 0xffff9933;
+        lines.emplace_back(arm.shoulder, arm.elbow, color);
+        lines.emplace_back(arm.elbow, arm.solvedPalm, color);
+        lines.emplace_back(arm.actualPalm, arm.palm.p, color);
+        for (const PxVec3& axis : {PxVec3(.035f, 0, 0), PxVec3(0, .035f, 0), PxVec3(0, 0, .035f)})
+        {
+            lines.emplace_back(arm.palm.p - axis, arm.palm.p + axis, color);
+        }
+        lines.emplace_back(arm.palm.p, arm.palm.p + protection.direction * .2f, color);
+    }
     const PARS::FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
     Vector3 currentCenter(kZero);
     float currentMass = 0;
@@ -841,6 +858,21 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip(u8"어깨·위팔·아래팔·손의 PD 강성 배율입니다. 감쇠비는 유지하며 0%%에서는 팔 구동을 끕니다. 활성 물리 상태에서 적용됩니다.");
+        }
+        PARS::FallArmSettings& fallArms = mesh.GetFallArmSettings();
+        ImGui::Checkbox(u8"낙상 중 손 뻗기 / 버티기", &fallArms.enabled);
+        if (fallArms.enabled)
+        {
+            ImGui::SliderFloat(u8"팔 최대 뻗기 비율", &fallArms.reachRatio, .75f, .98f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderFloat(u8"손 접촉 후 팔 강도 배율", &fallArms.braceDriveScale, .2f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+            const PARS::FallArmSnapshot& protection = mesh.GetFallArmSnapshot();
+            for (size_t side = 0; side < protection.arms.size(); ++side)
+            {
+                const PARS::FallArmTarget& arm = protection.arms[side];
+                ImGui::Text(u8"%s: %s / 보정 %.0f%% / 실제 접촉 %s", side == 0 ? u8"왼팔" : u8"오른팔",
+                    PARS::FallArmPhaseLabel(arm.phase), arm.weight * 100, arm.touching ? "ON" : "OFF");
+            }
+            ImGui::TextUnformatted(u8"팔 목표 표시: 주황=뻗기, 초록=접촉 후 버티기");
         }
         ImGui::Checkbox(u8"골반 XZ 직접 PD 보조", &horizontalSettings.enabled);
         if (horizontalSettings.enabled)

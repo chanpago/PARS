@@ -92,10 +92,12 @@ bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
 LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
 {
     LegIKResult result;
-    const float upper = input.thighLength, lower = input.calfLength;
+    const float upper = input.thighLength;
+    const float lower = input.calfLength;
     if (!input.hip.isSane() || !input.knee.isSane() || !input.ankle.isSane() ||
         !input.targetSole.isSane() || !input.soleInBone.isSane() ||
-        !std::isfinite(upper) || !std::isfinite(lower) || upper <= 1e-5f || lower <= 1e-5f)
+        !std::isfinite(upper) || !std::isfinite(lower) || upper <= 1e-5f || lower <= 1e-5f ||
+        !std::isfinite(input.maximumReachRatio) || input.maximumReachRatio <= 0 || input.maximumReachRatio > 1)
     {
         return result;
     }
@@ -105,7 +107,8 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     // requested: 역산한 발목본의 목표 위치·회전
     const PxTransform requested = input.targetSole * input.soleInBone.getInverse();
 
-    PxVec3 sourceUpper = input.knee.p - input.hip.p, sourceLower = input.ankle.p - input.knee.p;
+    PxVec3 sourceUpper = input.knee.p - input.hip.p;
+    PxVec3 sourceLower = input.ankle.p - input.knee.p;
     if (!requested.isSane() || !Unit(sourceUpper) || !Unit(sourceLower))
     {
         return result;
@@ -136,12 +139,16 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     const bool animationBent = sourceBend.magnitude() > (upper + lower) * .001f;
 
 
-    PxVec3 bend = sourceBend;
+    PxVec3 bend = input.preferReferenceBend ? input.referenceBend : sourceBend;
     // 거의 펴진 애니메이션의 작은 오차로 무릎 방향이 뒤집히는 것을 피한다.
 
     // bend는 b0
     // direction은 고관절에서 새 목표 발목으로 향하는 단위벡터
-    if (animationBent && ProjectHint(bend, direction))
+    if (input.preferReferenceBend && ProjectHint(bend, direction))
+    {
+        result.hintSource = KneeHintSource::Reference;
+    }
+    else if (animationBent && ProjectHint(bend = sourceBend, direction))
     {
         result.hintSource = KneeHintSource::Animation;
     }
@@ -171,7 +178,9 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
 
     // 뼈 길이는 유지한다. 완전히 펴지거나 접히는 특이점에만 작은 계산 여유를 둔다.
     const float margin = PxMin((upper + lower) * 1e-4f, PxMin(upper, lower) * .1f);
-    const float distance = PxClamp(requestedDistance, PxAbs(upper - lower) + margin, upper + lower - margin);
+    const float minimumReach = PxAbs(upper - lower) + margin;
+    const float maximumReach = PxMax(minimumReach, (upper + lower) * input.maximumReachRatio - margin);
+    const float distance = PxClamp(requestedDistance, minimumReach, maximumReach);
 
     // 두 직각삼각형의 관계로 고관절 H에서 기준점 Q까지의 거리 a를 구함
     const double along = (double(upper) * upper - double(lower) * lower + double(distance) * distance) / (2 * distance);

@@ -480,6 +480,7 @@ namespace PARS
             m_Standby->SetQueryOwner(m_QueryOwner);
             m_Standby->SetCollisionEnabled(m_CollisionEnabled);
             m_Standby->SetArmDriveStrength(m_ArmDriveStrength);
+            m_Standby->SetArmDriveScales(m_ArmDriveScales);
             m_Standby->SetDrivesEnabled(simulate && m_DrivesEnabled);
             m_Standby->SetFootDrivenSupport(simulate && m_FootDrivenSupport);
             if (simulate && IsRootSupported() &&
@@ -506,6 +507,7 @@ namespace PARS
         candidate.SetQueryOwner(m_QueryOwner);
         candidate.SetCollisionEnabled(m_CollisionEnabled);
         candidate.SetArmDriveStrength(m_ArmDriveStrength);
+        candidate.SetArmDriveScales(m_ArmDriveScales);
         if (simulate)
         {
             candidate.SetArticulationVelocities(linear, angular);

@@ -11,6 +11,7 @@
 #include "../RagdollRecovery.h"
 #include "../StandingSupport.h"
 #include "../HorizontalBalance.h"
+#include "../FallArmBrace.h"
 
 namespace PARS
 {
@@ -93,6 +94,9 @@ namespace PARS
         bool BeginKinematicStandingUp(float groundHeight);
         bool BeginKinematicRecovery();
         bool UpdateKinematicRecoveryPose(float deltaTime);
+        void InitializeFallArms();
+        void ApplyFallArmTargets(std::vector<Math::Matrix4>& target, float deltaTime);
+        void ResetFallArms();
 
     public:
         AnimInstance& GetAnimInstance() const
@@ -186,6 +190,18 @@ namespace PARS
         {
             return m_ArmDriveStrength;
         }
+        FallArmSettings& GetFallArmSettings()
+        {
+            return m_FallArmSettings;
+        }
+        const FallArmSettings& GetFallArmSettings() const
+        {
+            return m_FallArmSettings;
+        }
+        const FallArmSnapshot& GetFallArmSnapshot() const
+        {
+            return m_FallArmBrace.GetSnapshot();
+        }
         const HorizontalBalanceSnapshot& GetHorizontalBalanceSnapshot() const
         {
             return m_HorizontalBalance.GetSnapshot();
@@ -252,6 +268,7 @@ namespace PARS
         KinematicRecoveryTimer m_KinematicRecoveryTimer;
         StandingSupport m_StandingSupport;
         HorizontalBalance m_HorizontalBalance;
+        FallArmBrace m_FallArmBrace;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
         std::vector<GraphNode> m_KinematicBlendSource;
@@ -265,6 +282,8 @@ namespace PARS
         RecoverySettings m_RecoverySettings;
         StandingSupportSettings m_StandingSupportSettings;
         HorizontalBalanceSettings m_HorizontalBalanceSettings;
+        FallArmSettings m_FallArmSettings;
+        std::array<FallArmSetup, 2> m_FallArmSetups;
         std::array<physx::PxTransform, 2> m_RecoverySoles{
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};
         RootSupportRelease m_RootSupportRelease = RootSupportRelease::None;
@@ -281,6 +300,7 @@ namespace PARS
         bool m_AutomaticRootSupport = false;
         bool m_AutomaticRagdoll = false;
         bool m_PendingRecoveryImpact = false;
+        bool m_FallArmsInitialized = false;
         StandingUpState m_StandingUpState = StandingUpState::None;
     };
 }

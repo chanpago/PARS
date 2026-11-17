@@ -153,6 +153,11 @@
     <ClInclude Include="FootstepPlanner.h" />
     <ClCompile Include="FootstepPlanner.cpp" />
     <ClInclude Include="FootstepIK.h" />
+    <ClInclude Include="FallArmBrace.h" />
+    <ClCompile Include="FallArmBrace.cpp" />
+    <ClCompile Include="Components\SkeletalMeshFallArms.cpp">
+      <Filter>Components</Filter>
+    </ClCompile>
     <ClCompile Include="FootstepIK.cpp" />
     <ClInclude Include="FootstepCollision.h" />
     <ClCompile Include="FootstepCollision.cpp" />

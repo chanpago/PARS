@@ -27,7 +27,10 @@ namespace PARS
         physx::PxVec3 previousBend{0};
         float thighLength = 0;
         float calfLength = 0;
+        // 팔 보호 동작은 팔꿈치 방향을 지정하고 완전 신전 전에 여유를 남긴다.
+        float maximumReachRatio = 1.0f;
         bool hasPreviousBend = false;
+        bool preferReferenceBend = false;
     };
 
     struct LegIKResult

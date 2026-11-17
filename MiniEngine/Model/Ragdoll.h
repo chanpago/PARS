@@ -138,6 +138,12 @@ namespace PARS
             return m_DrivesEnabled;
         }
         bool SetArmDriveStrength(float strength);
+        // 사용자 기본 강도에 곱하는 낙상 중 좌우 팔 배율이다.
+        bool SetArmDriveScales(const std::array<float, 2>& scales);
+        const std::array<float, 2>& GetArmDriveScales() const
+        {
+            return m_ArmDriveScales;
+        }
         float GetArmDriveStrength() const
         {
             return m_ArmDriveStrength;
@@ -272,6 +278,7 @@ namespace PARS
         int m_SupportBody = -1;
         float m_RootSupportWeight = 0;
         float m_ArmDriveStrength = 1.0f;
+        std::array<float, 2> m_ArmDriveScales{1.0f, 1.0f};
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;
         physx::PxVec3 m_HorizontalSupportForce{0};

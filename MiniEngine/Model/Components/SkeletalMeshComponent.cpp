@@ -98,6 +98,8 @@ namespace PARS
             }
         }
         m_Ragdoll.Swap(candidate);
+        ResetFallArms();
+        m_FallArmsInitialized = false;
         m_PhysicsSkeleton = std::move(skeleton);
         m_PhysicsAsset = std::make_unique<const PhysicsAsset>(asset);
         m_FootSupport.OnPhysicsAssetChanged(*m_PhysicsAsset);
@@ -126,6 +128,7 @@ namespace PARS
         }
         instance->Initialize(m_SkeletalMesh);
         m_AnimInstance = std::move(instance);
+        ResetFallArms();
         m_FallingAnimationIndex = UINT32_MAX;
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
@@ -161,6 +164,7 @@ namespace PARS
         m_FootstepCollision = {};
         if (!m_Ragdoll.IsActive())
         {
+            ResetFallArms();
             return;
         }
 
@@ -192,6 +196,7 @@ namespace PARS
 
         if (m_PhysicsMode == PhysicsAnimationMode::PassiveRagdoll)
         {
+            ResetFallArms();
             return;
         }
 
@@ -232,6 +237,7 @@ namespace PARS
                 if (evaluated)
                 {
                     UpdateHorizontalBalance(deltaTime);
+                    ApplyFallArmTargets(target, deltaTime);
                 }
             }
             if (!evaluated || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
@@ -240,6 +246,7 @@ namespace PARS
                 // 골반의 힘/토크 지지를 제거하면서 목표 갱신 오류 메시지는 보존한다.
                 m_FootstepIK.Reset();
                 m_FootstepCollision = {};
+                ResetFallArms();
                 m_Ragdoll.SetDrivesEnabled(false);
                 std::string supportError;
                 m_Ragdoll.SetRootSupported(false, supportError);
@@ -248,6 +255,7 @@ namespace PARS
         }
         else
         {
+            ResetFallArms();
             if (!UpdateKinematicRecoveryPose(deltaTime))
             {
                 return;
