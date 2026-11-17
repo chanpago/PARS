@@ -1,6 +1,7 @@
 ﻿#include "SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
+#include "../FootstepPoseValidation.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -403,7 +404,7 @@ namespace PARS
             const FootIKLegInput& leg = input.legs[side];
             const std::array<int, 4> chain{leg.anchorNode, leg.hipNode, leg.kneeNode, leg.ankleNode};
             const std::array<PxTransform, 4> frames{leg.actualAnchor, solved.hip, solved.knee, solved.ankle};
-            std::array<Matrix4, 4> bodies;
+            std::array<int, 4> bodies;
             for (size_t index = 0; index < chain.size(); ++index)
             {
                 const int body = m_PhysicsAsset->FindBody(m_PhysicsSkeleton.names[chain[index]]);
@@ -411,30 +412,9 @@ namespace PARS
                 {
                     return false;
                 }
-                const PxTransform& frame = frames[index];
-                bodies[index] = Matrix4(OrthogonalTransform(
-                    Quaternion(DirectX::XMVectorSet(frame.q.x, frame.q.y, frame.q.z, frame.q.w)),
-                    Vector3(frame.p.x, frame.p.y, frame.p.z))) * m_PhysicsAsset->bodies[body].GetLocalTransform();
+                bodies[index] = body;
             }
-            for (size_t index = 0; index < 3; ++index)
-            {
-                const int joint = m_PhysicsAsset->FindConstraint(m_PhysicsSkeleton.names[chain[index]],
-                    m_PhysicsSkeleton.names[chain[index + 1]]);
-                if (joint < 0)
-                {
-                    return false;
-                }
-                const PhysicsConstraint& constraint = m_PhysicsAsset->constraints[joint];
-                const Quaternion raw = EvaluateJointDriveTarget(constraint, bodies[index], bodies[index + 1], false);
-                const Quaternion limited = m_Ragdoll.UsesArticulation() ?
-                    ClampArticulationDriveTarget(constraint, raw) : ClampD6DriveTarget(constraint, raw);
-                const float dot = PxClamp(PxAbs(DirectX::XMVectorGetX(DirectX::XMVector4Dot(raw, limited))), 0.0f, 1.0f);
-                if (!std::isfinite(dot) || 2 * std::acos(dot) > .01f)
-                {
-                    return false;
-                }
-            }
-            return true;
+            return IsFootstepPoseWithinJointLimits(*m_PhysicsAsset, m_Ragdoll.UsesArticulation(), bodies, frames);
         };
         const Vector3 actorForward = GetOwner().GetActorTransform().GetBasis() * Vector3(0, 0, 1);
         const PxVec3 forward(float(actorForward.GetX()), float(actorForward.GetY()), float(actorForward.GetZ()));
@@ -451,6 +431,15 @@ namespace PARS
         }
         m_FootstepCollision.elapsedMilliseconds = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - started).count();
+        for (size_t side = 0; side < step.feet.size(); ++side)
+        {
+            if (step.feet[side].IsInProgress())
+            {
+                m_FootSupport.ReportRecoveryPath(side, step.feet[side].target.position,
+                    m_FootstepCollision.status == FootstepCollisionStatus::Clear &&
+                    !m_FootstepCollision.reachLimited && !m_FootstepCollision.jointLimited);
+            }
+        }
     }
 
     void SkeletalMeshComponent::UpdateFootCandidateDebugColors()

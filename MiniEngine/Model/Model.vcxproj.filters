@@ -228,4 +228,11 @@
     <ClInclude Include="CharacterImpact.h" />
     <ClInclude Include="Components\CharacterImpactComponent.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="FootstepRecovery.h" />
+    <ClInclude Include="FootstepLandingQuery.h" />
+    <ClInclude Include="FootstepPoseValidation.h" />
+    <ClCompile Include="FootstepRecovery.cpp" />
+    <ClCompile Include="FootstepLandingQuery.cpp" />
+  </ItemGroup>
 </Project>

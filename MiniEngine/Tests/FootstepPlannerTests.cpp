@@ -1063,8 +1063,11 @@ namespace
     }
 }
 
+void TestFootstepRecovery();
+
 void TestFootstepPlanner()
 {
+    TestFootstepRecovery();
     checks = 0;
     TestPredictionAndTrajectory();
     TestImpactSelection();

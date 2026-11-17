@@ -9,6 +9,15 @@ namespace
 {
     constexpr float MinimumStepDistance = 1e-5f;
 
+    void AssignTarget(FootstepCommand& command, const FootstepTarget& target)
+    {
+        command.target = target;
+        // 영역 도형은 이번 틱의 후보에만 보관한다. 경로 검사에서 명령을 복사할 때 힙 할당을 반복하지 않는다.
+        command.target.recovery.reachable = {};
+        command.target.recovery.capture.clear();
+        command.target.recovery.intersections = {};
+    }
+
     float LiftHeight(const FootstepMotion& motion, float elapsed)
     {
         const float t = PxClamp(elapsed / (.5f * motion.duration), 0.0f, 1.0f);
@@ -237,6 +246,89 @@ namespace
         return result;
     }
 
+    FootstepTarget MakeRecoveryTarget(const FootstepInput& input, const FootstepSettings& settings,
+        const FootstepSnapshot& state, size_t side, bool needsStep, FootstepTarget normal)
+    {
+        if (!settings.recovery.enabled || !normal.valid || !input.feet[0].reach.available ||
+            !input.feet[1].reach.available || (input.active && !input.feet[1 - side].grounded) || state.groundNormal.y < .995f)
+        {
+            return normal;
+        }
+        const FootstepCommand& command = state.feet[side];
+        FootstepRecoveryInput request;
+        request.movingFoot = side;
+        request.com = input.com;
+        request.velocity = input.velocity;
+        request.groundHeight = state.groundPosition.y;
+        request.forward = PxVec3(-input.supportRight.z, 0, input.supportRight.x).getNormalized();
+        request.normalTarget = normal.position;
+        request.preferred = PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime,
+            request.groundHeight, input.com.z + input.velocity.z * settings.landingPredictionTime) +
+            PxVec3(input.feet[side].stanceOffset.x, 0, input.feet[side].stanceOffset.z) * settings.stanceScale;
+        request.stepping = needsStep || command.IsInProgress();
+        request.locked = command.IsInProgress() && command.motion.landingTargetLocked;
+        request.lockedTarget = command.target.position;
+        request.previousMode = command.IsInProgress() ? command.target.recovery.mode : FootstepMode::Normal;
+        request.hasRejectedTarget = command.IsInProgress() && command.target.recovery.pathRejected && !request.locked;
+        request.rejectedTarget = command.target.position;
+        const float transfer = (std::max)(settings.recovery.transferTime, settings.supportConfirmationTime);
+        request.firstStepTime = command.IsInProgress() ?
+            (std::max)(input.fixedDeltaTime, GetFootstepRemainingTime(command) +
+                (command.hasTakenOff ? 0 : transfer)) : settings.stepDuration * 1.5f + transfer;
+        request.followingStepTime = settings.stepDuration * 1.5f + transfer;
+        for (size_t foot = 0; foot < 2; ++foot)
+        {
+            request.feet[foot] = input.feet[foot].reach;
+            FootstepReachInput& reach = request.feet[foot];
+            reach.position = input.feet[foot].position;
+            reach.stepOrigin = state.feet[foot].IsInProgress() ? state.feet[foot].startPosition : reach.position;
+            reach.maximumDistance = settings.maximumStepLength;
+            const float sign = (input.feet[foot].stanceOffset - input.feet[1 - foot].stanceOffset).dot(input.supportRight);
+            reach.outward = input.supportRight * (sign >= 0 ? 1.0f : -1.0f);
+            const float idleWidth = std::abs(sign);
+            reach.minimumWidth = (std::max)(idleWidth * settings.minimumStanceWidthRatio,
+                settings.preventCrossing ? settings.crossingOffset : 0.0f);
+        }
+        request.acceptsTarget = [&input, side](const PxVec3& position) -> bool
+        {
+            return input.acceptsLanding && input.acceptsLanding(side, position);
+        };
+        normal.recovery = SelectFootstepRecovery(request, settings.recovery);
+        normal.recovery.pathRejected = command.IsInProgress() && command.target.recovery.pathRejected;
+        if (!normal.recovery.hasTarget && command.IsInProgress())
+        {
+            // 새 후보가 거절되면 진행 중인 교차 목표를 일반 목표로 덮어쓰지 않는다.
+            normal.position = command.target.position;
+            normal.raw = command.target.raw;
+            normal.recovery.mode = command.target.recovery.mode;
+            normal.travelDistance = HorizontalDistance(input.feet[side].position, normal.position);
+            normal.separationDistance = HorizontalDistance(input.feet[1 - side].position, normal.position);
+        }
+        if (normal.recovery.hasTarget)
+        {
+            normal.recovery.pathRejected = request.locked ? command.target.recovery.pathRejected :
+                (request.hasRejectedTarget && (normal.recovery.target - request.rejectedTarget).magnitudeSquared() < .0001f);
+            normal.position = normal.recovery.target;
+            normal.travelDistance = HorizontalDistance(input.feet[side].position, normal.position);
+            normal.separationDistance = HorizontalDistance(input.feet[1 - side].position, normal.position);
+        }
+        if (normal.recovery.mode != FootstepMode::Normal)
+        {
+            if (normal.recovery.hasTarget)
+            {
+                // 교차 분기의 최종 목표에 일반 딛기의 COM·간격 제한을 다시 적용하지 않는다.
+                normal.raw = request.preferred;
+            }
+            normal.crossingLimited = false;
+            normal.stanceWidthLimited = false;
+            normal.landingCom.clamped = normal.landingCom.raw;
+            normal.landingCom.enabled = false;
+            normal.landingCom.limited = false;
+            normal.landingCom.direction = FootstepLandingDirection::None;
+        }
+        return normal;
+    }
+
     int SelectRequestedFoot(const FootstepInput& input, const FootstepSnapshot& state)
     {
         if (input.requestedFoot >= 0 && input.requestedFoot < 2)
@@ -247,6 +339,10 @@ namespace
         if (state.IsInProgress() && !input.hasImpact)
         {
             return state.requestedFoot;
+        }
+        if (!input.hasImpact && state.followupFoot >= 0 && state.remainingRecoverySteps > 0)
+        {
+            return state.followupFoot;
         }
         if (state.hasImpact)
         {
@@ -481,6 +577,8 @@ void FootstepPlanner::Abort(FootstepReason reason)
     }
     m_Snapshot.aborted = true;
     m_Snapshot.reason = reason;
+    m_Snapshot.followupFoot = -1;
+    m_Snapshot.remainingRecoverySteps = 0;
     m_Snapshot.candidates = {};
     m_Snapshot.loadTransfer = {};
     for (FootstepCommand& command : m_Snapshot.feet)
@@ -589,6 +687,11 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.startCom = {};
     state.candidates = {};
     state.loadTransfer.ready = false;
+    if (!settings.recovery.enabled)
+    {
+        state.followupFoot = -1;
+        state.remainingRecoverySteps = 0;
+    }
     for (FootstepCommand& command : state.feet)
     {
         command.justStarted = false;
@@ -621,8 +724,29 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.hasImpact = false;
         state.hasGroundPlane = false;
         state.requestedFoot = -1;
+        state.followupFoot = -1;
+        state.remainingRecoverySteps = 0;
         state.reason = !input.active ? FootstepReason::Inactive : !input.automaticSupport ?
             FootstepReason::AutomaticSupportRequired : FootstepReason::IdleRequired;
+        if (!input.active && input.automaticSupport && input.idleAnimation && settings.recovery.enabled &&
+            input.hasCom && input.hasVelocity && input.feet[0].reach.available &&
+            input.feet[1].reach.available && ValidSettings(settings))
+        {
+            // 양발 대기 중에는 영역만 준비하며, 자세 탐색이나 이동 명령은 실행하지 않는다.
+            UpdateGroundPlane(input, state);
+            if (!state.hasGroundPlane && input.hull.size() >= 3 && std::isfinite(input.projectionHeight))
+            {
+                // 키네마틱 Idle의 미세한 바닥 간격은 레이 지면으로 미리 본다. 실제 접촉을 생성하지 않는다.
+                state.groundPosition = PxVec3(input.com.x, input.projectionHeight, input.com.z);
+                state.groundNormal = PxVec3(0, 1, 0);
+                state.hasGroundPlane = true;
+            }
+            for (size_t side = 0; side < state.candidates.size(); ++side)
+            {
+                state.candidates[side] = MakeRecoveryTarget(input, settings, state, side, false,
+                    MakeTarget(input, settings, state, side));
+            }
+        }
         return;
     }
     if (!ValidSettings(settings) || !std::isfinite(input.fixedDeltaTime) || input.fixedDeltaTime <= 0)
@@ -640,6 +764,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     UpdateGroundPlane(input, state);
     if (input.hasImpact && input.impactPosition.isFinite())
     {
+        state.followupFoot = -1;
+        state.remainingRecoverySteps = 0;
         state.lastImpactPosition = input.impactPosition;
         state.hasImpact = true;
     }
@@ -688,11 +814,38 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 command.motion.hasLandingError = std::isfinite(command.motion.landingError);
                 command.motion.remainingDistance = command.motion.landingError;
                 ++state.landingCount;
+                if (command.target.recovery.hasTarget && command.target.recovery.modelFeasible &&
+                    command.target.recovery.requiredSteps > 1)
+                {
+                    state.followupFoot = static_cast<int>(1 - side);
+                    state.remainingRecoverySteps = command.target.recovery.requiredSteps - 1;
+                }
+                else
+                {
+                    state.followupFoot = -1;
+                    state.remainingRecoverySteps = 0;
+                }
             }
         }
         state.candidates[side] = MakeTarget(input, settings, state, side);
     }
     state.requestedFoot = SelectRequestedFoot(input, state);
+    if (state.requestedFoot < 0 && settings.recovery.enabled &&
+        input.feet[0].reach.available && input.feet[1].reach.available)
+    {
+        float greatestDistance = MinimumStepDistance;
+        for (size_t side = 0; side < state.candidates.size(); ++side)
+        {
+            const PxVec3 preferred = state.candidates[side].landingCom.raw +
+                input.feet[side].stanceOffset * settings.stanceScale;
+            const float distance = HorizontalDistance(input.feet[side].position, preferred);
+            if (state.candidates[side].valid && distance > greatestDistance)
+            {
+                greatestDistance = distance;
+                state.requestedFoot = static_cast<int>(side);
+            }
+        }
+    }
     FootstepLandingDirection previousDirection = FootstepLandingDirection::None;
     if (state.requestedFoot >= 0 && state.requestedFoot < static_cast<int>(state.feet.size()))
     {
@@ -711,6 +864,25 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.needsStep = state.hasPrediction && validArea && !IsInsideFootSupportHull(input.hull, state.predictedCom);
     state.reason = !state.hasPrediction ? FootstepReason::InvalidCom : !validArea ? FootstepReason::NoSupportArea :
         state.needsStep ? FootstepReason::ValidTarget : FootstepReason::PredictedInside;
+    if (state.requestedFoot >= 0 && state.requestedFoot < 2)
+    {
+        const size_t side = static_cast<size_t>(state.requestedFoot);
+        // 시작 COM 보정 결과를 판단 계층의 입력으로 사용하지 않는다.
+        const bool rawNeedsStep = state.startCom.valid && validArea && !IsInsideFootSupportHull(input.hull, state.startCom.raw);
+        state.candidates[side] = MakeRecoveryTarget(input, settings, state, side,
+            rawNeedsStep || state.needsStep, state.candidates[side]);
+        const FootstepRecoverySnapshot& recovery = state.candidates[side].recovery;
+        if (rawNeedsStep && recovery.hasTarget)
+        {
+            state.needsStep = true;
+            state.reason = FootstepReason::ValidTarget;
+        }
+        if (!rawNeedsStep && !state.IsInProgress())
+        {
+            state.followupFoot = -1;
+            state.remainingRecoverySteps = 0;
+        }
+    }
     UpdateLoadTransfer(input, settings, consecutiveSample, state);
     for (size_t side = 0; side < state.feet.size(); ++side)
     {
@@ -755,7 +927,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             command.takeoffPosition = foot.position;
             command.initialTarget = candidate.position;
             command.initialDistance = candidate.travelDistance;
-            command.target = candidate;
+            AssignTarget(command, candidate);
             command.phase = foot.grounded ? FootstepPhase::AwaitingTakeoff : FootstepPhase::Airborne;
             command.hasTakenOff = !foot.grounded;
             command.justStarted = true;
@@ -777,7 +949,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
         if (!command.motion.landingTargetLocked && candidate.valid)
         {
-            command.target = candidate;
+            AssignTarget(command, candidate);
             if (candidate.landingCom.enabled && candidate.landingCom.direction != FootstepLandingDirection::None)
             {
                 command.landingComDirection = candidate.landingCom.direction;
@@ -801,6 +973,25 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     {
         state.reason = state.requestedFoot >= 0 ? state.feet[state.requestedFoot].reason :
             state.hasGroundPlane ? FootstepReason::NoFootRequest : FootstepReason::NoGroundPlane;
+    }
+}
+
+void FootstepPlanner::ReportRecoveryPath(size_t side, const PxVec3& target, bool accepted)
+{
+    if (side >= m_Snapshot.feet.size())
+    {
+        return;
+    }
+    FootstepCommand& command = m_Snapshot.feet[side];
+    if (command.IsInProgress() && command.target.recovery.hasTarget &&
+        (target - command.target.position).magnitudeSquared() < 1e-8f)
+    {
+        command.target.recovery.pathRejected = !accepted;
+        if (m_Snapshot.candidates[side].recovery.hasTarget &&
+            (m_Snapshot.candidates[side].position - target).magnitudeSquared() < 1e-8f)
+        {
+            m_Snapshot.candidates[side].recovery.pathRejected = !accepted;
+        }
     }
 }
 

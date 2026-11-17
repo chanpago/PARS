@@ -55,6 +55,9 @@ public:
     void RenderDebugLines(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
         const std::vector<physx::PxDebugLine>& lines, bool throughGeometry = false);
+    void RenderDebugTriangles(GraphicsContext& context, const Math::Camera& camera,
+        const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
+        const std::vector<physx::PxDebugTriangle>& triangles);
 
 private:
     bool AddMapBox(std::vector<MapBox>& boxes, const physx::PxTransform& pose,
@@ -82,6 +85,7 @@ private:
     GraphicsPSO m_PSO;
     GraphicsPSO m_LinePSO;
     GraphicsPSO m_OverlayLinePSO;
+    GraphicsPSO m_RegionPSO;
     std::vector<MapBox> m_MapBoxes;
     uint64_t m_PvdConnectDeadline = 0;
     uint64_t m_PvdNextAttempt = 0;

@@ -2223,6 +2223,12 @@ void ModelViewer::RenderScene(void)
         {
             m_PhysicsDemo->RenderSpheres(gfxContext, m_Camera, viewport, scissor,
                 m_ImpactTest->GetProjectiles(), RagdollImpactTest::SphereRadius);
+            if (PARS::Character* dummy = m_ImpactTest->GetDummy())
+            {
+                std::vector<physx::PxDebugTriangle> regions;
+                m_DummyFootSoles.BuildRegionTriangles(dummy->GetMesh(), regions);
+                m_PhysicsDemo->RenderDebugTriangles(gfxContext, m_Camera, viewport, scissor, regions);
+            }
             std::vector<physx::PxDebugLine> lines;
             m_ImpactTest->BuildLines(lines);
             m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);

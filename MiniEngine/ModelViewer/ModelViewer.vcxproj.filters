@@ -292,4 +292,9 @@
   <ItemGroup>
     <ClCompile Include="CharacterImpactUI.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Shaders\FootstepRegionPS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+  </ItemGroup>
 </Project>

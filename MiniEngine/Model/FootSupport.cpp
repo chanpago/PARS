@@ -2,6 +2,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicsWorld.h"
 #include "PhysicsPose.h"
+#include "FootstepLandingQuery.h"
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -273,6 +274,17 @@ void PARS::FootSupport::UpdateBufferGrace(bool enabled)
         PhysicsWorld::FixedDeltaTime, m_Snapshot.balance);
 }
 
+void PARS::FootSupport::ReportRecoveryPath(size_t side, const PxVec3& target, bool accepted)
+{
+    m_FootstepPlanner.ReportRecoveryPath(side, target, accepted);
+    const FootstepSnapshot& step = m_FootstepPlanner.GetSnapshot();
+    if (side < step.feet.size())
+    {
+        m_Snapshot.footstep.feet[side].target.recovery.pathRejected = step.feet[side].target.recovery.pathRejected;
+        m_Snapshot.footstep.candidates[side].recovery.pathRejected = step.candidates[side].recovery.pathRejected;
+    }
+}
+
 void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorld& physics)
 {
     const uint64_t step = physics.GetStepCount();
@@ -396,6 +408,16 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     // 플래너에 넘길 현재 상태를 FootstepInput에 모음
     // mesh에서 정보를 가져온다.
     FootstepInput input;
+    FootstepLandingQuery landingQuery;
+    std::array<FootstepReachInput, 2> reaches;
+    if (m_FootstepSettings.recovery.enabled && idle && mesh.UsesAutomaticRootSupport())
+    {
+        landingQuery.Prepare(mesh, m_Snapshot, reaches);
+        input.acceptsLanding = [&landingQuery](size_t side, const PxVec3& position) -> bool
+        {
+            return landingQuery.Accept(side, position);
+        };
+    }
     input.active = mesh.IsActiveRagdoll();
     input.automaticSupport = mesh.UsesAutomaticRootSupport();
     input.idleAnimation = idle;
@@ -479,6 +501,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         // foot은 이미 측정한 발 정보를 읽는 참조이고 target은 그 정보를 채워 넣을 입력 구조체의 참조
         const FootSoleSample& foot = m_Snapshot.feet[side];
         FootstepFootInput& target = input.feet[side];
+        target.reach = reaches[side];
         target.available = foot.available;
         target.hasContactSample = foot.contact.hasSample;
         target.grounded = foot.contact.grounded;

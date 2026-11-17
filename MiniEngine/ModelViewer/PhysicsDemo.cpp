@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "CompiledShaders/PhysicsDemoVS.h"
 #include "CompiledShaders/PhysicsDemoPS.h"
+#include "CompiledShaders/FootstepRegionPS.h"
 #include <cfloat>
 #include <cmath>
 #include <Windows.h>
@@ -204,6 +205,11 @@ bool PhysicsDemo::Startup(MapId map)
     m_OverlayLinePSO.SetDepthStencilState(DepthStateDisabled);
     m_OverlayLinePSO.SetRenderTargetFormat(g_SceneColorBuffer.GetFormat(), DXGI_FORMAT_UNKNOWN);
     m_OverlayLinePSO.Finalize();
+    m_RegionPSO = m_PSO;
+    m_RegionPSO.SetBlendState(BlendTraditional);
+    m_RegionPSO.SetDepthStencilState(DepthStateReadOnly);
+    m_RegionPSO.SetPixelShader(g_pFootstepRegionPS, sizeof(g_pFootstepRegionPS));
+    m_RegionPSO.Finalize();
     return true;
 }
 
@@ -590,6 +596,37 @@ void PhysicsDemo::RenderDebugLines(GraphicsContext& context, const Math::Camera&
     context.SetRootSignature(m_RootSignature);
     context.SetPipelineState(throughGeometry ? m_OverlayLinePSO : m_LinePSO);
     context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+    context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
+    context.SetDynamicVB(0, static_cast<UINT>(vertices.size()), sizeof(Vertex), vertices.data());
+    context.Draw(static_cast<UINT>(vertices.size()));
+}
+
+void PhysicsDemo::RenderDebugTriangles(GraphicsContext& context, const Math::Camera& camera,
+    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
+    const std::vector<PxDebugTriangle>& triangles)
+{
+    if (triangles.empty())
+    {
+        return;
+    }
+    std::vector<Vertex> vertices;
+    vertices.reserve(triangles.size() * 3);
+    for (const PxDebugTriangle& triangle : triangles)
+    {
+        const PxVec3 color(static_cast<float>((triangle.color0 >> 16) & 255) / 255,
+            static_cast<float>((triangle.color0 >> 8) & 255) / 255,
+            static_cast<float>(triangle.color0 & 255) / 255);
+        vertices.push_back({triangle.pos0, PxVec3(0, 1, 0), color});
+        vertices.push_back({triangle.pos1, PxVec3(0, 1, 0), color});
+        vertices.push_back({triangle.pos2, PxVec3(0, 1, 0), color});
+    }
+    context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ, true);
+    context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
+    context.SetViewportAndScissor(viewport, scissor);
+    context.SetRootSignature(m_RootSignature);
+    context.SetPipelineState(m_RegionPSO);
+    context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
     context.SetDynamicVB(0, static_cast<UINT>(vertices.size()), sizeof(Vertex), vertices.data());
     context.Draw(static_cast<UINT>(vertices.size()));

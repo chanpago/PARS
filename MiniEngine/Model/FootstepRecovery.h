@@ -90,6 +90,7 @@ namespace PARS
         FootstepMode mode = FootstepMode::Normal;
         FootstepRecoveryStatus status = FootstepRecoveryStatus::Unavailable;
         uint32_t steps = 0;
+        uint32_t requiredSteps = 0;
         uint32_t poseChecks = 0;
         float predictionTime = 0;
         uint32_t capturePieceCount = 0;

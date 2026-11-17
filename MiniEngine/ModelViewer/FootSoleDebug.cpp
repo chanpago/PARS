@@ -25,6 +25,47 @@ namespace
     constexpr PxU32 LandingComHysteresisColor = 0xffffaa33;
     constexpr PxU32 LandingComPreviewColor = 0xff889099;
     constexpr PxU32 IKStepColor = 0xffffff33, IKSupportColor = 0xff44dd88, KneeHintColor = 0xffcc88ff;
+    constexpr PxU32 RecoveryModeColors[] = {0xff4488ff, 0xffff9933, 0xffbb66ff};
+    constexpr PxU32 RecoveryCaptureColor = 0xff33dd77;
+    constexpr PxU32 RecoverySelectedColor = 0xffeeffff;
+
+    const PARS::FootstepRecoverySnapshot* VisibleRecovery(const PARS::SkeletalMeshComponent& mesh)
+    {
+        const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
+        if (step.requestedFoot < 0 || step.requestedFoot > 1)
+        {
+            for (const PARS::FootstepTarget& candidate : step.candidates)
+            {
+                if (candidate.recovery.status == PARS::FootstepRecoveryStatus::Preview)
+                {
+                    return &candidate.recovery;
+                }
+            }
+            return nullptr;
+        }
+        const PARS::FootstepRecoverySnapshot& recovery = step.candidates[step.requestedFoot].recovery;
+        return recovery.status == PARS::FootstepRecoveryStatus::Unavailable ? nullptr : &recovery;
+    }
+
+    void RegionTriangles(std::vector<PxDebugTriangle>& triangles, const PARS::FootstepPolygon& polygon,
+        PxU32 color, float lift)
+    {
+        for (size_t index = 1; index + 1 < polygon.size(); ++index)
+        {
+            const PxVec3 offset(0, lift, 0);
+            triangles.emplace_back(polygon[0] + offset, polygon[index] + offset, polygon[index + 1] + offset, color);
+        }
+    }
+
+    void RegionLines(std::vector<PxDebugLine>& lines, const PARS::FootstepPolygon& polygon,
+        PxU32 color, float lift)
+    {
+        for (size_t index = 0; index < polygon.size(); ++index)
+        {
+            const PxVec3 offset(0, lift, 0);
+            lines.emplace_back(polygon[index] + offset, polygon[(index + 1) % polygon.size()] + offset, color);
+        }
+    }
 
     const char* FootLabel(int foot)
     {
@@ -407,15 +448,25 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
 {
     const PARS::FootstepCollisionSnapshot& prediction = mesh.GetFootstepCollisionSnapshot();
     const PARS::FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
+    std::string decisionText;
+    const PARS::FootstepRecoverySnapshot* decision = VisibleRecovery(mesh);
+    if (decision)
+    {
+        char message[384];
+        std::snprintf(message, sizeof(message), u8"[딛기 판단] %s · %s · 최대 %u스텝 · %.3fms\n",
+            PARS::FootstepModeLabel(decision->mode), PARS::FootstepRecoveryStatusLabel(decision->status),
+            decision->steps, decision->elapsedMilliseconds);
+        decisionText = message;
+    }
     if (!support.footstep.IsInProgress())
     {
-        return u8"[더미] 목표 경로 예측: 이동 명령 없음";
+        return decisionText + u8"[더미] 목표 경로 예측: 이동 명령 없음";
     }
     if (prediction.status == PARS::FootstepCollisionStatus::Unavailable ||
         prediction.status == PARS::FootstepCollisionStatus::Inactive ||
         prediction.revision != support.footstep.revision || prediction.completedStep != support.footstep.completedStep)
     {
-        return u8"[더미] 목표 경로 예측: 검사 불가 (유효한 다리 자세·충돌 형상 필요)";
+        return decisionText + u8"[더미] 목표 경로 예측: 검사 불가 (유효한 다리 자세·충돌 형상 필요)";
     }
 
     const PARS::FootstepAvoidanceSnapshot& avoidance = mesh.GetFootstepAvoidanceSnapshot();
@@ -428,7 +479,7 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
         u8"[더미] %s · %s · 후보 %u개 · 전체 %u구간 / %u쌍 · %.3fms · 추종 오차 %.1fcm",
         route, state, avoidance.candidatesChecked, avoidance.totalIntervals, avoidance.totalQueries,
         prediction.elapsedMilliseconds, prediction.maximumTrackingError * 100);
-    std::string text = summary;
+    std::string text = decisionText + summary;
     if (prediction.assumesTakeoff)
     {
         text += u8" (들기 완료 후 이륙 가정)";
@@ -530,6 +581,27 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
         lines.emplace_back(arm.palm.p, arm.palm.p + protection.direction * .2f, color);
     }
     const PARS::FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
+    const PARS::FootstepRecoverySnapshot* recovery = VisibleRecovery(mesh);
+    if (m_ShowRecoveryRegions && recovery)
+    {
+        for (const PARS::FootstepPolygon& piece : recovery->capture)
+        {
+            RegionLines(lines, piece, RecoveryCaptureColor, .009f);
+        }
+        for (size_t mode = 0; mode < 3; ++mode)
+        {
+            RegionLines(lines, recovery->reachable[mode], RecoveryModeColors[mode], .012f + static_cast<float>(mode) * .002f);
+        }
+        if (recovery->hasTarget)
+        {
+            for (const PARS::FootstepPolygon& piece : recovery->intersections[static_cast<size_t>(recovery->mode)])
+            {
+                RegionLines(lines, piece, RecoverySelectedColor, .02f);
+            }
+            Point(lines, ToMath(recovery->target + PxVec3(0, .025f, 0)), RecoverySelectedColor, .04f);
+        }
+        Point(lines, ToMath(recovery->icp + PxVec3(0, .03f, 0)), RecoveryCaptureColor, .03f);
+    }
     Vector3 currentCenter(kZero);
     float currentMass = 0;
     const bool hasCurrentCom = mesh.GetRagdoll().GetCenterOfMass(currentCenter, currentMass);
@@ -730,6 +802,31 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     }
 }
 
+void FootSoleDebug::BuildRegionTriangles(const PARS::SkeletalMeshComponent& mesh,
+    std::vector<PxDebugTriangle>& triangles) const
+{
+    const PARS::FootstepRecoverySnapshot* recovery = VisibleRecovery(mesh);
+    if (!m_Visible || !m_ShowRecoveryRegions || !recovery)
+    {
+        return;
+    }
+    for (const PARS::FootstepPolygon& piece : recovery->capture)
+    {
+        RegionTriangles(triangles, piece, RecoveryCaptureColor, .006f);
+    }
+    for (size_t mode = 0; mode < 3; ++mode)
+    {
+        RegionTriangles(triangles, recovery->reachable[mode], RecoveryModeColors[mode], .01f + static_cast<float>(mode) * .002f);
+    }
+    if (recovery->hasTarget)
+    {
+        for (const PARS::FootstepPolygon& piece : recovery->intersections[static_cast<size_t>(recovery->mode)])
+        {
+            RegionTriangles(triangles, piece, RecoverySelectedColor, .018f);
+        }
+    }
+}
+
 void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings)
 {
     if (!ImGui::CollapsingHeader(u8"발바닥 / 지면 투영", ImGuiTreeNodeFlags_DefaultOpen))
@@ -923,6 +1020,46 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             ImGui::TextWrapped(u8"골반을 직접 들어 올리는 힘 없이 지지 다리의 자세와 관절 토크로 높이를 조절합니다. 지지발 IK 목표에는 골반 오차 보정이 포함되므로 실제 발바닥 고정점과 다를 수 있습니다.");
         }
         ImGui::Checkbox(u8"발딛기 판단·목표 3D 표시", &m_ShowFootstep);
+        ImGui::Checkbox(u8"회복·일반·교차 영역 색칠", &m_ShowRecoveryRegions);
+        ImGui::Checkbox(u8"회복 영역으로 일반 / 교차 선택", &settings.recovery.enabled);
+        if (settings.recovery.enabled)
+        {
+            ImGui::TextUnformatted(u8"초록: 회복 / 파랑: 일반 / 주황: 앞 교차 / 보라: 뒤 교차 / 흰색: 선택 교집합");
+            ImGui::TextWrapped(u8"색칠된 도달 영역은 현재 골반·다리 길이·발 크기의 근사입니다. 실제 PA 관절 제한·착지 자세와 이동 경로는 후보별로 검사합니다.");
+            int maximumSteps = static_cast<int>(settings.recovery.maximumSteps);
+            if (ImGui::SliderInt(u8"회복 예측 최대 발딛기 수", &maximumSteps, 1, 3))
+            {
+                settings.recovery.maximumSteps = static_cast<uint32_t>(maximumSteps);
+            }
+            ImGui::SliderFloat(u8"하중 이동 예측 시간", &settings.recovery.transferTime, .01f, .3f, "%.3fs");
+            ImGui::SliderFloat(u8"앞 교차 경계 각도", &settings.recovery.frontAngleDegrees, 0.0f, 60.0f, "%.1f도");
+            ImGui::SliderFloat(u8"뒤 교차 경계 각도", &settings.recovery.backAngleDegrees, 0.0f, 60.0f, "%.1f도");
+            const PARS::FootstepRecoverySnapshot* decision = VisibleRecovery(mesh);
+            if (decision)
+            {
+                ImGui::Text(u8"%s / %s / 최대 %u스텝 / %.3fms", PARS::FootstepModeLabel(decision->mode),
+                    PARS::FootstepRecoveryStatusLabel(decision->status), decision->steps, decision->elapsedMilliseconds);
+                ImGui::Text(u8"겹침 면적: 일반 %.1f / 앞 %.1f / 뒤 %.1f cm2",
+                    decision->overlapAreas[0] * 10000, decision->overlapAreas[1] * 10000, decision->overlapAreas[2] * 10000);
+                ImGui::Text(u8"착지 자세 %u회 / 영역 %u조각 / 착지 예측 %.3fs / 경로 %s",
+                    decision->poseChecks, decision->capturePieceCount, decision->predictionTime,
+                    decision->pathRejected ? u8"미확보" : u8"아래 충돌 예측 참조");
+                if (decision->hasTarget)
+                {
+                    ImGui::Text(u8"선택 목표의 필요 스텝: %u / 착지 자세 통과 %s / 검사 예산 %s",
+                        decision->requiredSteps, decision->poseRejected ? u8"일부 거절 후 선택" : "ON",
+                        decision->budgetExhausted ? u8"도달" : "OK");
+                }
+                else if (decision->status != PARS::FootstepRecoveryStatus::Preview)
+                {
+                    ImGui::TextUnformatted(u8"새 착지 후보 미확보: 기존 목표 유지 / 성공으로 판정하지 않음");
+                }
+                if (decision->usesFutureReachApproximation)
+                {
+                    ImGui::TextWrapped(u8"후속 스텝은 현재 도달 범위가 지지발을 따라 이동한다고 근사합니다. 실제 착지와 하중 인계 후 다시 판단합니다.");
+                }
+            }
+        }
         ImGui::Checkbox(u8"발별 착지 윤곽 표시", &m_ShowLandingFoot);
         ImGui::TextWrapped(u8"밝은 파랑 윤곽: 최종 착지 발바닥 위치·크기 / 화살표: 발끝 방향. 새 목표 계산이 잠시 멈춰도 마지막 착지 목표를 유지합니다.");
         ImGui::TextWrapped(u8"사유: %s", PARS::FootstepReasonLabel(step.reason));
@@ -955,10 +1092,10 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         {
             ImGui::SetTooltip(u8"착지 목표가 이 간격보다 좁을 때만 바깥으로 보정합니다. 0%%이면 간격 보정을 끕니다.");
         }
-        ImGui::Checkbox(u8"시작·착지 COM 예측의 지지발 방향 제한", &settings.landingComClampEnabled);
+        ImGui::Checkbox(u8"일반 딛기의 시작·착지 COM 방향 제한", &settings.landingComClampEnabled);
         ImGui::SliderFloat(u8"부채꼴 경계 선택 유지 반각 (도)", &settings.landingComClampHysteresisDegrees,
             0.0f, 30.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::TextWrapped(u8"시작·착지 COM 예측을 지지발 금지 구간의 가까운 경계로 보정합니다. 발딛기 시작 여부도 청록색 보정점으로 판단하며, 이등분선 근처에서는 진행 중인 명령의 이전 경계를 유지합니다.");
+        ImGui::TextWrapped(u8"기존 일반 딛기 후보에 적용하는 COM 보정입니다. 회복 영역 판단과 교차 후보는 보정 전 실제 COM·속도를 사용합니다. 회복 영역 선택을 끄면 기존 청록색 보정점으로 시작을 판단합니다.");
         ImGui::DragFloat(u8"이륙 후 발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"최소 들기 높이 (m)", &settings.minimumLiftHeight, .005f, .01f, .3f, "%.3f");
         ImGui::DragFloat(u8"착지 수평 목표 고정 진행률", &settings.landingLockProgress, .01f, .5f, 1.0f, "%.2f");

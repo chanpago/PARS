@@ -18,12 +18,19 @@ namespace
         uint32_t enabled = settings.landingComClampEnabled ? 1 : 0;
         CommandLineArgs::GetInteger(L"landingcomclamp", enabled);
         settings.landingComClampEnabled = enabled != 0;
+        uint32_t recoveryEnabled = settings.recovery.enabled ? 1 : 0;
+        CommandLineArgs::GetInteger(L"footsteprecovery", recoveryEnabled);
+        settings.recovery.enabled = recoveryEnabled != 0;
+        uint32_t recoverySteps = settings.recovery.maximumSteps;
+        CommandLineArgs::GetInteger(L"footsteprecoverysteps", recoverySteps);
+        settings.recovery.maximumSteps = physx::PxClamp(recoverySteps, uint32_t(1), uint32_t(3));
         CommandLineArgs::GetFloat(L"landingcomhysteresis", settings.landingComClampHysteresisDegrees);
         report << "landing_com_clamp=" << settings.landingComClampEnabled
             << " region=opposite_grounded_sole"
             << " hysteresis=" << settings.landingComClampHysteresisDegrees
             << " minimum_stance_ratio=" << settings.minimumStanceWidthRatio
             << " prevent_crossing=" << settings.preventCrossing << std::endl;
+        report << "footstep_recovery=" << settings.recovery.enabled << " maximum_steps=" << settings.recovery.maximumSteps << std::endl;
     }
 
     void WriteLandingComHeader(std::ostream& stream)
@@ -32,7 +39,9 @@ namespace
             "enabled,limited,direction,prediction_valid,com_x,com_z,start_x,start_z,raw_x,raw_z,clamped_x,clamped_z,"
             "target_x,target_z,sole_x,sole_y,sole_z,leg_contacts,recovery_count,return_count,landing_error,falling,standing_up,"
             "region_valid,support_foot,region_origin_x,region_origin_z,front_ray_x,front_ray_z,back_ray_x,back_ray_z,region_width_degrees,"
-            "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step\n";
+            "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
+            "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
+            "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -47,6 +56,7 @@ namespace
         {
             const PARS::FootstepCommand& command = support.footstep.feet[side];
             const PARS::FootstepComPrediction& landing = support.footstep.candidates[side].landingCom;
+            const PARS::FootstepRecoverySnapshot& decision = support.footstep.candidates[side].recovery;
             const Math::Vector3 sole(support.feet[side].soleWorld.GetW());
             // 현재 예측, 잠긴 명령 목표, 실제 발바닥과 회복 결과를 서로 다른 열로 기록한다.
             stream << frame << ',' << support.completedPhysicsStep << ',' << side
@@ -70,7 +80,12 @@ namespace
                 << ',' << start.raw.x << ',' << start.raw.z << ',' << start.limited
                 << ',' << start.region.valid << ',' << start.region.supportFoot
                 << ',' << PARS::IsInsideFootstepLandingRegion(start.region, support.footstep.predictedCom)
-                << ',' << support.footstep.needsStep << '\n';
+                << ',' << support.footstep.needsStep
+                << ',' << static_cast<int>(decision.mode) << ',' << static_cast<int>(decision.status)
+                << ',' << decision.hasTarget << ',' << decision.modelFeasible << ',' << decision.poseChecks
+                << ',' << decision.elapsedMilliseconds << ',' << decision.overlapAreas[0]
+                << ',' << decision.overlapAreas[1] << ',' << decision.overlapAreas[2]
+                << ',' << decision.capturePieceCount << ',' << decision.steps << ',' << decision.pathRejected << '\n';
         }
     }
 

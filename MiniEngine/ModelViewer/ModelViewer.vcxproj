@@ -141,6 +141,11 @@
       <ShaderType>Pixel</ShaderType>
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
     </FxCompile>
+    <FxCompile Include="Shaders\FootstepRegionPS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+      <VariableName>g_p%(Filename)</VariableName>
+      <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Core/Core.vcxproj">

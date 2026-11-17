@@ -8,7 +8,7 @@ using namespace physx;
 
 namespace
 {
-    constexpr uint32_t CircleVertices = 16;
+    constexpr uint32_t CircleVertices = 12;
     constexpr float Epsilon = 1e-6f;
     constexpr uint32_t MaximumCapturePieces = 13;
 
@@ -57,17 +57,84 @@ namespace
 
     FootstepPolygon Sum(const FootstepPolygon& a, const FootstepPolygon& b)
     {
-        FootstepPolygon points;
-        points.reserve(a.size() * b.size());
-        for (const PxVec3& first : a)
+        if (a.size() < 3 || b.size() < 3)
         {
-            for (const PxVec3& second : b)
+            return {};
+        }
+        size_t startA = 0;
+        size_t startB = 0;
+        for (size_t index = 1; index < a.size(); ++index)
+        {
+            if (a[index].z < a[startA].z || (a[index].z == a[startA].z && a[index].x < a[startA].x))
             {
-                points.emplace_back(first.x + second.x, first.y, first.z + second.z);
+                startA = index;
             }
         }
-        // 두 볼록 다각형의 민코프스키 합에만 볼록 껍질을 사용한다.
-        return BuildFootSupportHull(std::move(points));
+        for (size_t index = 1; index < b.size(); ++index)
+        {
+            if (b[index].z < b[startB].z || (b[index].z == b[startB].z && b[index].x < b[startB].x))
+            {
+                startB = index;
+            }
+        }
+        FootstepPolygon result;
+        result.reserve(a.size() + b.size());
+        size_t first = 0;
+        size_t second = 0;
+        while (first < a.size() || second < b.size())
+        {
+            const PxVec3 point = a[(startA + first) % a.size()] + b[(startB + second) % b.size()];
+            result.emplace_back(point.x, a[0].y, point.z);
+            const PxVec3 edgeA = a[(startA + first + 1) % a.size()] - a[(startA + first) % a.size()];
+            const PxVec3 edgeB = b[(startB + second + 1) % b.size()] - b[(startB + second) % b.size()];
+            const float turn = Cross(edgeA, edgeB);
+            const bool advanceA = second == b.size() || (first < a.size() && turn >= -1e-8f);
+            const bool advanceB = first == a.size() || (second < b.size() && turn <= 1e-8f);
+            if (advanceA)
+            {
+                ++first;
+            }
+            if (advanceB)
+            {
+                ++second;
+            }
+        }
+        return result;
+    }
+
+    void RemoveContained(std::vector<FootstepPolygon>& pieces)
+    {
+        std::vector<FootstepPolygon> result;
+        for (size_t source = 0; source < pieces.size(); ++source)
+        {
+            bool contained = false;
+            for (size_t other = 0; other < pieces.size() && !contained; ++other)
+            {
+                if (source == other || pieces[other].empty() || pieces[source].empty())
+                {
+                    continue;
+                }
+                bool inside = true;
+                for (const PxVec3& point : pieces[source])
+                {
+                    inside = inside && IsInsideFootSupportHull(pieces[other], point);
+                }
+                if (inside)
+                {
+                    bool equal = true;
+                    for (const PxVec3& point : pieces[other])
+                    {
+                        equal = equal && IsInsideFootSupportHull(pieces[source], point);
+                    }
+                    contained = !equal || other < source;
+                }
+            }
+            if (!contained && !pieces[source].empty())
+            {
+                result.push_back(pieces[source]);
+            }
+        }
+        pieces = std::move(result);
     }
 
     FootstepPolygon Circle(const PxVec3& center, float radius)
@@ -370,6 +437,15 @@ float PARS::FootstepUnionArea(const std::vector<FootstepPolygon>& polygons)
     // 각 다각형의 경계 중 다른 조각 내부에 가려지지 않은 구간만 적분한다.
     // 수직 단면마다 모든 변을 재검색하는 방식보다 비용의 증가를 제한할 수 있다.
     double area2 = 0;
+    PxVec3 origin(0);
+    for (const FootstepPolygon& polygon : polygons)
+    {
+        if (!polygon.empty())
+        {
+            origin = polygon.front();
+            break;
+        }
+    }
     for (size_t source = 0; source < polygons.size(); ++source)
     {
         const FootstepPolygon& polygon = polygons[source];
@@ -377,7 +453,6 @@ float PARS::FootstepUnionArea(const std::vector<FootstepPolygon>& polygons)
         {
             continue;
         }
-        const PxVec3 origin = polygons.front().empty() ? polygon.front() : polygons.front().front();
         for (size_t index = 0; index < polygon.size(); ++index)
         {
             const PxVec3& a = polygon[index];
@@ -446,16 +521,32 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     if (!settings.enabled || input.movingFoot > 1 || !input.com.isFinite() || !input.velocity.isFinite() ||
         !std::isfinite(height) || height < .05f || !std::isfinite(input.firstStepTime) || input.firstStepTime <= 0 ||
         !std::isfinite(input.followingStepTime) || input.followingStepTime <= 0 ||
-        settings.maximumSteps < 1 || settings.maximumSteps > 3 || settings.maximumPoseChecks == 0 ||
+        settings.maximumSteps < 1 || settings.maximumSteps > 3 || settings.maximumPoseChecks == 0 || settings.maximumPoseChecks > 6 ||
         !std::isfinite(settings.frontAngleDegrees) || settings.frontAngleDegrees < 0 || settings.frontAngleDegrees >= 80 ||
         !std::isfinite(settings.backAngleDegrees) || settings.backAngleDegrees < 0 || settings.backAngleDegrees >= 80 ||
         !std::isfinite(settings.clearance) || settings.clearance < 0 ||
         !std::isfinite(settings.switchAreaRatio) || settings.switchAreaRatio < 0 ||
-        !input.forward.isFinite() || std::abs(input.forward.magnitudeSquared() - 1) > .01f)
+        !input.forward.isFinite() || std::abs(input.forward.magnitudeSquared() - 1) > .01f ||
+        !input.normalTarget.isFinite() || !input.preferred.isFinite() || !input.lockedTarget.isFinite() ||
+        static_cast<size_t>(input.previousMode) > 2)
     {
         return result;
     }
     const size_t side = input.movingFoot;
+    for (const FootstepReachInput& foot : input.feet)
+    {
+        if (foot.sole.size() < 3 || foot.sole.size() > 8 || !foot.position.isFinite())
+        {
+            return result;
+        }
+        for (const PxVec3& corner : foot.sole)
+        {
+            if (!corner.isFinite())
+            {
+                return result;
+            }
+        }
+    }
     const float omega = std::sqrt(9.81f / height);
     const float exponent = omega * input.firstStepTime;
     if (exponent > 12 || input.feet[1 - side].sole.size() < 3)
@@ -479,18 +570,18 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     const FootstepPolygon future = Transform(input.feet[1 - side].sole, 1 - growth,
         PxVec3(growth * result.icp.x, input.groundHeight, growth * result.icp.z));
     const uint32_t maximum = input.stepping ? settings.maximumSteps : 1;
+    std::array<std::vector<FootstepPolygon>, 3> captureBySteps;
     for (uint32_t steps = 1; steps <= maximum; ++steps)
     {
         result.steps = steps;
-        result.capture.clear();
         for (const FootstepPolygon& error : errors[side])
         {
-            result.capture.push_back(Sum(future, Transform(error, -1, PxVec3(0, input.groundHeight, 0))));
+            captureBySteps[steps - 1].push_back(Sum(future,
+                Transform(error, -1, PxVec3(0, input.groundHeight, 0))));
         }
-        EvaluateIntersections(result);
-        result.modelFeasible = result.overlapAreas[0] > 0 || result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0;
         if (steps == maximum)
         {
+            result.capture = captureBySteps[steps - 1];
             break;
         }
         std::array<std::vector<FootstepPolygon>, 2> nextErrors;
@@ -511,9 +602,13 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
                     nextErrors[stance].push_back(Sum(Transform(Sum(displacement, remainingError), discount, PxVec3(0)), pressure));
                 }
             }
+            RemoveContained(nextErrors[stance]);
         }
         errors = std::move(nextErrors);
     }
+    RemoveContained(result.capture);
+    EvaluateIntersections(result);
+    result.modelFeasible = result.overlapAreas[0] > 0 || result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0;
     result.capturePieceCount = static_cast<uint32_t>(result.capture.size());
     result.usesFutureReachApproximation = result.steps > 1;
     if (result.capturePieceCount > MaximumCapturePieces)
@@ -537,6 +632,17 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     else
     {
         SelectTarget(input, settings, result);
+    }
+    if (result.hasTarget && result.modelFeasible)
+    {
+        for (uint32_t steps = 1; steps <= maximum; ++steps)
+        {
+            if (Contains(captureBySteps[steps - 1], result.target))
+            {
+                result.requiredSteps = steps;
+                break;
+            }
+        }
     }
     result.elapsedMilliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
     return result;

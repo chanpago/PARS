@@ -68,6 +68,7 @@ namespace PARS
     struct FootstepFootInput
     {
     public:
+        FootstepReachInput reach;
         physx::PxVec3 position{0};
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
@@ -84,14 +85,15 @@ namespace PARS
     struct FootstepInput
     {
     public:
+        std::function<bool(size_t, const physx::PxVec3&)> acceptsLanding;
         std::vector<physx::PxVec3> hull;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
+        std::array<FootstepFootInput, 2> feet;
         physx::PxVec3 com{0};
         physx::PxVec3 velocity{0};
         physx::PxVec3 supportRight{1, 0, 0};
         physx::PxVec3 impactPosition{0};
-        std::array<FootstepFootInput, 2> feet;
         FootSupportZone zone = FootSupportZone::Invalid;
         float projectionHeight = 0;
         float fixedDeltaTime = 0;
@@ -151,6 +153,7 @@ namespace PARS
     struct FootstepTarget
     {
     public:
+        FootstepRecoverySnapshot recovery;
         FootstepReason reason = FootstepReason::NotEvaluated;
         physx::PxVec3 raw{0};
         physx::PxVec3 position{0};
@@ -199,10 +202,10 @@ namespace PARS
     public:
         uint64_t startedStep = 0;
         uint64_t takeoffStep = 0;
+        FootstepTarget target;
         physx::PxVec3 startPosition{0};
         physx::PxVec3 initialTarget{0};
         physx::PxVec3 takeoffPosition{0};
-        FootstepTarget target;
         FootstepMotion motion;
         float initialDistance = 0;
         FootstepPhase phase = FootstepPhase::Idle;
@@ -249,6 +252,8 @@ namespace PARS
         FootstepLoadTransfer loadTransfer;
         FootstepReason reason = FootstepReason::Inactive;
         int requestedFoot = -1;
+        int followupFoot = -1;
+        uint32_t remainingRecoverySteps = 0;
         bool hasPrediction = false;
         bool needsStep = false;
         bool hasGroundPlane = false;
@@ -261,6 +266,7 @@ namespace PARS
     public:
         void Reset();
         void Update(const FootstepInput& input, const FootstepSettings& settings);
+        void ReportRecoveryPath(size_t side, const physx::PxVec3& target, bool accepted);
 
     private:
         void Abort(FootstepReason reason);
