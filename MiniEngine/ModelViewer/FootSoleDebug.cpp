@@ -25,7 +25,7 @@ namespace
     constexpr PxU32 LandingComHysteresisColor = 0xffffaa33;
     constexpr PxU32 LandingComPreviewColor = 0xff889099;
     constexpr PxU32 IKStepColor = 0xffffff33, IKSupportColor = 0xff44dd88, KneeHintColor = 0xffcc88ff;
-    constexpr PxU32 RecoveryModeColors[] = {0xff4488ff, 0xffff9933, 0xffbb66ff};
+    constexpr PxU32 RecoveryModeColors[] = {0xff000000, 0xffff9933, 0xffbb66ff};
     constexpr PxU32 RecoveryCaptureColor = 0xff33dd77;
     constexpr PxU32 RecoverySelectedColor = 0xffeeffff;
 
@@ -810,11 +810,14 @@ void FootSoleDebug::BuildRegionTriangles(const PARS::SkeletalMeshComponent& mesh
     {
         return;
     }
+    // 진한 검정 면을 먼저 칠해 초록 회복 영역과 겹치는 부분도 볼 수 있게 한다.
+    const size_t normalMode = static_cast<size_t>(PARS::FootstepMode::Normal);
+    RegionTriangles(triangles, recovery->reachable[normalMode], RecoveryModeColors[normalMode], .01f);
     for (const PARS::FootstepPolygon& piece : recovery->capture)
     {
         RegionTriangles(triangles, piece, RecoveryCaptureColor, .006f);
     }
-    for (size_t mode = 0; mode < 3; ++mode)
+    for (size_t mode = static_cast<size_t>(PARS::FootstepMode::FrontCross); mode < recovery->reachable.size(); ++mode)
     {
         RegionTriangles(triangles, recovery->reachable[mode], RecoveryModeColors[mode], .01f + static_cast<float>(mode) * .002f);
     }
@@ -1033,7 +1036,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         ImGui::Checkbox(u8"회복 영역으로 일반 / 교차 선택", &settings.recovery.enabled);
         if (settings.recovery.enabled)
         {
-            ImGui::TextUnformatted(u8"초록: 회복 / 파랑: 일반 / 주황: 앞 교차 / 보라: 뒤 교차 / 흰색: 선택 교집합");
+            ImGui::TextUnformatted(u8"초록: 회복 / 검정: 일반 / 주황: 앞 교차 / 보라: 뒤 교차 / 흰색: 선택 교집합");
             ImGui::TextWrapped(u8"색칠된 도달 영역은 현재 골반·다리 길이·발 크기의 근사입니다. 실제 PA 관절 제한·착지 자세와 이동 경로는 후보별로 검사합니다.");
             int maximumSteps = static_cast<int>(settings.recovery.maximumSteps);
             if (ImGui::SliderInt(u8"회복 예측 최대 발딛기 수", &maximumSteps, 1, 3))
