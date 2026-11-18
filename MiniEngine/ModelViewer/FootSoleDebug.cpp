@@ -27,7 +27,8 @@ namespace
     constexpr PxU32 IKStepColor = 0xffffff33, IKSupportColor = 0xff44dd88, KneeHintColor = 0xffcc88ff;
     constexpr PxU32 RecoveryModeColors[] = {0xff000000, 0xffff9933, 0xffbb66ff};
     constexpr PxU32 RecoveryCaptureColor = 0xff33dd77;
-    constexpr PxU32 RecoverySelectedColor = 0xffeeffff;
+    constexpr PxU32 RecoveryTargetColor = 0xffeeffff;
+    constexpr size_t NormalModeIndex = static_cast<size_t>(PARS::FootstepMode::Normal);
 
     const PARS::FootstepRecoverySnapshot* VisibleRecovery(const PARS::SkeletalMeshComponent& mesh)
     {
@@ -47,7 +48,26 @@ namespace
         return recovery.status == PARS::FootstepRecoveryStatus::Unavailable ? nullptr : &recovery;
     }
 
-    void RegionTriangles(std::vector<PxDebugTriangle>& triangles, const PARS::FootstepPolygon& polygon,
+    bool ShowNormalReachRegion(const PARS::FootstepRecoverySnapshot& recovery)
+    {
+        if (recovery.status == PARS::FootstepRecoveryStatus::Preview)
+        {
+            // 대기 중에는 착지 자세를 검사하지 않으므로 일반 영역과 회복 영역의 겹침을 사용한다.
+            return recovery.overlapAreas[NormalModeIndex] > 0.0f;
+        }
+        return recovery.hasTarget && recovery.mode == PARS::FootstepMode::Normal && recovery.modelFeasible;
+    }
+
+    const char* RecoveryDecisionLabel(const PARS::FootstepRecoverySnapshot& recovery)
+    {
+        if (recovery.hasTarget)
+        {
+            return PARS::FootstepModeLabel(recovery.mode);
+        }
+        return ShowNormalReachRegion(recovery) ? u8"일반 검토" : u8"교차 검토";
+    }
+
+    void AppendRegion(std::vector<PxDebugTriangle>& triangles, const PARS::FootstepPolygon& polygon,
         PxU32 color, float lift)
     {
         for (size_t index = 1; index + 1 < polygon.size(); ++index)
@@ -57,13 +77,37 @@ namespace
         }
     }
 
-    void RegionLines(std::vector<PxDebugLine>& lines, const PARS::FootstepPolygon& polygon,
+    void AppendRegion(std::vector<PxDebugLine>& lines, const PARS::FootstepPolygon& polygon,
         PxU32 color, float lift)
     {
         for (size_t index = 0; index < polygon.size(); ++index)
         {
             const PxVec3 offset(0, lift, 0);
             lines.emplace_back(polygon[index] + offset, polygon[(index + 1) % polygon.size()] + offset, color);
+        }
+    }
+
+    template <typename Primitive>
+    void AppendVisibleRecoveryRegions(std::vector<Primitive>& primitives, const PARS::FootstepRecoverySnapshot& recovery,
+        float captureLift, float reachLift)
+    {
+        const bool showNormal = ShowNormalReachRegion(recovery);
+        if (showNormal)
+        {
+            // 검정 위에 초록을 그려 두 영역이 겹치는 부분을 드러낸다.
+            AppendRegion(primitives, recovery.reachable[NormalModeIndex], RecoveryModeColors[NormalModeIndex], reachLift);
+        }
+        for (const PARS::FootstepPolygon& piece : recovery.capture)
+        {
+            AppendRegion(primitives, piece, RecoveryCaptureColor, captureLift);
+        }
+        if (!showNormal)
+        {
+            for (size_t mode = static_cast<size_t>(PARS::FootstepMode::FrontCross); mode < recovery.reachable.size(); ++mode)
+            {
+                const float lift = reachLift + static_cast<float>(mode) * .002f;
+                AppendRegion(primitives, recovery.reachable[mode], RecoveryModeColors[mode], lift);
+            }
         }
     }
 
@@ -454,7 +498,7 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     {
         char message[384];
         std::snprintf(message, sizeof(message), u8"[딛기 판단] %s · %s · 최대 %u스텝 · %.3fms\n",
-            PARS::FootstepModeLabel(decision->mode), PARS::FootstepRecoveryStatusLabel(decision->status),
+            RecoveryDecisionLabel(*decision), PARS::FootstepRecoveryStatusLabel(decision->status),
             decision->steps, decision->elapsedMilliseconds);
         decisionText = message;
     }
@@ -584,21 +628,10 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     const PARS::FootstepRecoverySnapshot* recovery = VisibleRecovery(mesh);
     if (m_ShowRecoveryRegions && recovery)
     {
-        for (const PARS::FootstepPolygon& piece : recovery->capture)
-        {
-            RegionLines(lines, piece, RecoveryCaptureColor, .009f);
-        }
-        for (size_t mode = 0; mode < 3; ++mode)
-        {
-            RegionLines(lines, recovery->reachable[mode], RecoveryModeColors[mode], .012f + static_cast<float>(mode) * .002f);
-        }
+        AppendVisibleRecoveryRegions(lines, *recovery, .009f, .012f);
         if (recovery->hasTarget)
         {
-            for (const PARS::FootstepPolygon& piece : recovery->intersections[static_cast<size_t>(recovery->mode)])
-            {
-                RegionLines(lines, piece, RecoverySelectedColor, .02f);
-            }
-            Point(lines, ToMath(recovery->target + PxVec3(0, .025f, 0)), RecoverySelectedColor, .04f);
+            Point(lines, ToMath(recovery->target + PxVec3(0, .025f, 0)), RecoveryTargetColor, .04f);
         }
         Point(lines, ToMath(recovery->icp + PxVec3(0, .03f, 0)), RecoveryCaptureColor, .03f);
     }
@@ -810,24 +843,7 @@ void FootSoleDebug::BuildRegionTriangles(const PARS::SkeletalMeshComponent& mesh
     {
         return;
     }
-    // 진한 검정 면을 먼저 칠해 초록 회복 영역과 겹치는 부분도 볼 수 있게 한다.
-    const size_t normalMode = static_cast<size_t>(PARS::FootstepMode::Normal);
-    RegionTriangles(triangles, recovery->reachable[normalMode], RecoveryModeColors[normalMode], .01f);
-    for (const PARS::FootstepPolygon& piece : recovery->capture)
-    {
-        RegionTriangles(triangles, piece, RecoveryCaptureColor, .006f);
-    }
-    for (size_t mode = static_cast<size_t>(PARS::FootstepMode::FrontCross); mode < recovery->reachable.size(); ++mode)
-    {
-        RegionTriangles(triangles, recovery->reachable[mode], RecoveryModeColors[mode], .01f + static_cast<float>(mode) * .002f);
-    }
-    if (recovery->hasTarget)
-    {
-        for (const PARS::FootstepPolygon& piece : recovery->intersections[static_cast<size_t>(recovery->mode)])
-        {
-            RegionTriangles(triangles, piece, RecoverySelectedColor, .018f);
-        }
-    }
+    AppendVisibleRecoveryRegions(triangles, *recovery, .006f, .01f);
 }
 
 void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings)
@@ -1036,7 +1052,6 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         ImGui::Checkbox(u8"회복 영역으로 일반 / 교차 선택", &settings.recovery.enabled);
         if (settings.recovery.enabled)
         {
-            ImGui::TextUnformatted(u8"초록: 회복 / 검정: 일반 / 주황: 앞 교차 / 보라: 뒤 교차 / 흰색: 선택 교집합");
             ImGui::TextWrapped(u8"색칠된 도달 영역은 현재 골반·다리 길이·발 크기의 근사입니다. 실제 PA 관절 제한·착지 자세와 이동 경로는 후보별로 검사합니다.");
             int maximumSteps = static_cast<int>(settings.recovery.maximumSteps);
             if (ImGui::SliderInt(u8"회복 예측 최대 발딛기 수", &maximumSteps, 1, 3))
@@ -1049,7 +1064,12 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             const PARS::FootstepRecoverySnapshot* decision = VisibleRecovery(mesh);
             if (decision)
             {
-                ImGui::Text(u8"%s / %s / 최대 %u스텝 / %.3fms", PARS::FootstepModeLabel(decision->mode),
+                if (m_ShowRecoveryRegions)
+                {
+                    ImGui::TextUnformatted(ShowNormalReachRegion(*decision) ? u8"표시 영역 · 연초록 회복 / 검정 일반" :
+                        u8"표시 영역 · 연초록 회복 / 연주황 앞 교차 / 연보라 뒤 교차");
+                }
+                ImGui::Text(u8"%s / %s / 최대 %u스텝 / %.3fms", RecoveryDecisionLabel(*decision),
                     PARS::FootstepRecoveryStatusLabel(decision->status), decision->steps, decision->elapsedMilliseconds);
                 ImGui::Text(u8"겹침 면적: 일반 %.1f / 앞 %.1f / 뒤 %.1f cm2",
                     decision->overlapAreas[0] * 10000, decision->overlapAreas[1] * 10000, decision->overlapAreas[2] * 10000);
