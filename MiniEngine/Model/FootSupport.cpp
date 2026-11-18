@@ -2,6 +2,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicsWorld.h"
 #include "PhysicsPose.h"
+#include "FootstepLandingQuery.h"
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -254,13 +255,34 @@ void PARS::FootSupport::ResetFootstep()
     m_FootstepPlanner.Reset();
     m_BufferGrace.Reset();
     m_HasIdleReference = false;
+    m_HasPendingImpact = false;
     m_Snapshot.footstep = {};
+}
+
+void PARS::FootSupport::RecordImpact(const PxVec3& position)
+{
+    if (position.isFinite())
+    {
+        m_PendingImpactPosition = position;
+        m_HasPendingImpact = true;
+    }
 }
 
 void PARS::FootSupport::UpdateBufferGrace(bool enabled)
 {
     m_BufferGrace.Update(enabled, m_Snapshot.contactRevision, m_Snapshot.completedPhysicsStep,
         PhysicsWorld::FixedDeltaTime, m_Snapshot.balance);
+}
+
+void PARS::FootSupport::ReportRecoveryPath(size_t side, const PxVec3& target, bool accepted)
+{
+    m_FootstepPlanner.ReportRecoveryPath(side, target, accepted);
+    const FootstepSnapshot& step = m_FootstepPlanner.GetSnapshot();
+    if (side < step.feet.size())
+    {
+        m_Snapshot.footstep.feet[side].target.recovery.pathRejected = step.feet[side].target.recovery.pathRejected;
+        m_Snapshot.footstep.candidates[side].recovery.pathRejected = step.candidates[side].recovery.pathRejected;
+    }
 }
 
 void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorld& physics)
@@ -367,7 +389,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
             m_HasIdleReference = true;
             for (size_t side = 0; side < m_Feet.size(); ++side)
             {
-                // 본 노드를 가져옴 
+                // 본 노드를 가져옴
                 const int node = m_Snapshot.feet[side].boneNode;
 
                 // 유효하지 않으면 탈락
@@ -386,6 +408,16 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     // 플래너에 넘길 현재 상태를 FootstepInput에 모음
     // mesh에서 정보를 가져온다.
     FootstepInput input;
+    FootstepLandingQuery landingQuery;
+    std::array<FootstepReachInput, 2> reaches;
+    if (m_FootstepSettings.recovery.enabled && idle && mesh.UsesAutomaticRootSupport())
+    {
+        landingQuery.Prepare(mesh, m_Snapshot, reaches);
+        input.acceptsLanding = [&landingQuery](size_t side, const PxVec3& position) -> bool
+        {
+            return landingQuery.Accept(side, position);
+        };
+    }
     input.active = mesh.IsActiveRagdoll();
     input.automaticSupport = mesh.UsesAutomaticRootSupport();
     input.idleAnimation = idle;
@@ -399,9 +431,36 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.zone = m_Snapshot.balance.zone;
     input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
     input.fixedDeltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
-    // PhysicsWorld의 고정 중력 크기와 전신 질량으로 접촉 하중을 체중 비율로 환산한다.
     input.bodyWeight = m_Snapshot.totalMass * 9.81f;
-    input.blueFoot = m_Snapshot.candidates.step;
+    // 실제 루트 충격점과 각 발 사이의 수평 거리로 명령 대상을 고른다.
+    const Ragdoll& ragdoll = mesh.GetRagdoll();
+    const int root = ragdoll.GetImpactRootBody();
+    float impactWeight = 0;
+    if (input.active && root >= 0)
+    {
+        std::vector<RagdollBodyImpulse> impacts;
+        ragdoll.CaptureExternalImpacts(impacts);
+        for (const RagdollBodyImpulse& impact : impacts)
+        {
+            const float weight = impact.impulse.magnitude();
+            if (impact.body == static_cast<size_t>(root) && impact.position.isFinite() &&
+                std::isfinite(weight) && weight > 1e-6f)
+            {
+                input.impactPosition += impact.position * weight;
+                impactWeight += weight;
+            }
+        }
+    }
+    if (impactWeight > 0)
+    {
+        input.impactPosition /= impactWeight;
+        input.hasImpact = true;
+    }
+    else if (input.active && m_HasPendingImpact)
+    {
+        input.impactPosition = m_PendingImpactPosition;
+        input.hasImpact = true;
+    }
     input.completedStep = m_Snapshot.completedPhysicsStep;
     input.revision = m_Snapshot.contactRevision;
 
@@ -442,14 +501,17 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         // foot은 이미 측정한 발 정보를 읽는 참조이고 target은 그 정보를 채워 넣을 입력 구조체의 참조
         const FootSoleSample& foot = m_Snapshot.feet[side];
         FootstepFootInput& target = input.feet[side];
+        target.reach = reaches[side];
         target.available = foot.available;
         target.hasContactSample = foot.contact.hasSample;
         target.grounded = foot.contact.grounded;
         target.position = ToPx(Vector3(foot.soleWorld.GetW()));
         target.contactPosition = foot.contact.position;
         target.normal = foot.contact.normal;
-        target.normalImpulse = foot.contact.normalImpulse;
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
+        target.normalImpulse = foot.contact.normalImpulse;
+        target.corners = foot.corners;
+        target.hasSoleRectangle = foot.available;
 
         // idle기준 발배치 오프셋을 현재 캐릭터 방향으로 돌림
         const PxVec3 offset = referenceFeet[side] - midpoint;
@@ -460,19 +522,22 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     /*
     1. 현재 COM과 속도로 미래 COM을 예측
     2. 예측 COM이 A 밖이면 발딛기가 필요하다고 판단
-    3. 전달받은 움직일 발 후보와 각 발의 착지 후보가 유효하면, 움직일 발과 착지 목표를 정함
-    4. 이후 실제 발의 이동·접촉을 확인하면서 목표와 이륙·공중·착지 상태를 갱신
+    3. 충격점에 가까운 발을 선택하고, 첫 발딛기 이후에는 실제 착지와 하중 인계를 확인해 새 명령을 허용
+    4. 발마다 실제 이동·접촉을 확인하면서 각자의 목표와 이륙·공중·착지 상태를 갱신
     */
     m_FootstepPlanner.Update(input, m_FootstepSettings);
     m_Snapshot.footstep = m_FootstepPlanner.GetSnapshot();
+    if (m_Snapshot.footstep.hasImpact)
+    {
+        m_HasPendingImpact = false;
+    }
 }
 
 void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& physics)
 {
     const uint64_t sampleNumber = m_Snapshot.sampleNumber + 1;                          // 디버그용 번호
-    const int previousCandidate = m_Snapshot.candidates.support;                        // 0: 왼발이 지지발 후보, 1: 오른발이 지지발 후보, -1: 유효한 지지발 후보가없음
     m_Snapshot = {};                                                                    // 이번 프레임 용으로 스냅샷을 비운다
-    
+
     m_Snapshot.sampleNumber = sampleNumber;
     m_Snapshot.completedPhysicsStep = physics.GetStepCount();                           // 물리 스텝을 읽어온다
 
@@ -488,8 +553,8 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     }
 
     Vector3 velocity(kZero);
-    m_Snapshot.hasCenterOfMassVelocity = ragdoll.GetCenterOfMassVelocity(velocity);      // 현재 프레임의 리지드바디의 질량 * 속도를 전체질량으로 나눠서 가져온다. 
-                                                                                         // 속도를 구하는데 이전 프레임의 중심차이 기반을 안쓰는 이유는 
+    m_Snapshot.hasCenterOfMassVelocity = ragdoll.GetCenterOfMassVelocity(velocity);      // 현재 프레임의 리지드바디의 질량 * 속도를 전체질량으로 나눠서 가져온다.
+                                                                                         // 속도를 구하는데 이전 프레임의 중심차이 기반을 안쓰는 이유는
                                                                                          // "예를 들어 한 스텝 도중 충돌해서 멈췄다면, 위치 차이로는 그동안 이동했으니 속도가 나오지만 현재 속도는 이미 0일 수 있는경우" 때문이다.
     if (m_Snapshot.hasCenterOfMassVelocity)
     {
@@ -520,7 +585,6 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     // 모은 점들로 A영역을 만든다
     // COM을 히트 지점들의 평균 높이에 수직 투영한다. XZ는 그대로 두고 Y만 바꾼다.
     std::vector<PxVec3> supportPoints;
-    std::array<std::vector<PxVec3>, 2> footPoints;
     supportPoints.reserve(8);
     double supportHeight = 0;
     const PxVec3 down(0, -RayLength, 0);
@@ -561,7 +625,6 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
             if (foot.projected[i])
             {
                 supportPoints.push_back(hit.position);
-                footPoints[side].push_back(hit.position);
                 supportHeight += hit.position.y;
             }
         }
@@ -587,15 +650,6 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     // 현재 COM이 어디에 있는지 기록한다.
     m_Snapshot.balance = EvaluateFootSupportBalance(m_Snapshot.hull, m_Snapshot.hasComProjection ? m_Snapshot.projectedCenterOfMass : PxVec3(std::numeric_limits<float>::quiet_NaN()), m_BufferScale);
     UpdateBufferGrace(mesh.IsActiveRagdoll() && mesh.UsesAutomaticRootSupport());
-    
-    if (m_Snapshot.hasComProjection)
-    {
-        // 위에서 계산한 A/B 판정을 전달해 A~B에서도 움직일 발 후보를 만들 수 있게 한다.
-        // 계산 방법은 그냥 단순히 COM과 가까운 것으로 정한다.
-        // 발딛기 필요 여부와 반대 발의 실제 지지 여부는 이후 플래너에서 판단한다.
-        m_Snapshot.candidates = EvaluateFootSupportCandidates(m_Snapshot.hull, m_Snapshot.projectedCenterOfMass,
-            footPoints, m_Snapshot.balance.zone, previousCandidate, m_BufferGrace.IsActive());
-    }
 
     // COM 예측과 발 접촉 정보를 바탕으로 발딛기 필요 여부, 움직일 발과 착지 목표를 판단한다.
     // 실제 발의 이동·접촉에 따라 진행 상태와 발 이동 목표를 갱신하고 m_Snapshot.footstep에 저장한다.

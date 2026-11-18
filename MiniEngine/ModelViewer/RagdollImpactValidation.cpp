@@ -8,6 +8,132 @@
 #include <stdexcept>
 #include <cmath>
 #include <functional>
+#include <array>
+
+namespace
+{
+    void ConfigureLandingComValidation(PARS::SkeletalMeshComponent& mesh, std::ostream& report)
+    {
+        PARS::FootstepSettings& settings = mesh.GetFootSupport().GetFootstepSettings();
+        uint32_t enabled = settings.landingComClampEnabled ? 1 : 0;
+        CommandLineArgs::GetInteger(L"landingcomclamp", enabled);
+        settings.landingComClampEnabled = enabled != 0;
+        uint32_t recoveryEnabled = settings.recovery.enabled ? 1 : 0;
+        CommandLineArgs::GetInteger(L"footsteprecovery", recoveryEnabled);
+        settings.recovery.enabled = recoveryEnabled != 0;
+        uint32_t recoverySteps = settings.recovery.maximumSteps;
+        CommandLineArgs::GetInteger(L"footsteprecoverysteps", recoverySteps);
+        settings.recovery.maximumSteps = physx::PxClamp(recoverySteps, uint32_t(1), uint32_t(3));
+        CommandLineArgs::GetFloat(L"landingcomhysteresis", settings.landingComClampHysteresisDegrees);
+        report << "landing_com_clamp=" << settings.landingComClampEnabled
+            << " region=opposite_grounded_sole"
+            << " hysteresis=" << settings.landingComClampHysteresisDegrees
+            << " minimum_stance_ratio=" << settings.minimumStanceWidthRatio
+            << " prevent_crossing=" << settings.preventCrossing << std::endl;
+        report << "footstep_recovery=" << settings.recovery.enabled << " maximum_steps=" << settings.recovery.maximumSteps << std::endl;
+    }
+
+    void WriteLandingComHeader(std::ostream& stream)
+    {
+        stream << "frame,physics_step,side,mode,root_release,recovery,phase,started,landed,moving,grounded,locked,"
+            "enabled,limited,direction,prediction_valid,com_x,com_z,start_x,start_z,raw_x,raw_z,clamped_x,clamped_z,"
+            "target_x,target_z,sole_x,sole_y,sole_z,leg_contacts,recovery_count,return_count,landing_error,falling,standing_up,"
+            "region_valid,support_foot,region_origin_x,region_origin_z,front_ray_x,front_ray_z,back_ray_x,back_ray_z,region_width_degrees,"
+            "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
+            "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
+            "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected\n";
+    }
+
+    void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
+    {
+        const PARS::FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
+        const PARS::RecoverySnapshot& recovery = mesh.GetRecoverySnapshot();
+        const PARS::FootstepComPrediction& start = support.footstep.startCom;
+        FootSoleDebug debug;
+        std::string contactText;
+        const uint32_t contacts = debug.GetLegContacts(&mesh, contactText);
+        for (size_t side = 0; side < support.feet.size(); ++side)
+        {
+            const PARS::FootstepCommand& command = support.footstep.feet[side];
+            const PARS::FootstepComPrediction& landing = support.footstep.candidates[side].landingCom;
+            const PARS::FootstepRecoverySnapshot& decision = support.footstep.candidates[side].recovery;
+            const Math::Vector3 sole(support.feet[side].soleWorld.GetW());
+            // 현재 예측, 잠긴 명령 목표, 실제 발바닥과 회복 결과를 서로 다른 열로 기록한다.
+            stream << frame << ',' << support.completedPhysicsStep << ',' << side
+                << ',' << static_cast<int>(mesh.GetPhysicsMode()) << ',' << static_cast<int>(mesh.GetRootSupportRelease())
+                << ',' << static_cast<int>(recovery.state) << ',' << static_cast<int>(command.phase)
+                << ',' << command.justStarted << ',' << command.justLanded << ',' << command.IsInProgress()
+                << ',' << support.feet[side].contact.grounded << ',' << command.motion.landingTargetLocked
+                << ',' << landing.enabled << ',' << landing.limited << ',' << static_cast<int>(landing.direction)
+                << ',' << landing.valid << ',' << support.centerOfMass.x << ',' << support.centerOfMass.z
+                << ',' << support.footstep.predictedCom.x << ',' << support.footstep.predictedCom.z
+                << ',' << landing.raw.x << ',' << landing.raw.z << ',' << landing.clamped.x << ',' << landing.clamped.z
+                << ',' << command.target.position.x << ',' << command.target.position.z
+                << ',' << float(sole.GetX()) << ',' << float(sole.GetY()) << ',' << float(sole.GetZ())
+                << ',' << contacts << ',' << recovery.recoveryCount << ',' << recovery.returnCount
+                << ',' << command.motion.landingError << ',' << mesh.IsFollowingFallingAnimation()
+                << ',' << mesh.IsFollowingStandingUpAnimation() << ',' << landing.region.valid << ',' << landing.region.supportFoot
+                << ',' << landing.region.origin.x << ',' << landing.region.origin.z
+                << ',' << landing.region.frontRay.x << ',' << landing.region.frontRay.z
+                << ',' << landing.region.backRay.x << ',' << landing.region.backRay.z
+                << ',' << landing.region.halfAngleRadians * 360.0f / physx::PxPi
+                << ',' << start.raw.x << ',' << start.raw.z << ',' << start.limited
+                << ',' << start.region.valid << ',' << start.region.supportFoot
+                << ',' << PARS::IsInsideFootstepLandingRegion(start.region, support.footstep.predictedCom)
+                << ',' << support.footstep.needsStep
+                << ',' << static_cast<int>(decision.mode) << ',' << static_cast<int>(decision.status)
+                << ',' << decision.hasTarget << ',' << decision.modelFeasible << ',' << decision.poseChecks
+                << ',' << decision.elapsedMilliseconds << ',' << decision.overlapAreas[0]
+                << ',' << decision.overlapAreas[1] << ',' << decision.overlapAreas[2]
+                << ',' << decision.capturePieceCount << ',' << decision.steps << ',' << decision.pathRejected << '\n';
+        }
+    }
+
+    bool LandingComDebugMatchesPrediction(const PARS::SkeletalMeshComponent& mesh)
+    {
+        Math::Vector3 center(Math::kZero);
+        float mass = 0;
+        if (!mesh.GetRagdoll().GetCenterOfMass(center, mass))
+        {
+            return false;
+        }
+        const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
+        if (step.hasPrediction && step.requestedFoot >= 0 && step.requestedFoot < static_cast<int>(step.feet.size()))
+        {
+            center = Math::Vector3(step.startCom.origin.x, step.startCom.origin.y, step.startCom.origin.z);
+            if (step.startCom.enabled && PARS::IsInsideFootstepLandingRegion(step.startCom.region, step.predictedCom))
+            {
+                return false;
+            }
+        }
+        FootSoleDebug debug;
+        std::vector<physx::PxDebugLine> lines;
+        debug.BuildLines(mesh, lines);
+        const physx::PxU32 regionColor = mesh.GetFootSupport().GetFootstepSettings().landingComClampEnabled ?
+            0xff55cc77 : 0xff889099;
+        float minimumX = PX_MAX_F32;
+        float maximumX = -PX_MAX_F32;
+        float minimumZ = PX_MAX_F32;
+        float maximumZ = -PX_MAX_F32;
+        unsigned regionLines = 0;
+        for (const physx::PxDebugLine& line : lines)
+        {
+            if (line.color0 != regionColor || line.color1 != regionColor)
+            {
+                continue;
+            }
+            minimumX = (std::min)(minimumX, (std::min)(line.pos0.x, line.pos1.x));
+            maximumX = (std::max)(maximumX, (std::max)(line.pos0.x, line.pos1.x));
+            minimumZ = (std::min)(minimumZ, (std::min)(line.pos0.z, line.pos1.z));
+            maximumZ = (std::max)(maximumZ, (std::max)(line.pos0.z, line.pos1.z));
+            ++regionLines;
+        }
+        // 예측이 있으면 같은 스텝의 원점을, 없으면 현재 COM의 미리보기 원점을 검증한다.
+        const float tolerance = (std::max)(2e-5f, (maximumX - minimumX + maximumZ - minimumZ) * .001f);
+        return regionLines >= 64 && std::abs((minimumX + maximumX) * .5f - float(center.GetX())) <= tolerance &&
+            std::abs((minimumZ + maximumZ) * .5f - float(center.GetZ())) <= tolerance;
+    }
+}
 
 // 기준과 후보에서 같은 바닥·애니메이션·입력을 사용하는 실제 캐릭터 검증이다.
 bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
@@ -18,8 +144,12 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
     std::ofstream report(path);
     std::ofstream samples(path + L".csv");
     std::ofstream feet(path + L".feet.csv");
+    std::ofstream landingCom(path + L".landing-com.csv");
+    landingCom.precision(9);
     uint32_t validateFootAlignment = 0;
+    uint32_t validateLandingRegion = 0;
     CommandLineArgs::GetInteger(L"validatefootalignment", validateFootAlignment);
+    CommandLineArgs::GetInteger(L"validatelandingregion", validateLandingRegion);
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -30,22 +160,34 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
     };
     try
     {
-        check(report.good() && samples.good() && feet.good() && scenario <= 5 && test.SetAutomaticSupport(true),
+        check(report.good() && samples.good() && feet.good() && landingCom.good() && scenario <= 5 && test.SetAutomaticSupport(true),
             "Prepare grounded automatic kinematic dummy");
         SkeletalMeshComponent& mesh = test.GetDummy()->GetMesh();
+        ConfigureLandingComValidation(mesh, report);
+        WriteLandingComHeader(landingCom);
         check(!mesh.IsRagdoll() && mesh.GetRagdoll().GetKinematicBodyCount() == mesh.GetRagdoll().GetBodyCount(),
             "Idle starts with every PA body kinematic");
         check(mesh.GetKinematicStableDuration() == 2.0f, "Default recovery duration is exactly two seconds");
         std::string error;
         check(player.StopRagdoll(error), "Place projectile source away from the dummy");
-        player.SetActorLocation(Vector3(3.5f, player.GetCapsuleComponent().GetHalfHeight(), -5.0f));
+        float sourceX = 3.5f;
+        float sourceZ = -5.0f;
+        CommandLineArgs::GetFloat(L"impactsourcex", sourceX);
+        CommandLineArgs::GetFloat(L"impactsourcez", sourceZ);
+        player.SetActorLocation(Vector3(sourceX, player.GetCapsuleComponent().GetHalfHeight(), sourceZ));
         PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());
         if (controller)
         {
             controller->SetMoveInput(0, 0, false);
             controller->SetInputEnabled(false);
         }
-        check(test.SetProjectileSettings(scenario == 3 ? 20.0f : 2.0f, 7.5f), "Set explicit projectile test input");
+        float projectileMass = scenario == 3 ? 20.0f : 2.0f;
+        float projectileSpeed = 7.5f;
+        CommandLineArgs::GetFloat(L"impactmass", projectileMass);
+        CommandLineArgs::GetFloat(L"impactspeed", projectileSpeed);
+        check(test.SetProjectileSettings(projectileMass, projectileSpeed), "Set explicit projectile test input");
+        report << "projectile_mass=" << projectileMass << " projectile_speed=" << projectileSpeed
+            << " source_x=" << sourceX << " source_z=" << sourceZ << std::endl;
         PhysicsSkeleton skeleton;
         check(mesh.BuildPhysicsSkeleton(skeleton, error), "Read actual dummy skeleton");
         world.SetPhysicsPaused(false);
@@ -59,6 +201,12 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         bool secondShot = false;
         unsigned entries = 0;
         unsigned returns = 0;
+        unsigned footCommands = 0;
+        unsigned confirmedTakeoffs = 0;
+        unsigned confirmedLandings = 0;
+        unsigned validatedDebugFrames = 0;
+        std::array<bool, 2> commandObserved{};
+        std::array<bool, 2> takeoffObserved{};
         PhysicsAnimationMode previousMode = mesh.GetPhysicsMode();
         for (uint32_t frame = 0; frame < 900; ++frame)
         {
@@ -71,6 +219,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 secondShot = seenActive;
             }
             const float beforeTimer = mesh.GetKinematicStableTime();
+            const bool beforeFalling = mesh.IsFollowingFallingAnimation();
             const Vector3 beforeRoot = test.GetDummy()->GetActorLocation();
             Vector3 expectedRootOffset(kZero);
             bool beforeBothGrounded = true;
@@ -98,6 +247,13 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             }
             world.Tick(1.0f / 60.0f);
             test.Update();
+            RecordLandingComFrame(landingCom, mesh, frame);
+            if (validateLandingRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
+                mesh.GetFootSupport().GetSnapshot().footstep.hasGroundPlane))
+            {
+                check(LandingComDebugMatchesPrediction(mesh), "Rendered region matches the cyan prediction without forbidden-sector penetration");
+                ++validatedDebugFrames;
+            }
             check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");
             if (mesh.GetPhysicsMode() != previousMode)
             {
@@ -113,13 +269,23 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 {
                     ++returns;
                     seenReturn = true;
-                    check(beforeTimer >= 2.0f - 1.0f / 60.0f - .00001f, "Return requires the complete two-second interval");
+                    const bool balanceReturn = !beforeFalling;
+                    if (balanceReturn)
+                    {
+                        check(beforeTimer >= 2.0f - 1.0f / 60.0f - .00001f, "Return requires the complete two-second interval");
+                    }
+                    else
+                    {
+                        // 낙상 후 기상은 액티브 모드를 유지해도 균형 회복 대기 시간과 다른 전환이다.
+                        check(scenario == 3 && mesh.IsFollowingStandingUpAnimation(),
+                            "Large-impact fixture permits the existing fall and stand-up transition");
+                    }
                     const Vector3 rootOffset = test.GetDummy()->GetActorLocation() - beforeRoot;
                     const float alignmentError = float(Length(rootOffset - expectedRootOffset));
-                    report << "return_both_grounded=" << beforeBothGrounded
+                    report << "return_from_fall=" << !balanceReturn << " return_both_grounded=" << beforeBothGrounded
                         << " root_dx=" << float(rootOffset.GetX()) << " root_dy=" << float(rootOffset.GetY())
                         << " root_dz=" << float(rootOffset.GetZ()) << " sole_alignment_error=" << alignmentError << std::endl;
-                    if (validateFootAlignment)
+                    if (validateFootAlignment && balanceReturn)
                     {
                         check(beforeBothGrounded, "Kinematic handoff requires both actual ground contacts");
                         check(alignmentError < .0001f, "Root translation matches both sole midpoints on all three axes");
@@ -156,6 +322,25 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 check(foot.available && foot.boneNode >= 0 && body < nodes.size(), "Measure actual foot sole");
                 PhysicsGroundContact contact;
                 const bool grounded = mesh.GetRagdoll().GetBodyGroundContact(body, contact);
+                const FootstepCommand& command = support.footstep.feet[side];
+                if (command.justStarted)
+                {
+                    ++footCommands;
+                    commandObserved[side] = true;
+                    takeoffObserved[side] = false;
+                }
+                if (commandObserved[side] && !takeoffObserved[side] &&
+                    (!grounded || (foot.contact.hasSample && !foot.contact.grounded)))
+                {
+                    takeoffObserved[side] = true;
+                    ++confirmedTakeoffs;
+                }
+                if (command.justLanded)
+                {
+                    check(takeoffObserved[side], "Completed footstep includes an observed physical takeoff");
+                    ++confirmedLandings;
+                    commandObserved[side] = false;
+                }
                 const Matrix4 actualSole = mesh.GetRagdoll().GetBoneWorld(body) * foot.soleInBone;
                 const Matrix4 targetSole = PhysicsBoneFrame(targets[foot.boneNode]) * foot.soleInBone;
                 const Vector3 actualPosition(actualSole.GetW());
@@ -184,6 +369,14 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         }
         world.SetPhysicsPaused(true);
         report << "entries=" << entries << " returns=" << returns << std::endl;
+        report << "foot_commands=" << footCommands << " physical_takeoffs=" << confirmedTakeoffs
+            << " confirmed_landings=" << confirmedLandings << std::endl;
+        report << "validated_debug_frames=" << validatedDebugFrames << std::endl;
+        if (scenario == 1 && footCommands > 0)
+        {
+            check(confirmedTakeoffs > 0 && confirmedLandings > 0,
+                "A requested recovery step physically lifts and lands the foot");
+        }
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors");
         check(scenario == 0 ? !seenActive : seenActive, "Impact is required to enter active ragdoll");
         if (scenario == 1 || scenario == 2 || scenario == 4 || scenario == 5)
@@ -220,12 +413,16 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     std::ofstream events(path + L".events.csv");
     std::ofstream states(path + L".states.csv");
     std::ofstream capsules(path + L".capsules.csv");
+    std::ofstream landingCom(path + L".landing-com.csv");
+    landingCom.precision(9);
     uint32_t kinematicPlayer = 0;
     uint32_t modeCycles = 0;
     uint32_t incoming = 0;
+    uint32_t contactCheck = 0;
     CommandLineArgs::GetInteger(L"bodyimpactkinematic", kinematicPlayer);
     CommandLineArgs::GetInteger(L"bodyimpactmodes", modeCycles);
     CommandLineArgs::GetInteger(L"bodyimpactincoming", incoming);
+    CommandLineArgs::GetInteger(L"bodyimpactcontactcheck", contactCheck);
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -237,10 +434,27 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     try
     {
         Character* dummy = test.GetDummy();
-        check(report.good() && samples.good() && events.good() && dummy && scenario <= 6 && frames > 0 && frames <= 720,
+        check(report.good() && samples.good() && events.good() && landingCom.good() && dummy && scenario <= 6 && frames > 0 && frames <= 720,
             "Open actual-character body impact validation");
         std::string error;
         check(test.Reset(), "Reset grounded Idle dummy with original automatic support");
+        ConfigureLandingComValidation(dummy->GetMesh(), report);
+        WriteLandingComHeader(landingCom);
+        if (contactCheck)
+        {
+            check(!test.IsContactCheckEnabled(), "Contact pause starts disabled");
+            // 검사 전용 복사본에서 허벅지 접촉을 유도하며 저장된 PA 파일은 수정하지 않는다.
+            PhysicsAsset contactAsset = *dummy->GetMesh().GetPhysicsAsset();
+            for (PhysicsBody& body : contactAsset.bodies)
+            {
+                if (body.bone.find("UpLeg") != std::string::npos)
+                {
+                    body.radius = .2f;
+                }
+            }
+            check(dummy->GetMesh().SetPhysicsAsset(contactAsset, error), "Prepare a repeatable physical thigh-contact fixture");
+            test.SetContactCheckEnabled(true);
+        }
         PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());
         check(controller != nullptr, "Use the normal player movement controller");
         controller->SetInputEnabled(true);
@@ -287,7 +501,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         world.SetPhysicsTimeScale(1);
         samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
         events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
-        states << "frame,mode,blending,zone,stable_time,step_count,impact\n";
+        states << "frame,mode,blending,zone,stable_time,step_count,impact,physics_step,requested_foot,load_left,load_right,confirm_left,confirm_right,impulse_left,impulse_right,normal_y_left,normal_y_right,grounded_left,grounded_right,started_left,started_right,landed_left,landed_right,avoidance,prediction,candidates,intervals,queries,prediction_ms,tracking_error,reach_limited,joint_limited,fixed_pose_blocked\n";
         capsules << "frame,time,mode,root_x,root_y,root_z,present,mass,radius,half_length,x,y,z,cyan_lines\n";
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
@@ -340,6 +554,56 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             }
             world.Tick(1.0f / 60.0f);
             test.Update();
+            RecordLandingComFrame(landingCom, dummy->GetMesh(), frame);
+            if (contactCheck && world.IsPhysicsPaused())
+            {
+                FootSoleDebug debug;
+                std::string contactMessage;
+                const uint32_t contacts = debug.GetLegContacts(&dummy->GetMesh(), contactMessage);
+                check(contacts != 0 && !contactMessage.empty(), "Actual dummy leg contact triggers the pause");
+                const FootstepCollisionSnapshot prediction = dummy->GetMesh().GetFootstepCollisionSnapshot();
+                const FootstepSnapshot& step = dummy->GetMesh().GetFootSupport().GetSnapshot().footstep;
+                check(prediction.status == FootstepCollisionStatus::Collision && prediction.sampleCount == 6 &&
+                    prediction.queryCount >= 63 && prediction.completedStep == step.completedStep &&
+                    prediction.revision == step.revision,
+                    "The real dummy checks its runtime PA shapes on the current control tick");
+                check(prediction.overlapPairs != 0, "The enlarged-thigh fixture also overlaps on the predicted path");
+                report << "prediction_samples=" << prediction.sampleCount << " prediction_queries=" << prediction.queryCount
+                    << " prediction_pairs=" << prediction.overlapPairs << " prediction_ms=" << prediction.elapsedMilliseconds
+                    << std::endl;
+                const uint64_t pausedStep = world.GetPhysicsWorld()->GetStepCount();
+                const Vector3 pausedPosition = dummy->GetMesh().GetRagdoll().GetPosition();
+                for (uint32_t pausedFrame = 0; pausedFrame < 60; ++pausedFrame)
+                {
+                    world.Tick(1.0f / 60.0f);
+                    test.Update();
+                }
+                check(world.IsPhysicsPaused() && world.GetPhysicsWorld()->GetStepCount() == pausedStep &&
+                    float(Length(dummy->GetMesh().GetRagdoll().GetPosition() - pausedPosition)) < .00001f,
+                    "Contact pause preserves the physics step and dummy pose");
+                std::string retainedMessage;
+                check(debug.GetLegContacts(&dummy->GetMesh(), retainedMessage) == contacts && retainedMessage == contactMessage,
+                    "The contact description remains available while paused");
+                const FootstepCollisionSnapshot& retainedPrediction = dummy->GetMesh().GetFootstepCollisionSnapshot();
+                check(retainedPrediction.completedStep == prediction.completedStep &&
+                    retainedPrediction.overlapPairs == prediction.overlapPairs &&
+                    debug.GetLegPredictionText(dummy->GetMesh()).find(u8"겹침 예상") != std::string::npos,
+                    "The separate predicted-contact description remains inspectable while paused");
+                test.ResumeSimulation();
+                test.Update();
+                check(!world.IsPhysicsPaused(), "Resume does not immediately pause on the same contact");
+                test.SetContactCheckEnabled(false);
+                test.Update();
+                check(!world.IsPhysicsPaused(), "Disabling contact check allows an existing contact");
+                test.SetContactCheckEnabled(true);
+                test.Update();
+                check(world.IsPhysicsPaused(), "Enabling contact check rearms contact detection");
+                check(world.GetPhysicsWorld()->GetErrorCount() == 0, "Contact pause introduces no PhysX errors");
+                // 캡처 옵션에서는 마지막으로 멈춘 실제 접촉 장면을 표시한다.
+                controller->SetMoveInput(0, 0, false);
+                report << "PASS: dummy contact pause and resume" << std::endl;
+                return true;
+            }
             const Ragdoll& playerRagdoll = player.GetMesh().GetRagdoll();
             const Vector3 playerRoot = player.GetActorLocation();
             PxTransform capsulePose(PxIdentity);
@@ -371,9 +635,23 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const float time = (frame + 1) / 60.0f;
             const SkeletalMeshComponent& dummyMesh = dummy->GetMesh();
             const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
+            const FootstepAvoidanceSnapshot& avoidance = dummyMesh.GetFootstepAvoidanceSnapshot();
+            const FootstepCollisionSnapshot& prediction = dummyMesh.GetFootstepCollisionSnapshot();
             states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()
                 << ',' << static_cast<int>(dummySupport.balance.zone) << ',' << dummyMesh.GetKinematicStableTime()
-                << ',' << dummySupport.footstep.startCount << ',' << dummy->GetMesh().GetRagdoll().GetExternalImpactImpulse() << '\n';
+                << ',' << dummySupport.footstep.startCount << ',' << dummy->GetMesh().GetRagdoll().GetExternalImpactImpulse()
+                << ',' << dummySupport.completedPhysicsStep << ',' << dummySupport.footstep.requestedFoot
+                << ',' << dummySupport.footstep.loadTransfer.loadRatios[0] << ',' << dummySupport.footstep.loadTransfer.loadRatios[1]
+                << ',' << dummySupport.footstep.loadTransfer.confirmationTimes[0] << ',' << dummySupport.footstep.loadTransfer.confirmationTimes[1]
+                << ',' << dummySupport.feet[0].contact.normalImpulse << ',' << dummySupport.feet[1].contact.normalImpulse
+                << ',' << dummySupport.feet[0].contact.normal.y << ',' << dummySupport.feet[1].contact.normal.y
+                << ',' << dummySupport.feet[0].contact.grounded << ',' << dummySupport.feet[1].contact.grounded
+                << ',' << dummySupport.footstep.feet[0].justStarted << ',' << dummySupport.footstep.feet[1].justStarted
+                << ',' << dummySupport.footstep.feet[0].justLanded << ',' << dummySupport.footstep.feet[1].justLanded
+                << ',' << static_cast<int>(avoidance.status) << ',' << static_cast<int>(prediction.status)
+                << ',' << avoidance.candidatesChecked << ',' << avoidance.totalIntervals << ',' << avoidance.totalQueries
+                << ',' << prediction.elapsedMilliseconds << ',' << prediction.maximumTrackingError
+                << ',' << prediction.reachLimited << ',' << prediction.jointLimited << ',' << prediction.fixedPoseBlocked << '\n';
             for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
             {
                 ++eventCount;
@@ -416,6 +694,10 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         }
         controller->SetMoveInput(0, 0, false);
         world.SetPhysicsPaused(true);
+        if (contactCheck)
+        {
+            check(false, "Expected an actual leg contact before the frame limit");
+        }
         report << "events=" << eventCount << std::endl;
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors");
         report << "PASS: actual-character body impact recording" << std::endl;

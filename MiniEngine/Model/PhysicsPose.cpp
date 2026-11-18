@@ -81,7 +81,8 @@ namespace PARS
                 Invert(parentBody) * Matrix4(parentNeutral * Matrix3(rotation), pivot));
             joint.childFrame = PhysicsJointFrame::FromTransform(Invert(childBody) * Matrix4(childNeutral, pivot));
             joint.swingYLimit = XMConvertToRadians(cone.halfY);
-            joint.swingZLimit = XMConvertToRadians(cone.halfZ);
+            joint.swingZMin = -XMConvertToRadians(cone.halfZ);
+            joint.swingZMax = XMConvertToRadians(cone.halfZ);
             joint.twistMin = XMConvertToRadians(twistMin);
             joint.twistMax = XMConvertToRadians(twistMax);
         }
@@ -131,8 +132,8 @@ namespace PARS
         XMStoreFloat3(&position, JointRotationVector(rotation));
         float values[] = {position.x, position.y, position.z};
         const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
-        const float lower[] = {joint.twistMin, -joint.swingYLimit, -joint.swingZLimit};
-        const float upper[] = {joint.twistMax, joint.swingYLimit, joint.swingZLimit};
+        const float lower[] = {joint.twistMin, -joint.swingYLimit, joint.swingZMin};
+        const float upper[] = {joint.twistMax, joint.swingYLimit, joint.swingZMax};
         for (int axis = 0; axis < 3; ++axis)
         {
             if (motions[axis] == PhysicsJointMotion::Locked)
@@ -174,6 +175,12 @@ namespace PARS
         {
             return q;
         }
+        return ClampD6DriveTarget(joint, q);
+    }
+
+    Quaternion ClampD6DriveTarget(const PhysicsConstraint& joint, Quaternion rotation)
+    {
+        Quaternion q = Normalize(rotation);
         XMFLOAT4 v;
         XMStoreFloat4(&v, q);
         if (v.w < 0)
@@ -192,7 +199,8 @@ namespace PARS
             s.w = -s.w;
         }
         float x = norm > 1e-7f ? 2 * std::atan2(v.x, v.w) : 0;
-        float y = 4 * std::atan2(s.y, 1 + s.w), z = 4 * std::atan2(s.z, 1 + s.w);
+        float y = 4 * std::atan2(s.y, 1 + s.w);
+        float z = 4 * std::atan2(s.z, 1 + s.w);
         if (joint.twist == PhysicsJointMotion::Locked)
         {
             x = 0;
@@ -215,20 +223,23 @@ namespace PARS
         }
         else if (joint.swingZ == PhysicsJointMotion::Limited)
         {
-            z = std::max(-joint.swingZLimit, std::min(joint.swingZLimit, z));
+            z = std::max(joint.swingZMin, std::min(joint.swingZMax, z));
         }
-        if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited)
+        if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited &&
+            !joint.HasAsymmetricSwingZLimit())
         {
             // 스윙 각도 좌표에서 PhysX ConeLimitHelperTanLess의 타원과 일치하도록 처리한다.
             // 각 축을 따로 제한하는 것만으로는 대각선 방향의 범위 초과를 잡을 수 없다.
-            const float r = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) + z * z / (joint.swingZLimit * joint.swingZLimit));
+            const float r = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) + z * z / (joint.swingZMax * joint.swingZMax));
             if (r > 1)
             {
                 y /= r;
                 z /= r;
             }
         }
-        const float ty = std::tan(y * .25f), tz = std::tan(z * .25f), r2 = ty * ty + tz * tz;
+        const float ty = std::tan(y * .25f);
+        const float tz = std::tan(z * .25f);
+        const float r2 = ty * ty + tz * tz;
         const Quaternion swing(XMVectorSet(0, 2 * ty / (1 + r2), 2 * tz / (1 + r2), (1 - r2) / (1 + r2)));
         return Normalize(swing * Quaternion(Vector3(kXUnitVector), x));
     }
@@ -485,16 +496,14 @@ namespace PARS
         // 팔꿈치/무릎은 순수 힌지를 사용한다. 아래팔 회내/회외에는 별도의 축 회전 조인트가
         // 필요하며, 이는 팔꿈치 굽힘 제한에 포함되지 않는다.
         //
-        // 아래의 두 축 원뿔 계수는 이 SDK의 ConeLimitHelperTanLess 각도 공간에서
-        // 각 평면 방향의 네 끝점에 맞춘 값이다.
-        // (swingY/halfY)^2 + (swingZ/halfZ)^2 = 1이며, 트위스트를 제거한 뒤
-        // swingY/Z = 4*atan2(q.y/z, 1+q.w)로 계산한다. 편향된 부모 좌표계는 순수 스윙이므로
-        // 중립 자세의 트위스트는 0이다. 두 축 모두 단순히 가동 범위의 절반을 사용하면
-        // 굴곡 편향이 클 때 측면 가동 범위가 잘못 줄어든다.
-        // centerZ와 트위스트의 부호를 반전해 좌우의 해부학적 대칭을 유지한다.
+        // 부모 프레임을 기울여 제한 범위의 중심을 옮기지 않고 기준 T포즈를 0도로 쓴다.
+        // 기존 제한각 수치는 유지하며, 상체의 부모·자식 축은 같은 기준 축에 맞춘다.
+        // 따라서 위의 비대칭 측정 범위를 그대로 재현하는 값은 아니며, 필요하면
+        // 정렬된 관절 좌표계에서 각도 한계를 별도로 조정한다.
         for (size_t i = 1; i < nodes.size(); ++i)
         {
-            int parent = skeleton.parents[nodes[i]], parentBody = -1;
+            int parent = skeleton.parents[nodes[i]];
+            int parentBody = -1;
             while (parent >= 0)
             {
                 parentBody = candidate.FindBody(skeleton.names[parent]);
@@ -517,53 +526,53 @@ namespace PARS
             const std::string name(parts[i].bone);
             const bool isLeft = name.find("Left") == 0;
             const float side = isLeft ? 1.0f : -1.0f;
-            const Vector3 x = longitudinal[i], parentX = longitudinal[parentBody];
-            Matrix3 parentAxes = AnatomicalAxes(up, left), childAxes = parentAxes;
+            const Vector3 x = longitudinal[i];
+            const Vector3 parentX = longitudinal[parentBody];
+            Matrix3 parentAxes = AnatomicalAxes(up, left);
+            Matrix3 childAxes = parentAxes;
             AnatomicalCone cone{};
-            float twistMin = -1, twistMax = 1; // 잠긴 축에서는 무시된다.
+            float twistMin = -1;
+            float twistMax = 1; // 잠긴 축에서는 무시된다.
             if (name.find("Spine") == 0)
             {
                 // 리그의 조인트 3개가 몸통 전체의 가동 범위를 동일하게 나눠 가진다.
                 // 리그에 맞춘 근사 배분이며, 척추뼈별 가동 범위 측정값은 아니다.
-                cone = {1.516667f, 0, 10.916667f, 8.347644f};
+                cone = {0, 0, 10.916667f, 8.347644f};
                 twistMax = 52.2f / 3;
                 twistMin = -twistMax;
             }
             else if (name == "Neck" || name == "Head")
             {
-                // 보수적인 능동 가동 범위로, 측정된 총 125도 안에서 굴곡 55도 / 신전 70도를 선택한다.
-                // 이 범위를 리그의 Neck/Head 조인트에 60:40으로 나눈다.
-                // 방향별 범위와 리그 내 배분은 모델링상의 선택이다.
+                // 목 전체 굽힘 회전폭 125도를 리그의 Neck/Head 조인트에 60:40으로 나눈다.
+                // 중심 편향을 없애 T포즈 0도를 기준으로 양방향에 같은 반각을 적용한다.
+                // 리그 내 배분은 모델링상의 선택이다.
                 // 이 두 조인트는 해부학적으로 실제 척추뼈 두 개를 나타내는 것이 아니다.
                 const bool neck = name == "Neck";
-                cone = neck ? AnatomicalCone{-4.5f, 0, 37.5f, 24.121613f}
-                            : AnatomicalCone{-3, 0, 25, 16.078565f};
+                cone = neck ? AnatomicalCone{0, 0, 37.5f, 24.121613f}
+                            : AnatomicalCone{0, 0, 25, 16.078565f};
                 twistMax = 65.5f * (neck ? .6f : .4f);
                 twistMin = -twistMax;
             }
             else if (name.find("Shoulder") != std::string::npos)
             {
                 // Shoulder 본이 어깨이음을 대신한다. 이 리그에는 별도의 견갑골 바디가 없다.
-                // 여기에 수평 -10~20도와 거상 -10~30도를 배분하고,
-                // 아래의 위팔뼈 범위에서 그만큼 뺀다. 근사 방식이다.
-                parentAxes = childAxes = AnatomicalAxes(left * side, up * -side);
+                // 기준 T포즈에서 부모와 자식이 같은 축을 사용한다.
+                parentAxes = AnatomicalAxes(left * side, up * -side);
+                childAxes = parentAxes;
                 // 대기/걷기/달리기 보고서의 결합 스윙을 수용하는 튜닝 범위다.
                 // 각 축 최대값뿐 아니라 타원 경계에도 여유를 두며, 해부학적 ROM 측정값은 아니다.
-                cone = {4.973932f, -9.956774f * side, 30, 35};
+                cone = {0, 0, 30, 35};
                 // 실제 추종 궤적에도 여유를 두어 PD 비교 중 경계 반력이 개입하지 않게 한다.
                 twistMin = -8;
                 twistMax = 8;
             }
             else if (name == "LeftArm" || name == "RightArm")
             {
-                parentAxes = AnatomicalAxes(left * side, up * -side);
-                childAxes = AnatomicalAxes(x, Cross(x, forward));
-                // 위팔뼈는 수평 -44.3~110.7도, T 포즈에서 내리기 90도 / 올리기 59.8도를 사용한다.
-                // 어깨이음의 범위와 합쳐 측정된 전체 어깨 가동 범위를 근사하며,
-                // 동일한 가동 범위를 중복으로 계산하지 않는다.
-                // 걷기의 결합 스윙 목표와 실제 추종 궤적을 함께 수용하도록 반각을 보정한다.
-                // 중심과 해부학적 축은 유지하며, 이 추가 여유는 가져온 애니메이션의 PD 비교용이다.
-                cone = {32.595316f, 13.336539f * side, 90, 90};
+                // 위팔을 따르는 자식 기준 축을 부모에도 적용해 T포즈의 상대 회전을 없앤다.
+                parentAxes = AnatomicalAxes(x, Cross(x, forward));
+                childAxes = parentAxes;
+                // 애니메이션 추종용으로 넓혀 둔 반각은 유지하고 중심 편향만 제거한다.
+                cone = {0, 0, 90, 90};
                 twistMin = isLeft ? -91.5f : -58.4f;
                 twistMax = isLeft ? 58.4f : 91.5f;
             }
@@ -572,8 +581,8 @@ namespace PARS
                 // 굽힘에는 트위스트 X축을 사용한다. 좌우 X축을 대칭으로 잡아
                 // 양쪽 모두 양의 트위스트에서 아래팔이 앞으로 굽혀지게 한다. Y축은 각 아래팔을 따라
                 // 초록색 각도 표시가 실제 팔꿈치 굽힘을 나타내도록 한다.
-                parentAxes = HingeAxes(parentX, Cross(parentX, forward));
-                childAxes = HingeAxes(x, Cross(x, forward));
+                parentAxes = HingeAxes(x, Cross(x, forward));
+                childAxes = parentAxes;
                 // 걷기 보고서의 아래팔 목표는 Y 최대 23.4도, Z 최대 16.2도의
                 // 보조 회전을 포함한다. 두 축을 잠그면 굽힘이 정상이어도 목표가 약 20도 잘린다.
                 // 길이 방향 회전은 굽힘과 결합되어 두 스윙 성분에 나뉘므로 둘 다 Limited로 둔다.
@@ -586,24 +595,24 @@ namespace PARS
             else if (name.find("Hand") != std::string::npos)
             {
                 const Vector3 hinge = radial[isLeft ? 0 : 1] * -side;
-                parentAxes = AnatomicalAxes(parentX, hinge);
-                childAxes = AnatomicalAxes(x, hinge);
-                // 신전 -79도~굴곡 87도다. 요측/척측 편위 20/30도는 보수적인 리그 제한값이며,
-                // 위에서 인용한 손목 연구에서 측정된 값은 아니다.
-                // 달리기의 스윙 Z 최대 26.4도와 대기의 트위스트 최대 41.6도를 포함한다.
+                parentAxes = AnatomicalAxes(x, hinge);
+                childAxes = parentAxes;
+                // 애니메이션 추종을 위해 넓혀 둔 스윙 반각과 트위스트 한계는 유지한다.
+                // 부모 중심 편향을 제거했으므로 각도 한계는 T포즈의 0도를 기준으로 해석한다.
                 // 리그의 손 본에 들어 있는 축 회전을 수용하는 근사이며,
                 // 생리학적인 손목 회내 동작이나 별도의 아래팔 축 회전 조인트를 의미하지 않는다.
-                cone = {3.959488f, 5.002095f * side, 83.083931f, 30};
+                cone = {0, 0, 83.083931f, 30};
                 twistMin = -45;
                 twistMax = 45;
             }
             else if (name.find("UpLeg") != std::string::npos)
             {
-                parentAxes = AnatomicalAxes(-up, -left);
-                childAxes = AnatomicalAxes(x, -left);
-                // 걷기의 스윙 Y 최대 77.5도와 동시 발생하는 Z 회전을 수용한다.
-                // 측면 반각과 중심은 유지하고 굽힘 방향에 애니메이션용 여유만 추가한다.
-                cone = {55.314192f, -9.524431f * side, 83, 37.496596f};
+                // T포즈에서 양쪽 고관절의 +X는 무릎, +Y는 캐릭터 오른쪽, +Z는 뒤쪽을 향한다.
+                // 실제 허벅지 방향에 직교하도록 보정한 같은 축을 부모와 자식에 적용한다.
+                parentAxes = AnatomicalAxes(x, -left);
+                childAxes = parentAxes;
+                // 부모 좌표계의 기울기 보정을 제거하고, 제한각 수치는 직접 조정할 수 있게 유지한다.
+                cone = {0, 0, 83, 37.496596f};
                 twistMin = isLeft ? -46.7f : -37.1f;
                 twistMax = isLeft ? 37.1f : 46.7f;
             }
@@ -624,14 +633,12 @@ namespace PARS
             }
             else // 발은 발목에서 발가락으로 향하는 캡슐 X축 대신 가상의 아래쪽 축을 사용한다.
             {
+                // T포즈에서 +X는 정강이 아래쪽, +Y는 캐릭터 오른쪽, +Z는 뒤쪽을 향한다.
+                // 같은 축을 부모와 자식에 적용해 기준 자세의 상대 회전을 0으로 맞춘다.
                 parentAxes = AnatomicalAxes(parentX, -left);
-                childAxes = AnatomicalAxes(-up, -left);
-                // 시상면 범위는 족저굴곡 -54.6도~배측굴곡 12.7도다. 내번/외번 30/15도는
-                // 발목/거골하관절을 합친 대체 바디의 리그 제한값이며 CDC 측정값은 아니다.
-                // 가져온 달리기 목표는 이 좌표계에서 Y 74.2도, Z 27.2도,
-                // 트위스트 21.3도까지 필요하다. 결합 타원에도 여유를 둔 튜닝 범위로,
-                // 위의 참고 ROM보다 넓다. 기준 프레임이나 목표 애니메이션은 바꾸지 않는다.
-                cone = {-20.754667f, 7.333241f * side, 82, 38};
+                childAxes = parentAxes;
+                // 부모 좌표계의 기울기 보정을 제거하고, 제한각 수치는 직접 조정할 수 있게 유지한다.
+                cone = {0, 0, 82, 38};
                 twistMin = -25;
                 twistMax = 25;
             }

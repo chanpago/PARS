@@ -112,7 +112,7 @@ table{font-size:9px;white-space:normal}td,th{padding:4px}button,input,select{dis
 <section><h2>관절 제한과 추종 오차</h2><p class="muted">원본 → 보정 목표: 관절 제한 때문에 목표 자세가 변경된 각도입니다.
 보정 목표 → 실제: 제한 안의 목표와 물리 결과 사이의 추종 오차입니다. 제한값, 조인트 기준 좌표계, 원본 애니메이션과 제어 강도를 함께 확인하세요.
 Articulation은 회전 벡터의 축별 성분을, 기존 D6는 트위스트/quarter-angle 스윙 좌표를 사용합니다.
-D6에서만 두 스윙 축을 함께 제한하는 원뿔을 검사합니다. 정규화 게인은 Kp/I, Kd/I이며 실제 토크 게인은 자세에 따라 달라집니다.</p>
+D6의 대칭 스윙 제한은 두 축의 원뿔을 검사하며, 비대칭 Z 제한은 축별 최소·최대 경계를 검사합니다. 정규화 게인은 Kp/I, Kd/I이며 실제 토크 게인은 자세에 따라 달라집니다.</p>
 <div class="scroll"><table id="joints"></table></div></section>
 <section><h2>시간별 측정값</h2>
 <p><label>바디 <select id="body"></select></label> <label>관절 <select id="joint"></select></label></p>
@@ -155,8 +155,8 @@ const data = )HTML";
             const PARS::PhysicsConstraint& joint = m_Asset.constraints[i];
             out << (i ? "," : "") << "{\"name\":" << JsonString(joint.childBone) << ",\"parent\":" << JsonString(joint.parentBone)
                 << ",\"motion\":[" << static_cast<int>(joint.twist) << ',' << static_cast<int>(joint.swingY) << ',' << static_cast<int>(joint.swingZ)
-                << "],\"min\":[" << joint.twistMin << ',' << -joint.swingYLimit << ',' << -joint.swingZLimit
-                << "],\"max\":[" << joint.twistMax << ',' << joint.swingYLimit << ',' << joint.swingZLimit << "],\"slerp\":" << (joint.useSlerpDrive ? "true" : "false")
+                << "],\"min\":[" << joint.twistMin << ',' << -joint.swingYLimit << ',' << joint.swingZMin
+                << "],\"max\":[" << joint.twistMax << ',' << joint.swingYLimit << ',' << joint.swingZMax << "],\"slerp\":" << (joint.useSlerpDrive ? "true" : "false")
                 << ",\"collision\":" << (joint.enableCollision ? "true" : "false") << ",\"parentFrame\":";
             FrameTransform(out, joint.parentFrame);
             out << ",\"childFrame\":";
@@ -265,7 +265,7 @@ if(!data.joints.length)return;const j=f.j[ji],cfg=data.joints[ji];
 chart("jointPlot",[{color:"#1674c5",points:data.frames.map(f=>[f.t,f.j[ji].c*deg])},{color:"#bd590a",points:data.frames.map(f=>[f.t,f.j[ji].k*deg])}],f.t);
 const bounds=cfg.motion[a]===2?[]:cfg.motion[a]===0?[0]:[cfg.min[a]*deg,cfg.max[a]*deg];
 chart("axisPlot",[{color:"#1674c5",points:data.frames.map(f=>[f.t,f.j[ji].r.a[a]*deg])},{color:"#27815d",points:data.frames.map(f=>[f.t,f.j[ji].b.a[a]*deg])},{color:"#bd590a",points:data.frames.map(f=>[f.t,f.j[ji].a.a[a]*deg])}],f.t,"시간 (초)",bounds);
-const rows=axes.map((name,a)=>[name,a===3?(cfg.motion[1]===1&&cfg.motion[2]===1?"두 축의 타원 제한":"적용 안 됨"):cfg.motion[a]===2?"자유":cfg.motion[a]===0?"잠금 (0°)":`${fmt(cfg.min[a]*deg)} ~ ${fmt(cfg.max[a]*deg)}`,
+const rows=axes.map((name,a)=>[name,a===3?(!data.articulation&&cfg.min[2]===-cfg.max[2]&&cfg.motion[1]===1&&cfg.motion[2]===1?"두 축의 타원 제한":"적용 안 됨"):cfg.motion[a]===2?"자유":cfg.motion[a]===0?"잠금 (0°)":`${fmt(cfg.min[a]*deg)} ~ ${fmt(cfg.max[a]*deg)}`,
 ...(a<3?[j.r.a[a]*deg,j.b.a[a]*deg,j.a.a[a]*deg]:["-","-","-"]),j.r.e[a]*deg,j.a.e[a]*deg]);
 table("angles",["축","허용 범위 (°)","원본 (°)","보정 목표 (°)","실제 (°)","원본 초과량 (°)","실제 초과량 (°)"],rows);
 table("violations",["축","위반 비율 (%)","총 지속 (초)","최장 연속 (초)","최초 (초)","마지막 (초)","최대 초과 (°)","최대 시각 (초)","실제 최대 초과 (°)"],axes.map((name,a)=>{

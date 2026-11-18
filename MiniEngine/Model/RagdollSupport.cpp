@@ -21,7 +21,8 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
     for (size_t side = 0; side < m_SupportContacts.size(); ++side)
     {
         const RagdollSupportContact& contact = m_SupportContacts[side];
-        valid[side] = contact.supporting && contact.body >= 0 &&
+        valid[side] = contact.grounded && contact.body >= 0 &&
+            std::isfinite(contact.loadWeight) && contact.loadWeight > 0 &&
             static_cast<size_t>(contact.body) < m_Bodies.size() && contact.position.isFinite() &&
             contact.normal.isFinite() && contact.normal.y >= .70710678f;
         if (valid[side])
@@ -43,12 +44,24 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
     {
         // 양발 사이로 투영한 COM에 따라 하중을 분담한다. 지면반력 측정값과는 별개의 목표값이다.
         const PxVec3 span = m_SupportContacts[1].position - m_SupportContacts[0].position;
-        const PxVec3 relative = PxVec3(float(center.GetX()), float(center.GetY()), float(center.GetZ())) -
-            m_SupportContacts[0].position;
+        const PxVec3 relative = PxVec3(float(center.GetX()), float(center.GetY()), float(center.GetZ())) - m_SupportContacts[0].position;
+
         const float lengthSquared = span.x * span.x + span.z * span.z;
-        const float right = lengthSquared > 1e-8f ?
-            PxClamp((relative.x * span.x + relative.z * span.z) / lengthSquared, 0.0f, 1.0f) : .5f;
-        m_SupportLoads.fractions = {1.0f - right, right};
+        const float right = lengthSquared > 1e-8f ? PxClamp((relative.x * span.x + relative.z * span.z) / lengthSquared, 0.0f, 1.0f) : .5f;
+        const float leftWeight = (1.0f - right) * PxClamp(m_SupportContacts[0].loadWeight, 0.0f, 1.0f);
+        const float rightWeight = right * PxClamp(m_SupportContacts[1].loadWeight, 0.0f, 1.0f);
+        const float totalWeight = leftWeight + rightWeight;
+        if (totalWeight > 1e-6f)
+        {
+            m_SupportLoads.fractions = {leftWeight / totalWeight, rightWeight / totalWeight};
+        }
+        else
+        {
+            const float leftAvailability = PxClamp(m_SupportContacts[0].loadWeight, 0.0f, 1.0f);
+            const float rightAvailability = PxClamp(m_SupportContacts[1].loadWeight, 0.0f, 1.0f);
+            const float availability = leftAvailability + rightAvailability;
+            m_SupportLoads.fractions = {leftAvailability / availability, rightAvailability / availability};
+        }
     }
     else
     {
@@ -56,6 +69,8 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
     }
     PxArticulationCache& cache = *m_ArticulationCache;
     PxU32 rows = 0, columns = 0;
+
+
     m_Articulation->computeDenseJacobian(cache, rows, columns);
     if (columns != count)
     {
@@ -63,6 +78,7 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
         return generalized;
     }
     const float weight = (std::max)(0.0f, -mass * m_Articulation->getScene()->getGravity().y);
+
     for (size_t side = 0; side < m_SupportContacts.size(); ++side)
     {
         if (!valid[side])
@@ -77,10 +93,19 @@ std::vector<float> Ragdoll::ComputeSupportGeneralizedForce()
             m_SupportLoads = {};
             return std::vector<float>(count, 0);
         }
+
         const PxVec3 force = contact.normal * (weight * m_SupportLoads.fractions[side] / contact.normal.y);
+
         const PxVec3 centerOfMass = (body.getGlobalPose() * body.getCMassLocalPose()).p;
         const PxVec3 torque = (contact.position - centerOfMass).cross(force);
+
         m_SupportLoads.forces[side] = force;
+        if (weight > 0 && std::isfinite(contact.ankleDriveBoost))
+        {
+            // 예상 하중을 체중으로 정규화한다. 기존 관성 보상에 질량비를 중복 적용하지 않는다.
+            m_SupportLoads.ankleDriveScales[side] +=
+                PxClamp(contact.ankleDriveBoost, 0.0f, 1.0f) * m_SupportLoads.fractions[side];
+        }
         const PxU32 firstRow = 6 * link->getLinkIndex();
         for (unsigned column = 0; column < count; ++column)
         {

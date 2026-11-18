@@ -116,56 +116,6 @@ namespace PARS
         bool hasDirection = false;
     };
 
-    struct FootSupportCandidates
-    {
-    public:
-        int support = -1;                                                         // 지지발 후보
-        int step = -1;                                                            // 움직일 발의 후보
-        std::array<physx::PxVec3, 2> centers{physx::PxVec3(0), physx::PxVec3(0)}; // 각 발의 중심 위치 저장
-        std::array<float, 2> distances{};                                         // 각 발 중심과 COM까지의 거리 저장
-    };
-
-    // A 내부, A~B 사이와 명시적인 B 이탈 유예 중에 지지발·움직일 발 후보를 고른다.
-    // 실제 영역 판정은 그대로 보존하고, 무효 영역은 유예 여부와 관계없이 제외한다.
-    // 후보는 COM과 발 중심의 수평 거리로 정한다. 실제 접촉과 착지 가능 여부는 플래너가 별도로 검사한다.
-    inline FootSupportCandidates EvaluateFootSupportCandidates(const std::vector<physx::PxVec3>& hull,
-        const physx::PxVec3& com, const std::array<std::vector<physx::PxVec3>, 2>& feet,
-        FootSupportZone zone, int previous = -1, bool allowOutside = false)
-    {
-        FootSupportCandidates result;
-        // A를 벗어났다는 이유만으로 회복 발딛기 후보를 없애지 않는다.
-        if (!com.isFinite() || hull.size() < 3 ||
-            (zone != FootSupportZone::Inside && zone != FootSupportZone::Buffer &&
-                !(allowOutside && zone == FootSupportZone::Outside)))
-        {
-            return result;
-        }
-        for (size_t side = 0; side < feet.size(); ++side)
-        {
-            if (BuildFootSupportHull(feet[side]).size() < 3)
-            {
-                return {};
-            }
-            for (const physx::PxVec3& point : feet[side])
-            {
-                result.centers[side] += point;
-            }
-            result.centers[side] /= float(feet[side].size());
-            const physx::PxVec3 delta = com - result.centers[side];
-            result.distances[side] = std::sqrt(delta.x * delta.x + delta.z * delta.z);
-        }
-        // COM에 가까운 발을 지지발 후보로, 반대 발을 움직일 발 후보로 정한다.
-        result.support = result.distances[0] <= result.distances[1] ? 0 : 1;
-        // 거리 차이가 1cm 이내면 이전 후보를 유지한다. 처음 동률이면 왼발을 선택한다.
-        if (previous >= 0 && previous < 2 &&
-            result.distances[previous] <= result.distances[1 - previous] + .01f)
-        {
-            result.support = previous;
-        }
-        result.step = 1 - result.support;
-        return result;
-    }
-
     // A is a CCW convex hull from BuildFootSupportHull. B scales XZ distances
     // about its AREA centroid; a scale of 2 gives four times the area.
     inline FootSupportBalance EvaluateFootSupportBalance(const std::vector<physx::PxVec3>& hull,

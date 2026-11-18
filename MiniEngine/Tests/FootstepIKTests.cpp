@@ -1,4 +1,4 @@
-#include "../Model/FootstepIK.h"
+﻿#include "../Model/FootstepIK.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -186,7 +186,7 @@ namespace
             pose[0] = PxTransform(PxVec3(0, 1.1f, 0));
             pose[9] = PxTransform(PxVec3(0, 1.4f, 0));
             input.enabled = true;
-            input.stepFoot = 1;
+            input.motionTargets[1] = true;
             input.revision = 1;
             const PxTransform physical(PxVec3(.2f, 1.07f, .15f),
                 PxQuat(.3f, PxVec3(0, 1, 0)) * PxQuat(.1f, PxVec3(0, 0, 1)));
@@ -291,7 +291,7 @@ namespace
     {
         PoseFixture fixture;
         FootstepIK ik;
-        fixture.input.stepFoot = -1;
+        fixture.input.motionTargets = {};
         const std::vector<physx::PxTransform> animated = fixture.pose;
         for (int frame = 0; frame < 20; ++frame)
         {
@@ -309,7 +309,27 @@ namespace
                 Check(Near(actualSole, leg.targetSole), "Stored recovery soles stay in world space as the pelvis moves");
             }
         }
-        Check(ik.GetSnapshot().stepFoot == -1, "Recovery support does not display a fictional moving foot");
+        Check(!ik.GetSnapshot().motionTargets[0] && !ik.GetSnapshot().motionTargets[1], "Recovery support does not display a fictional moving foot");
+    }
+    void TestIndependentCommandFlags()
+    {
+        for (unsigned mask = 0; mask < 4; ++mask)
+        {
+            PoseFixture fixture;
+            FootstepIK ik;
+            fixture.input.motionTargets[0] = (mask & 1u) != 0;
+            fixture.input.motionTargets[1] = (mask & 2u) != 0;
+            Check(ik.Apply(fixture.input, fixture.parents, fixture.pose),
+                "IK accepts either, both, or neither foot as independently commanded");
+            Check(ik.GetSnapshot().motionTargets == fixture.input.motionTargets,
+                "The IK snapshot preserves each foot's command flag without assigning its opposite a role");
+            for (const FootIKLegInput& leg : fixture.input.legs)
+            {
+                const PxTransform actualSole = leg.actualAnchor * fixture.pose[leg.anchorNode].getInverse() *
+                    fixture.pose[leg.ankleNode] * leg.soleInBone;
+                Check(Near(actualSole, leg.targetSole), "Every leg still solves its own world-space sole goal");
+            }
+        }
     }
 }
 
@@ -321,5 +341,6 @@ void TestFootstepIK()
     TestPoseAndPhysicalAnchor();
     TestHintHistoryReset();
     TestRecoverySupportTargets();
+    TestIndependentCommandFlags();
     std::printf("PASS: %u footstep IK checks (no PhysX simulation)\n", checks);
 }

@@ -45,6 +45,7 @@
     <ClCompile Include="..\Model\RagdollRecovery.cpp" />
     <ClCompile Include="..\Model\RagdollRecoveryPose.cpp" />
     <ClCompile Include="PhysicsAssetTests.cpp" />
+    <ClCompile Include="JointLimitTests.cpp" />
     <ClCompile Include="..\Model\PhysicsAsset.cpp" />
     <ClCompile Include="..\Model\PhysicsPose.cpp" />
     <ClCompile Include="..\Model\Ragdoll.cpp" />
@@ -54,6 +55,8 @@
     <ClCompile Include="RagdollTests.cpp" />
     <ClCompile Include="RagdollReuseTests.cpp" />
     <ClCompile Include="ActiveRagdollTests.cpp" />
+    <ClCompile Include="HorizontalBalanceRagdollTests.cpp" />
+    <ClCompile Include="ArmDriveTests.cpp" />
     <ClCompile Include="RagdollComparisonTests.cpp" />
     <ClCompile Include="..\Model\RagdollComparison.cpp" />
     <ClCompile Include="..\Model\RagdollComparisonReport.cpp" />

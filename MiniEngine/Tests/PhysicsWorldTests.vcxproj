@@ -47,9 +47,18 @@
     <ClCompile Include="FramePerformanceTests.cpp" />
     <ClCompile Include="FootstepPlannerTests.cpp" />
     <ClCompile Include="..\Model\FootstepPlanner.cpp" />
+    <ClCompile Include="..\Model\FootstepRecovery.cpp" />
+    <ClCompile Include="FootstepRecoveryTests.cpp" />
     <ClCompile Include="FootstepIKTests.cpp" />
     <ClCompile Include="..\Model\FootstepIK.cpp" />
+    <ClCompile Include="FootstepCollisionTests.cpp" />
+    <ClCompile Include="..\Model\FootstepCollision.cpp" />
+    <ClCompile Include="..\Model\FootstepPath.cpp" />
+    <ClCompile Include="..\Model\FootstepCollisionBounds.cpp" />
+    <ClCompile Include="..\Model\FootstepAvoidance.cpp" />
     <ClCompile Include="StandingSupportTests.cpp" />
+    <ClCompile Include="HorizontalBalanceTests.cpp" />
+    <ClCompile Include="..\Model\HorizontalBalance.cpp" />
     <ClCompile Include="..\Model\StandingSupport.cpp" />
     <ClCompile Include="..\Core\PhysicsWorld.cpp" />
   </ItemGroup>

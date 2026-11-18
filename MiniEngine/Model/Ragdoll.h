@@ -19,6 +19,7 @@ namespace physx
     class PxArticulationJointReducedCoordinate;
     class PxArticulationCache;
     class PxShape;
+    class PxGeometryHolder;
 }
 
 namespace PARS
@@ -37,7 +38,10 @@ namespace PARS
         int body = -1;
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0, 1, 0};
-        bool supporting = false;
+        float loadWeight = 1.0f; // 실제 접촉 여부와 별개로 이 발에 배정할 목표 하중의 가중치
+        float ankleDriveBoost = 0;
+        float ankleDriveBlendTime = .08f;
+        bool grounded = false;
     };
 
     struct RagdollSupportLoads
@@ -45,6 +49,7 @@ namespace PARS
     public:
         std::array<float, 2> fractions{};
         std::array<physx::PxVec3, 2> forces{physx::PxVec3(0), physx::PxVec3(0)};
+        std::array<float, 2> ankleDriveScales{1.0f, 1.0f};
     };
 
     // 실행 중인 PhysX 객체를 소유한다. 소속 PhysicsWorld가 종료되기 전에 파괴해야 한다.
@@ -132,7 +137,33 @@ namespace PARS
         {
             return m_DrivesEnabled;
         }
+        bool SetArmDriveStrength(float strength);
+        // 좌우 팔 배율과 임시 강도를 설정한다. -1은 사용자 기본 강도를 사용한다.
+        bool SetArmDriveScales(const std::array<float, 2>& scales, float overrideStrength = -1.0f);
+        const std::array<float, 2>& GetArmDriveScales() const
+        {
+            return m_ArmDriveScales;
+        }
+        float GetArmDriveStrength() const
+        {
+            return m_ArmDriveStrength;
+        }
+        float GetEffectiveArmDriveStrength(size_t side) const
+        {
+            if (side >= m_ArmDriveScales.size())
+            {
+                return 0;
+            }
+            const float strength = m_ArmDriveOverride >= 0 ? m_ArmDriveOverride : m_ArmDriveStrength;
+            return strength * m_ArmDriveScales[side];
+        }
         void SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts);
+        // 힘은 저장만 하며 양의 시간으로 드라이브를 갱신할 때 물리 스텝당 한 번 적용한다.
+        void SetHorizontalSupportForce(const physx::PxVec3& force);
+        const physx::PxVec3& GetHorizontalSupportForce() const
+        {
+            return m_HorizontalSupportForce;
+        }
         bool UsesFootDrivenSupport() const
         {
             return m_FootDrivenSupport;
@@ -178,12 +209,15 @@ namespace PARS
             return m_BoneNodes;
         }
         Math::Matrix4 GetBoneWorld(size_t body) const;
+        bool GetBodyCollisionShape(size_t body, physx::PxGeometryHolder& geometry,
+            physx::PxTransform& inBone, physx::PxTransform& actualPose) const;
         Math::Vector3 GetPosition() const;
         // 실제 바디의 월드 질량중심을 질량으로 가중 평균한다. 바디가 없으면 false다.
         bool GetCenterOfMass(Math::Vector3& center, float& totalMass) const;
         // 바디 질량중심의 실제 선속도를 질량으로 가중 평균한다. 단위는 m/s다.
         bool GetCenterOfMassVelocity(Math::Vector3& velocity) const;
         bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
+        bool AreBodiesInContact(size_t first, size_t second) const;
         float GetExternalImpactImpulse() const;
         void CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const;
         bool HasApproachingImpact(float minimumDeltaVelocity) const;
@@ -218,6 +252,9 @@ namespace PARS
         bool IsFinite() const;
 
     private:
+        float GetJointDriveStrength(const PhysicsConstraint& joint) const;
+
+    private:
         static constexpr float PelvisLinearFrequency = 30.0f;
         static constexpr float PelvisLinearDampingRatio = 1.0f;
         static constexpr float PelvisAngularFrequency = 16.0f;
@@ -225,6 +262,7 @@ namespace PARS
 
     private:
         uint64_t m_ContactRevision = 0;
+        uint64_t m_HorizontalSupportStep = UINT64_MAX;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
@@ -248,8 +286,12 @@ namespace PARS
         int m_ArticulationRoot = -1;
         int m_SupportBody = -1;
         float m_RootSupportWeight = 0;
+        float m_ArmDriveStrength = 1.0f;
+        float m_ArmDriveOverride = -1.0f;
+        std::array<float, 2> m_ArmDriveScales{1.0f, 1.0f};
         std::array<RagdollSupportContact, 2> m_SupportContacts;
         RagdollSupportLoads m_SupportLoads;
+        physx::PxVec3 m_HorizontalSupportForce{0};
         float m_MaxTargetClampAngle = 0;
         physx::PxTransform m_CapsuleRootPose{physx::PxIdentity};
         float m_CapsuleRadiusScale = 0;

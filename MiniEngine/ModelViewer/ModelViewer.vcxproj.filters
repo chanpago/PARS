@@ -15,6 +15,7 @@
     <ClCompile Include="FootSoleDebug.cpp" />
     <ClCompile Include="RagdollImpactTest.cpp" />
     <ClCompile Include="RagdollImpactValidation.cpp" />
+    <ClCompile Include="HorizontalBalanceValidation.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FootSoleDebug.h" />
@@ -290,5 +291,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CharacterImpactUI.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Shaders\FootstepRegionPS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
 </Project>

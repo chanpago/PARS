@@ -92,10 +92,12 @@ bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
 LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
 {
     LegIKResult result;
-    const float upper = input.thighLength, lower = input.calfLength;
+    const float upper = input.thighLength;
+    const float lower = input.calfLength;
     if (!input.hip.isSane() || !input.knee.isSane() || !input.ankle.isSane() ||
         !input.targetSole.isSane() || !input.soleInBone.isSane() ||
-        !std::isfinite(upper) || !std::isfinite(lower) || upper <= 1e-5f || lower <= 1e-5f)
+        !std::isfinite(upper) || !std::isfinite(lower) || upper <= 1e-5f || lower <= 1e-5f ||
+        !std::isfinite(input.maximumReachRatio) || input.maximumReachRatio <= 0 || input.maximumReachRatio > 1)
     {
         return result;
     }
@@ -105,7 +107,8 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     // requested: 역산한 발목본의 목표 위치·회전
     const PxTransform requested = input.targetSole * input.soleInBone.getInverse();
 
-    PxVec3 sourceUpper = input.knee.p - input.hip.p, sourceLower = input.ankle.p - input.knee.p;
+    PxVec3 sourceUpper = input.knee.p - input.hip.p;
+    PxVec3 sourceLower = input.ankle.p - input.knee.p;
     if (!requested.isSane() || !Unit(sourceUpper) || !Unit(sourceLower))
     {
         return result;
@@ -136,12 +139,16 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     const bool animationBent = sourceBend.magnitude() > (upper + lower) * .001f;
 
 
-    PxVec3 bend = sourceBend;
+    PxVec3 bend = input.preferReferenceBend ? input.referenceBend : sourceBend;
     // 거의 펴진 애니메이션의 작은 오차로 무릎 방향이 뒤집히는 것을 피한다.
 
     // bend는 b0
     // direction은 고관절에서 새 목표 발목으로 향하는 단위벡터
-    if (animationBent && ProjectHint(bend, direction))
+    if (input.preferReferenceBend && ProjectHint(bend, direction))
+    {
+        result.hintSource = KneeHintSource::Reference;
+    }
+    else if (animationBent && ProjectHint(bend = sourceBend, direction))
     {
         result.hintSource = KneeHintSource::Animation;
     }
@@ -149,7 +156,7 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     {
         bend = input.previousBend;
 
-        
+
         if (input.hasPreviousBend && ProjectHint(bend, direction))
         {
             result.hintSource = KneeHintSource::Previous;
@@ -171,7 +178,9 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
 
     // 뼈 길이는 유지한다. 완전히 펴지거나 접히는 특이점에만 작은 계산 여유를 둔다.
     const float margin = PxMin((upper + lower) * 1e-4f, PxMin(upper, lower) * .1f);
-    const float distance = PxClamp(requestedDistance, PxAbs(upper - lower) + margin, upper + lower - margin);
+    const float minimumReach = PxAbs(upper - lower) + margin;
+    const float maximumReach = PxMax(minimumReach, (upper + lower) * input.maximumReachRatio - margin);
+    const float distance = PxClamp(requestedDistance, minimumReach, maximumReach);
 
     // 두 직각삼각형의 관계로 고관절 H에서 기준점 Q까지의 거리 a를 구함
     const double along = (double(upper) * upper - double(lower) * lower + double(distance) * distance) / (2 * distance);
@@ -229,7 +238,7 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
     }
     m_Snapshot = {};
     m_Snapshot.revision = input.revision;
-    m_Snapshot.stepFoot = input.stepFoot;
+    m_Snapshot.motionTargets = input.motionTargets;
     if (!input.enabled)
     {
         return false;
@@ -247,10 +256,6 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         }
     }
     m_Snapshot.status = FootstepIKStatus::InvalidLeg;
-    if (input.stepFoot < -1 || input.stepFoot > 1)
-    {
-        return false;
-    }
     for (const PARS::FootIKLegInput& leg : input.legs)
     {
         if (!leg.available || !Ancestor(parents, leg.anchorNode, leg.hipNode) ||
@@ -277,16 +282,10 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         // 현재 물리 부모를 기준으로 풀되, 골반의 애니메이션 목표 자체는 덮어쓰지 않는다.
         const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
         TwoBoneIKInput solve;
-        solve.hip = toPhysical * pose[leg.hipNode];
-        solve.knee = toPhysical * pose[leg.kneeNode];
-        solve.ankle = toPhysical * pose[leg.ankleNode];
-        solve.soleInBone = leg.soleInBone;
-        solve.targetSole = leg.targetSole;
-        solve.thighLength = leg.thighLength;
-        solve.calfLength = leg.calfLength;
-        solve.referenceBend = solve.hip.q.rotate(leg.referenceBendInHip);
-        solve.hasPreviousBend = m_HasPreviousBend[side];
-        solve.previousBend = leg.actualAnchor.q.rotate(m_PreviousBendInAnchor[side]);
+        if (!BuildLegInput(input, side, pose, solve))
+        {
+            return false;
+        }
         PARS::LegIKResult& result = m_Snapshot.legs[side];
         result = SolveTwoBoneIK(solve);
         if (!result.valid)
@@ -320,6 +319,34 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
         m_HasPreviousBend[side] = true;
     }
     m_Snapshot.status = FootstepIKStatus::Applied;
+    return true;
+}
+
+bool FootstepIK::BuildLegInput(const FootstepIKInput& input, size_t side,
+    const std::vector<PxTransform>& pose, TwoBoneIKInput& result) const
+{
+    if (side >= input.legs.size())
+    {
+        return false;
+    }
+    const FootIKLegInput& leg = input.legs[side];
+    if (!leg.available || leg.anchorNode < 0 || leg.hipNode < 0 || leg.kneeNode < 0 || leg.ankleNode < 0 ||
+        size_t(leg.anchorNode) >= pose.size() || size_t(leg.hipNode) >= pose.size() ||
+        size_t(leg.kneeNode) >= pose.size() || size_t(leg.ankleNode) >= pose.size())
+    {
+        return false;
+    }
+    const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
+    result.hip = toPhysical * pose[leg.hipNode];
+    result.knee = toPhysical * pose[leg.kneeNode];
+    result.ankle = toPhysical * pose[leg.ankleNode];
+    result.soleInBone = leg.soleInBone;
+    result.targetSole = leg.targetSole;
+    result.thighLength = leg.thighLength;
+    result.calfLength = leg.calfLength;
+    result.referenceBend = result.hip.q.rotate(leg.referenceBendInHip);
+    result.hasPreviousBend = input.revision == m_Snapshot.revision && m_HasPreviousBend[side];
+    result.previousBend = leg.actualAnchor.q.rotate(m_PreviousBendInAnchor[side]);
     return true;
 }
 

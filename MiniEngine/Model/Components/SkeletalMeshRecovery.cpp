@@ -54,19 +54,37 @@ namespace PARS
         {
             return UpdateStandingUpAnimation(deltaTime);
         }
-        if (!IsActiveRagdoll() || !m_AutomaticRootSupport)
+        if (!IsFalling())
         {
             m_StandingUpStableTime = 0;
             m_StandingUpState = StandingUpState::None;
             return true;
         }
+        if (!m_FallingAnimationEnabled || m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount())
+        {
+            // 낙상 클립을 꺼도 물리 낙상과 착지 후 기상은 계속 처리한다.
+            if (IsFollowingFallingAnimation() || IsFollowingStandingUpAnimation())
+            {
+                // 재생 도중 끄거나 기상 중 다시 넘어지면 기본 Idle 목표로 돌아간다.
+                if (m_StandingIdleAnimationIndex < m_AnimInstance->GetAnimationCount())
+                {
+                    if (!m_AnimInstance->TransitionToAnimation(m_StandingIdleAnimationIndex, .05f, true))
+                    {
+                        m_PhysicsError = "Cannot return to idle after disabling the falling animation.";
+                        return false;
+                    }
+                    m_Ragdoll.ResetDriveTargetHistory();
+                }
+                else
+                {
+                    m_AnimInstance->SetPlaying(false);
+                }
+            }
+            return UpdateStandingUpAnimation(deltaTime);
+        }
         if (IsFollowingFallingAnimation())
         {
             return UpdateStandingUpAnimation(deltaTime);
-        }
-        if (m_RootSupportRelease == RootSupportRelease::None || m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount())
-        {
-            return true;
         }
 
         // 낙상은 한 번 재생하고 착지 후 기상을 기다린다. 위치와 회전 지지는 이미 해제된 상태다.
@@ -108,7 +126,10 @@ namespace PARS
             return true;
         }
 
-        if (m_AnimInstance->IsPlaying() || m_AnimInstance->IsBlending() || IsBlendingToKinematic())
+        // 낙상 시퀀스를 생략한 경우 반복 Idle의 종료를 기다리지 않는다.
+        const bool waitForClip = m_StandingUpState == StandingUpState::Kinematic ||
+            (m_FallingAnimationEnabled && IsFollowingFallingAnimation());
+        if ((waitForClip && m_AnimInstance->IsPlaying()) || m_AnimInstance->IsBlending() || IsBlendingToKinematic())
         {
             m_StandingUpStableTime = 0;
             return true;
@@ -130,12 +151,19 @@ namespace PARS
             float(Length(velocity)) <= m_RecoverySettings.maximumReturnSpeed;
         bool grounded = false;
         float groundHeight = -std::numeric_limits<float>::infinity();
+        const bool requireBodyContact = !m_FallingAnimationEnabled ||
+            m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount();
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
         for (size_t body = 0; body < m_Ragdoll.GetBodyCount(); ++body)
         {
             PhysicsGroundContact contact;
             if (m_Ragdoll.GetBodyGroundContact(body, contact))
             {
-                grounded = true;
+                // 클립의 종료 대기가 없을 때는 발만 닿은 채 기상 동작을 시작하지 않는다.
+                const bool footContact = body < nodes.size() &&
+                    (nodes[body] == support.feet[0].boneNode || nodes[body] == support.feet[1].boneNode);
+                grounded = grounded || !requireBodyContact || !footContact;
                 groundHeight = Max(groundHeight, contact.position.y);
             }
         }
@@ -320,6 +348,19 @@ namespace PARS
             // 모드 전환은 접촉 캐시를 비우므로 충격점과 바디별 충격량을 먼저 복사한다.
             std::vector<RagdollBodyImpulse> impacts;
             m_Ragdoll.CaptureExternalImpacts(impacts);
+            const int impactRoot = m_Ragdoll.GetImpactRootBody();
+            PxVec3 impactPosition(0);
+            float impactWeight = 0;
+            for (const RagdollBodyImpulse& bodyImpact : impacts)
+            {
+                const float weight = bodyImpact.impulse.magnitude();
+                if (impactRoot >= 0 && bodyImpact.body == static_cast<size_t>(impactRoot) &&
+                    bodyImpact.position.isFinite() && std::isfinite(weight) && weight > 1e-6f)
+                {
+                    impactPosition += bodyImpact.position * weight;
+                    impactWeight += weight;
+                }
+            }
             Character* character = dynamic_cast<Character*>(&GetOwner());
             const bool activated = character ? character->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_PhysicsError) :
                 SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, Vector3(kZero), m_PhysicsError);
@@ -340,10 +381,14 @@ namespace PARS
             m_KinematicRecoveryTimer.Reset();
             m_PendingRecoveryImpact = !interruptedStandingUp;
             m_Ragdoll.ApplyExternalImpacts(impacts);
+            if (impactWeight > 0)
+            {
+                m_FootSupport.RecordImpact(impactPosition / impactWeight);
+            }
             return m_Ragdoll.SetRootSupported(!interruptedStandingUp, m_PhysicsError);
         }
         // 낙상은 전용 기상 경로에서 처리하므로 기존 서기 복귀 타이머에서 제외한다.
-        if (!IsActiveRagdoll() || IsFollowingFallingAnimation())
+        if (!IsActiveRagdoll() || IsFalling())
         {
             m_KinematicRecoveryTimer.Reset();
             return true;
@@ -490,12 +535,16 @@ namespace PARS
 
     void SkeletalMeshComponent::ResetRecovery()
     {
+        m_FootstepAvoidance.Reset();
+        m_FootstepCollision = {};
         m_Recovery.Reset();
         m_HasRecoverySoles = false;
         m_RecoveryReferenceHull.clear();
         m_RecoveryBlendSource.clear();
         m_FootstepIK.Reset();
         m_StandingSupport.Reset();
+        m_HorizontalBalance.Reset();
+        m_Ragdoll.SetHorizontalSupportForce(PxVec3(0));
         m_Ragdoll.SetSupportContacts({});
     }
 
@@ -539,11 +588,11 @@ namespace PARS
             return true;
         }
 
-        // 지지 해제 여부와 발딛기 상태를 전달 
+        // 지지 해제 여부와 발딛기 상태를 전달
         // fallen : 골반 지지가 해제됐거나 발딛기가 중단
         // needsStep : 플래너가 예측 COM을 보고 발딛기가 필요하다고 판단
         // stepping : 발딛기가 이미 시작돼, 이륙 대기 또는 공중 단계인지
-        input.fallen = m_RootSupportRelease != RootSupportRelease::None || step.phase == FootstepPhase::Aborted;
+        input.fallen = m_RootSupportRelease != RootSupportRelease::None || step.aborted;
         input.needsStep = step.needsStep;
         input.stepping = step.IsInProgress();
 
@@ -563,10 +612,10 @@ namespace PARS
         input.predictionInsideSupport = step.hasPrediction && !step.needsStep;
 
         // 양발 모두 실제로 접지했는지 전달. 접촉샘플 데이터와 지면접촉정보로 판단
-        input.bothGrounded = 
-            sample.feet[0].contact.hasSample && 
+        input.bothGrounded =
+            sample.feet[0].contact.hasSample &&
             sample.feet[0].contact.grounded &&
-            sample.feet[1].contact.hasSample && 
+            sample.feet[1].contact.hasSample &&
             sample.feet[1].contact.grounded;
 
         // 외부 충격을 속도 변화 단위로 환산. GetExternalImpactImpulse()은 물리 엔진에 기록된 전신의 외부 충돌 충격량을 가져옴. 이를 전신 질량으로 나눔
@@ -619,7 +668,7 @@ namespace PARS
             const FootSoleSettings& sole = m_FootSupport.GetSoleSettings(side);
             const float w = sole.halfWidth, l = sole.halfLength;
 
-            // 
+            //
             for (const PxVec3& corner : {PxVec3(-w, 0, -l), PxVec3(w, 0, -l), PxVec3(w, 0, l), PxVec3(-w, 0, l)})
             {
                 // 발바닥 네 모서리를 월드 좌표로 바꿈
@@ -644,14 +693,14 @@ namespace PARS
 
             // 최소 3개로 다각형을 이루었는지
             input.hasReference = m_RecoveryReferenceHull.size() >= 3;
-			// 현재 COM이 기준 다각형 안에 있는지
+            // 현재 COM이 기준 다각형 안에 있는지
             input.insideReference = IsInsideFootSupportHull(m_RecoveryReferenceHull, sample.centerOfMass);
-			// 예측 COM이 기준 다각형 안에 있는지
+            // 예측 COM이 기준 다각형 안에 있는지
             input.predictionInsideReference = step.hasPrediction && IsInsideFootSupportHull(m_RecoveryReferenceHull, step.predictedCom);
         }
 
         // m_RecoverySoles : 회복,지지에 사용할 양발 발바닥의 목표 위치,회전
-		// m_RecoveryBlendSource : 애니메이션 복귀를 시작할 때 캡처한 물리 본 자세
+        // m_RecoveryBlendSource : 애니메이션 복귀를 시작할 때 캡처한 물리 본 자세
 
         // 앞서 정의한 RecoveryInput input;으로 회복 상태를 갱신. 충격, COM, 발딛기, 접지 상태 등을 보고 회복 제어가 현재 상태를 결정
         m_Recovery.Update(input, m_RecoverySettings);
@@ -676,7 +725,7 @@ namespace PARS
             m_RecoveryBlendSource.clear();
         }
 
-        
+
         if ((m_Ragdoll.UsesFootDrivenSupport() && !m_HasRecoverySoles) || (recovery.enteredRecovery && !m_Ragdoll.UsesFootDrivenSupport()))
         {
             m_HasRecoverySoles = sample.feet[0].available && sample.feet[1].available;
@@ -720,7 +769,7 @@ namespace PARS
         }
 
         // 회복 중이거나 발 기반 지지를 사용하면, 발 목표를 계속 갱신
-        // 유효한 양발 목표가 있는지 검사하고, 없으면 오류를 반환 
+        // 유효한 양발 목표가 있는지 검사하고, 없으면 오류를 반환
         if (recovery.state == RecoveryState::Recovery || m_Ragdoll.UsesFootDrivenSupport())
         {
             if (!m_HasRecoverySoles)
@@ -729,43 +778,29 @@ namespace PARS
                 return false;
             }
 
-            // 발딛기를 시작하면 지지발의 기준을 현재 상태로 다시 잡음
-            // 이번 발딛기를 지탱할 왼발의 기본 목표
-            if (step.justStarted && step.supportFoot >= 0 && step.supportFoot < 2)
+            bool changedTargets = false;
+            for (size_t side = 0; side < step.feet.size(); ++side)
             {
-                m_RecoverySoles[step.supportFoot] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[step.supportFoot]) :
-                    ToRecoveryFrame(sample.feet[step.supportFoot].soleWorld);
-            }
-
-            // 움직이던 발이 착지하면 실제 착지 상태를 새 기준으로 저장
-			// 예를들어 계획한 착지 X위치가 0.4m인데 실제로 0.35m에 착지했다면, 평평한 지면에서는 실제 착지한 0.35를 바탕으로 새 기본 목표를 잡음
-            if (step.justLanded && step.stepFoot >= 0 && step.stepFoot < 2)
-            {
-                // 착지는 회복의 종료가 아니다. 착지한 발을 유지하며 COM 안정 조건을 계속 확인한다.
-                m_RecoverySoles[step.stepFoot] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[step.stepFoot]) :
-                    ToRecoveryFrame(sample.feet[step.stepFoot].soleWorld);
-            }
-
-            // 착지 전에는 움직이는 발의 목표를 궤적에 따라 갱신
-            else if (step.motion.valid && step.stepFoot >= 0 && step.stepFoot < 2)
-            {
-                PxTransform sole(PxIdentity);
-
-                /*
-				step.motion.position : 발딛기 궤적에 따라 계산된 발바닥 위치
-				step.targetNormal : 목표 발바닥의 위 방향을 정할 지면 법선
-				animatedSoles[step.stepFoot] : 발의 전방 방향을 얻을 애니메이션 기준 자세
-                sole : 계산 결과를 받을 위치,회전 변환
-                */
-                if (MakeFootSoleTarget(step.motion.position, step.targetNormal, animatedSoles[step.stepFoot], sole))
+                const FootstepCommand& command = step.feet[side];
+                changedTargets = changedTargets || command.justStarted || command.justLanded;
+                if (command.justLanded || (!command.IsInProgress() && sample.feet[side].contact.landed))
                 {
-                    // 성공하면 이동할 발의 목표를 갱신
-                    m_RecoverySoles[step.stepFoot] = sole;
+                    // 해당 발의 실제 착지점만 갱신하며 반대 발의 목표나 역할은 바꾸지 않는다.
+                    m_RecoverySoles[side] = m_Ragdoll.UsesFootDrivenSupport() ? CaptureSupportSole(sample.feet[side]) :
+                        ToRecoveryFrame(sample.feet[side].soleWorld);
+                }
+                else if (command.motion.valid)
+                {
+                    PxTransform sole(PxIdentity);
+                    if (MakeFootSoleTarget(command.motion.position, command.target.normal, animatedSoles[side], sole))
+                    {
+                        m_RecoverySoles[side] = sole;
+                    }
                 }
             }
 
             // 시작,착지 때 목표 변화율 계산 이력을 초기화
-            if (m_Ragdoll.UsesFootDrivenSupport() && (step.justStarted || step.justLanded))
+            if (m_Ragdoll.UsesFootDrivenSupport() && changedTargets)
             {
                 // 이륙/착지 때 실제 발로 기준을 다시 잡는 차이를 목표 속도·가속도로 오인하지 않는다.
                 // 현재 물리 속도는 유지하므로 관절 PD의 제동은 계속 작동한다.

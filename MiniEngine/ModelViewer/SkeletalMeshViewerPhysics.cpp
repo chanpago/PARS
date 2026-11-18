@@ -363,6 +363,41 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     ImGui::TextUnformatted(u8"본 기준 위치 (m)");
     ImGui::SetNextItemWidth(-1);
     changed |= ImGui::DragFloat3("##BodyOffset", &body.offset.x, .002f, -100, 100, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+    XMFLOAT4 rotation;
+    XMStoreFloat4(&rotation, Normalize(Quaternion(XMLoadFloat4(&body.rotation))));
+    const float sineY = Clamp(2 * (rotation.w * rotation.y - rotation.z * rotation.x), -1.0f, 1.0f);
+    const float sineXCosineY = 2 * (rotation.w * rotation.x + rotation.y * rotation.z);
+    const float cosineXCosineY = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
+    const float cosineY = std::hypot(sineXCosineY, cosineXCosineY);
+    float rotationDegrees[3];
+    rotationDegrees[1] = XMConvertToDegrees(std::atan2(sineY, cosineY));
+    if (cosineY > 1e-5f)
+    {
+        rotationDegrees[0] = XMConvertToDegrees(std::atan2(sineXCosineY, cosineXCosineY));
+        rotationDegrees[2] = XMConvertToDegrees(std::atan2(2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+            1 - 2 * (rotation.y * rotation.y + rotation.z * rotation.z)));
+    }
+    else
+    {
+        // Y축이 ±90도이면 분리할 수 없는 X/Z 회전을 X축에 합쳐 같은 방향을 표시한다.
+        rotationDegrees[0] = XMConvertToDegrees(std::atan2(2 * (rotation.w * rotation.x - rotation.y * rotation.z),
+            1 - 2 * (rotation.x * rotation.x + rotation.z * rotation.z)));
+        rotationDegrees[2] = 0;
+    }
+    ImGui::TextUnformatted(u8"본 기준 회전 X / Y / Z (도)");
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::DragFloat3("##BodyRotation", rotationDegrees, .5f, -180, 180, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+    {
+        XMStoreFloat4(&body.rotation, Normalize(
+            Quaternion(Vector3(kZUnitVector), XMConvertToRadians(rotationDegrees[2])) *
+            Quaternion(Vector3(kYUnitVector), XMConvertToRadians(rotationDegrees[1])) *
+            Quaternion(Vector3(kXUnitVector), XMConvertToRadians(rotationDegrees[0]))));
+        changed = true;
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(u8"본 좌표계 기준 X → Y → Z 순서의 회전입니다.\n숫자를 더블클릭하거나 Ctrl+클릭하면 직접 입력할 수 있습니다.");
+    }
     if (body.shape == PhysicsShapeType::Box)
     {
         ImGui::TextUnformatted(u8"상자 반크기 X / Y / Z (m)");

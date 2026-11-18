@@ -1,4 +1,4 @@
-#include "../Model/StandingSupport.h"
+﻿#include "../Model/StandingSupport.h"
 #include "../Model/FootSupport.h"
 #include <cmath>
 #include <cstdio>
@@ -34,6 +34,7 @@ namespace
             foot.available = foot.grounded = true;
             foot.sole = PxTransform(PxVec3(side == 0 ? -.1f : .1f, 0, 0));
             foot.animatedSole = foot.sole;
+            foot.actualSole = foot.sole;
             foot.length = 1.1f;
         }
         return input;
@@ -55,7 +56,7 @@ namespace
         controller.Reset();
         input.stepping = true;
         input.stepDistance = .4f;
-        input.feet[1].supporting = false;
+        input.feet[1].hasMotionTarget = true;
         input.feet[1].grounded = false;
         input.feet[1].sole.p = PxVec3(.2f, .2f, .3f);
         Check(controller.Update(input, settings), "Single stance supports height control");
@@ -68,13 +69,13 @@ namespace
         input = StandingPose();
         Check(controller.Update(input, settings), "Initialize a horizontal support reference");
         input.stepping = true;
-        input.feet[1].supporting = false;
+        input.feet[1].hasMotionTarget = true;
         input.feet[1].sole.p.z += .3f;
         ++input.completedStep;
         Check(controller.Update(input, settings) && controller.GetSnapshot().horizontalCorrection.magnitude() < 1e-6f,
             "Swing trajectory cannot pull the pelvis horizontal reference toward itself");
         input.stepping = false;
-        input.feet[1].supporting = true;
+        input.feet[1].hasMotionTarget = false;
         ++input.completedStep;
         Check(controller.Update(input, settings) && controller.GetSnapshot().horizontalCorrection.magnitude() < .02f,
             "Landing updates the horizontal reference continuously rather than jumping to the new foot midpoint");
@@ -193,7 +194,7 @@ namespace
         input.deltaTime = 1.0f / 60.0f;
         input.stepping = true;
         input.stepDistance = .4f;
-        input.feet[1].supporting = false;
+        input.feet[1].hasMotionTarget = true;
         input.feet[1].grounded = false;
         contact.Update(1, true, true, input.feet[0].sole.p, PxVec3(0, 1, 0));
         Check(held.Update(input, settings) && continuous.Update(input, settings),
@@ -223,32 +224,120 @@ namespace
             "Support grace never changes the swing-foot target");
     }
 
-    void TestDisplayContactGrace()
+    void TestSupportFootTilt()
     {
-        FootSupportSnapshot sample;
-        sample.footstep.phase = FootstepPhase::AwaitingTakeoff;
-        sample.footstep.supportFoot = 0;
-        sample.footstep.stepFoot = 1;
-        sample.feet[0].available = true;
-        FootContactSample& contact = sample.feet[0].contact;
-        contact.hasSample = true;
-        contact.grounded = true;
-        contact.normal = PxVec3(0, 1, 0);
-        contact.support.Update(10, contact.hasSample, contact.grounded, contact.position, contact.normal);
-        Check(sample.GetDisplayRoles().IsValid(), "A real stance contact enables role colors");
-        contact.grounded = false;
-        contact.normal = PxVec3(0);
-        for (uint64_t step = 11; step <= 13; ++step)
+        StandingSupport controller;
+        StandingSupportSettings settings;
+        StandingSupportInput input = StandingPose();
+        const PxVec3 pitchAxis(1, 0, 0);
+        input.feet[0].actualSole.q = PxQuat(PxPi / 18.0f, pitchAxis);
+        input.feet[0].sole.q = PxQuat(PxPi / 9.0f, pitchAxis);
+        input.feet[1].hasMotionTarget = true;
+        input.feet[1].actualSole.q = input.feet[0].actualSole.q;
+        input.feet[1].sole.q = input.feet[0].sole.q;
+        Check(controller.Update(input, settings), "Tilted support has a valid target");
+        const PxVec3 limitedUp = controller.GetSnapshot().soleTargets[0].q.rotate(PxVec3(0, 1, 0));
+        Check(controller.GetSnapshot().footTiltLimited[0] &&
+                std::abs(std::acos(PxClamp(limitedUp.y, -1.0f, 1.0f)) - PxPi / 36.0f) < 1e-5f,
+            "A tilted stance foot caps an excessive target at five degrees");
+        Check(!controller.GetSnapshot().footTiltLimited[1] &&
+                std::abs(controller.GetSnapshot().soleTargets[1].q.dot(input.feet[1].sole.q)) > .999999f,
+            "The same tilt never alters the swing-foot orientation");
+        ++input.completedStep;
+        input.feet[0].sole.q = PxQuat(-PxPi / 9.0f, pitchAxis);
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0],
+            "A restoring target in the opposite direction remains unchanged");
+        ++input.completedStep;
+        input.feet[0].sole.q = PxQuat(PxPi, PxVec3(0, 1, 0));
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0],
+            "Yaw alone is not treated as sole tilt");
+        ++input.completedStep;
+        const PxQuat slope(PxPi / 12.0f, PxVec3(0, 0, 1));
+        input.feet[0].supportNormal = slope.rotate(PxVec3(0, 1, 0));
+        input.feet[0].actualSole.q = slope;
+        input.feet[0].sole.q = slope;
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0],
+            "A foot flat on a slope is not flattened toward world up");
+        ++input.completedStep;
+        input.feet[0].supportNormal = PxVec3(0, 1, 0);
+        input.feet[0].actualSole.q = PxQuat(3.5f * PxPi / 180.0f, pitchAxis);
+        input.feet[0].sole.q = PxQuat(PxPi / 9.0f, pitchAxis);
+        Check(controller.Update(input, settings), "Intermediate tilt remains valid");
+        const PxVec3 blendedUp = controller.GetSnapshot().soleTargets[0].q.rotate(PxVec3(0, 1, 0));
+        Check(std::abs(std::acos(PxClamp(blendedUp.y, -1.0f, 1.0f)) - 12.5f * PxPi / 180.0f) < 1e-5f,
+            "The limit blends continuously between its onset and full strength");
+        ++input.completedStep;
+        input.feet[0].grounded = false;
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0],
+            "No tilt restriction remains after support contact expires");
+        ++input.completedStep;
+        input.feet[0].contactGraceActive = true;
+        Check(controller.Update(input, settings) && controller.GetSnapshot().footTiltLimited[0],
+            "Brief support contact grace preserves the tilt restriction");
+        ++input.completedStep;
+        settings.limitFootTilt = false;
+        Check(controller.Update(input, settings) && !controller.GetSnapshot().footTiltLimited[0] &&
+                std::abs(controller.GetSnapshot().soleTargets[0].q.dot(input.feet[0].sole.q)) > .999999f,
+            "Disabling the limiter restores the original rotation target");
+    }
+
+
+    void TestIndependentMotionTargets()
+    {
+        const StandingSupportSettings settings;
+        for (unsigned mask = 1; mask < 4; ++mask)
         {
-            contact.support.Update(step, contact.hasSample, contact.grounded, contact.position, contact.normal);
-            Check(sample.GetDisplayRoles().supportFoot == 0 && sample.GetDisplayRoles().movableFoot == 1,
-                "Role colors retain the committed feet during three missing contact steps");
+            StandingSupport controller;
+            StandingSupportInput input = StandingPose();
+            input.stepping = true;
+            input.stepDistance = .4f;
+            input.pelvis.p.y = .85f;
+            for (size_t side = 0; side < input.feet.size(); ++side)
+            {
+                StandingSupportFoot& foot = input.feet[side];
+                foot.hasMotionTarget = (mask & (1u << side)) != 0;
+                if (foot.hasMotionTarget)
+                {
+                    foot.sole.p += PxVec3(0, .2f, .3f);
+                    foot.sole.q = PxQuat(.2f, PxVec3(1, 0, 0));
+                }
+            }
+            Check(controller.Update(input, settings), "Grounded feet may also have independent motion targets");
+            Check(std::abs(controller.GetSnapshot().nominalHeight - 1) < 1e-5f,
+                "A grounded commanded foot contributes its actual sole height rather than its future target");
+            for (size_t side = 0; side < input.feet.size(); ++side)
+            {
+                if (input.feet[side].hasMotionTarget)
+                {
+                    const PxTransform& target = controller.GetSnapshot().soleTargets[side];
+                    Check((target.p - input.feet[side].sole.p).magnitude() < 1e-6f &&
+                            std::abs(target.q.dot(input.feet[side].sole.q)) > .999999f,
+                        "Standing corrections cannot overwrite a grounded foot's motion position or orientation");
+                }
+            }
         }
-        sample.footstep.phase = FootstepPhase::Aborted;
-        Check(!sample.GetDisplayRoles().IsValid(), "Aborting stepping still hides roles during the grace interval");
-        sample.footstep.phase = FootstepPhase::Airborne;
-        contact.support.Update(14, contact.hasSample, contact.grounded, contact.position, contact.normal);
-        Check(!sample.GetDisplayRoles().IsValid(), "Role colors hide after support grace expires");
+
+        StandingSupport controller;
+        StandingSupportInput input = StandingPose();
+        input.stepping = true;
+        for (StandingSupportFoot& foot : input.feet)
+        {
+            foot.hasMotionTarget = true;
+            foot.grounded = false;
+            foot.contactGraceActive = true;
+            foot.sole.p += PxVec3(0, .2f, .3f);
+        }
+        Check(controller.Update(input, settings) && controller.GetSnapshot().valid,
+            "Two airborne commands keep valid IK goals without a designated supporting foot");
+        for (size_t side = 0; side < input.feet.size(); ++side)
+        {
+            Check((controller.GetSnapshot().soleTargets[side].p - input.feet[side].sole.p).magnitude() < 1e-6f,
+                "Contact grace cannot turn an airborne motion target into a standing correction");
+        }
+        input.feet[0].grounded = true;
+        ++input.completedStep;
+        Check(controller.Update(input, settings) && controller.GetSnapshot().valid,
+            "A new real contact resumes height calculation without transferring a foot role");
     }
 }
 
@@ -259,6 +348,7 @@ void TestStandingSupport()
     TestReachAndReset();
     TestSupportContactGrace();
     TestGracePreservesStandingCorrection();
-    TestDisplayContactGrace();
+    TestSupportFootTilt();
+    TestIndependentMotionTargets();
     std::puts("PASS: standing height, swing isolation, contact loss, reach and reset");
 }

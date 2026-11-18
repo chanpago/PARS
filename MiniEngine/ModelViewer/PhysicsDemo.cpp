@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "CompiledShaders/PhysicsDemoVS.h"
 #include "CompiledShaders/PhysicsDemoPS.h"
+#include "CompiledShaders/FootstepRegionPS.h"
 #include <cfloat>
 #include <cmath>
 #include <Windows.h>
@@ -19,7 +20,6 @@ using namespace Graphics;
 namespace
 {
     const PxVec3 FloorHalfExtents(15.0f, 0.25f, 15.0f);
-    const PxVec3 BoxHalfExtents(0.5f);
     // 외곽 벽의 위치와 길이는 바닥 크기에 맞추고 내부 장애물은 기존 배치를 유지한다.
     const PxVec3 WallCentres[] =
     {
@@ -166,119 +166,6 @@ namespace
         }
     }
 
-    void AppendRulerQuad(std::vector<Vertex>& vertices, float x0, float y0, float x1, float y1,
-        float side, float depth, const PxVec3& color)
-    {
-        // 뒷면도 그 면을 바라보는 방향에서 글자가 바르게 읽히도록 좌우 축을 바꾼다.
-        const PxVec3 normal(0, 0, side);
-        const PxVec3 corners[] =
-        {
-            {side * x0, y0, side * depth}, {side * x1, y0, side * depth},
-            {side * x1, y1, side * depth}, {side * x0, y1, side * depth}
-        };
-        const int indices[] = {0, 1, 2, 0, 2, 3};
-        for (const int index : indices)
-        {
-            vertices.push_back({corners[index], normal, color});
-        }
-    }
-
-    const uint8_t* RulerGlyph(char letter)
-    {
-        // 숫자와 단위를 삼각형 메시로 만든다. 별도 텍스처나 화면 좌표 글꼴이 필요하지 않다.
-        static const uint8_t digits[10][7] =
-        {
-            {14, 17, 19, 21, 25, 17, 14}, {4, 12, 4, 4, 4, 4, 14},
-            {14, 17, 1, 2, 4, 8, 31}, {30, 1, 1, 14, 1, 1, 30},
-            {2, 6, 10, 18, 31, 2, 2}, {31, 16, 16, 30, 1, 1, 30},
-            {14, 16, 16, 30, 17, 17, 14}, {31, 1, 2, 4, 8, 8, 8},
-            {14, 17, 17, 14, 17, 17, 14}, {14, 17, 17, 15, 1, 1, 14}
-        };
-        static const uint8_t centimetre[] = {0, 0, 14, 16, 16, 16, 14};
-        static const uint8_t metre[] = {0, 0, 26, 21, 21, 21, 21};
-        if (letter >= '0' && letter <= '9')
-        {
-            return digits[letter - '0'];
-        }
-        if (letter == 'c')
-        {
-            return centimetre;
-        }
-        if (letter == 'm')
-        {
-            return metre;
-        }
-        return nullptr;
-    }
-
-    void AppendRulerText(std::vector<Vertex>& vertices, const std::string& text,
-        float x, float y, float height, float side, float depth, const PxVec3& color)
-    {
-        const float cell = height / 7.0f;
-        for (const char letter : text)
-        {
-            const uint8_t* glyph = RulerGlyph(letter);
-            if (glyph)
-            {
-                for (int row = 0; row < 7; ++row)
-                {
-                    for (int column = 0; column < 5; ++column)
-                    {
-                        if (glyph[row] & (1 << (4 - column)))
-                        {
-                            const float left = x + column * cell;
-                            const float bottom = y + (6 - row) * cell;
-                            AppendRulerQuad(vertices, left, bottom, left + cell, bottom + cell,
-                                side, depth, color);
-                        }
-                    }
-                }
-            }
-            x += 6.0f * cell;
-        }
-    }
-
-    std::vector<Vertex> BuildRulerMesh()
-    {
-        std::vector<Vertex> vertices(72);
-        Vertex* output = vertices.data();
-        const PxVec3 board(.94f, .88f, .67f);
-        const PxVec3 ink(.025f, .035f, .045f);
-        const PxVec3 major(.025f, .15f, .36f);
-        const PxVec3 highlight(1.0f, .28f, .025f);
-        AppendBox(output, PxTransform(PxVec3(0, 1.035f, 0)), PxVec3(.185f, 1.035f, .018f), board);
-        AppendBox(output, PxTransform(PxVec3(0, .003f, 0)), PxVec3(.24f, .003f, .12f), major);
-
-        // 월드 1단위는 1m다. 표시용 메시만 생성하고 물리 형상은 등록하지 않는다.
-        for (const float side : {-1.0f, 1.0f})
-        {
-            AppendRulerQuad(vertices, -.18f, 0, -.177f, 2.0f, side, .019f, ink);
-            for (int centimetres = 0; centimetres <= 200; ++centimetres)
-            {
-                const float height = centimetres * .01f;
-                const bool numbered = centimetres % 10 == 0;
-                const bool emphasized = centimetres % 50 == 0;
-                const float length = numbered ? .09f : centimetres % 5 == 0 ? .055f : .027f;
-                const float thickness = numbered ? .0025f : .001f;
-                const PxVec3 color = emphasized ? major : ink;
-                AppendRulerQuad(vertices, -.177f, height - thickness * .5f,
-                    -.177f + length, height + thickness * .5f, side, .019f, color);
-                if (numbered)
-                {
-                    const std::string label = centimetres == 200 ? "2m" : std::to_string(centimetres) + "cm";
-                    const float textHeight = emphasized ? .05f : .045f;
-                    const float bottom = centimetres == 0 ? .012f :
-                        centimetres == 200 ? 2.008f : height - textHeight * .5f;
-                    AppendRulerText(vertices, label, -.065f, bottom, textHeight, side, .0195f, color);
-                }
-            }
-            // 8cm 표시를 숫자 열 반대쪽으로 빼서 10cm 눈금과 글자가 겹치지 않게 한다.
-            AppendRulerQuad(vertices, -.38f, .048f, -.185f, .112f, side, .020f, highlight);
-            AppendRulerQuad(vertices, -.38f, .0785f, .177f, .0815f, side, .020f, highlight);
-            AppendRulerText(vertices, "8cm", -.366f, .058f, .044f, side, .0205f, ink);
-        }
-        return vertices;
-    }
 }
 
 PhysicsDemo::PhysicsDemo(PARS::World& world)
@@ -292,12 +179,6 @@ bool PhysicsDemo::Startup(MapId map)
     {
         return false;
     }
-    if (!m_Box)
-    {
-        Cleanup();
-        return false;
-    }
-
     m_RootSignature.Reset(1);
     m_RootSignature[0].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSignature.Finalize(L"Physics demo", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
@@ -324,31 +205,27 @@ bool PhysicsDemo::Startup(MapId map)
     m_OverlayLinePSO.SetDepthStencilState(DepthStateDisabled);
     m_OverlayLinePSO.SetRenderTargetFormat(g_SceneColorBuffer.GetFormat(), DXGI_FORMAT_UNKNOWN);
     m_OverlayLinePSO.Finalize();
-    // 고정 눈금과 숫자는 한 번만 생성해 GPU에 보관한다.
-    const std::vector<Vertex> ruler = BuildRulerMesh();
-    m_RulerMesh.Create(L"Dummy 2m ruler", static_cast<uint32_t>(ruler.size()), sizeof(Vertex), ruler.data());
+    m_RegionPSO = m_PSO;
+    m_RegionPSO.SetBlendState(BlendTraditional);
+    m_RegionPSO.SetDepthStencilState(DepthStateReadOnly);
+    m_RegionPSO.SetPixelShader(g_pFootstepRegionPS, sizeof(g_pFootstepRegionPS));
+    m_RegionPSO.Finalize();
     return true;
 }
 
 void PhysicsDemo::Cleanup()
 {
-    m_RulerMesh.Destroy();
     m_PvdConnecting = false;
     ReleaseMap();
 }
 
 void PhysicsDemo::ReleaseMap()
 {
-    if (m_Box)
-    {
-        m_Box->release();
-    }
     for (const MapBox& box : m_MapBoxes)
     {
         box.body->release();
     }
     m_MapBoxes.clear();
-    m_Box = nullptr;
 }
 
 bool PhysicsDemo::AddMapBox(std::vector<MapBox>& boxes, const PxTransform& pose,
@@ -387,15 +264,6 @@ bool PhysicsDemo::LoadMap(MapId map)
         ready = AddMapBox(boxes, PxTransform(PxVec3(0, -.25f, 0)), FloorHalfExtents,
             groundColor, "Ground", groundMaterial);
     }
-    // 기존 테스트장은 바닥, 낙하 상자, 벽의 생성 순서까지 유지한다.
-    PxRigidDynamic* dropBox = ready
-        ? m_World.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), BoxHalfExtents, 10.0f, "Falling box")
-        : nullptr;
-    ready = ready && dropBox != nullptr;
-    if (dropBox)
-    {
-        dropBox->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-    }
     if (map == MapId::TestYard)
     {
         for (size_t index = 0; index < _countof(WallCentres) && ready; ++index)
@@ -424,10 +292,6 @@ bool PhysicsDemo::LoadMap(MapId map)
     }
     if (!ready)
     {
-        if (dropBox)
-        {
-            dropBox->release();
-        }
         for (const MapBox& box : boxes)
         {
             box.body->release();
@@ -437,11 +301,6 @@ bool PhysicsDemo::LoadMap(MapId map)
     ReleaseMap();
     m_MapBoxes = std::move(boxes);
     m_Map = map;
-    m_Box = dropBox;
-    m_DropReady = true;
-    m_HistoryCount = 0;
-    m_HistoryOffset = 0;
-    RecordHeight();
     return true;
 }
 
@@ -490,74 +349,9 @@ Math::Vector3 PhysicsDemo::GetDummySpawnOrigin() const
     return Math::Vector3(3.5f, 0, m_Map == MapId::Cliff ? -5.7f : -2.5f);
 }
 
-void PhysicsDemo::ResetBox()
-{
-    if (m_Box)
-    {
-        m_Box->release();
-    }
-    m_Box = m_World.CreateDynamicBox(PxTransform(PxVec3(0, 4, 0)), BoxHalfExtents, 10.0f, "Falling box");
-    // 데모 상자만 고정하며, 캐릭터 물리는 계속 동작한다.
-    if (m_Box)
-    {
-        m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-    }
-    m_DropReady = true;
-    m_HistoryCount = 0;
-    m_HistoryOffset = 0;
-    RecordHeight();
-}
-
-void PhysicsDemo::StartDrop()
-{
-    ResetBox();
-    if (m_Box)
-    {
-        m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
-        // eKINEMATIC을 해제해도 수면 상태는 유지된다. 해제한 상자를 명시적으로 깨워
-        // 바로 다음 월드 스텝부터 중력이 작용하게 한다.
-        m_Box->wakeUp();
-    }
-    m_DropReady = m_Box == nullptr;
-    m_GameWorld.SetPhysicsPaused(false);
-}
-
-void PhysicsDemo::KickBox()
-{
-    if (!m_Box)
-    {
-        return;
-    }
-    m_Box->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
-    m_DropReady = false;
-    // 실제 충격량과 토크를 적용한다. 이후의 비행, 회전, 바닥 충돌은
-    // 현재 포즈를 기준으로 PhysX가 처리한다.
-    m_Box->addForce(PxVec3(0, 60, 0), PxForceMode::eIMPULSE);
-    m_Box->addTorque(PxVec3(5, 0, 3), PxForceMode::eIMPULSE);
-    m_GameWorld.SetPhysicsPaused(false);
-}
-
-void PhysicsDemo::RecordHeight()
-{
-    if (!m_Box)
-    {
-        return;
-    }
-    m_HeightHistory[m_HistoryOffset] = m_Box->getGlobalPose().p.y;
-    m_HistoryOffset = (m_HistoryOffset + 1) % HistoryCapacity;
-    if (m_HistoryCount < HistoryCapacity)
-    {
-        ++m_HistoryCount;
-    }
-}
-
 void PhysicsDemo::Update(float)
 {
     UpdatePvdConnection(); // 물리가 일시정지된 동안에도 연결 재시도를 수행해야 한다.
-    if (!m_DropReady && m_World.GetLastSubsteps() && m_Box && !m_Box->isSleeping())
-    {
-        RecordHeight();
-    }
 }
 
 void PhysicsDemo::ConnectPvd()
@@ -711,10 +505,6 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
             AppendBox(output, box.body->getGlobalPose(), box.halfExtents, box.color);
         }
     }
-    if (m_Box && !comparisonScene)
-    {
-        AppendBox(output, m_Box->getGlobalPose(), BoxHalfExtents, PxVec3(1.0f, 0.38f, 0.06f));
-    }
     const UINT count = static_cast<UINT>(output - vertices.data());
     if (count)
     {
@@ -768,28 +558,6 @@ void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& ca
     context.Draw(static_cast<UINT>(vertices.size()));
 }
 
-void PhysicsDemo::RenderRuler(GraphicsContext& context, const Math::Camera& camera,
-    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor, Math::Vector3 origin)
-{
-    if (m_RulerMesh.GetElementCount() == 0)
-    {
-        return;
-    }
-    const Math::Matrix4 viewProjection = camera.GetViewProjMatrix() *
-        Math::Matrix4(Math::OrthogonalTransform(origin));
-    context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-    context.TransitionResource(m_RulerMesh, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, true);
-    context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV());
-    context.SetViewportAndScissor(viewport, scissor);
-    context.SetRootSignature(m_RootSignature);
-    context.SetPipelineState(m_PSO);
-    context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context.SetDynamicConstantBufferView(0, sizeof(viewProjection), &viewProjection);
-    context.SetVertexBuffer(0, m_RulerMesh.VertexBufferView());
-    context.Draw(m_RulerMesh.GetElementCount());
-}
-
 void PhysicsDemo::RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
     const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor)
 {
@@ -833,6 +601,37 @@ void PhysicsDemo::RenderDebugLines(GraphicsContext& context, const Math::Camera&
     context.Draw(static_cast<UINT>(vertices.size()));
 }
 
+void PhysicsDemo::RenderDebugTriangles(GraphicsContext& context, const Math::Camera& camera,
+    const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
+    const std::vector<PxDebugTriangle>& triangles)
+{
+    if (triangles.empty())
+    {
+        return;
+    }
+    std::vector<Vertex> vertices;
+    vertices.reserve(triangles.size() * 3);
+    for (const PxDebugTriangle& triangle : triangles)
+    {
+        const PxVec3 color(static_cast<float>((triangle.color0 >> 16) & 255) / 255,
+            static_cast<float>((triangle.color0 >> 8) & 255) / 255,
+            static_cast<float>(triangle.color0 & 255) / 255);
+        vertices.push_back({triangle.pos0, PxVec3(0, 1, 0), color});
+        vertices.push_back({triangle.pos1, PxVec3(0, 1, 0), color});
+        vertices.push_back({triangle.pos2, PxVec3(0, 1, 0), color});
+    }
+    context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_READ, true);
+    context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
+    context.SetViewportAndScissor(viewport, scissor);
+    context.SetRootSignature(m_RootSignature);
+    context.SetPipelineState(m_RegionPSO);
+    context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context.SetDynamicConstantBufferView(0, sizeof(Math::Matrix4), &camera.GetViewProjMatrix());
+    context.SetDynamicVB(0, static_cast<UINT>(vertices.size()), sizeof(Vertex), vertices.data());
+    context.Draw(static_cast<UINT>(vertices.size()));
+}
+
 void PhysicsDemo::RenderUI()
 {
     static bool visible = true;
@@ -845,33 +644,16 @@ void PhysicsDemo::RenderUI()
         return;
     }
     ImGui::SetNextWindowPos(ImVec2(20, 70), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(410, 610), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(390, 520), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowSize(ImVec2(410, 460), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(390, 360), ImVec2(FLT_MAX, FLT_MAX));
     if (ImGui::Begin(u8"PARS - 물리", &visible))
     {
-        const bool ready = m_DropReady;
         bool paused = m_GameWorld.IsPhysicsPaused();
         bool slowMotion = m_GameWorld.GetPhysicsTimeScale() < 1.0f;
-        ImGui::TextUnformatted(paused ? u8"월드 일시정지" : ready ? u8"상자 준비 완료 - 캐릭터 동작 중"
-                                                                  : u8"시뮬레이션 중");
-        if (ImGui::Button(ready ? u8"낙하 시작###Drop" : u8"다시 낙하###Drop", ImVec2(-1, 32)))
+        ImGui::TextUnformatted(paused ? u8"월드 일시정지" : u8"시뮬레이션 중");
+        if (ImGui::Checkbox(u8"느리게 (0.1배, F)", &slowMotion))
         {
-            StartDrop();
-        }
-        if (ImGui::Button(u8"상자 초기화"))
-        {
-            ResetBox();
-        }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!m_Box);
-        if (ImGui::Button(u8"위로 밀기 + 회전"))
-        {
-            KickBox();
-        }
-        ImGui::EndDisabled();
-        if (ImGui::Checkbox(u8"느리게 (0.25배)", &slowMotion))
-        {
-            m_GameWorld.SetPhysicsTimeScale(slowMotion ? 0.25f : 1.0f);
+            m_GameWorld.SetPhysicsTimeScale(slowMotion ? 0.1f : 1.0f);
         }
         if (ImGui::Checkbox(u8"월드 일시정지", &paused))
         {
@@ -885,19 +667,6 @@ void PhysicsDemo::RenderUI()
         }
         ImGui::EndDisabled();
         ImGui::Separator();
-        if (m_Box)
-        {
-            ImGui::Text(u8"상자 중심 높이: %.3f m", m_Box->getGlobalPose().p.y);
-            ImGui::Text(u8"수직 속도: %.3f m/s", m_Box->getLinearVelocity().y);
-            ImGui::Text(u8"바디 상태: %s", m_Box->isSleeping() ? u8"휴면" : u8"활성");
-            ImGui::PlotLines("##Height", m_HeightHistory, m_HistoryCount,
-                m_HistoryCount == HistoryCapacity ? m_HistoryOffset : 0,
-                u8"높이 변화 (m)", 0.0f, FLT_MAX, ImVec2(-1, 64));
-        }
-        else
-        {
-            ImGui::TextUnformatted(u8"상자를 생성하지 못했습니다. '상자 초기화'를 눌러주세요.");
-        }
         ImGui::Text(u8"%.1f FPS | 물리: 60 Hz | 속도: %.2f배", ImGui::GetIO().Framerate,
             m_GameWorld.GetPhysicsTimeScale());
         ImGui::Text(u8"물리 스텝: %llu | 현재 프레임: %u", static_cast<unsigned long long>(m_World.GetStepCount()),

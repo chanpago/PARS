@@ -1,7 +1,9 @@
 ﻿#include "SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
+#include "../FootstepPoseValidation.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
 
@@ -45,6 +47,17 @@ namespace PARS
             return false;
         }
         candidate.SetQueryOwner(&GetOwner());
+        candidate.SetArmDriveStrength(m_ArmDriveStrength);
+        return true;
+    }
+
+    bool SkeletalMeshComponent::SetArmDriveStrength(float strength)
+    {
+        if (!m_Ragdoll.SetArmDriveStrength(strength))
+        {
+            return false;
+        }
+        m_ArmDriveStrength = strength;
         return true;
     }
 
@@ -105,7 +118,7 @@ namespace PARS
                 - COM 정보: 현재 질량중심, 전체 질량, COM 속도.
                 - 발 정보: 실제 접촉 상태, 발바닥 위치, 레이로 얻은 지면 투영점.
                 - 균형 판단: A 영역, COM의 지면 투영과 A 내부 여부, A/B 기준 골반 지지계수 weight.
-                - 발딛기 판단: 지지발·움직일 발 후보, 예측 COM, 발딛기 필요 여부, 착지 목표와 발딛기 진행 상태.
+                - 발딛기 판단: 예측 COM, 발딛기 필요 여부, 발별 명령 대상·착지 목표·진행 상태.
             */
             // 현재 몸과 발의 상태를 읽고, 균형 판단과 발딛기 계획을 m_Snapshot에 갱신하는함수
             m_FootSupport.Update(*this, *physics);
@@ -122,11 +135,11 @@ namespace PARS
     }
 
 
-    // target은 본 노드별 월드 공간 목표 행렬 배열 
+    // target은 본 노드별 월드 공간 목표 행렬 배열
     // 참조로 받으르모 함수 마지막에서 이 배열의 다리관련 행렬을 수정
     void SkeletalMeshComponent::ApplyFootstepIKTargets(std::vector<Matrix4>& target, float deltaTime)
     {
-        // IK를 실행할 수 있는 상태인지 확인. 발 지지 정보와 발딛기 상태를 가져옴 
+        // IK를 실행할 수 있는 상태인지 확인. 발 지지 정보와 발딛기 상태를 가져옴
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const FootstepSnapshot& step = sample.footstep;
 
@@ -135,6 +148,7 @@ namespace PARS
             !m_HasRecoverySoles)
         {
             m_FootstepIK.Reset();
+            m_FootstepAvoidance.Reset();
             return;
         }
 
@@ -155,7 +169,6 @@ namespace PARS
         // IK와 서있기 보정의 공통입력을 준비함
         FootstepIKInput input;
         input.enabled = true;
-        input.stepFoot = step.IsInProgress() ? step.stepFoot : -1;
         input.revision = sample.contactRevision;
 
 
@@ -163,23 +176,23 @@ namespace PARS
         StandingSupportInput standing;
         standing.enabled = m_Ragdoll.UsesFootDrivenSupport();
         standing.stepping = step.IsInProgress();
-        standing.stepDistance = step.initialDistance;
+        standing.stepDistance = step.GetMaximumInitialDistance();
         standing.deltaTime = deltaTime;
         standing.revision = sample.contactRevision;
         standing.completedStep = sample.completedPhysicsStep;
         standing.velocity = sample.hasCenterOfMassVelocity ? sample.centerOfMassVelocity : PxVec3(0);
         std::array<RagdollSupportContact, 2> contacts;
 
-		// 다리별 IK 입력을 준비하고, 서있기 보정 입력과 접촉 정보를 준비함
+        // 다리별 IK 입력을 준비하고, 서있기 보정 입력과 접촉 정보를 준비함
         for (size_t side = 0; side < input.legs.size(); ++side)
         {
             /*
             hipsNode : 허벅지가 시작하는 본
-			kneeNode : 무릎이 시작하는 본
-			ankleNode : 발목이 시작하는 본
-			thighLength : 허벅지 길이
-			caalfLength : 종아리 길이
-			referenceBendInHip : 허벅지 본 기준의 기준 무릎 굽힘 방향
+            kneeNode : 무릎이 시작하는 본
+            ankleNode : 발목이 시작하는 본
+            thighLength : 허벅지 길이
+            caalfLength : 종아리 길이
+            referenceBendInHip : 허벅지 본 기준의 기준 무릎 굽힘 방향
             */
             const FootSoleSample& foot = sample.feet[side];
             const FootLegSetup& setup = foot.leg;
@@ -247,26 +260,29 @@ namespace PARS
             StandingSupportFoot& support = standing.feet[side];
             support.available = leg.available;
 
-            // 지지역할을 하는발과 실제 접지를 구분함
-            support.supporting = input.stepFoot != static_cast<int>(side);
+            // 명령 여부와 접촉 측정은 독립적이며 제어에 요구할 하중은 아래에서 별도로 정한다.
+            support.hasMotionTarget = step.feet[side].IsInProgress();
+            input.motionTargets[side] = support.hasMotionTarget;
             support.grounded = foot.contact.hasSample && foot.contact.grounded;
             support.contactGraceActive = foot.contact.hasSample && !support.grounded && foot.contact.support.IsValid();
 
 
             support.sole = leg.targetSole;
             support.soleInBone = leg.soleInBone;
+            support.actualSole = toPx(foot.soleWorld);
+            support.supportNormal = foot.contact.support.GetNormal();
 
             // 입력 목표 포즈의 발바닥을 계산
             support.animatedSole = rigidTargets[leg.ankleNode] * leg.soleInBone;
 
             // IK좌표 변환의 핵심
             /*
-			일단 기본적으로 목표(애니메이션 트랙데이터) 를 실제 물리 바디의 부모 좌표계로 쉽게 변환하기 위해 쓰는 toPhysical 변환이다.
-            목표 고관절의 월드변환은 목표 루트로부터 쭉 곱해지는데 여기서 행렬의 결합법칙이 작용하므로 
-			목표 고관절의 월드변환 = 목표 루트 * ... * 목표 고관절 부모 * 목표 고관절
-			물리 고관절의 월드변환 = toPhysical * 목표 루트 * ... * 목표 고관절
-								= 물리 루트 * ... * 물리 고관절 부모 * 물리 고관절
-            그냥 목표로 적용되어있던 관절을 루트만 바꿔서 물리로 바꿔주기위한 도움 변수 행렬이다 
+            일단 기본적으로 목표(애니메이션 트랙데이터) 를 실제 물리 바디의 부모 좌표계로 쉽게 변환하기 위해 쓰는 toPhysical 변환이다.
+            목표 고관절의 월드변환은 목표 루트로부터 쭉 곱해지는데 여기서 행렬의 결합법칙이 작용하므로
+            목표 고관절의 월드변환 = 목표 루트 * ... * 목표 고관절 부모 * 목표 고관절
+            물리 고관절의 월드변환 = toPhysical * 목표 루트 * ... * 목표 고관절
+                                = 물리 루트 * ... * 물리 고관절 부모 * 물리 고관절
+            그냥 목표로 적용되어있던 관절을 루트만 바꿔서 물리로 바꿔주기위한 도움 변수 행렬이다
             */
             const PxTransform toPhysical = leg.actualAnchor * rigidTargets[leg.anchorNode].getInverse();
 
@@ -277,14 +293,18 @@ namespace PARS
             standing.animatedPelvis = rigidTargets[leg.anchorNode];
             const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), foot.boneNode);
 
-            // 지지 보정에는 유예 중인 마지막 지지면을 함께 사용한다. 측정 충격량은 재사용하지 않는다.
+            // 하중 보상에는 실제 접지한 발과 그 지면을 전달한다.
             contacts[side].body = body != nodes.end() ? static_cast<int>(body - nodes.begin()) : -1;
-            contacts[side].supporting = support.supporting && foot.contact.support.IsValid();
+            contacts[side].grounded = support.grounded;
+            // 접촉 측정은 유지하되 이륙 명령에 몸을 지탱할 하중 목표를 함께 부여하지 않는다.
+            contacts[side].loadWeight = support.hasMotionTarget ? 0.0f : 1.0f;
             contacts[side].position = foot.contact.support.GetPosition();
             contacts[side].normal = foot.contact.support.GetNormal();
+            contacts[side].ankleDriveBoost = m_StandingSupportSettings.ankleDriveBoost;
+            contacts[side].ankleDriveBlendTime = m_StandingSupportSettings.ankleDriveBlendTime;
         }
 
-        // 이동 중인 발은 제외하고 지지 역할의 현재 또는 유예 접촉만 전달한다.
+        // 실제 접촉만 전달한다. 이동 명령과 접촉 유예로 하중을 만들어 내지 않는다.
         m_Ragdoll.SetSupportContacts(contacts);
 
         // 발 기반 지지에서는 기본 발 목표에 서 있기 보정을 더함
@@ -303,6 +323,7 @@ namespace PARS
             if (!m_StandingSupport.Update(standing, m_StandingSupportSettings))
             {
                 m_FootstepIK.Reset();
+                m_FootstepAvoidance.Reset();
                 return;
             }
 
@@ -314,15 +335,19 @@ namespace PARS
             }
         }
 
-        // 실제 양쪽 다리 IK를 계산
+        UpdateFootstepCollision(input, rigidTargets, deltaTime);
+
+        // 선택한 경로의 현재 발 목표로 실제 양쪽 다리 IK를 계산한다.
         if (!m_FootstepIK.Apply(input, m_PhysicsSkeleton.parents, rigidTargets))
         {
+            m_FootstepAvoidance.Reset();
+            m_FootstepCollision.status = FootstepCollisionStatus::Unavailable;
             // IK 입력이 부족하면 기본 애니메이션 목표를 유지하고 실패 사유를 디버그에 남긴다.
             // Recovery 호출자는 이 실패를 감지해 패시브 물리로 전환하므로 Idle 목표를 구동하지 않는다.
             return;
         }
 
-		// IK 결과를 원래 target에 반영. correctedNodesd 에 있는 본만 갱신
+        // IK 결과를 원래 target에 반영. correctedNodesd 에 있는 본만 갱신
         for (int node : m_FootstepIK.GetSnapshot().correctedNodes)
         {
             const PxTransform& frame = rigidTargets[node];
@@ -334,6 +359,89 @@ namespace PARS
         }
     }
 
+    void SkeletalMeshComponent::UpdateFootstepCollision(FootstepIKInput& input,
+        const std::vector<PxTransform>& sourcePose, float deltaTime)
+    {
+        const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
+        if (!step.IsInProgress())
+        {
+            m_FootstepAvoidance.Reset();
+            return;
+        }
+        const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+        FootstepCollisionInput prediction;
+        prediction.completedStep = step.completedStep;
+        prediction.revision = step.revision;
+        prediction.fixedDeltaTime = deltaTime;
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        for (size_t side = 0; side < prediction.legs.size(); ++side)
+        {
+            FootstepCollisionLeg& leg = prediction.legs[side];
+            leg.command = step.feet[side];
+            const FootIKLegInput& source = input.legs[side];
+            // 실제 IK와 동일한 원본 자세·부모 좌표·이전 무릎 힌트로 후보를 평가한다.
+            if (!m_FootstepIK.BuildLegInput(input, side, sourcePose, leg.pose))
+            {
+                m_FootstepAvoidance.Reset();
+                m_FootstepCollision.status = FootstepCollisionStatus::Unavailable;
+                return;
+            }
+            const std::array<int, 3> legNodes{source.hipNode, source.kneeNode, source.ankleNode};
+            for (size_t part = 0; part < legNodes.size(); ++part)
+            {
+                const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), legNodes[part]);
+                if (body == nodes.end())
+                {
+                    continue;
+                }
+                FootstepCollisionShape& shape = leg.shapes[part];
+                shape.available = m_Ragdoll.GetBodyCollisionShape(static_cast<size_t>(body - nodes.begin()),
+                    shape.geometry, shape.inBone, shape.actualPose);
+            }
+        }
+        prediction.acceptsPose = [this, &input](size_t side, const LegIKResult& solved) -> bool
+        {
+            const FootIKLegInput& leg = input.legs[side];
+            const std::array<int, 4> chain{leg.anchorNode, leg.hipNode, leg.kneeNode, leg.ankleNode};
+            const std::array<PxTransform, 4> frames{leg.actualAnchor, solved.hip, solved.knee, solved.ankle};
+            std::array<int, 4> bodies;
+            for (size_t index = 0; index < chain.size(); ++index)
+            {
+                const int body = m_PhysicsAsset->FindBody(m_PhysicsSkeleton.names[chain[index]]);
+                if (body < 0)
+                {
+                    return false;
+                }
+                bodies[index] = body;
+            }
+            return IsFootstepPoseWithinJointLimits(*m_PhysicsAsset, m_Ragdoll.UsesArticulation(), bodies, frames);
+        };
+        const Vector3 actorForward = GetOwner().GetActorTransform().GetBasis() * Vector3(0, 0, 1);
+        const PxVec3 forward(float(actorForward.GetX()), float(actorForward.GetY()), float(actorForward.GetZ()));
+        m_FootstepAvoidance.Update(prediction, forward);
+        const FootstepAvoidanceSnapshot& avoidance = m_FootstepAvoidance.GetSnapshot();
+        m_FootstepCollision = avoidance.collision;
+        for (size_t side = 0; side < input.legs.size(); ++side)
+        {
+            if (step.feet[side].IsInProgress())
+            {
+                input.legs[side].targetSole.p += SampleFootstepPath(avoidance.paths[side],
+                    GetPredictedFootstepFlightTime(step.feet[side], 0));
+            }
+        }
+        m_FootstepCollision.elapsedMilliseconds = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started).count();
+        for (size_t side = 0; side < step.feet.size(); ++side)
+        {
+            if (step.feet[side].IsInProgress())
+            {
+                m_FootSupport.ReportRecoveryPath(side, step.feet[side].target.position,
+                    m_FootstepCollision.status == FootstepCollisionStatus::Clear &&
+                    !m_FootstepCollision.reachLimited && !m_FootstepCollision.jointLimited);
+            }
+        }
+    }
+
     void SkeletalMeshComponent::UpdateFootCandidateDebugColors()
     {
         m_ModelInstance.ClearJointDebugColors();
@@ -342,17 +450,18 @@ namespace PARS
             return;
         }
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
-        const FootstepRoles roles = sample.GetDisplayRoles();
-        if (!roles.IsValid())
+        for (size_t side = 0; side < sample.feet.size(); ++side)
         {
-            return;
-        }
-        const int supportNode = sample.feet[roles.supportFoot].boneNode;
-        const int stepNode = sample.feet[roles.movableFoot].boneNode;
-        if (supportNode >= 0 && stepNode >= 0)
-        {
-            m_ModelInstance.SetNodeDebugColor(uint32_t(supportNode), DirectX::XMFLOAT4(1, 0, 0, 1));
-            m_ModelInstance.SetNodeDebugColor(uint32_t(stepNode), DirectX::XMFLOAT4(0, 0, 1, 1));
+            const FootSoleSample& foot = sample.feet[side];
+            if (foot.boneNode < 0)
+            {
+                continue;
+            }
+            const bool commanded = sample.footstep.feet[side].IsInProgress();
+            const bool grounded = foot.contact.hasSample && foot.contact.grounded;
+            const DirectX::XMFLOAT4 color(commanded ? 0.0f : .4f, grounded ? 1.0f : .4f,
+                commanded ? 1.0f : .4f, 1.0f);
+            m_ModelInstance.SetNodeDebugColor(static_cast<uint32_t>(foot.boneNode), color);
         }
     }
 
@@ -424,6 +533,9 @@ namespace PARS
 
     void SkeletalMeshComponent::DestroyPhysicsState()
     {
+        ResetFallArms();
+        m_FallArmsInitialized = false;
+        m_FallArmSetups = {};
         m_Ragdoll.Destroy();
         m_FootSupport.Reset();
         ResetRecovery();
@@ -609,6 +721,7 @@ namespace PARS
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
+        ResetFallArms();
         m_Ragdoll.SetDrivesEnabled(active);
         UpdatePhysicsPose();
         UpdateFootSupport();
@@ -690,6 +803,7 @@ namespace PARS
 
     void SkeletalMeshComponent::StopRagdoll()
     {
+        ResetFallArms();
         if (!IsRagdoll())
         {
             return;

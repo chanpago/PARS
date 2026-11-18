@@ -7,8 +7,11 @@
 #include "../Ragdoll.h"
 #include "../FootSupport.h"
 #include "../FootstepIK.h"
+#include "../FootstepAvoidance.h"
 #include "../RagdollRecovery.h"
 #include "../StandingSupport.h"
+#include "../HorizontalBalance.h"
+#include "../FallArmBrace.h"
 
 namespace PARS
 {
@@ -76,7 +79,10 @@ namespace PARS
         void UpdateKinematicPose(bool teleport);
         void UpdatePhysicsPose();
         void UpdateFootSupport();
+        void UpdateHorizontalBalance(float deltaTime);
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
+        void UpdateFootstepCollision(FootstepIKInput& input,
+            const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
         bool ApplyRecoveryTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void ResetRecovery();
         bool CaptureRecoveryBlendSource();
@@ -88,6 +94,9 @@ namespace PARS
         bool BeginKinematicStandingUp(float groundHeight);
         bool BeginKinematicRecovery();
         bool UpdateKinematicRecoveryPose(float deltaTime);
+        void InitializeFallArms();
+        void ApplyFallArmTargets(std::vector<Math::Matrix4>& target, float deltaTime);
+        void ResetFallArms();
 
     public:
         AnimInstance& GetAnimInstance() const
@@ -118,6 +127,10 @@ namespace PARS
         {
             return m_Ragdoll;
         }
+        const Ragdoll& GetRagdoll() const
+        {
+            return m_Ragdoll;
+        }
         FootSupport& GetFootSupport()
         {
             return m_FootSupport;
@@ -130,6 +143,14 @@ namespace PARS
         {
             return m_FootstepIK.GetSnapshot();
         }
+        const FootstepCollisionSnapshot& GetFootstepCollisionSnapshot() const
+        {
+            return m_FootstepCollision;
+        }
+        const FootstepAvoidanceSnapshot& GetFootstepAvoidanceSnapshot() const
+        {
+            return m_FootstepAvoidance.GetSnapshot();
+        }
         const RecoverySnapshot& GetRecoverySnapshot() const
         {
             return m_Recovery.GetSnapshot();
@@ -139,6 +160,19 @@ namespace PARS
             return m_RecoverySettings;
         }
         bool SetFallingAnimation(uint32_t animationIndex);
+        void SetFallingAnimationEnabled(bool enabled)
+        {
+            m_FallingAnimationEnabled = enabled;
+        }
+        bool IsFallingAnimationEnabled() const
+        {
+            return m_FallingAnimationEnabled;
+        }
+        bool IsFalling() const
+        {
+            return IsActiveRagdoll() && m_AutomaticRootSupport &&
+                m_StandingUpState == StandingUpState::None && m_RootSupportRelease != RootSupportRelease::None;
+        }
         bool IsFollowingFallingAnimation() const;
         bool SetStandingUpAnimation(uint32_t animationIndex, uint32_t idleAnimationIndex);
         bool IsFollowingStandingUpAnimation() const;
@@ -163,6 +197,43 @@ namespace PARS
         const StandingSupportSnapshot& GetStandingSupportSnapshot() const
         {
             return m_StandingSupport.GetSnapshot();
+        }
+        bool SetArmDriveStrength(float strength);
+        float GetArmDriveStrength() const
+        {
+            return m_ArmDriveStrength;
+        }
+        FallArmSettings& GetFallArmSettings()
+        {
+            return m_FallArmSettings;
+        }
+        const FallArmSettings& GetFallArmSettings() const
+        {
+            return m_FallArmSettings;
+        }
+        const FallArmSnapshot& GetFallArmSnapshot() const
+        {
+            return m_FallArmBrace.GetSnapshot();
+        }
+        const HorizontalBalanceSnapshot& GetHorizontalBalanceSnapshot() const
+        {
+            return m_HorizontalBalance.GetSnapshot();
+        }
+        HorizontalBalanceSettings& GetHorizontalBalanceSettings()
+        {
+            return m_HorizontalBalanceSettings;
+        }
+        const HorizontalBalanceSettings& GetHorizontalBalanceSettings() const
+        {
+            return m_HorizontalBalanceSettings;
+        }
+        StandingSupportSettings& GetStandingSupportSettings()
+        {
+            return m_StandingSupportSettings;
+        }
+        const StandingSupportSettings& GetStandingSupportSettings() const
+        {
+            return m_StandingSupportSettings;
         }
         const std::vector<physx::PxVec3>& GetRecoveryReferenceHull() const
         {
@@ -204,9 +275,13 @@ namespace PARS
         std::unique_ptr<const PhysicsAsset> m_PhysicsAsset;
         Ragdoll m_Ragdoll;
         FootstepIK m_FootstepIK;
+        FootstepCollisionSnapshot m_FootstepCollision;
+        FootstepAvoidance m_FootstepAvoidance;
         RagdollRecovery m_Recovery;
         KinematicRecoveryTimer m_KinematicRecoveryTimer;
         StandingSupport m_StandingSupport;
+        HorizontalBalance m_HorizontalBalance;
+        FallArmBrace m_FallArmBrace;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
         std::vector<GraphNode> m_KinematicBlendSource;
@@ -219,11 +294,15 @@ namespace PARS
         std::unique_ptr<const PhysicsAsset> m_PendingDriveSettings;
         RecoverySettings m_RecoverySettings;
         StandingSupportSettings m_StandingSupportSettings;
+        HorizontalBalanceSettings m_HorizontalBalanceSettings;
+        FallArmSettings m_FallArmSettings;
+        std::array<FallArmSetup, 2> m_FallArmSetups;
         std::array<physx::PxTransform, 2> m_RecoverySoles{
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};
         RootSupportRelease m_RootSupportRelease = RootSupportRelease::None;
         PhysicsAnimationMode m_PhysicsMode = PhysicsAnimationMode::Animation;
         float m_KinematicStableDuration = 2.0f;
+        float m_ArmDriveStrength = 1.0f;
         float m_KinematicBlendTime = 0;
         float m_StandingUpStableTime = 0;
         uint32_t m_FallingAnimationIndex = UINT32_MAX;
@@ -234,6 +313,8 @@ namespace PARS
         bool m_AutomaticRootSupport = false;
         bool m_AutomaticRagdoll = false;
         bool m_PendingRecoveryImpact = false;
+        bool m_FallArmsInitialized = false;
+        bool m_FallingAnimationEnabled = true;
         StandingUpState m_StandingUpState = StandingUpState::None;
     };
 }

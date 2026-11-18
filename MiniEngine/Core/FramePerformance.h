@@ -12,6 +12,8 @@ namespace FramePerformance
     {
         PhysXStep,
         ParsControl,
+        FootstepPlanning,
+        FootstepIK,
         ParsPose,
         ParsOther,
         RenderPreparation,
@@ -56,6 +58,8 @@ namespace FramePerformance
             const size_t total = static_cast<size_t>(Category::ParsTotal);
             m_Current.milliseconds[total] =
                 m_Current.milliseconds[static_cast<size_t>(Category::ParsControl)] +
+                m_Current.milliseconds[static_cast<size_t>(Category::FootstepPlanning)] +
+                m_Current.milliseconds[static_cast<size_t>(Category::FootstepIK)] +
                 m_Current.milliseconds[static_cast<size_t>(Category::ParsPose)] +
                 m_Current.milliseconds[static_cast<size_t>(Category::ParsOther)];
             m_History[m_Next] = m_Current;

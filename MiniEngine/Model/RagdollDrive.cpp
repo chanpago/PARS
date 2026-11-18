@@ -2,6 +2,7 @@
 #include "PhysicsPose.h"
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #if defined(_M_X64)
 #include "PhysicsWorld.h"
 using namespace physx;
@@ -36,32 +37,107 @@ namespace PARS
     }
 #endif
 
+    float Ragdoll::GetJointDriveStrength(const PhysicsConstraint& joint) const
+    {
+        std::string name = joint.childBone;
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) -> char
+        {
+            return static_cast<char>(std::tolower(value));
+        });
+        const bool arm = name.find("shoulder") != std::string::npos || name.find("clavicle") != std::string::npos ||
+            name.find("arm") != std::string::npos || name.find("hand") != std::string::npos ||
+            name.find("wrist") != std::string::npos || name.find("elbow") != std::string::npos;
+        if (!arm)
+        {
+            return 1.0f;
+        }
+        const float scale = name.find("left") != std::string::npos ? m_ArmDriveScales[0] :
+            name.find("right") != std::string::npos ? m_ArmDriveScales[1] : 1.0f;
+        const float strength = m_ArmDriveOverride >= 0 ? m_ArmDriveOverride : m_ArmDriveStrength;
+        return strength * scale;
+    }
+
+    bool Ragdoll::SetArmDriveScales(const std::array<float, 2>& scales, float overrideStrength)
+    {
+        if (!std::isfinite(overrideStrength) ||
+            (overrideStrength != -1.0f && (overrideStrength < 0 || overrideStrength > 1)))
+        {
+            return false;
+        }
+        for (float scale : scales)
+        {
+            if (!std::isfinite(scale) || scale < 0 || scale > 1)
+            {
+                return false;
+            }
+        }
+        if (m_ArmDriveScales == scales && m_ArmDriveOverride == overrideStrength)
+        {
+            return true;
+        }
+        m_ArmDriveScales = scales;
+        m_ArmDriveOverride = overrideStrength;
+        if (IsActive())
+        {
+            // 배율 변경은 목표 회전의 이력을 끊지 않는다.
+            SetDrivesEnabled(m_DrivesEnabled);
+        }
+        return true;
+    }
+
+    bool Ragdoll::SetArmDriveStrength(float strength)
+    {
+        if (!std::isfinite(strength) || strength < 0 || strength > 1)
+        {
+            return false;
+        }
+        if (m_ArmDriveStrength == strength)
+        {
+            return true;
+        }
+        m_ArmDriveStrength = strength;
+        m_PreviousArticulationTargetVelocity.clear();
+        if (IsActive())
+        {
+            SetDrivesEnabled(m_DrivesEnabled);
+        }
+        return true;
+    }
+
     void Ragdoll::SetDrivesEnabled(bool enabled)
     {
         m_DrivesEnabled = enabled && IsSimulating();
+        if (!m_DrivesEnabled)
+        {
+            m_HorizontalSupportForce = physx::PxVec3(0);
+        }
 #if defined(_M_X64)
         const PxD6Drive::Enum axes[] = {PxD6Drive::eTWIST, PxD6Drive::eSWING1, PxD6Drive::eSWING2};
         for (size_t i = 0; i < m_Joints.size(); ++i)
         {
             const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
+            const float strength = GetJointDriveStrength(data);
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             m_Joints[i]->setAngularDriveConfig(data.useSlerpDrive ? PxD6AngularDriveConfig::eSLERP : PxD6AngularDriveConfig::eSWING_TWIST);
             for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
             {
                 const PARS::PhysicsAngularDrive& drive = data.drives[axis];
                 // 기존 PA의 힘 모드는 D6에서 유지한다. Articulation 모터는 아래에서 별도로 갱신한다.
-                const bool on = !m_Articulation && m_DrivesEnabled && Enabled(drive, motions[axis]);
+                const bool on = !m_Articulation && m_DrivesEnabled && strength > 0 && Enabled(drive, motions[axis]);
                 PxD6JointDrive motor;
                 if (on)
                 {
-                    motor = PxD6JointDrive(drive.GetStiffness(), drive.GetDamping(), drive.maxTorque, drive.useAcceleration);
+                    // 강성 배율을 낮추면서 감쇠비는 유지한다.
+                    motor = PxD6JointDrive(drive.GetStiffness() * strength, drive.GetDamping() * std::sqrt(strength),
+                        drive.maxTorque * strength, drive.useAcceleration);
                 }
                 m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], motor);
             }
         }
         if (m_Articulation)
         {
-            m_Articulation->setArticulationFlag(PxArticulationFlag::eDISABLE_SELF_COLLISION, m_DrivesEnabled);
+            // 모터 활성 여부와 관계없이 자기 충돌을 허용한다. 직접 연결된 부모·자식 링크는 PhysX가 제외한다.
+            m_Articulation->setArticulationFlag(PxArticulationFlag::eDISABLE_SELF_COLLISION, false);
             m_Articulation->setSolverIterationCounts(32, 8);
             UpdateArticulationDrives();
         }
@@ -300,7 +376,7 @@ namespace PARS
 
 
         // [4] 관절별 목표 회전/각속도를 PhysX 드라이브에 전달
-		// targets에는 각 관절의 목표 회전이 들어 있다(쿼터니언, 부모관절 기준 상대적 차이). 목표 각속도는 이전 목표와 이번 목표의 차이를 시간으로 나눠 계산한다.
+        // targets에는 각 관절의 목표 회전이 들어 있다(쿼터니언, 부모관절 기준 상대적 차이). 목표 각속도는 이전 목표와 이번 목표의 차이를 시간으로 나눠 계산한다.
         for (size_t i = 0; i < targets.size(); ++i)
         {
             const PxQuat q = ToPx(targets[i]);
@@ -326,18 +402,18 @@ namespace PARS
             if (history)
             {
                 // 이 식이 나오는 이유는 생각해보면,
-				// 이번목표 = delta * 이전목표 이니까(delta는 차이) 
+                // 이번목표 = delta * 이전목표 이니까(delta는 차이)
                 // 이번목표 * 이전목표역회전 = delta
-				// q가 이번목표 , m_DriveTargets[i]가 이전목표
+                // q가 이번목표 , m_DriveTargets[i]가 이전목표
                 PxQuat delta = q * ToPx(m_DriveTargets[i]).getConjugate();
 
                 // 같은 회전 변화라도, 더 짧게 도는 방향으로 각속도를 계산하려는것. 의도적으로 그런것이다.
                 // 현재처럼 한 고정 스텝 동안 목표가 조금씩 변하는 상황에서는 짧은 쪽으로 계산하는게 맞다
                 // w가 0보다 작으면 각도가 180도 이상이라는 뜻이므로 이때 모든 성분의 부호를 뒤집으면 같은 회전을 반대축으로 180이하만큼 도는 표현으로 바꿀 수 있다.
                 // 간단히 쿼터니언에 대해 정리하자면, 어느 축을 중심으로 몇도를 회전할지를 쿼터니언의 네 성분(x,y,z,w)로 표현함.
-				// 회전축이 길이 인 벡터 u = (ux, uy, uz)이고 회전각이 θ라면, 쿼터니언은 다음과 같이 표현됨:
-				// x = ux * sin(θ/2), y = uy * sin(θ/2), z = uz * sin(θ/2), w = cos(θ/2)
-                // 즉, xyz에는 회전축 방향을 담고, xyz의 크기와 w에 회전량을 담는 구조 
+                // 회전축이 길이 인 벡터 u = (ux, uy, uz)이고 회전각이 θ라면, 쿼터니언은 다음과 같이 표현됨:
+                // x = ux * sin(θ/2), y = uy * sin(θ/2), z = uz * sin(θ/2), w = cos(θ/2)
+                // 즉, xyz에는 회전축 방향을 담고, xyz의 크기와 w에 회전량을 담는 구조
                 if (delta.w < 0)
                 {
                     delta = -delta;
@@ -416,13 +492,27 @@ namespace PARS
         m_FootDrivenSupport = enabled;
         m_SupportContacts = {};
         m_SupportLoads = {};
+        m_HorizontalSupportForce = physx::PxVec3(0);
+        m_HorizontalSupportStep = UINT64_MAX;
         ResetDriveTargetHistory();
         ConfigureRootSupportDrives();
     }
 
     void Ragdoll::SetSupportContacts(const std::array<RagdollSupportContact, 2>& contacts)
     {
+        for (size_t side = 0; side < contacts.size(); ++side)
+        {
+            if (contacts[side].body != m_SupportContacts[side].body)
+            {
+                m_SupportLoads.ankleDriveScales[side] = 1.0f;
+            }
+        }
         m_SupportContacts = contacts;
+    }
+
+    void Ragdoll::SetHorizontalSupportForce(const physx::PxVec3& force)
+    {
+        m_HorizontalSupportForce = force.isFinite() ? physx::PxVec3(force.x, 0, force.z) : physx::PxVec3(0);
     }
 
     bool Ragdoll::SetRootSupported(bool supported, std::string& error)

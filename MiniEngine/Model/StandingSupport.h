@@ -17,8 +17,14 @@ namespace PARS
         float raisingSpeed = .25f;
         float reachReserve = .01f;
         float horizontalDampingTime = .1f;
-        float maximumHorizontalCorrection = .06f;
+        float maximumHorizontalCorrection = 0.0f; // 지지발의 XZ 목표 보정을 끈다.
         float horizontalFrequency = 4.0f;
+        // 기존 관성 보상에 더하는 최대 배율 증가량이다. 0이면 하중별 증폭을 끈다.
+        float ankleDriveBoost = .5f;
+        float ankleDriveBlendTime = .08f;
+        float footTiltLimitStartDegrees = 2.0f;
+        float footTiltLimitDegrees = 5.0f;
+        bool limitFootTilt = true;
     };
 
     struct StandingSupportFoot
@@ -28,10 +34,12 @@ namespace PARS
         physx::PxTransform animatedSole{physx::PxIdentity};
         physx::PxTransform soleInBone{physx::PxIdentity};
         physx::PxVec3 hipOffset{0};
+        physx::PxTransform actualSole{physx::PxIdentity};
+        physx::PxVec3 supportNormal{0, 1, 0};
         float length = 0;
         bool available = false;
         bool grounded = false;
-        bool supporting = true;
+        bool hasMotionTarget = false;
         bool contactGraceActive = false;
     };
 
@@ -65,6 +73,7 @@ namespace PARS
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};
         bool valid = false;
         bool reachLimited = false;
+        std::array<bool, 2> footTiltLimited{};
     };
 
     // 골반 높이 오차를 지지 다리의 상대 자세로 바꾼다. 바디 위치와 외력은 직접 바꾸지 않는다.

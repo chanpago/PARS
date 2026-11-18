@@ -1,4 +1,4 @@
-#include "SkeletalMeshComponent.h"
+ï»¿#include "SkeletalMeshComponent.h"
 #include "FramePerformance.h"
 
 namespace PARS
@@ -98,6 +98,8 @@ namespace PARS
             }
         }
         m_Ragdoll.Swap(candidate);
+        ResetFallArms();
+        m_FallArmsInitialized = false;
         m_PhysicsSkeleton = std::move(skeleton);
         m_PhysicsAsset = std::make_unique<const PhysicsAsset>(asset);
         m_FootSupport.OnPhysicsAssetChanged(*m_PhysicsAsset);
@@ -126,6 +128,7 @@ namespace PARS
         }
         instance->Initialize(m_SkeletalMesh);
         m_AnimInstance = std::move(instance);
+        ResetFallArms();
         m_FallingAnimationIndex = UINT32_MAX;
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
@@ -153,13 +156,15 @@ namespace PARS
     }
 
     /*
-    * ¾Ö´Ï¸ŞÀÌ¼ÇÀ» ÁøÇàÇÏ°í, ·¡±×µ¹ÀÌ µû¶ó°¥ ¸ñÇ¥ ÀÚ¼¼¸¦ °»½ÅÇÑ´Ù
+    * ì• ë‹ˆë©”ì´ì…˜ì„ ì§„í–‰í•˜ê³ , ë˜ê·¸ëŒì´ ë”°ë¼ê°ˆ ëª©í‘œ ìì„¸ë¥¼ ê°±ì‹ í•œë‹¤
     */
     void SkeletalMeshComponent::FixedTickComponent(float deltaTime)
     {
         FramePerformance::Scope controlTiming(FramePerformance::Category::ParsControl);
+        m_FootstepCollision = {};
         if (!m_Ragdoll.IsActive())
         {
+            ResetFallArms();
             return;
         }
 
@@ -175,7 +180,8 @@ namespace PARS
             }
         }
 
-        // ¿©±â¼­ ¹ß ¿òÁ÷ÀÓÀ» °è»êÇÏ°í ÁöÁö¿µ¿ªÀ» Á¶»çÇØ °¡ÁßÄ¡¸¦ ±¸ÇÑ´Ù
+        // ì—¬ê¸°ì„œ ë°œ ì›€ì§ì„ì„ ê³„ì‚°í•˜ê³  ì§€ì§€ì˜ì—­ì„ ì¡°ì‚¬í•´ ê°€ì¤‘ì¹˜ë¥¼ êµ¬í•œë‹¤
+        m_Ragdoll.SetHorizontalSupportForce(physx::PxVec3(0));
         UpdateFootSupport();
 
         //
@@ -190,6 +196,7 @@ namespace PARS
 
         if (m_PhysicsMode == PhysicsAnimationMode::PassiveRagdoll)
         {
+            ResetFallArms();
             return;
         }
 
@@ -200,39 +207,46 @@ namespace PARS
             return;
         }
 
-        // Ä³¸¯ÅÍ ÀÌµ¿ÀÌ ÄÄÆ÷³ÍÆ® ·çÆ®¸¦ ÀÌ¹Ì °»½ÅÇÑ »óÅÂ´Ù. simulate() Àü¿¡ ¾Ö´Ï¸ŞÀÌ¼ÇÀ»
-        // »ùÇÃ¸µÇØ PVD¿Í ·»´õ¸µÀÌ ¸ğµÎ ÀÌ Æ÷Áî¸¦ »ç¿ëÇÏµµ·Ï ÇÑ´Ù.
-        // ÀÌ¹ö ½ºÅÜ¿¡¼­ÀÇ ¾Ö´Ï¸ŞÀÌ¼Ç ÀÚ¼¼¸¦ ±¸ÇÑ´Ù.
-        // ¾Ö´Ï¸ŞÀÌ¼Ç Àç»ı ½Ã°£À» ÁøÇà½ÃÅ°°í, ±× ½Ã°£¿¡ ÇØ´çÇÏ´Â º»µéÀÇ ÀÚ¼¼¸¦ °è»ê
-        // clip¿¡¼­ Å°ÇÁ·¹ÀÓ µ¥ÀÌÅÍ¿Í ½Ã°£ °£°İ Á¤º¸¸¦ ÀĞ¾î¿Í¼­ µÎ ÇÁ·¹ÀÓ »çÀÌÀÇ ºñÀ²À» °è»êÇÏ°í m_pose¿¡ ÀúÀå
+        // ìºë¦­í„° ì´ë™ì´ ì»´í¬ë„ŒíŠ¸ ë£¨íŠ¸ë¥¼ ì´ë¯¸ ê°±ì‹ í•œ ìƒíƒœë‹¤. simulate() ì „ì— ì• ë‹ˆë©”ì´ì…˜ì„
+        // ìƒ˜í”Œë§í•´ PVDì™€ ë Œë”ë§ì´ ëª¨ë‘ ì´ í¬ì¦ˆë¥¼ ì‚¬ìš©í•˜ë„ë¡ í•œë‹¤.
+        // ì´ë²„ ìŠ¤í…ì—ì„œì˜ ì• ë‹ˆë©”ì´ì…˜ ìì„¸ë¥¼ êµ¬í•œë‹¤.
+        // ì• ë‹ˆë©”ì´ì…˜ ì¬ìƒ ì‹œê°„ì„ ì§„í–‰ì‹œí‚¤ê³ , ê·¸ ì‹œê°„ì— í•´ë‹¹í•˜ëŠ” ë³¸ë“¤ì˜ ìì„¸ë¥¼ ê³„ì‚°
+        // clipì—ì„œ í‚¤í”„ë ˆì„ ë°ì´í„°ì™€ ì‹œê°„ ê°„ê²© ì •ë³´ë¥¼ ì½ì–´ì™€ì„œ ë‘ í”„ë ˆì„ ì‚¬ì´ì˜ ë¹„ìœ¨ì„ ê³„ì‚°í•˜ê³  m_poseì— ì €ì¥
         m_AnimInstance->UpdateAnimation(deltaTime);
 
         if (IsActiveRagdoll())
         {
             std::vector<Math::Matrix4> target;
 
-            // ÀÌ ºÎºĞ¿¡¼­ ¾×Æ¼ºê ·¡±×µ¹ ¹°¸®Ã³¸®¸¦ÇÑ´Ù(pd±¸µ¿ ¹× Ãß°¡º¸»óÅäÅ©°è»ê)
-			// EvaluateAnimationPhysicsPoseºÎºĞ¿¡¼­ ÀÌ¹ø ÇÁ·¹ÀÓÀÇ ¾Ö´Ï¸ŞÀÌ¼ÇÀÇ ¸ñÇ¥ º» ÀÚ¼¼¸¦ ¿ùµå ±âÁØÀ¸·Î °è»êÇÏ°í target¿¡ ÀúÀåÇÑ´Ù.
+            // ì´ ë¶€ë¶„ì—ì„œ ì•¡í‹°ë¸Œ ë˜ê·¸ëŒ ë¬¼ë¦¬ì²˜ë¦¬ë¥¼í•œë‹¤(pdêµ¬ë™ ë° ì¶”ê°€ë³´ìƒí† í¬ê³„ì‚°)
+            // EvaluateAnimationPhysicsPoseë¶€ë¶„ì—ì„œ ì´ë²ˆ í”„ë ˆì„ì˜ ì• ë‹ˆë©”ì´ì…˜ì˜ ëª©í‘œ ë³¸ ìì„¸ë¥¼ ì›”ë“œ ê¸°ì¤€ìœ¼ë¡œ ê³„ì‚°í•˜ê³  targetì— ì €ì¥í•œë‹¤.
             // 
-            // UpdateDriveTargetsºÎºĞÀº Á» ±æ´Ù ¼ø¼­´ë·Î ¼³¸íÇÏ¸é,
-            // 1. ¾Õ¼­ °è»êÇÑ target(¾Ö´Ï¸ŞÀÌ¼Ç ¸ñÇ¥ º» ÀÚ¼¼)À» ±â¹İÀ¸·Î ÀÌ¹ø ÇÁ·¹ÀÓÀÇ ¸®Áöµå¹ÙµğÀÇ ¸ñÇ¥ ÀÚ¼¼¸¦ °è»êÇÑ´Ù.
-            // 2. 1¿¡¼­ °è»êÇÑ ¸®Áöµå ¹ÙµğÀÇ ¸ñÇ¥ ÀÚ¼¼¸¦ ±â¹İÀ¸·Î °¢ Á¶ÀÎÆ®ÀÇ ¸ñÇ¥ ÀÚ¼¼¸¦ °è»ê
-            // 3. °ñ¹İ º¸Á¤À» ½ÇÇàÇÑ´Ù. À§Ä¡, ¼Óµµ
-            // 4. targets¿¡ ÀÖ´Â ºÎ¸ğ±âÁØ »ó´ë°¢ Â÷ÀÌ ÄõÅÍ´Ï¾ğÀ» physx°¡ ÀĞÀ» ¼ö ÀÖµµ·Ï vec3±â¹İ °¢¼Óµµº¤ÅÍ·Î ¸¸µç´Ù.
-            // 5. Articulation Drive update <- ÀÌ ºÎºĞÀÌ Áß¿äÇÏ´Ù
-            //      - °ñ¹İº¸Á¤
-            //      - Å¸°ÙÀ» ¸ñÇ¥·Î À¯È¿°ü¼ºÀ» °è»êÇÏ°í Áß·Âº¸»ó, ÄÚ¸®¿Ã¸®-¿ø½É·Â º¸»óÀ» ÅäÅ©°ª¿¡ ´õÇÔ
-            //      - °¢ °üÀıÀÇ °¢ Ãà¿¡ ¾ó¸¶¸¸Å­ÀÇ PD¸¦ Àû¿ë½ÃÅ³Áö °è»ê
+            // UpdateDriveTargetsë¶€ë¶„ì€ ì¢€ ê¸¸ë‹¤ ìˆœì„œëŒ€ë¡œ ì„¤ëª…í•˜ë©´,
+            // 1. ì•ì„œ ê³„ì‚°í•œ target(ì• ë‹ˆë©”ì´ì…˜ ëª©í‘œ ë³¸ ìì„¸)ì„ ê¸°ë°˜ìœ¼ë¡œ ì´ë²ˆ í”„ë ˆì„ì˜ ë¦¬ì§€ë“œë°”ë””ì˜ ëª©í‘œ ìì„¸ë¥¼ ê³„ì‚°í•œë‹¤.
+            // 2. 1ì—ì„œ ê³„ì‚°í•œ ë¦¬ì§€ë“œ ë°”ë””ì˜ ëª©í‘œ ìì„¸ë¥¼ ê¸°ë°˜ìœ¼ë¡œ ê° ì¡°ì¸íŠ¸ì˜ ëª©í‘œ ìì„¸ë¥¼ ê³„ì‚°
+            // 3. ê³¨ë°˜ ë³´ì •ì„ ì‹¤í–‰í•œë‹¤. ìœ„ì¹˜, ì†ë„
+            // 4. targetsì— ìˆëŠ” ë¶€ëª¨ê¸°ì¤€ ìƒëŒ€ê° ì°¨ì´ ì¿¼í„°ë‹ˆì–¸ì„ physxê°€ ì½ì„ ìˆ˜ ìˆë„ë¡ vec3ê¸°ë°˜ ê°ì†ë„ë²¡í„°ë¡œ ë§Œë“ ë‹¤.
+            // 5. Articulation Drive update <- ì´ ë¶€ë¶„ì´ ì¤‘ìš”í•˜ë‹¤
+            //      - ê³¨ë°˜ë³´ì •
+            //      - íƒ€ê²Ÿì„ ëª©í‘œë¡œ ìœ íš¨ê´€ì„±ì„ ê³„ì‚°í•˜ê³  ì¤‘ë ¥ë³´ìƒ, ì½”ë¦¬ì˜¬ë¦¬-ì›ì‹¬ë ¥ ë³´ìƒì„ í† í¬ê°’ì— ë”í•¨
+            //      - ê° ê´€ì ˆì˜ ê° ì¶•ì— ì–¼ë§ˆë§Œí¼ì˜ PDë¥¼ ì ìš©ì‹œí‚¬ì§€ ê³„ì‚°
             bool evaluated = fallingTargetReady && EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError);
             if (evaluated)
             {
                 evaluated = ApplyRecoveryTargets(target, deltaTime);
+                if (evaluated)
+                {
+                    UpdateHorizontalBalance(deltaTime);
+                    ApplyFallArmTargets(target, deltaTime);
+                }
             }
             if (!evaluated || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {
-                // ¸ñÇ¥ °»½Å¿¡ ½ÇÆĞÇÏ¸é Àü½Å ÆĞ½Ãºê ¹°¸® ½Ã¹Ä·¹ÀÌ¼ÇÀ¸·Î ÀüÈ¯ÇÑ´Ù.
-                // °ñ¹İÀÇ Èû/ÅäÅ© ÁöÁö¸¦ Á¦°ÅÇÏ¸é¼­ ¸ñÇ¥ °»½Å ¿À·ù ¸Ş½ÃÁö´Â º¸Á¸ÇÑ´Ù.
+                // ëª©í‘œ ê°±ì‹ ì— ì‹¤íŒ¨í•˜ë©´ ì „ì‹  íŒ¨ì‹œë¸Œ ë¬¼ë¦¬ ì‹œë®¬ë ˆì´ì…˜ìœ¼ë¡œ ì „í™˜í•œë‹¤.
+                // ê³¨ë°˜ì˜ í˜/í† í¬ ì§€ì§€ë¥¼ ì œê±°í•˜ë©´ì„œ ëª©í‘œ ê°±ì‹  ì˜¤ë¥˜ ë©”ì‹œì§€ëŠ” ë³´ì¡´í•œë‹¤.
                 m_FootstepIK.Reset();
+                m_FootstepCollision = {};
+                ResetFallArms();
                 m_Ragdoll.SetDrivesEnabled(false);
                 std::string supportError;
                 m_Ragdoll.SetRootSupported(false, supportError);
@@ -241,6 +255,7 @@ namespace PARS
         }
         else
         {
+            ResetFallArms();
             if (!UpdateKinematicRecoveryPose(deltaTime))
             {
                 return;

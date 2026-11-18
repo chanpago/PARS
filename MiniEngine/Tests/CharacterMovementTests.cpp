@@ -92,7 +92,7 @@ namespace
         f.player->SetMoveInput(1, diagonal ? 1.0f : 0.0f, run);
         f.Frames(fps * 2, 1.0f / fps);
         const Vector3 position = f.character->GetActorLocation();
-        Check(Near(f.character->movement->GetGroundSpeed(), run ? 3.5f : 1.6f), "Reach requested walk/run speed");
+        Check(Near(f.character->movement->GetGroundSpeed(), run ? 3.5f : 1.0f), "Reach requested walk/run speed");
         Check(Near(float(Length(f.character->observedPosition - position)), 0), "PostPhysics observes resolved position");
         Check(f.character->movement->IsMovingOnGround(), "Remain grounded during movement");
         return Length(Vector3(position.GetX(), 0, position.GetZ()));
@@ -103,13 +103,13 @@ namespace
         const float at30 = Travel(30, false, false);
         Check(Near(at30, Travel(60, false, false), .001f) && Near(at30, Travel(144, false, false), .001f), "Fixed movement independent of render FPS");
         Check(Near(at30, Travel(60, false, true), .005f), "Diagonal input cannot exceed straight movement speed");
-        Check(Travel(60, true, false) > 6.3f && at30 > 3.0f, "Run covers greater distance than walk");
+        Check(Travel(60, true, false) > 6.3f && at30 > 1.9f, "Run covers greater distance than walk");
 
         Fixture f;
         f.player->SetControlYaw(3.14159265f);
         f.player->SetMoveInput(0, 1, false);
         f.Frames(60);
-        Check(float(f.character->GetActorLocation().GetX()) > 1.4f, "D moves camera-right when looking toward -Z");
+        Check(float(f.character->GetActorLocation().GetX()) > .9f, "D moves camera-right when looking toward -Z");
         Check(float(f.character->GetActorTransform().GetZ().GetX()) > .99f, "Character turns toward travel direction");
         f.player->SetInputEnabled(false);
         f.Frames(30);
@@ -198,7 +198,8 @@ namespace
 
         // A 20 cm ledge is reachable, while a tall wall remains blocking.
         physx::PxRigidStatic* ledge = physics->CreateStaticBox(PxTransform(PxVec3(0, .1f, 2)), PxVec3(2, .1f, 1), "Step");
-        f.player->SetMoveInput(1, 0, false); f.Frames(90);
+        f.player->SetMoveInput(1, 0, false);
+        f.Frames(120);
         Check(float(f.character->GetActorLocation().GetZ()) > 1.8f &&
             Near(f.character->GetActorLocation().GetY(), 1.12f, .015f), "Query movement climbs a low step");
         f.Frames(120);
@@ -243,7 +244,7 @@ namespace
         Check(float(Length(f.character->GetActorLocation() - before)) < .001f,
             "Movement depenetration ignores overlapping bodies of the same owner");
         f.player->SetMoveInput(1, 0, false); f.Frames(60);
-        Check(float(f.character->GetActorLocation().GetZ()) > 1.4f &&
+        Check(float(f.character->GetActorLocation().GetZ()) > .9f &&
             std::abs(float(f.character->GetActorLocation().GetX())) < .001f,
             "Movement sweeps pass through their own PA without moving sideways");
         physx::PxRigidDynamic* other = physics->CreateDynamicBody(PxTransform(PxVec3(0, 1, 3)), PxBoxGeometry(1, 1, .2f), 10, "Other PA body");

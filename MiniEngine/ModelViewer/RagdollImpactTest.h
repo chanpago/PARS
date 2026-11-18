@@ -37,7 +37,9 @@ public:
     bool FireAimed(const PARS::Character& player, Math::Vector3 cameraPosition, Math::Vector3 cameraDirection);
     void ClearProjectiles();
     void Update();
+    void ResumeSimulation();
     void DrawUI(PARS::Character* player);
+    void DrawContactOverlay(float topInset) const;
     bool LoadProjectileSettings(const std::string& path);
     bool SaveProjectileSettings();
     void LoadBodyImpactSettings(PARS::Character& player, const std::string& path);
@@ -46,12 +48,18 @@ public:
     void BuildLines(std::vector<physx::PxDebugLine>& lines);
 
 private:
+    void ClearContactCheck();
     void DrawBodyImpactUI(PARS::Character* player);
     void DrawDummySupportSettingsUI();
     void BuildBodyImpactLines(std::vector<physx::PxDebugLine>& lines);
     bool FireAt(const PARS::Character& player, Math::Vector3 target, bool checkMuzzle = false);
 
 public:
+    void SetContactCheckEnabled(bool enabled);
+    bool IsContactCheckEnabled() const
+    {
+        return m_ContactCheckEnabled;
+    }
     void SetSpawnOrigin(Math::Vector3 origin)
     {
         m_SpawnOrigin = origin;
@@ -66,14 +74,6 @@ public:
     }
     bool SetProjectileSettings(float mass, float speed);
     PARS::Character* GetDummy() const;
-    bool IsRulerVisible() const
-    {
-        return m_RulerVisible;
-    }
-    Math::Vector3 GetRulerOrigin() const
-    {
-        return m_RulerOrigin;
-    }
     std::vector<physx::PxRigidDynamic*> GetProjectiles() const;
     float GetMaxHipsDisplacement() const
     {
@@ -89,8 +89,8 @@ public:
 
 private:
     Math::Vector3 m_HipsReference{Math::kZero};
-    Math::Vector3 m_RulerOrigin{Math::kZero};
     Math::Vector3 m_SpawnOrigin{3.5f, 0, -2.5f};
+    Math::AffineTransform m_SpawnTransform{Math::kIdentity};
     PARS::World& m_World;
     PARS::ActorHandle m_Dummy;
     PARS::PhysicsAsset m_Asset;
@@ -103,10 +103,13 @@ private:
     std::string m_BodyImpactMessage;
     std::string m_DummySupportSettingsPath;
     std::string m_DummySupportSettingsMessage;
+    std::string m_LegContactMessage;
+    std::string m_PausedLegContactMessage;
+    uint32_t m_PreviousLegContacts = 0;
     float m_Mass = 2.0f;
     float m_Speed = 7.5f;
     float m_MaxHipsDisplacement = 0;
     bool m_AutomaticSupport = true;
-    bool m_RulerVisible = true;
     bool m_BodyImpactCapsuleVisible = true;
+    bool m_ContactCheckEnabled = false;
 };

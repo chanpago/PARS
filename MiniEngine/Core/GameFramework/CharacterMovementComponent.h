@@ -37,7 +37,7 @@ namespace PARS
         }
 
     public:
-        static constexpr float WalkSpeed = 1.6f;
+        static constexpr float WalkSpeed = 1.0f;
         static constexpr float RunSpeed = 3.5f;
 
     private:

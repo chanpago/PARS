@@ -39,6 +39,7 @@ namespace
 
 RagdollImpactTest::~RagdollImpactTest()
 {
+    ClearContactCheck();
     ClearProjectiles();
     if (PARS::Character* dummy = GetDummy())
     {
@@ -68,12 +69,15 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
     dummy->GetCharacterMovement().SetTickEnabled(false);
     dummy->GetCapsuleComponent().SetPhysicsEnabled(false);
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
+    mesh.SetFootCandidateDebugVisible(true);
+    mesh.SetArmDriveStrength(.1f);
+    mesh.SetFallingAnimationEnabled(false);
     if (!mesh.SetSkeletalMesh(idle))
     {
         m_Message = u8"더미 메시를 초기화하지 못했습니다.";
         return false;
     }
-    // 평소에는 Idle을 반복하고, 낙상과 착지 후 기상 클립을 순서대로 추종한다.
+    // 낙상 클립은 선택적으로 켤 수 있게 등록하고, 기본 상태에서는 Idle과 착지 후 기상을 사용한다.
     if (!mesh.SetAnimInstance(std::make_unique<AnimInstance>(mesh)) ||
         !mesh.GetAnimInstance().AddAnimation("Idle", idle) ||
         !mesh.GetAnimInstance().AddAnimation("Falling Down", falling) ||
@@ -88,6 +92,7 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
         return false;
     }
     m_World.InitializePendingActors();
+    m_SpawnTransform = dummy->GetActorTransform();
     return Reset();
 }
 
@@ -108,7 +113,14 @@ bool RagdollImpactTest::Reset()
     {
         return false;
     }
-    dummy->SetActorLocation(m_SpawnOrigin + Vector3(0, dummy->GetCapsuleComponent().GetHalfHeight(), 0));
+    // 회복 중 달라진 회전을 남기지 않고 최초 생성 당시 방향과 크기를 함께 복원한다.
+    AffineTransform spawnTransform = m_SpawnTransform;
+    spawnTransform.SetTranslation(m_SpawnOrigin + Vector3(0, dummy->GetCapsuleComponent().GetHalfHeight(), 0));
+    if (!dummy->SetActorTransform(spawnTransform))
+    {
+        m_Message = u8"더미의 초기 위치와 방향을 복원하지 못했습니다.";
+        return false;
+    }
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
     mesh.GetAnimInstance().PlayAnimation(0);
     if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
@@ -134,11 +146,35 @@ bool RagdollImpactTest::Reset()
     }
     m_HipsReference = mesh.GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
-    // 눈금 0은 시작 지점의 바닥 높이다. 더미가 밀려도 눈금자는 초기 위치 옆에 고정한다.
-    const Vector3 dummyPosition = dummy->GetActorLocation();
-    m_RulerOrigin = Vector3(float(dummyPosition.GetX()) - .75f, float(m_SpawnOrigin.GetY()), float(dummyPosition.GetZ()));
     m_Message.clear();
+    ClearContactCheck();
     return true;
+}
+
+void RagdollImpactTest::SetContactCheckEnabled(bool enabled)
+{
+    if (m_ContactCheckEnabled != enabled)
+    {
+        m_ContactCheckEnabled = enabled;
+        m_PreviousLegContacts = 0;
+    }
+}
+
+void RagdollImpactTest::ResumeSimulation()
+{
+    // 직전 접촉 쌍은 유지해 P 직후 같은 접촉으로 다시 멈추지 않게 한다.
+    m_PausedLegContactMessage.clear();
+    m_World.SetPhysicsPaused(false);
+}
+
+void RagdollImpactTest::ClearContactCheck()
+{
+    if (!m_PausedLegContactMessage.empty())
+    {
+        ResumeSimulation();
+    }
+    m_LegContactMessage.clear();
+    m_PreviousLegContacts = 0;
 }
 
 bool RagdollImpactTest::SetAutomaticSupport(bool enabled)
@@ -425,7 +461,55 @@ void RagdollImpactTest::Update()
     {
         m_MaxHipsDisplacement = Max(m_MaxHipsDisplacement,
             float(Length(dummy->GetMesh().GetRagdoll().GetPosition() - m_HipsReference)));
+        const uint32_t contacts = m_FootSoles.GetLegContacts(&dummy->GetMesh(), m_LegContactMessage);
+        if (!m_World.IsPhysicsPaused())
+        {
+            m_PausedLegContactMessage.clear();
+            if (m_ContactCheckEnabled && (contacts & ~m_PreviousLegContacts) != 0)
+            {
+                m_PausedLegContactMessage = m_LegContactMessage;
+                m_World.SetPhysicsPaused(true);
+            }
+            m_PreviousLegContacts = contacts;
+        }
     }
+    else
+    {
+        ClearContactCheck();
+    }
+}
+
+void RagdollImpactTest::DrawContactOverlay(float topInset) const
+{
+    const PARS::Character* dummy = GetDummy();
+    if (!dummy)
+    {
+        return;
+    }
+    const bool contactPaused = m_World.IsPhysicsPaused() && !m_PausedLegContactMessage.empty();
+    std::string text = contactPaused ? m_PausedLegContactMessage : m_LegContactMessage;
+    const bool touching = !text.empty();
+    if (!touching)
+    {
+        text = u8"[더미] 이동 다리의 실제 자기 접촉: 없음";
+    }
+    text += '\n';
+    text += m_FootSoles.GetLegPredictionText(dummy->GetMesh());
+    text += m_ContactCheckEnabled ? u8"\n접촉 확인 모드: 켜짐 (T: 끄기)" : u8"\n접촉 확인 모드: 꺼짐 (T: 켜기)";
+    if (contactPaused)
+    {
+        text += u8"\n다리 접촉으로 시뮬레이션 일시정지 · P: 재개";
+    }
+    else if (m_World.IsPhysicsPaused())
+    {
+        text += u8"\n시뮬레이션 일시정지 · P: 재개";
+    }
+    else
+    {
+        text += u8"\n시뮬레이션 중 · P: 일시정지";
+    }
+    const bool predicted = dummy->GetMesh().GetFootstepCollisionSnapshot().overlapPairs != 0;
+    m_FootSoles.DrawContactOverlay(text, touching || predicted, topInset);
 }
 
 void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)
@@ -447,8 +531,6 @@ void RagdollImpactTest::DrawUI(Character* player)
         ImGui::TextWrapped("%s", u8"우클릭 유지: 조준 / 조준 중 좌클릭 또는 R: 발사");
         ImGui::TextWrapped("%s", u8"조준하지 않을 때 R: 더미 골반으로 발사");
         ImGui::TextUnformatted(u8"반지름 15cm / 중력과 실제 충돌 적용");
-        ImGui::Checkbox(u8"2m 눈금자 표시", &m_RulerVisible);
-        ImGui::TextUnformatted(u8"눈금자: 1cm 눈금 / 10cm 숫자 / 주황색 8cm 표시");
         ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
         ImGui::BeginDisabled(m_ProjectileSettingsPath.empty());
@@ -527,10 +609,13 @@ void RagdollImpactTest::DrawUI(Character* player)
             }
             ImGui::TextUnformatted(u8"기준은 초기화 또는 마지막 발사 시점입니다.");
             ImGui::PushID("ImpactDummy");
-            m_FootSoles.DrawUI(dummy->GetMesh(), [this]() -> void
+            if (m_FootSoles.IsVisible())
             {
-                DrawDummySupportSettingsUI();
-            });
+                m_FootSoles.DrawUI(dummy->GetMesh(), [this]() -> void
+                {
+                    DrawDummySupportSettingsUI();
+                });
+            }
             ImGui::PopID();
         }
         if (!m_Message.empty())

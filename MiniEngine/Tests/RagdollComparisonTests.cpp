@@ -87,7 +87,9 @@ void RunRagdollComparisonTests()
     PARS::ComparisonJointRotation locked = AnalyzeComparisonJoint(joint, Quaternion(Vector3(kYUnitVector), .3f));
     CheckComparison(Near(locked.excess[1], .3f), "Locked swing violation");
     joint.swingY = joint.swingZ = PhysicsJointMotion::Limited;
-    joint.swingYLimit = joint.swingZLimit = .5f;
+    joint.swingYLimit = .5f;
+    joint.swingZMin = -.5f;
+    joint.swingZMax = .5f;
     const float t = std::tan(.4f * .25f), r2 = 2 * t * t;
     const Quaternion diagonal(XMVectorSet(0, 2 * t / (1 + r2), 2 * t / (1 + r2), (1 - r2) / (1 + r2)));
     const PARS::ComparisonJointRotation cone = AnalyzeComparisonJoint(joint, diagonal);

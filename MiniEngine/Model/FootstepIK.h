@@ -27,7 +27,10 @@ namespace PARS
         physx::PxVec3 previousBend{0};
         float thighLength = 0;
         float calfLength = 0;
+        // 팔 보호 동작은 팔꿈치 방향을 지정하고 완전 신전 전에 여유를 남긴다.
+        float maximumReachRatio = 1.0f;
         bool hasPreviousBend = false;
+        bool preferReferenceBend = false;
     };
 
     struct LegIKResult
@@ -71,9 +74,8 @@ namespace PARS
     {
     public:
         uint64_t revision = 0;
-        // -1은 새 발딛기 없이 회복 중 양발 목표를 유지하는 경우다.
-        int stepFoot = -1;
         std::array<FootIKLegInput, 2> legs;
+        std::array<bool, 2> motionTargets{};
         bool enabled = false;
     };
 
@@ -92,8 +94,8 @@ namespace PARS
         uint64_t revision = 0;
         std::vector<int> correctedNodes;
         FootstepIKStatus status = FootstepIKStatus::Inactive;
-        int stepFoot = -1;
         std::array<LegIKResult, 2> legs;
+        std::array<bool, 2> motionTargets{};
     };
 
     // 실제 부모 좌표에서 IK를 푼 뒤 애니메이션 부모 기준 목표로 되돌린다. 물리 바디는 옮기지 않는다.
@@ -101,6 +103,8 @@ namespace PARS
     {
     public:
         void Reset();
+        bool BuildLegInput(const FootstepIKInput& input, size_t side,
+            const std::vector<physx::PxTransform>& pose, TwoBoneIKInput& result) const;
         bool Apply(const FootstepIKInput& input, const std::vector<int32_t>& parents,
             std::vector<physx::PxTransform>& pose);
 

@@ -238,6 +238,35 @@ void PhysicsWorld::onRelease(const PxBase* object, void*, PxDeletionEventFlag::E
         m_Contacts.end());
 }
 
+bool PhysicsWorld::HasContact(const PxRigidActor& first, const PxRigidActor& second) const
+{
+    if (!m_Scene || &first == &second || first.getScene() != m_Scene || second.getScene() != m_Scene)
+    {
+        return false;
+    }
+    for (const ContactPair& pair : m_Contacts)
+    {
+        const bool matches = (pair.actors[0] == &first && pair.actors[1] == &second) ||
+            (pair.actors[0] == &second && pair.actors[1] == &first);
+        if (!matches || pair.clockRevision != m_ClockRevision ||
+            !pair.shapes[0]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE) ||
+            !pair.shapes[1]->getFlags().isSet(PxShapeFlag::eSIMULATION_SHAPE))
+        {
+            continue;
+        }
+        for (const PxContactPairPoint& point : pair.points)
+        {
+            // 접촉 오프셋 안에 들어온 근접 상태만으로는 닿았다고 표시하지 않는다.
+            if (point.position.isFinite() && point.normal.isFinite() && point.impulse.isFinite() &&
+                std::isfinite(point.separation) && (point.separation <= 0 || point.impulse.dot(point.normal) > 0))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool PhysicsWorld::GetGroundContact(const PxRigidActor& body, PhysicsGroundContact& contact,
     const void* ignoredOwner) const
 {

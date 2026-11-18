@@ -88,6 +88,12 @@ namespace PARS
             const Math::Matrix4& childBodyWorld, const Math::Matrix4& jointWorld);
 
     public:
+        bool HasAsymmetricSwingZLimit() const
+        {
+            return swingZ == PhysicsJointMotion::Limited && swingZMin != -swingZMax;
+        }
+
+    public:
         std::string parentBone;
         std::string childBone;
         PhysicsJointFrame parentFrame;
@@ -98,7 +104,8 @@ namespace PARS
         float twistMin = -DirectX::XM_PIDIV4;
         float twistMax = DirectX::XM_PIDIV4;
         float swingYLimit = DirectX::XM_PI / 6;
-        float swingZLimit = DirectX::XM_PI / 6;
+        float swingZMin = -DirectX::XM_PI / 6;
+        float swingZMax = DirectX::XM_PI / 6;
         PhysicsAngularDrive drives[3]; // 순서대로 트위스트 X, 스윙 Y, 스윙 Z다.
         bool enableCollision = false;
         // SLERP는 모든 회전에 drives[0]을 사용하며, 잠긴 회전축이 없어야 한다.

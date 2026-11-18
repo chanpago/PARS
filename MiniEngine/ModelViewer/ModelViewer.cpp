@@ -51,6 +51,8 @@
 #include "RagdollImpactTest.h"
 bool RunRagdollImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
     const std::wstring& path);
+bool RunHorizontalBalanceValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
+    const std::wstring& path);
 bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& world, PARS::Character& player,
     const std::wstring& path, uint32_t scenario, uint32_t frames);
 #include "RagdollComparisonRunner.h"
@@ -126,7 +128,7 @@ namespace
     {
         const wchar_t* const reportOptions[] =
         {
-            L"bodyimpacttest", L"impacttest", L"pelvistest", L"patransitiontest", L"pawalltest",
+            L"horizontalbalancetest", L"bodyimpacttest", L"impacttest", L"pelvistest", L"patransitiontest", L"pawalltest",
             L"ragdolltest", L"comparisontest", L"comparisonreturncapture", L"comparisoncapture", L"impactcapture"
         };
         std::wstring path;
@@ -148,6 +150,9 @@ class ModelViewer : public GameCore::IGameApp
 public:
     ModelViewer(void)
     {
+#if defined(_M_X64)
+        m_PlayerFootSoles.SetVisible(false);
+#endif
     }
 
 public:
@@ -230,7 +235,7 @@ public:
     }
 
 private:
-    void SetFootCandidateDebugVisible(bool visible);
+    void SetPlayerFootDebugVisible(bool visible);
     PARS::PlayerController* GetPlayerController() const
     {
         return m_World.FindActor<PARS::PlayerController>(m_PlayerController);
@@ -259,8 +264,9 @@ private:
     unique_ptr<SkeletalMeshViewer> m_MeshViewer;
 #if defined(_M_X64)
     unique_ptr<PhysicsDemo> m_PhysicsDemo;
-    // 더미가 보관하는 참조의 수명이 정렬 순서보다 우선한다.
-    FootSoleDebug m_FootSoles;
+    // 더미 전용 표시 객체는 이를 참조하는 충격 테스트보다 먼저 생성한다.
+    FootSoleDebug m_PlayerFootSoles;
+    FootSoleDebug m_DummyFootSoles;
     unique_ptr<RagdollImpactTest> m_ImpactTest;
     unique_ptr<RagdollComparisonRunner> m_Comparison;
     std::string m_MapError;
@@ -277,10 +283,11 @@ private:
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
     bool m_ActiveSupport = true;
-    bool m_FootCandidateDebugVisible = true;
+    bool m_PlayerFootDebugVisible = false;
     bool m_RagdollTestDone = false;
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
+    bool m_ContactOverlayVisible = false;
     bool m_IsAiming = false;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
@@ -451,6 +458,14 @@ void ModelViewer::Startup(void)
                     SetFreeCamera(true);
                     m_Camera.Update();
                 }
+            }
+            else if (CommandLineArgs::GetString(L"horizontalbalancetest", ragdollReport))
+            {
+                if (m_ImpactTest && GetPreviewCharacter())
+                {
+                    RunHorizontalBalanceValidation(*m_ImpactTest, m_World, *GetPreviewCharacter(), ragdollReport);
+                }
+                m_RagdollTestDone = true;
             }
             else if (CommandLineArgs::GetString(L"impacttest", ragdollReport))
             {
@@ -781,13 +796,13 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 
 
     /*
-    idle,walk,run에 사용할 모델 데이터를 파일에서 읽어 models배열에 저장한다. 
+    idle,walk,run에 사용할 모델 데이터를 파일에서 읽어 models배열에 저장한다.
     가져오는 데이터는 다음과 같다.
     - 외형 정보: 메시, 재질, 텍스처
     - 본 정보: 본 목록과 계층, 스키닝 연결 정보, 역바인드 행렬
     - 애니메이션 정보: 시간에 따른 본의 위치·회전·크기 변화
 
-    완료되면 
+    완료되면
     models[0] → Idle 모델 데이터
     models[1] → Walking 모델 데이터
     models[2] → SlowRun 모델 데이터
@@ -941,7 +956,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     if (m_PhysicsDemo && mesh.GetPhysicsAsset())
     {
         // 플레이어는 기본 키네마틱 상태로 시작하고, 몸통 캡슐은 공통 설정으로 생성한다.
-        m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_FootSoles);
+        m_ImpactTest = std::make_unique<RagdollImpactTest>(m_World, m_DummyFootSoles);
         m_ImpactTest->SetSpawnOrigin(m_PhysicsDemo->GetDummySpawnOrigin());
         const size_t impactDirectory = m_DefaultPAPath.find_last_of("/\\");
         m_ImpactTest->LoadBodyImpactSettings(*character,
@@ -962,7 +977,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
 #endif
-    SetFootCandidateDebugVisible(m_FootCandidateDebugVisible);
+    SetPlayerFootDebugVisible(m_PlayerFootDebugVisible);
     GraphicsContext& context = GraphicsContext::Begin(L"Initialize Character Pose");
     // 현재 포즈의 스키닝 행렬 등 렌더 데이터를 준비하고, GPU 명령 완료를 기다린다.
     Renderer::UpdateWorldRenderData(m_World, context);
@@ -1002,22 +1017,16 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 #endif
 }
 
-void ModelViewer::SetFootCandidateDebugVisible(bool visible)
+void ModelViewer::SetPlayerFootDebugVisible(bool visible)
 {
-    m_FootCandidateDebugVisible = visible;
+    m_PlayerFootDebugVisible = visible;
+#if defined(_M_X64)
+    m_PlayerFootSoles.SetVisible(visible);
+#endif
     if (PARS::Character* player = GetPreviewCharacter())
     {
         player->GetMesh().SetFootCandidateDebugVisible(visible);
     }
-#if defined(_M_X64)
-    if (m_ImpactTest)
-    {
-        if (PARS::Character* dummy = m_ImpactTest->GetDummy())
-        {
-            dummy->GetMesh().SetFootCandidateDebugVisible(visible);
-        }
-    }
-#endif
 }
 
 void ModelViewer::SelectPreview(uint32_t index)
@@ -1310,6 +1319,43 @@ void ModelViewer::Update(float deltaT)
         DebugZoom.Increment();
     }
 
+    // 메시 뷰어의 카메라 맞춤과 텍스트 입력에는 F 단축키를 양보한다.
+    // 물리 고정 간격은 유지하고 게임 시간의 진행 속도만 바꾼다.
+    if (!(m_MeshViewer && m_MeshViewer->WantsInput()) &&
+        !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_F, false))
+    {
+        const float timeScale = m_World.GetPhysicsTimeScale() < 1.0f ? 1.0f : 0.1f;
+        m_World.SetPhysicsTimeScale(timeScale);
+    }
+
+#if defined(_M_X64)
+    // 더미 검사 단축키는 메시 편집이나 텍스트 입력 중에는 처리하지 않는다.
+    if (m_ImpactTest && !(m_MeshViewer && m_MeshViewer->WantsInput()) &&
+        !(m_Comparison && m_Comparison->IsShowingScene()) &&
+        !ImGui::GetIO().WantTextInput)
+    {
+        if (ImGui::IsKeyPressed(ImGuiKey_T, false))
+        {
+            m_ImpactTest->SetContactCheckEnabled(!m_ImpactTest->IsContactCheckEnabled());
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_P, false))
+        {
+            if (m_World.IsPhysicsPaused())
+            {
+                m_ImpactTest->ResumeSimulation();
+            }
+            else
+            {
+                m_World.SetPhysicsPaused(true);
+            }
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_G, false))
+        {
+            m_ImpactTest->Reset();
+        }
+    }
+#endif
+
     // 현재 렌더 타깃의 세로/가로 비율을 카메라 투영에 반영한다.
     m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
     // 조작 가능 여부, 카메라 조준 방향, 이동/달리기 입력을 설정한다. 실제 이동은 아래 World::Tick에서 처리한다.
@@ -1333,8 +1379,8 @@ void ModelViewer::Update(float deltaT)
 #if defined(_M_X64)
     if (m_PhysicsDemo)
     {
-        // 물리 디버거(PVD) 연결 상태를 갱신하고, 물리 스텝이 진행됐으면 낙하 상자의 높이를 기록한다.
-        // 이 함수는 데모의 관측/연결 관리이며, 월드 물리 계산은 바로 위 World::Tick에서 수행한다.
+        // 물리 디버거(PVD) 연결 상태를 갱신한다.
+        // 월드 물리 계산은 바로 위 World::Tick에서 수행한다.
         m_PhysicsDemo->Update(deltaT);
         if (m_ImpactTest)
         {
@@ -1524,7 +1570,10 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     const PARS::Ragdoll& runtime = mesh.GetRagdoll();
     ImGui::Text(u8"PhysX: 바디 %zu개 / 관절 %zu개", runtime.GetBodyCount(), runtime.GetJointCount());
 #if defined(_M_X64)
-    m_FootSoles.DrawUI(mesh);
+    if (m_PlayerFootSoles.IsVisible())
+    {
+        m_PlayerFootSoles.DrawUI(mesh);
+    }
 #endif
     if (runtime.IsActive())
     {
@@ -1683,6 +1732,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         DrawMapSelection();
         return;
     }
+    if (m_ContactOverlayVisible && m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
+    {
+        m_ImpactTest->DrawContactOverlay(m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
+    }
     if (m_IsAiming)
     {
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1753,64 +1806,63 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         if (ImGui::Begin(u8"캐릭터 애니메이션", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
 #if defined(_M_X64)
+            if (ImGui::Button(m_ContactOverlayVisible ? u8"상단 디버그 끄기###ContactOverlayToggle" :
+                u8"상단 디버그 켜기###ContactOverlayToggle"))
+            {
+                m_ContactOverlayVisible = !m_ContactOverlayVisible;
+            }
             if (!(m_Comparison && m_Comparison->IsShowingScene()))
             {
                 if (m_ImpactTest)
                 {
-                    if (ImGui::Button(u8"더미 리셋"))
+                    if (ImGui::Button(u8"더미 리셋 (G)"))
                     {
                         m_ImpactTest->Reset();
                     }
                     ImGui::SameLine();
                 }
-                if (ImGui::Button(m_FootCandidateDebugVisible ? u8"발 역할 표시 끄기" : u8"발 역할 표시"))
+                PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
+                bool dummyFootStatesVisible = dummy && dummy->GetMesh().IsFootCandidateDebugVisible();
+                ImGui::BeginDisabled(!dummy);
+                if (ImGui::Button(dummyFootStatesVisible ? u8"더미 발 상태 표시 끄기" : u8"더미 발 상태 표시") && dummy)
                 {
-                    SetFootCandidateDebugVisible(!m_FootCandidateDebugVisible);
+                    dummyFootStatesVisible = !dummyFootStatesVisible;
+                    dummy->GetMesh().SetFootCandidateDebugVisible(dummyFootStatesVisible);
                 }
                 ImGui::SameLine();
-                if (ImGui::Button(m_FootSoles.IsVisible() ? u8"발 디버그 끄기" : u8"발 디버그 켜기"))
+                if (ImGui::Button(m_DummyFootSoles.IsVisible() ? u8"더미 발 디버그 끄기" : u8"더미 발 디버그 켜기"))
                 {
-                    m_FootSoles.SetVisible(!m_FootSoles.IsVisible());
+                    m_DummyFootSoles.SetVisible(!m_DummyFootSoles.IsVisible());
                 }
-                if (m_FootCandidateDebugVisible)
+                ImGui::EndDisabled();
+                if (ImGui::Button(m_PlayerFootDebugVisible ? u8"플레이어 발 상태·디버그 끄기###PlayerFootDebugToggle" :
+                    u8"플레이어 발 상태·디버그 켜기###PlayerFootDebugToggle"))
                 {
-                    void (*const drawRoles)(PARS::Character*, const char*) = [](PARS::Character* character, const char* label) -> void
+                    SetPlayerFootDebugVisible(!m_PlayerFootDebugVisible);
+                }
+                void (*const drawFootStates)(PARS::Character*, const char*) = [](PARS::Character* character, const char* label) -> void
+                {
+                    if (!character)
                     {
-                        if (!character)
-                        {
-                            return;
-                        }
-                        const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
-                        const PARS::FootstepRoles roles = sample.GetDisplayRoles();
-                        ImGui::TextUnformatted(label);
-                        if (roles.IsValid())
-                        {
-                            const char* const feet[] = {u8"왼발", u8"오른발"};
-                            ImGui::TextColored(ImVec4(1, .15f, .15f, 1), u8"지지발: %s", feet[roles.supportFoot]);
-                            ImGui::SameLine();
-                            ImGui::TextColored(ImVec4(.2f, .45f, 1, 1), roles.locked ? u8"이동발: %s" : u8"이동 가능 발: %s",
-                                feet[roles.movableFoot]);
-                            if (roles.locked)
-                            {
-                                ImGui::TextUnformatted(u8"발딛기 역할 유지: 착지 처리까지 고정");
-                            }
-                        }
-                        else if (sample.footstep.GetRoles().IsValid())
-                        {
-                            ImGui::TextUnformatted(u8"발 역할 표시 없음: 지지발 접촉 무효");
-                        }
-                        else
-                        {
-                            ImGui::TextWrapped(u8"발 역할 없음: %s", PARS::FootstepReasonLabel(sample.footstep.reason));
-                        }
-                        if (sample.candidates.support >= 0)
-                        {
-                            ImGui::Text(u8"COM 거리: 왼발 %.1f / 오른발 %.1f cm",
-                                sample.candidates.distances[0] * 100, sample.candidates.distances[1] * 100);
-                        }
-                    };
-                    drawRoles(GetPreviewCharacter(), u8"플레이어 발 역할");
-                    drawRoles(m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr, u8"더미 발 역할");
+                        return;
+                    }
+                    const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
+                    ImGui::TextUnformatted(label);
+                    for (size_t side = 0; side < sample.feet.size(); ++side)
+                    {
+                        const PARS::FootContactSample& contact = sample.feet[side].contact;
+                        ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
+                            contact.hasSample && contact.grounded ? "ON" : "OFF",
+                            sample.footstep.feet[side].IsInProgress() ? "ON" : "OFF");
+                    }
+                };
+                if (dummyFootStatesVisible)
+                {
+                    drawFootStates(dummy, u8"더미 발 상태");
+                }
+                if (m_PlayerFootDebugVisible)
+                {
+                    drawFootStates(GetPreviewCharacter(), u8"플레이어 발 상태");
                 }
                 if (m_ImpactTest && !m_ImpactTest->GetStatusMessage().empty())
                 {
@@ -1935,6 +1987,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                         ResetMapCharacter();
                     }
                     ImGui::TextWrapped(m_FreeCamera ? u8"자유 카메라: WASD + Q/E 이동. Tab: 캐릭터 조작." : u8"캐릭터: WASD 이동, Shift 달리기. Tab: 자유 카메라.");
+                    ImGui::Text(u8"F: 0.1배속 / 정상 속도 전환 | 현재 %.1f배 | G: 더미 리셋", m_World.GetPhysicsTimeScale());
                     ImGui::TextWrapped(u8"우클릭 유지로 시점 이동·조준, 조준 중 좌클릭 또는 R로 구를 발사합니다. 애니메이션 버튼으로 수동 미리보기를 시작합니다.");
                 }
                 else
@@ -2102,7 +2155,7 @@ void ModelViewer::RenderScene(void)
 
         // 깊이 렌더링을 시작한다.
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
-        // 바닥과 상자의 깊이를 유지해 캐릭터를 올바르게 가리도록 한다.
+        // 바닥과 지형의 깊이를 유지해 캐릭터를 올바르게 가리도록 한다.
         if (!physicsScene)
         {
             gfxContext.ClearDepth(g_SceneDepthBuffer);
@@ -2175,13 +2228,14 @@ void ModelViewer::RenderScene(void)
         m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
         if (m_ImpactTest)
         {
-            if (m_ImpactTest->GetDummy() && m_ImpactTest->IsRulerVisible())
-            {
-                m_PhysicsDemo->RenderRuler(gfxContext, m_Camera, viewport, scissor,
-                    m_ImpactTest->GetRulerOrigin());
-            }
             m_PhysicsDemo->RenderSpheres(gfxContext, m_Camera, viewport, scissor,
                 m_ImpactTest->GetProjectiles(), RagdollImpactTest::SphereRadius);
+            if (PARS::Character* dummy = m_ImpactTest->GetDummy())
+            {
+                std::vector<physx::PxDebugTriangle> regions;
+                m_DummyFootSoles.BuildRegionTriangles(dummy->GetMesh(), regions);
+                m_PhysicsDemo->RenderDebugTriangles(gfxContext, m_Camera, viewport, scissor, regions);
+            }
             std::vector<physx::PxDebugLine> lines;
             m_ImpactTest->BuildLines(lines);
             m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
@@ -2189,7 +2243,7 @@ void ModelViewer::RenderScene(void)
         if (PARS::Character* character = GetPreviewCharacter())
         {
             std::vector<physx::PxDebugLine> lines;
-            m_FootSoles.BuildLines(character->GetMesh(), lines);
+            m_PlayerFootSoles.BuildLines(character->GetMesh(), lines);
             m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
         }
     }

@@ -5,6 +5,67 @@
 using namespace PARS;
 using namespace physx;
 
+namespace
+{
+    PxVec3 SoleTiltVector(const PxQuat& orientation, const PxVec3& normal)
+    {
+        const PxVec3 up = orientation.rotate(PxVec3(0, 1, 0));
+        PxVec3 axis = normal.cross(up);
+        const float sine = axis.normalize();
+        const float cosine = PxClamp(normal.dot(up), -1.0f, 1.0f);
+        if (sine < 1e-6f)
+        {
+            if (cosine >= 0.0f)
+            {
+                return PxVec3(0);
+            }
+            axis = normal.cross(PxVec3(1, 0, 0));
+            if (axis.normalize() < 1e-6f)
+            {
+                axis = normal.cross(PxVec3(0, 0, 1)).getNormalized();
+            }
+        }
+        return axis * std::atan2(sine, cosine);
+    }
+
+    PxQuat TiltRotation(const PxVec3& rotation)
+    {
+        const float angle = rotation.magnitude();
+        return angle > 1e-6f ? PxQuat(angle, rotation / angle) : PxQuat(PxIdentity);
+    }
+
+    bool LimitSupportTilt(const StandingSupportFoot& foot, const StandingSupportSettings& settings,
+        PxQuat& target)
+    {
+        PxVec3 normal = foot.supportNormal;
+        if (!settings.limitFootTilt || !foot.actualSole.isSane() || !normal.isFinite() ||
+            normal.normalize() < 1e-6f || normal.y < .70710678f)
+        {
+            return false;
+        }
+        PxVec3 tiltAxis = SoleTiltVector(foot.actualSole.q, normal);
+        const float actualAngle = tiltAxis.normalize();
+        const float start = settings.footTiltLimitStartDegrees * PxPi / 180.0f;
+        const float maximum = settings.footTiltLimitDegrees * PxPi / 180.0f;
+        if (actualAngle <= start)
+        {
+            return false;
+        }
+        const PxVec3 targetTilt = SoleTiltVector(target, normal);
+        const float alongTilt = targetTilt.dot(tiltAxis);
+        const float blend = PxClamp((actualAngle - start) / (maximum - start), 0.0f, 1.0f);
+        const float excess = (std::max)(0.0f, alongTilt - maximum) * blend;
+        if (excess <= 1e-6f)
+        {
+            return false;
+        }
+        // 반대 방향의 복원과 선회는 남기고, 이미 들린 방향으로 과도한 목표만 줄인다.
+        const PxVec3 limitedTilt = targetTilt - tiltAxis * excess;
+        target = (TiltRotation(limitedTilt) * TiltRotation(targetTilt).getConjugate() * target).getNormalized();
+        return true;
+    }
+}
+
 void StandingSupport::Reset()
 {
     m_Snapshot = {};
@@ -43,7 +104,10 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         !std::isfinite(settings.reachReserve) || settings.reachReserve < 0 ||
         !std::isfinite(settings.horizontalDampingTime) || settings.horizontalDampingTime < 0 ||
         !std::isfinite(settings.maximumHorizontalCorrection) || settings.maximumHorizontalCorrection < 0 ||
-        !std::isfinite(settings.horizontalFrequency) || settings.horizontalFrequency <= 0)
+        !std::isfinite(settings.horizontalFrequency) || settings.horizontalFrequency <= 0 ||
+        !std::isfinite(settings.footTiltLimitStartDegrees) || settings.footTiltLimitStartDegrees < 0 ||
+        !std::isfinite(settings.footTiltLimitDegrees) ||
+        settings.footTiltLimitDegrees <= settings.footTiltLimitStartDegrees || settings.footTiltLimitDegrees > 90.0f)
     {
         m_Snapshot.valid = false;
         return false;
@@ -63,6 +127,7 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     {
         const StandingSupportFoot& foot = input.feet[side];
         if (!foot.available || !foot.sole.isSane() || !foot.animatedSole.isSane() ||
+            (foot.hasMotionTarget && !foot.actualSole.isSane()) ||
             !foot.soleInBone.isSane() || !foot.hipOffset.isFinite() ||
             !std::isfinite(foot.length) || foot.length <= settings.reachReserve)
         {
@@ -72,16 +137,16 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         // 발바닥 목표가 애니메이션 기준 위치에서 옮겨진 평균만큼, 골반 기준 위치도 옮김
         // 이렇게 desiredPelvis(애니메이션 목표 골반위치)에 물리발의 오프셋만큼 더해줌
         // 발 목표 배치에 맞춘 골반 위치를 구해서, 뒤에서 수평 위치를 유지할 기준으로 사용
-        desiredPelvis += (foot.sole.p - foot.animatedSole.p) * .5f;
-        if (!foot.supporting)
+        const PxTransform& referenceSole = foot.hasMotionTarget ? foot.actualSole : foot.sole;
+        desiredPelvis += (referenceSole.p - foot.animatedSole.p) * .5f;
+        if (foot.hasMotionTarget && !foot.grounded)
         {
             m_MissingContactTime[side] = 0;
             continue;
         }
 
-        // 지지 역할을 맡은 발에 대해 실행
-        // 지지발을 기준으로 정상 골반 높이를 계산하는부분
-        // 실제 접촉 판정은 바꾸지 않고 지지 예정인 발만 재접촉용 높이 목표를 낮춘다.
+        // 접지한 발의 실제 위치 또는 자세를 유지할 발의 목표로 정상 골반 높이를 계산한다.
+        // 이동 명령이 있는 발의 공중 궤적은 높이 기준에서 제외한다.
 
         // 지지 접촉 유예가 끝난 뒤부터 재접촉을 위한 낮추기를 누적한다.
         const bool hasSupportContact = foot.grounded || foot.contactGraceActive;
@@ -92,12 +157,12 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         missingAmount = (std::max)(missingAmount, m_MissingContactTime[side] / settings.contactLoweringTime);
 
         // 발바닥 목표 위에서 애니메이션과 같은 높이 관계를 유지하려면 골반이 어느 높이에 있어야하는지 계산하는 코드
-        nominalHeight += foot.sole.p.y + input.animatedPelvis.p.y - foot.animatedSole.p.y;
+        nominalHeight += referenceSole.p.y + input.animatedPelvis.p.y - foot.animatedSole.p.y;
         supportCount += 1;
 
         // 발목 목표에 다리가 닿을 수 있도록 골반이 올라갈 수 있는 최대 높이를 계산하는부분
         // 발목 목표와 고관절 위치를 구함
-        const PxVec3 ankle = (foot.sole * foot.soleInBone.getInverse()).p;
+        const PxVec3 ankle = (referenceSole * foot.soleInBone.getInverse()).p;
         const PxVec3 hip = input.pelvis.p + foot.hipOffset;
 
 
@@ -113,7 +178,7 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
 
         // 가능한 수직거리를 골반의 최대 높이로 바꿈
         /*
-        ankle.y + std::sqrt((std::max)(0.0f, verticalSquared)) 
+        ankle.y + std::sqrt((std::max)(0.0f, verticalSquared))
         이렇게만 적으면 발목부터 고관절(다리가시작하는부분) 까지의거리. 여기에 hip offset을 빼줘서 골반까지의 높이를 구한다
         일반적으로 골반보다 다리가 시작하는 부분이 더 밑에 있기 때문에 foot.hipOffset.y는 음수
         */
@@ -124,8 +189,18 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     }
     if (supportCount == 0)
     {
-        m_Snapshot.valid = false;
-        return false;
+        // 접촉이 없는 동안에도 양발 명령은 이어가고 서 있기 보정만 생략한다.
+        m_Snapshot = {};
+        m_Snapshot.valid = true;
+        m_Snapshot.actualHeight = input.pelvis.p.y;
+        m_Snapshot.targetHeight = input.pelvis.p.y;
+        for (size_t side = 0; side < input.feet.size(); ++side)
+        {
+            m_Snapshot.soleTargets[side] = input.feet[side].sole;
+        }
+        m_Revision = input.revision;
+        m_CompletedStep = input.completedStep;
+        return true;
     }
     nominalHeight /= supportCount;
     const float stepLowering = input.stepping ? input.stepDistance * settings.stepLoweringScale : 0;
@@ -138,7 +213,7 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     const float rate = desiredHeight < previousHeight ? settings.loweringSpeed : settings.raisingSpeed;
     const float change = PxClamp(desiredHeight - previousHeight, -rate * input.deltaTime, rate * input.deltaTime);
     // 공중 발의 이동 궤적을 골반 목표에 다시 넣으면 몸이 그 궤적을 쫓아 추가 발딛기를 유발한다.
-    // 양발이 지지 역할일 때 기준을 갱신하고 발딛기 중에는 직전 지지 기준을 유지한다.
+    // 이동 명령이 없을 때 기준을 갱신하고 명령 중에는 직전 기준을 유지한다.
     if (!m_Initialized)
     {
         m_HorizontalReference = desiredPelvis;
@@ -182,11 +257,13 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     {
         m_Snapshot.soleTargets[side] = input.feet[side].sole;
         // 짧은 접촉 상실에는 보정을 이어가고, 유예가 끝난 다리는 바닥을 다시 찾는다.
-        if (input.feet[side].supporting && (input.feet[side].grounded || input.feet[side].contactGraceActive))
+        if (!input.feet[side].hasMotionTarget && (input.feet[side].grounded || input.feet[side].contactGraceActive))
         {
             // 실제 골반이 낮으면 제어용 발 목표를 아래로 보내 다리가 바닥을 밀도록 한다.
             m_Snapshot.soleTargets[side].p.y += input.pelvis.p.y - m_Snapshot.targetHeight;
             m_Snapshot.soleTargets[side].p += horizontalCorrection;
+            m_Snapshot.footTiltLimited[side] = LimitSupportTilt(input.feet[side], settings,
+                m_Snapshot.soleTargets[side].q);
         }
     }
     m_Initialized = true;
