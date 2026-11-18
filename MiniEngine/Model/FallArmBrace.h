@@ -16,7 +16,6 @@ namespace PARS
     struct FallArmSettings
     {
     public:
-        float predictionTime = .18f;
         float blendInDuration = .05f;
         float blendOutDuration = .22f;
         float maximumDuration = 1.6f;
@@ -40,7 +39,6 @@ namespace PARS
         physx::PxTransform palmInHand{physx::PxIdentity};
         physx::PxVec3 forwardInAnchor{0, 0, 1};
         physx::PxVec3 rightInAnchor{1, 0, 0};
-        physx::PxVec3 upInAnchor{0, 1, 0};
         float upperLength = 0;
         float lowerLength = 0;
         int anchorNode = -1;

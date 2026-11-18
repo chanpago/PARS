@@ -61,9 +61,8 @@ namespace
                 return false;
             }
         }
-        const float nonnegative[] = {settings.predictionTime, settings.contactGraceDuration,
-            settings.forwardReachRatio, settings.backwardReachRatio, settings.outwardReachRatio,
-            settings.surfaceOffset};
+        const float nonnegative[] = {settings.contactGraceDuration, settings.forwardReachRatio,
+            settings.backwardReachRatio, settings.outwardReachRatio, settings.surfaceOffset};
         for (float value : nonnegative)
         {
             if (!std::isfinite(value) || value < 0)
@@ -85,8 +84,7 @@ namespace
             std::isfinite(setup.upperLength) && setup.upperLength > 1e-5f &&
             std::isfinite(setup.lowerLength) && setup.lowerLength > 1e-5f &&
             arm.actualAnchor.isSane() && arm.actualHand.isSane() && setup.palmInHand.isSane() &&
-            arm.shoulderVelocity.isFinite() && setup.forwardInAnchor.isFinite() &&
-            setup.rightInAnchor.isFinite() && setup.upInAnchor.isFinite();
+            arm.shoulderVelocity.isFinite() && setup.forwardInAnchor.isFinite() && setup.rightInAnchor.isFinite();
     }
 
     bool SurfaceFrame(const PxVec3& position, PxVec3 normal, PxVec3 forward, PxTransform& frame)
@@ -199,10 +197,8 @@ bool FallArmBrace::Apply(const FallArmInput& input, const FallArmSettings& setti
             m_Snapshot.arms[side] = {};
             continue;
         }
-        const float length = arm.setup.upperLength + arm.setup.lowerLength;
-        // 상체 회전으로 생긴 어깨 속도와 실제 기울기를 함께 사용한다.
-        direction += Horizontal(arm.shoulderVelocity) * settings.predictionTime +
-            Horizontal(arm.actualAnchor.q.rotate(arm.setup.upInAnchor)) * length * .5f;
+        // 양쪽 어깨의 수평 속도를 먼저 더해 빠르게 움직이는 쪽의 기여를 보존한다.
+        direction += Horizontal(arm.shoulderVelocity);
         fallback += Horizontal(arm.actualAnchor.q.rotate(arm.setup.forwardInAnchor));
     }
     if (valid[0] && valid[1] && (input.arms[0].setup.shoulderNode == input.arms[1].setup.shoulderNode ||

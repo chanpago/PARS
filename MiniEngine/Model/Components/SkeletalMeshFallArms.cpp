@@ -144,7 +144,6 @@ void SkeletalMeshComponent::InitializeFallArms()
         setup.lowerLength = (wrist.p - elbow.p).magnitude();
         setup.forwardInAnchor = anchor.q.rotateInv(forward);
         setup.rightInAnchor = anchor.q.rotateInv(right);
-        setup.upInAnchor = anchor.q.rotateInv(up);
         PxVec3 fingers = ToFrame(referenceWorld[middle]).p - wrist.p;
         PxVec3 radial = ToFrame(referenceWorld[index]).p - ToFrame(referenceWorld[pinky]).p;
         if (fingers.normalize() < 1e-6f || radial.normalize() < 1e-6f)
