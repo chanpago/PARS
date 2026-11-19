@@ -34,7 +34,7 @@ namespace PARS
         float backAngleDegrees = 30.0f;
         float clearance = .005f;
         float switchAreaRatio = .15f;
-        uint32_t maximumSteps = 3;
+        uint32_t maximumSteps = 1;
         uint32_t maximumPoseChecks = 6;
         bool enabled = true;
     };

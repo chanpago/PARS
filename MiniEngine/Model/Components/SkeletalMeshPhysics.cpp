@@ -1,4 +1,5 @@
 ﻿#include "SkeletalMeshComponent.h"
+#include "EngineTuning.h"
 #include "FramePerformance.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
@@ -10,6 +11,12 @@
 
 using namespace Math;
 using namespace physx;
+
+namespace
+{
+    BoolVar CheckCurrentPathIntervals("PARS/Current Bounds and Split", false);
+}
+
 namespace PARS
 {
     bool SkeletalMeshComponent::ClearPhysicsAsset()
@@ -365,7 +372,7 @@ namespace PARS
         const std::vector<PxTransform>& sourcePose, float deltaTime)
     {
         const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
-        if (!step.IsInProgress())
+        if (!step.IsInProgress() || !m_FootSupport.GetFootstepSettings().pathAvoidanceEnabled)
         {
             m_FootstepAvoidance.Reset();
             return;
@@ -376,6 +383,7 @@ namespace PARS
         prediction.completedStep = step.completedStep;
         prediction.revision = step.revision;
         prediction.fixedDeltaTime = deltaTime;
+        prediction.checkCurrentPathIntervals = CheckCurrentPathIntervals;
         const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
         for (size_t side = 0; side < prediction.legs.size(); ++side)
         {
@@ -439,7 +447,7 @@ namespace PARS
             if (step.feet[side].IsInProgress())
             {
                 m_FootSupport.ReportRecoveryPath(side, step.feet[side].target.position,
-                    m_FootstepCollision.status == FootstepCollisionStatus::Clear &&
+                    m_FootstepCollision.PassedCollisionCheck() &&
                     !m_FootstepCollision.reachLimited && !m_FootstepCollision.jointLimited);
             }
         }

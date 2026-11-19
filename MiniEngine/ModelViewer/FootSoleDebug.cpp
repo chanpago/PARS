@@ -506,6 +506,10 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     {
         return decisionText + u8"[더미] 목표 경로 예측: 이동 명령 없음";
     }
+    if (!mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled)
+    {
+        return decisionText + u8"[더미] 이동 경로 충돌 예측 꺼짐";
+    }
     if (prediction.status == PARS::FootstepCollisionStatus::Unavailable ||
         prediction.status == PARS::FootstepCollisionStatus::Inactive ||
         prediction.revision != support.footstep.revision || prediction.completedStep != support.footstep.completedStep)
@@ -514,8 +518,19 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     }
 
     const PARS::FootstepAvoidanceSnapshot& avoidance = mesh.GetFootstepAvoidanceSnapshot();
-    const char* state = prediction.status == PARS::FootstepCollisionStatus::Collision ? u8"겹침 예상" :
-        prediction.status == PARS::FootstepCollisionStatus::Clear ? u8"계획 경로 구간 통과" : u8"미확인";
+    const char* state = u8"미확인";
+    if (prediction.status == PARS::FootstepCollisionStatus::Collision)
+    {
+        state = u8"겹침 예상";
+    }
+    else if (prediction.status == PARS::FootstepCollisionStatus::Clear)
+    {
+        state = u8"계획 경로 구간 통과";
+    }
+    else if (prediction.status == PARS::FootstepCollisionStatus::SamplesClear)
+    {
+        state = u8"샘플에서 겹침 없음 (구간 검사 꺼짐)";
+    }
     const char* route = avoidance.status == PARS::FootstepAvoidanceStatus::Detouring ? u8"우회 적용" :
         avoidance.status == PARS::FootstepAvoidanceStatus::Failed ? u8"회피 실패" : u8"기존 경로";
     char summary[512];
@@ -1048,6 +1063,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             ImGui::TextWrapped(u8"골반을 직접 들어 올리는 힘 없이 지지 다리의 자세와 관절 토크로 높이를 조절합니다. 지지발 IK 목표에는 골반 오차 보정이 포함되므로 실제 발바닥 고정점과 다를 수 있습니다.");
         }
         ImGui::Checkbox(u8"발딛기 판단·목표 3D 표시", &m_ShowFootstep);
+        ImGui::Checkbox(u8"이동 경로 충돌 예측 및 우회", &settings.pathAvoidanceEnabled);
         ImGui::Checkbox(u8"회복·일반·교차 영역 색칠", &m_ShowRecoveryRegions);
         ImGui::Checkbox(u8"회복 영역으로 일반 / 교차 선택", &settings.recovery.enabled);
         if (settings.recovery.enabled)

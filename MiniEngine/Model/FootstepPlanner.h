@@ -30,6 +30,7 @@ namespace PARS
         float landingComClampHysteresisDegrees = 5.0f;
         bool preventCrossing = true;
         bool landingComClampEnabled = true;
+        bool pathAvoidanceEnabled = false;
     };
 
     enum class FootstepPhase

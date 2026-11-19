@@ -180,7 +180,7 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
             margins[side][part] = input.clearance * .5f + tracking + 1e-5f;
         }
     }
-    // 여섯 자세는 표시와 빠른 거절에 사용한다. 이 샘플들만으로 통과시키지 않는다.
+    // 여섯 자세는 표시와 구간 검사 전의 빠른 충돌 판정에 사용한다.
     for (uint32_t index = 0; index < FootstepCollisionSampleCount; ++index)
     {
         const float fraction = static_cast<float>(index) / (FootstepCollisionSampleCount - 1);
@@ -201,6 +201,11 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
     {
         result.status = FootstepCollisionStatus::Uncertain;
         result.uncertainPairs = 0x1ff;
+        return result;
+    }
+    if (!detour && !input.checkCurrentPathIntervals)
+    {
+        result.status = FootstepCollisionStatus::SamplesClear;
         return result;
     }
     // 중간 자세 검사 시간을 빼면 경계 계산, 도형 분리 판정, 구간 분할에 쓴 시간이 남는다.

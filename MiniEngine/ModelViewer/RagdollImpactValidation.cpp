@@ -521,6 +521,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 }
             }
             check(dummy->GetMesh().SetPhysicsAsset(contactAsset, error), "Prepare a repeatable physical thigh-contact fixture");
+            dummy->GetMesh().GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled = true;
             test.SetContactCheckEnabled(true);
         }
         PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());

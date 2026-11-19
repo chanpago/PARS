@@ -267,7 +267,9 @@ namespace
             return true;
         };
         FootstepSettings settings;
-        settings.recovery.maximumSteps = 1;
+        Check(settings.recovery.maximumSteps == 1 && !settings.pathAvoidanceEnabled,
+            "Default recovery plans one step with path avoidance off");
+        settings.pathAvoidanceEnabled = true;
         settings.recovery.transferTime = .025f;
         FootstepPlanner planner;
         planner.Update(input, settings);
@@ -307,11 +309,16 @@ namespace
         }
         const PxVec3 locked = planner.GetSnapshot().feet[1].target.position;
         Check(planner.GetSnapshot().feet[1].motion.landingTargetLocked, "integration keeps the existing 75 percent lock");
+        planner.ReportRecoveryPath(1, locked, false);
+        Check(planner.GetSnapshot().feet[1].target.recovery.pathRejected, "The locked path records the last rejection");
+        settings.pathAvoidanceEnabled = false;
         input.velocity = PxVec3(1, 0, 2);
         ++input.completedStep;
         planner.Update(input, settings);
         Check((planner.GetSnapshot().feet[1].target.position - locked).magnitude() < 1e-6f,
             "new recovery choices cannot move the locked horizontal target");
+        Check(planner.GetSnapshot().feet[1].motion.valid && !planner.GetSnapshot().feet[1].target.recovery.pathRejected,
+            "Disabling avoidance clears the previous rejection while the swing remains active");
         input.active = false;
         input.velocity = PxVec3(0);
         input.feet[1].grounded = true;
@@ -332,7 +339,8 @@ void TestFootstepRecovery()
     TestPlannerIntegration();
     FootstepRecoveryInput input = Input();
     input.velocity = PxVec3(-1.5f, 0, .5f);
-    const FootstepRecoverySettings settings;
+    FootstepRecoverySettings settings;
+    settings.maximumSteps = 3;
     const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     double maximum = 0;
     for (uint32_t frame = 0; frame < 120; ++frame)
