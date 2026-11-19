@@ -193,6 +193,7 @@
     <ClInclude Include="PhysicsAsset.h" />
     <ClCompile Include="AnimInstance.cpp" />
     <ClInclude Include="AnimInstance.h" />
+    <ClInclude Include="MotionMatching.h" />
     <ClInclude Include="Components\MeshComponent.h">
       <Filter>Components</Filter>
     </ClInclude>
