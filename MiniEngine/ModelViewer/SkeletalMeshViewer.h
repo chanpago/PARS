@@ -10,6 +10,7 @@
 #include "RootSignature.h"
 #include "Animation.h"
 #include "SkeletonOverlay.h"
+#include <map>
 #include <memory>
 
 class Model;
@@ -23,6 +24,8 @@ namespace PARS
 class SkeletalMeshViewer
 {
 public:
+    using AnimationModels = std::map<std::wstring, std::shared_ptr<const Model>>;
+
     enum class ComparisonRequest
     {
         None,
@@ -37,7 +40,7 @@ public:
     }
 
 public:
-    bool Initialize(const std::shared_ptr<const Model>* models, const char* const* names, uint32_t count);
+    bool Initialize(const std::shared_ptr<const Model>& referenceMesh, const AnimationModels& animations);
     void Cleanup(); // GPU가 유휴 상태가 된 후, 렌더러/ImGui를 종료하기 전에 호출한다.
     void Update(float deltaTime);
     void RenderUI(GraphicsContext& context, bool comparisonAvailable = false, bool physicsSaveAvailable = false);

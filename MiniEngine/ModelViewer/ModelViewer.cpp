@@ -83,6 +83,49 @@ namespace
     const wchar_t* const kCrossStepFiles[] = {L"WalkStrafeLeft/WalkStrafeLeft.gltf", L"WalkStrafeRight/WalkStrafeRight.gltf"};
     const char* const kCrossStepNames[] = {"WalkStrafeLeft", "WalkStrafeRight"};
 
+    std::shared_ptr<const Model> LoadAnimationModel(const std::wstring& path, bool forceRebuild,
+        SkeletalMeshViewer::AnimationModels& models)
+    {
+        // 플레이어, 더미, 메시 뷰어가 같은 파일의 모델을 공유한다.
+        std::shared_ptr<const Model>& model = models[path];
+        if (!model)
+        {
+            model = Renderer::LoadModel(path, forceRebuild);
+        }
+        return model;
+    }
+
+    void LoadViewerAnimations(const std::wstring& directory, bool forceRebuild, SkeletalMeshViewer::AnimationModels& models)
+    {
+        WIN32_FIND_DATAW entry{};
+        const HANDLE search = FindFirstFileW((directory + L"*").c_str(), &entry);
+        if (search == INVALID_HANDLE_VALUE)
+        {
+            return;
+        }
+        do
+        {
+            const std::wstring name = entry.cFileName;
+            if (name == L"." || name == L".." || (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            {
+                continue;
+            }
+            const std::wstring path = directory + name;
+            if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            {
+                LoadViewerAnimations(path + L"/", forceRebuild, models);
+                continue;
+            }
+            const std::wstring extension = Utility::ToLower(Utility::GetFileExtension(name));
+            if (extension == L"gltf" || extension == L"glb")
+            {
+                LoadAnimationModel(path, forceRebuild, models);
+            }
+        }
+        while (FindNextFileW(search, &entry));
+        FindClose(search);
+    }
+
     // 실행 파일 위치와 작업 디렉터리 양쪽을 기준으로 프로젝트 에셋을 찾는다.
     // 빌드 출력 폴더에서 직접 실행한 경우에도 동작한다.
     std::wstring FindPreviewAssetRoot()
@@ -810,11 +853,13 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     models[2] → SlowRun 모델 데이터
     이렇게 저장됨
     */
+    const std::wstring convertedDirectory = root + L"Converted/";
+    SkeletalMeshViewer::AnimationModels animationModels;
     std::shared_ptr<const Model> models[kPreviewCount];
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
         std::shared_ptr<const Model>& model = models[i];
-        model = Renderer::LoadModel(root + L"Converted/" + kPreviewFiles[i], forceRebuild);
+        model = LoadAnimationModel(convertedDirectory + kPreviewFiles[i], forceRebuild, animationModels);
         if (!model || model->m_NumAnimations == 0 || model->m_Animations[0].duration <= 0.0f)
         {
             m_PreviewError = std::string(u8"애니메이션을 불러오지 못했습니다: ") + kPreviewNames[i];
@@ -867,7 +912,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     const uint32_t firstCrossStep = static_cast<uint32_t>(motionSource.GetAnimationCount());
     for (size_t i = 0; i < _countof(kCrossStepFiles); ++i)
     {
-        const std::shared_ptr<const Model> model = Renderer::LoadModel(root + L"Converted/" + kCrossStepFiles[i], forceRebuild);
+        const std::shared_ptr<const Model> model = LoadAnimationModel(convertedDirectory + kCrossStepFiles[i], forceRebuild, animationModels);
         if (!motionSource.AddAnimation(kCrossStepNames[i], model))
         {
             m_PreviewError = std::string(u8"교차딛기 클립을 등록하지 못했습니다. ") + kCrossStepNames[i];
@@ -984,8 +1029,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "CharacterImpact.settings.json");
         m_ImpactTest->LoadProjectileSettings(
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "Projectile.settings.json");
-        const std::shared_ptr<const Model> falling = Renderer::LoadModel(root + L"Converted/FallingDown/FallingDown.gltf", forceRebuild);
-        const std::shared_ptr<const Model> standingUp = Renderer::LoadModel(root + L"Converted/StandingUp/StandingUp.gltf", forceRebuild);
+        const std::shared_ptr<const Model> falling = LoadAnimationModel(convertedDirectory + L"FallingDown/FallingDown.gltf", forceRebuild, animationModels);
+        const std::shared_ptr<const Model> standingUp = LoadAnimationModel(convertedDirectory + L"StandingUp/StandingUp.gltf", forceRebuild, animationModels);
         if (!m_ImpactTest->Initialize(models[0], falling, standingUp, *mesh.GetPhysicsAsset(), motionSource))
         {
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
@@ -1006,8 +1051,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     m_PreviewReady = true;
     ResetPreviewCamera();
     m_MeshViewer = std::make_unique<SkeletalMeshViewer>();
-
-    if (!m_MeshViewer->Initialize(models, kPreviewNames, kPreviewCount))
+    LoadViewerAnimations(convertedDirectory, forceRebuild, animationModels);
+    if (!m_MeshViewer->Initialize(models[0], animationModels))
     {
         m_MeshViewer.reset();
     }

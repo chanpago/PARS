@@ -22,7 +22,7 @@ namespace ViewerLabels
         {
             return u8"걷기";
         }
-        if (name == "Slow Run")
+        if (name == "Slow Run" || name == "SlowRun")
         {
             return u8"달리기";
         }

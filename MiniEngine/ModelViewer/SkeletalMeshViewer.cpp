@@ -20,30 +20,54 @@ namespace
     constexpr uint32_t PreviewResolution = 1024;
 }
 
-bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>* models,
-    const char* const* names, uint32_t count)
+bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>& referenceMesh, const AnimationModels& animations)
 {
-    if (!count || !models[0])
+    if (!referenceMesh)
     {
         return false;
     }
     PARS::Actor* actor = m_World.SpawnActor<PARS::Actor>("MeshPreview");
     m_Mesh = &actor->CreateDefaultSubobject<PARS::SkeletalMeshComponent>("SkeletalMeshComponent");
     actor->SetRootComponent(*m_Mesh);
-    if (!m_Mesh->SetSkeletalMesh(models[0]))
+    if (!m_Mesh->SetSkeletalMesh(referenceMesh))
     {
         return false;
     }
-    for (uint32_t i = 0; i < count; ++i)
+    PARS::AnimInstance& animation = m_Mesh->GetAnimInstance();
+    if (!animation.AddAnimation("Idle", referenceMesh))
     {
-        if (!m_Mesh->GetAnimInstance().AddAnimation(names[i], models[i]))
+        return false;
+    }
+    for (const AnimationModels::value_type& asset : animations)
+    {
+        const std::shared_ptr<const Model>& source = asset.second;
+        if (!source)
         {
-            return false;
+            continue;
+        }
+        const std::wstring stem = Utility::RemoveExtension(Utility::RemoveBasePath(asset.first));
+        char assetName[MAX_PATH * 3]{};
+        if (!WideCharToMultiByte(CP_UTF8, 0, stem.c_str(), -1, assetName, sizeof(assetName), nullptr, nullptr))
+        {
+            continue;
+        }
+        const uint32_t firstClip = source == referenceMesh ? 1u : 0u;
+        for (uint32_t clip = firstClip; clip < source->m_NumAnimations; ++clip)
+        {
+            std::string name = assetName;
+            if (source->m_NumAnimations > 1)
+            {
+                name += " #" + std::to_string(clip + 1);
+            }
+            if (!animation.AddAnimation(name, source, clip))
+            {
+                Utility::Printf(L"Skipping incompatible animation %ws (%u)\n", asset.first.c_str(), clip);
+            }
         }
     }
-    m_Mesh->GetAnimInstance().PlayAnimation(0);
+    animation.PlayAnimation(0);
     // 관절 편집은 애니메이션을 멈추고 기준 T포즈에서 시작한다.
-    m_Mesh->GetAnimInstance().SetPlaying(false);
+    animation.SetPlaying(false);
     const Model& model = *m_Mesh->GetSkeletalMesh();
     m_EditPose.assign(model.m_SceneGraph.get(), model.m_SceneGraph.get() + model.m_NumNodes);
     BuildSkeleton();
@@ -241,17 +265,26 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::TextDisabled(u8"A: 직선 대기 / 걷기 / 달리기 | B: 3m 직진 / 유턴 반복 | 현재 에디터 PA");
-        ImGui::SetNextItemWidth(130);
-        if (ImGui::BeginCombo("##Animation", ViewerLabels::Animation(animation.GetAnimationName(animation.GetCurrentAnimationIndex()))))
+        const uint32_t currentClip = animation.GetCurrentAnimationIndex();
+        const char* previewName = m_EditPose.empty() ? ViewerLabels::Animation(animation.GetAnimationName(currentClip)) : u8"클립 선택";
+        ImGui::SetNextItemWidth(190);
+        if (ImGui::BeginCombo(u8"애니메이션 자세", previewName, ImGuiComboFlags_HeightLarge))
         {
             for (uint32_t i = 0; i < animation.GetAnimationCount(); ++i)
             {
-                if (ImGui::Selectable(ViewerLabels::Animation(animation.GetAnimationName(i)), i == animation.GetCurrentAnimationIndex()))
+                const bool selected = m_EditPose.empty() && i == currentClip;
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::Selectable(ViewerLabels::Animation(animation.GetAnimationName(i)), selected))
                 {
                     CancelInteraction();
                     m_EditPose.clear();
                     animation.PlayAnimation(i);
                 }
+                if (selected)
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
+                ImGui::PopID();
             }
             ImGui::EndCombo();
         }
@@ -273,12 +306,6 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
             animation.SetPlaying(false);
             const Model& model = *m_Mesh->GetSkeletalMesh();
             m_EditPose.assign(model.m_SceneGraph.get(), model.m_SceneGraph.get() + model.m_NumNodes);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(u8"애니메이션 자세"))
-        {
-            CancelInteraction();
-            m_EditPose.clear();
         }
         ImGui::SameLine();
         if (ImGui::Button(u8"메시에 화면 맞춤"))
