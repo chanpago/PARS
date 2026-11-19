@@ -7,6 +7,7 @@
 class Model;
 namespace PARS
 {
+    class AnimInstance;
     class World;
     class Character;
 }
@@ -30,7 +31,7 @@ public:
 
 public:
     bool Initialize(std::shared_ptr<const Model> idle, std::shared_ptr<const Model> falling,
-        std::shared_ptr<const Model> standingUp, const PARS::PhysicsAsset& asset);
+        std::shared_ptr<const Model> standingUp, const PARS::PhysicsAsset& asset, const PARS::AnimInstance& motionSource);
     bool Reset();
     bool SetAutomaticSupport(bool enabled);
     bool FireFrom(const PARS::Character& player);

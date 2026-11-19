@@ -1,12 +1,16 @@
 #pragma once
 
 #include "LocomotionAnimInstance.h"
+#include <algorithm>
 #include <cmath>
 
 class PreviewAnimInstance : public PARS::LocomotionAnimInstance
 {
 public:
-    using LocomotionAnimInstance::LocomotionAnimInstance;
+    PreviewAnimInstance(PARS::SkeletalMeshComponent& owner, uint32_t previewClipCount)
+        : LocomotionAnimInstance(owner), m_PreviewClipCount(previewClipCount)
+    {
+    }
 
 public:
     bool SelectAnimation(uint32_t index)
@@ -31,14 +35,15 @@ protected:
             LocomotionAnimInstance::NativeUpdateAnimation(deltaTime);
             return;
         }
-        if (!m_AutoCycle || GetAnimationCount() == 0)
+        const uint32_t count = std::min(m_PreviewClipCount, static_cast<uint32_t>(GetAnimationCount()));
+        if (!m_AutoCycle || count == 0)
         {
             return;
         }
         m_Elapsed += deltaTime;
         if (m_Elapsed >= GetDisplayDuration())
         {
-            TransitionToAnimation((GetCurrentAnimationIndex() + 1) % static_cast<uint32_t>(GetAnimationCount()));
+            TransitionToAnimation((GetCurrentAnimationIndex() + 1) % count);
             m_Elapsed = 0.0f;
         }
     }
@@ -66,6 +71,7 @@ private:
     }
 
 private:
+    uint32_t m_PreviewClipCount;
     float m_Elapsed = 0.0f;
     bool m_AutoCycle = true;
 };

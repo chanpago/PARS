@@ -80,6 +80,8 @@ namespace
         L"Idle/Idle.gltf", L"Walking/Walking.gltf", L"SlowRun/SlowRun.gltf"};
     const char* const kPreviewNames[] = {"Idle", "Walking", "Slow Run"};
     constexpr uint32_t kPreviewCount = 3;
+    const wchar_t* const kCrossStepFiles[] = {L"WalkStrafeLeft/WalkStrafeLeft.gltf", L"WalkStrafeRight/WalkStrafeRight.gltf"};
+    const char* const kCrossStepNames[] = {"WalkStrafeLeft", "WalkStrafeRight"};
 
     // 실행 파일 위치와 작업 디렉터리 양쪽을 기준으로 프로젝트 에셋을 찾는다.
     // 빌드 출력 폴더에서 직접 실행한 경우에도 동작한다.
@@ -849,7 +851,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             }
 
             // 재생 시간, 클립 선택과 전환을 관리할 객체를 만든다. 실제 재생 시작은 아래 PlayAnimation에서 한다.
-            mesh.SetAnimInstance(std::make_unique<PreviewAnimInstance>(mesh));
+            mesh.SetAnimInstance(std::make_unique<PreviewAnimInstance>(mesh, kPreviewCount));
         }
 
         // 각 Model의 첫 번째 애니메이션을 Idle / Walking / Slow Run이라는 이름으로 등록한다.
@@ -861,6 +863,25 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             return;
         }
     }
+    PARS::AnimInstance& motionSource = mesh.GetAnimInstance();
+    const uint32_t firstCrossStep = static_cast<uint32_t>(motionSource.GetAnimationCount());
+    for (size_t i = 0; i < _countof(kCrossStepFiles); ++i)
+    {
+        const std::shared_ptr<const Model> model = Renderer::LoadModel(root + L"Converted/" + kCrossStepFiles[i], forceRebuild);
+        if (!motionSource.AddAnimation(kCrossStepNames[i], model))
+        {
+            m_PreviewError = std::string(u8"교차딛기 클립을 등록하지 못했습니다. ") + kCrossStepNames[i];
+            character->Destroy();
+            return;
+        }
+    }
+    if (!motionSource.BuildMotionFrames({{0, PARS::MotionFrameUsage::General},
+        {firstCrossStep, PARS::MotionFrameUsage::CrossStep}, {firstCrossStep + 1, PARS::MotionFrameUsage::CrossStep}}, m_PreviewError))
+    {
+        character->Destroy();
+        return;
+    }
+
     // [캐릭터 배치] Actor 원점은 캡슐 중심이므로, 반높이만큼 올려 캡슐 아래쪽을 지면 높이에 맞춘다.
     const float halfHeight = character->GetCapsuleComponent().GetHalfHeight();
     character->SetActorLocation(Vector3(2.0f, halfHeight, 0.0f));
@@ -965,7 +986,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "Projectile.settings.json");
         const std::shared_ptr<const Model> falling = Renderer::LoadModel(root + L"Converted/FallingDown/FallingDown.gltf", forceRebuild);
         const std::shared_ptr<const Model> standingUp = Renderer::LoadModel(root + L"Converted/StandingUp/StandingUp.gltf", forceRebuild);
-        if (!m_ImpactTest->Initialize(models[0], falling, standingUp, *mesh.GetPhysicsAsset()))
+        if (!m_ImpactTest->Initialize(models[0], falling, standingUp, *mesh.GetPhysicsAsset(), motionSource))
         {
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
             m_ImpactTest.reset();

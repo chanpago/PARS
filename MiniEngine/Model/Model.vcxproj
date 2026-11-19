@@ -192,6 +192,7 @@
     <ClCompile Include="AnimInstance.cpp" />
     <ClInclude Include="AnimInstance.h" />
     <ClInclude Include="MotionMatching.h" />
+    <ClCompile Include="MotionMatching.cpp" />
     <ClInclude Include="Components\MeshComponent.h" />
     <ClCompile Include="Components\SkeletalMeshComponent.cpp" />
     <ClCompile Include="Components\SkeletalMeshPhysics.cpp" />

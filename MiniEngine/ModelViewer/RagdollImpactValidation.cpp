@@ -733,6 +733,27 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         PARS::Character* dummy = test.GetDummy();
         check(dummy && dummy != &player && dummy->GetController() == nullptr,
             "Idle dummy is independent of the possessed player");
+        const PARS::AnimInstance& dummyAnimation = dummy->GetMesh().GetAnimInstance();
+        const std::vector<PARS::MotionFrame>& candidates = dummyAnimation.GetMotionFrames();
+        check(!candidates.empty() && &candidates == &player.GetMesh().GetAnimInstance().GetMotionFrames(),
+            "Player and impact dummy share the initialized motion frames");
+        const char* const clipNames[] = {"Idle", "WalkStrafeLeft", "WalkStrafeRight"};
+        const std::array<size_t, 3> frameCounts = {501, 89, 89};
+        size_t firstFrame = 0;
+        for (size_t clip = 0; clip < frameCounts.size(); ++clip)
+        {
+            const PARS::MotionFrameUsage usage = clip == 0 ? PARS::MotionFrameUsage::General : PARS::MotionFrameUsage::CrossStep;
+            bool valid = firstFrame + frameCounts[clip] <= candidates.size();
+            for (size_t i = 0; valid && i < frameCounts[clip]; ++i)
+            {
+                const PARS::MotionFrame& frame = candidates[firstFrame + i];
+                valid = dummyAnimation.GetAnimationName(frame.clipIndex) == clipNames[clip] && frame.usage == usage &&
+                    std::abs(frame.clipTimeSeconds - static_cast<float>(i) / 60.0f) < 2e-6f;
+            }
+            check(valid, "Motion candidates keep their registered clip, usage and 60 Hz sample times");
+            firstFrame += frameCounts[clip];
+        }
+        check(firstFrame == candidates.size(), "Only the three selected clips contribute motion candidates");
         check(dummy->GetMesh().IsActiveRagdoll() && dummy->GetMesh().GetRagdoll().IsRootSupported(),
             "Dummy is dynamic with angular drives and pelvis support enabled");
         const std::function<void()> tick = [&]() -> void
@@ -837,8 +858,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         }
         report << "idle_travel_m=" << travel[0] << " projectile_travel_m=" << travel[1] << std::endl;
         check(travel[1] > travel[0] + .0001f, "Physical sphere impact moves the actual Hips beyond the Idle baseline");
-        check(dummy->GetMesh().GetAnimInstance().GetAnimationCount() == 1 &&
-                dummy->GetMesh().GetAnimInstance().GetCurrentAnimationIndex() == 0,
+        check(dummyAnimation.GetAnimationName(dummyAnimation.GetCurrentAnimationIndex()) == "Idle",
             "Dummy keeps the Idle animation after being hit");
 
         check(test.SetProjectileSettings(.5f, 7.5f) && test.Reset(), "Use the existing 0.5 kg fixture for camera aiming checks");

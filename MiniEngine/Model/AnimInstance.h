@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "Animation.h"
+#include "MotionMatching.h"
+#include <initializer_list>
 #include <memory>
 #include <string>
 
@@ -34,6 +36,10 @@ namespace PARS
     public:
         void Initialize(std::shared_ptr<const Model> skeleton);
         bool AddAnimation(const std::string& name, std::shared_ptr<const Model> source, uint32_t animationIndex = 0);
+        // 등록한 클립의 포즈를 샘플링해 검색 후보를 한 번에 교체한다.
+        bool BuildMotionFrames(std::initializer_list<MotionClipSelection> clips, std::string& error);
+        // 같은 기준 메시를 쓰는 캐릭터가 동일한 클립 번호로 후보 배열을 공유한다.
+        bool ShareMotionFramesFrom(const AnimInstance& source, std::string& error);
         bool PlayAnimation(uint32_t index, bool loop = true, float startTime = 0.0f);
         // 시작 시점을 지정해 발 디딤 위상을 맞출 수 있다. 일반 전환에서는 두 클립의 시간을 함께 진행한다.
         bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true, float startTime = 0.0f);
@@ -50,7 +56,7 @@ namespace PARS
         }
 
     private:
-        void EvaluateClipPose(uint32_t index, float time, std::vector<GraphNode>& pose) const;
+        bool EvaluateClipPose(uint32_t index, float time, std::vector<GraphNode>& pose) const;
         void EvaluatePose();
 
     public:
@@ -91,6 +97,7 @@ namespace PARS
         }
         float GetAnimationDuration(uint32_t index) const;
         const std::string& GetAnimationName(uint32_t index) const;
+        const std::vector<MotionFrame>& GetMotionFrames() const;
         const std::vector<GraphNode>& GetPose() const
         {
             return m_Pose;
@@ -100,6 +107,7 @@ namespace PARS
         SkeletalMeshComponent& m_Owner;
         std::shared_ptr<const Model> m_Skeleton;
         std::vector<Clip> m_Clips;
+        std::shared_ptr<const std::vector<MotionFrame>> m_MotionFrames;
         std::vector<GraphNode> m_Pose;
         std::vector<GraphNode> m_BlendSource;
         uint32_t m_BlendSourceClip = 0;

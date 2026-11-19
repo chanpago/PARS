@@ -13,6 +13,13 @@ namespace PARS
         CrossStep
     };
 
+    struct MotionClipSelection
+    {
+    public:
+        std::uint32_t clipIndex = UINT32_MAX;
+        MotionFrameUsage usage = MotionFrameUsage::General;
+    };
+
     // 클립 후보와 현재 캐릭터가 공유하는 특징이다. 캐릭터가 바라보는 수평 방향을 로컬 전방으로 쓴다.
     struct MotionFeatures
     {

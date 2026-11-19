@@ -53,7 +53,7 @@ Character* RagdollImpactTest::GetDummy() const
 }
 
 bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::shared_ptr<const Model> falling,
-    std::shared_ptr<const Model> standingUp, const PhysicsAsset& asset)
+    std::shared_ptr<const Model> standingUp, const PhysicsAsset& asset, const AnimInstance& motionSource)
 {
     m_Asset = asset;
     if (std::none_of(m_Asset.constraints.begin(), m_Asset.constraints.end(), HasEnabledAngularDrive))
@@ -87,7 +87,7 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
         m_Message = u8"더미의 Idle, Falling Down 또는 Standing Up 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
         return false;
     }
-    if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
+    if (!mesh.GetAnimInstance().ShareMotionFramesFrom(motionSource, m_Message) || !mesh.SetPhysicsAsset(m_Asset, m_Message))
     {
         return false;
     }
