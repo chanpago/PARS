@@ -31,19 +31,43 @@ void TestFramePerformance()
     recorder.AddSample(Category::PhysXStep, 2.0);
     recorder.AddSample(Category::PhysXStep, 3.0);
     recorder.AddSample(Category::ParsControl, 1.0);
+    const Category controlStages[] = {Category::FootSupport, Category::FootstepPlanning, Category::LandingTargetSearch,
+        Category::FootstepIK, Category::RecoveryTargets, Category::RagdollDrives};
+    for (const Category stage : controlStages)
+    {
+        recorder.AddSample(stage, 0.5);
+    }
+    const Category trajectoryStages[] = {Category::SwingTrajectory, Category::TrajectorySetup, Category::CurrentPathSamples,
+        Category::CurrentPathMidpoints, Category::CurrentPathIntervals, Category::DetourRanking, Category::DetourSamples,
+        Category::DetourMidpoints, Category::DetourIntervals};
+    for (const Category stage : trajectoryStages)
+    {
+        recorder.AddSample(stage, 0.25);
+    }
     recorder.AddSample(Category::ParsPose, 0.25);
     recorder.AddSample(Category::ParsOther, 0.5);
     recorder.AddSample(Category::RenderPreparation, 4.0);
     recorder.EndFrame();
     CheckTiming(Near(recorder.GetStatistics(Category::PhysXStep).last, 5.0) &&
         recorder.GetStatistics(Category::PhysXStep).calls == 2, "Multiple steps accumulate within one frame");
-    CheckTiming(Near(recorder.GetStatistics(Category::ParsTotal).last, 1.75),
-        "PARS sum excludes simulation and render preparation");
+    CheckTiming(Near(recorder.GetStatistics(Category::TrajectoryTotal).last, 2.25) &&
+        Near(recorder.GetStatistics(Category::ControlTotal).last, 6.25) &&
+        Near(recorder.GetStatistics(Category::ParsTotal).last, 7.0),
+        "Each control and trajectory stage contributes once to its totals");
     recorder.BeginFrame();
     recorder.EndFrame();
     const FramePerformance::Statistics idle = recorder.GetStatistics(Category::PhysXStep);
     CheckTiming(idle.last == 0.0 && idle.calls == 0 && Near(idle.average, 2.5) && Near(idle.maximum, 5.0),
         "Zero-step frames clear current values and remain in the average");
+    recorder.BeginFrame();
+    recorder.AddSample(Category::DetourSamples, 3.0);
+    recorder.EndFrame();
+    const size_t detour = static_cast<size_t>(Category::DetourSamples);
+    const FramePerformance::Sample& peak = recorder.GetPeakFrame(Category::ParsTotal);
+    CheckTiming(Near(peak.milliseconds[detour], 0.25) && peak.calls[detour] == 1 &&
+        peak.calls[static_cast<size_t>(Category::PhysXStep)] == 2 &&
+        Near(recorder.GetStatistics(Category::DetourSamples).maximum, 3.0),
+        "Peak times and calls come from the same frame even when a stage peaks in another frame");
     for (size_t frame = 0; frame < FramePerformance::HistoryLength; ++frame)
     {
         recorder.BeginFrame();
@@ -54,6 +78,8 @@ void TestFramePerformance()
         Near(recorder.GetStatistics(Category::PhysXStep).average, 1.0) &&
         Near(recorder.GetStatistics(Category::PhysXStep).maximum, 1.0),
         "Rolling history expires old peaks");
+    CheckTiming(recorder.GetPeakFrame(Category::ParsTotal).calls[detour] == 0,
+        "An expired PARS peak cannot supply the displayed stage breakdown");
 
     PhysicsWorld world;
     CheckTiming(world.Initialize(false), "Initialize real PhysX timing fixture");

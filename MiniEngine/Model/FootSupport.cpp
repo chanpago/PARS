@@ -1,5 +1,6 @@
 ﻿#include "FootSupport.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "FramePerformance.h"
 #include "PhysicsWorld.h"
 #include "PhysicsPose.h"
 #include "FootstepLandingQuery.h"
@@ -365,6 +366,7 @@ bool PARS::FootSupport::SetBufferScale(float scale)
 
 void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
 {
+    FramePerformance::Scope planningTiming(FramePerformance::Category::FootstepPlanning);
     const AnimInstance& animation = mesh.GetAnimInstance();
 
     // 애니메이션 전환 중이 아니고 현재 클립이름이 idle일때만 true
@@ -535,6 +537,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
 
 void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& physics)
 {
+    FramePerformance::Scope supportTiming(FramePerformance::Category::FootSupport);
     const uint64_t sampleNumber = m_Snapshot.sampleNumber + 1;                          // 디버그용 번호
     m_Snapshot = {};                                                                    // 이번 프레임 용으로 스냅샷을 비운다
 

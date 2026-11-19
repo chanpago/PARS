@@ -1,5 +1,6 @@
 ﻿#include "FootstepCollisionBounds.h"
 #include "geometry/PxGeometryQuery.h"
+#include "FramePerformance.h"
 #include <algorithm>
 #include <cmath>
 
@@ -109,7 +110,8 @@ namespace
     };
 }
 
-FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisionInput& input)
+FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisionInput& input,
+    FootstepCollisionPass pass)
 {
     FootstepCollisionSnapshot result;
     result.completedStep = input.completedStep;
@@ -122,6 +124,9 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
     {
         return result;
     }
+    const bool detour = pass == FootstepCollisionPass::DetourCandidate;
+    FramePerformance::Scope samplesTiming(detour ?
+        FramePerformance::Category::DetourSamples : FramePerformance::Category::CurrentPathSamples);
     result.status = FootstepCollisionStatus::Unavailable;
     if (!std::isfinite(input.fixedDeltaTime) || input.fixedDeltaTime <= 0 ||
         !std::isfinite(input.clearance) || input.clearance < 0)
@@ -198,6 +203,9 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
         result.uncertainPairs = 0x1ff;
         return result;
     }
+    // 중간 자세 검사 시간을 빼면 경계 계산, 도형 분리 판정, 구간 분할에 쓴 시간이 남는다.
+    FramePerformance::Scope intervalsTiming(detour ?
+        FramePerformance::Category::DetourIntervals : FramePerformance::Category::CurrentPathIntervals);
     std::array<Interval, 20> stack;
     stack[0].end = horizon;
     uint32_t count = 1;
@@ -218,9 +226,14 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
         ++result.intervalCount;
         const float middle = interval.begin + (interval.end - interval.begin) * .5f;
         FootstepCollisionSample sample;
-        if (!Sample(input, middle, interval.pairs, sample, shapes, result))
         {
-            return result;
+            // 중간 자세 하나의 IK, 관절 제한, 형상 겹침 질의를 묶어 측정한다.
+            FramePerformance::Scope midpointTiming(detour ?
+                FramePerformance::Category::DetourMidpoints : FramePerformance::Category::CurrentPathMidpoints);
+            if (!Sample(input, middle, interval.pairs, sample, shapes, result))
+            {
+                return result;
+            }
         }
         if (sample.overlapPairs != 0)
         {

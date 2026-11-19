@@ -1,4 +1,5 @@
 ﻿#include "Ragdoll.h"
+#include "FramePerformance.h"
 #include "PhysicsPose.h"
 #include <algorithm>
 #include <cmath>
@@ -241,6 +242,7 @@ namespace PARS
 
     bool Ragdoll::UpdateDriveTargets(const std::vector<Matrix4>& boneWorld, float deltaTime, std::string& error)
     {
+        FramePerformance::Scope driveTiming(FramePerformance::Category::RagdollDrives);
         // 애니메이션 본의 월드 목표 자세를 PA 바디와 관절의 목표로 변환해 PhysX에 전달한다.
         // 실제 몸체의 움직임은 이 함수가 끝난 뒤 PhysicsWorld::Step()의 simulate()에서 계산된다.
         // IsActive()는 물리 바디가 생성되어 있는지 확인한다. 액티브 래그돌 모드 검사와는 다르다.

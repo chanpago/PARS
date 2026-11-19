@@ -1,5 +1,6 @@
 ﻿#include "FootstepPlanner.h"
 
+#include "FramePerformance.h"
 #include <limits>
 
 using namespace physx;
@@ -627,6 +628,7 @@ PxVec3 PARS::SampleFootstepPosition(const FootstepCommand& command, float timeAh
 
 void FootstepPlanner::UpdateMotion(FootstepCommand& command, const FootstepFootInput& foot, const FootstepInput& input)
 {
+    FramePerformance::Scope swingTiming(FramePerformance::Category::SwingTrajectory);
     FootstepMotion& motion = command.motion;
     const PxVec3 horizontal = command.target.position - command.startPosition;
     const float lengthSquared = horizontal.x * horizontal.x + horizontal.z * horizontal.z;

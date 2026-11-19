@@ -2,6 +2,7 @@
 #include <cmath>
 #include "../Model/FootstepCollisionBounds.h"
 #include "../Model/FootstepAvoidance.h"
+#include "FramePerformance.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -311,17 +312,37 @@ namespace
 
     void TestAvoidanceAndContinuity()
     {
+        using FramePerformance::Category;
         FootstepCollisionInput input = MakeAvoidanceFixture();
         Check(PredictFootstepCollisions(input).status == FootstepCollisionStatus::Collision,
             "Avoidance fixture obstructs the direct swing");
         FootstepAvoidance avoidance;
         const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+        FramePerformance::BeginFrame();
         avoidance.Update(input, PxVec3(0, 0, 1));
+        FramePerformance::EndFrame();
         const FootstepAvoidanceSnapshot first = avoidance.GetSnapshot();
         const double milliseconds = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - started).count();
         std::printf("avoidance: status=%d candidates=%u intervals=%u queries=%u %.3fms\n",
             int(first.status), first.candidatesChecked, first.totalIntervals, first.totalQueries, milliseconds);
+        const FramePerformance::Recorder& timings = FramePerformance::GetState().recorder;
+        Check(timings.GetStatistics(Category::CurrentPathSamples).calls == 1 &&
+            timings.GetStatistics(Category::DetourRanking).calls == 1 &&
+            timings.GetStatistics(Category::DetourSamples).calls == first.candidatesChecked &&
+            timings.GetStatistics(Category::DetourIntervals).calls > 0,
+            "A blocked path records the current check, candidate ranking and each detour check");
+        Check(timings.GetStatistics(Category::CurrentPathMidpoints).calls +
+            timings.GetStatistics(Category::DetourMidpoints).calls == first.totalIntervals,
+            "Every visited interval records one midpoint check for its path");
+        Check(timings.GetStatistics(Category::TrajectoryTotal).last <= milliseconds,
+            "Nested candidate and interval timings fit within the elapsed avoidance update");
+        std::printf("trajectory ms | current samples %.3f, midpoints %.3f, bounds/split %.3f | "
+            "detour ranking %.3f, samples %.3f, midpoints %.3f, bounds/split %.3f\n",
+            timings.GetStatistics(Category::CurrentPathSamples).last, timings.GetStatistics(Category::CurrentPathMidpoints).last,
+            timings.GetStatistics(Category::CurrentPathIntervals).last, timings.GetStatistics(Category::DetourRanking).last,
+            timings.GetStatistics(Category::DetourSamples).last, timings.GetStatistics(Category::DetourMidpoints).last,
+            timings.GetStatistics(Category::DetourIntervals).last);
         Check(first.status == FootstepAvoidanceStatus::Detouring && first.collision.status == FootstepCollisionStatus::Clear,
             "A blocked direct swing selects a fully checked detour");
         Check(Near(SampleFootstepPath(first.paths[0], 0), PxVec3(0)) &&
@@ -331,7 +352,14 @@ namespace
             "Detour preserves takeoff and landing position and velocity");
         input.legs[0].command.motion.elapsedTime = .03f;
         ++input.completedStep;
+        FramePerformance::BeginFrame();
         avoidance.Update(input, PxVec3(0, 0, 1));
+        FramePerformance::EndFrame();
+        Check(timings.GetStatistics(Category::CurrentPathIntervals).calls == 1 &&
+            timings.GetStatistics(Category::DetourRanking).calls == 0 &&
+            timings.GetStatistics(Category::DetourSamples).calls == 0 && timings.GetStatistics(Category::DetourMidpoints).calls == 0 &&
+            timings.GetStatistics(Category::DetourIntervals).calls == 0,
+            "Rechecking a safe path only records the current path stages");
         Check(avoidance.GetSnapshot().directions == first.directions &&
             avoidance.GetSnapshot().candidatesChecked == 0, "A safe selected route is kept on the next tick");
         const PxVec3 offset = SampleFootstepPath(first.paths[0], .08f);

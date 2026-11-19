@@ -12,11 +12,26 @@ namespace FramePerformance
     {
         PhysXStep,
         ParsControl,
+        FootSupport,
         FootstepPlanning,
+        LandingTargetSearch,
         FootstepIK,
+        RecoveryTargets,
+        RagdollDrives,
+        SwingTrajectory,
+        TrajectorySetup,
+        CurrentPathSamples,
+        CurrentPathMidpoints,
+        CurrentPathIntervals,
+        DetourRanking,
+        DetourSamples,
+        DetourMidpoints,
+        DetourIntervals,
         ParsPose,
         ParsOther,
         RenderPreparation,
+        TrajectoryTotal,
+        ControlTotal,
         ParsTotal,
         Count
     };
@@ -55,13 +70,13 @@ namespace FramePerformance
         }
         void EndFrame()
         {
-            const size_t total = static_cast<size_t>(Category::ParsTotal);
-            m_Current.milliseconds[total] =
-                m_Current.milliseconds[static_cast<size_t>(Category::ParsControl)] +
-                m_Current.milliseconds[static_cast<size_t>(Category::FootstepPlanning)] +
-                m_Current.milliseconds[static_cast<size_t>(Category::FootstepIK)] +
-                m_Current.milliseconds[static_cast<size_t>(Category::ParsPose)] +
-                m_Current.milliseconds[static_cast<size_t>(Category::ParsOther)];
+            // 연속해서 배치한 개별 구간의 순수 시간으로 소계를 만든다. 소계끼리는 더하지 않는다.
+            m_Current.milliseconds[static_cast<size_t>(Category::TrajectoryTotal)] =
+                SumMilliseconds(Category::SwingTrajectory, Category::DetourIntervals);
+            m_Current.milliseconds[static_cast<size_t>(Category::ControlTotal)] =
+                SumMilliseconds(Category::ParsControl, Category::DetourIntervals);
+            m_Current.milliseconds[static_cast<size_t>(Category::ParsTotal)] =
+                SumMilliseconds(Category::ParsControl, Category::ParsOther);
             m_History[m_Next] = m_Current;
             m_Next = (m_Next + 1) % HistoryLength;
             if (m_Count < HistoryLength)
@@ -98,6 +113,31 @@ namespace FramePerformance
         size_t GetFrameCount() const
         {
             return m_Count;
+        }
+        const Sample& GetPeakFrame(Category category) const
+        {
+            const size_t index = static_cast<size_t>(category);
+            size_t peak = (m_Next + HistoryLength - 1) % HistoryLength;
+            for (size_t age = 1; age < m_Count; ++age)
+            {
+                const size_t frame = (m_Next + HistoryLength - 1 - age) % HistoryLength;
+                if (m_History[frame].milliseconds[index] > m_History[peak].milliseconds[index])
+                {
+                    peak = frame;
+                }
+            }
+            return m_History[peak];
+        }
+
+    private:
+        double SumMilliseconds(Category first, Category last) const
+        {
+            double sum = 0.0;
+            for (size_t index = static_cast<size_t>(first); index <= static_cast<size_t>(last); ++index)
+            {
+                sum += m_Current.milliseconds[index];
+            }
+            return sum;
         }
 
     private:

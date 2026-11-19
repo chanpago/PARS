@@ -1,4 +1,5 @@
 ﻿#include "FootstepRecovery.h"
+#include "FramePerformance.h"
 #include <chrono>
 #include <limits>
 #include <utility>
@@ -514,6 +515,7 @@ float PARS::FootstepUnionArea(const std::vector<FootstepPolygon>& polygons)
 FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInput& input,
     const FootstepRecoverySettings& settings)
 {
+    FramePerformance::Scope landingTiming(FramePerformance::Category::LandingTargetSearch);
     const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     FootstepRecoverySnapshot result;
     result.preferred = input.preferred;

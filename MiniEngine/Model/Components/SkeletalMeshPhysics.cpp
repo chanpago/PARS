@@ -1,4 +1,5 @@
 ﻿#include "SkeletalMeshComponent.h"
+#include "FramePerformance.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
 #include "../FootstepPoseValidation.h"
@@ -152,6 +153,7 @@ namespace PARS
             return;
         }
 
+        FramePerformance::Scope ikTiming(FramePerformance::Category::FootstepIK);
         // toPx라는 람다함수를 정의. 위치와 쿼터니언을 분리해서 PxTransform으로 변환.
         const std::function<PxTransform(const Matrix4&)> toPx = [](const Matrix4& matrix) -> PxTransform
         {
@@ -368,6 +370,7 @@ namespace PARS
             m_FootstepAvoidance.Reset();
             return;
         }
+        FramePerformance::Scope pathTiming(FramePerformance::Category::TrajectorySetup);
         const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
         FootstepCollisionInput prediction;
         prediction.completedStep = step.completedStep;

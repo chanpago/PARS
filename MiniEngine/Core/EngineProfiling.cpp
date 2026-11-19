@@ -453,17 +453,14 @@ namespace EngineProfiling
         return Paused;
     }
 
-    void DisplayTimingRow(TextContext& text, const char* label, FramePerformance::Category category)
+    void DisplayTimingRow(TextContext& text, const char* label, FramePerformance::Category category,
+        const FramePerformance::Sample& peak)
     {
         const FramePerformance::Statistics statistics = FramePerformance::GetState().recorder.GetStatistics(category);
+        const size_t index = static_cast<size_t>(category);
         text.SetCursorX(10.0f);
-        text.DrawString(label);
-        text.SetCursorX(290.0f);
-        text.DrawFormattedString("%8.3f", statistics.last);
-        text.SetCursorX(410.0f);
-        text.DrawFormattedString("%8.3f", statistics.average);
-        text.SetCursorX(530.0f);
-        text.DrawFormattedString("%8.3f\n", statistics.maximum);
+        text.DrawFormattedString("%-29s %8.3f %8.3f %8.3f %8.3f %6.0u\n",
+            label, statistics.last, statistics.average, statistics.maximum, peak.milliseconds[index], peak.calls[index]);
     }
 
     void DisplayFrameRate( TextContext& Text )
@@ -488,29 +485,43 @@ namespace EngineProfiling
         Text.ResetCursor(10.0f, Text.GetCursorY() + 8.0f);
         Text.SetTextSize(18.0f);
         Text.SetColor(Color(0.5f, 1.0f, 1.0f));
-        Text.DrawString("CPU elapsed time (ms/frame)");
-        Text.SetCursorX(290.0f);
-        Text.DrawString("    Last");
-        Text.SetCursorX(410.0f);
-        Text.DrawString("     Avg");
-        Text.SetCursorX(530.0f);
-        Text.DrawString("     Max\n");
+        Text.DrawFormattedString("%-29s %8s %8s %8s %8s %6s\n",
+            "CPU elapsed time (ms/frame)", "Last", "Avg", "Max", "Peak", "Calls");
         Text.SetColor(Color(1.0f, 1.0f, 1.0f));
-        DisplayTimingRow(Text, "PhysX step + wait", FramePerformance::Category::PhysXStep);
-        DisplayTimingRow(Text, "PARS CPU total", FramePerformance::Category::ParsTotal);
-        DisplayTimingRow(Text, "  Control / targets", FramePerformance::Category::ParsControl);
-        DisplayTimingRow(Text, "  Footstep planning", FramePerformance::Category::FootstepPlanning);
-        DisplayTimingRow(Text, "  Footstep IK", FramePerformance::Category::FootstepIK);
-        DisplayTimingRow(Text, "  Pose / animation", FramePerformance::Category::ParsPose);
-        DisplayTimingRow(Text, "  Other world work", FramePerformance::Category::ParsOther);
-        DisplayTimingRow(Text, "Mesh render prep CPU", FramePerformance::Category::RenderPreparation);
-        const FramePerformance::Statistics physics =
-            FramePerformance::GetState().recorder.GetStatistics(FramePerformance::Category::PhysXStep);
+        using FramePerformance::Category;
+        const FramePerformance::Recorder& recorder = FramePerformance::GetState().recorder;
+        const FramePerformance::Sample& peak = recorder.GetPeakFrame(Category::ParsTotal);
+        DisplayTimingRow(Text, "PhysX step + wait", Category::PhysXStep, peak);
+        DisplayTimingRow(Text, "PARS CPU total", Category::ParsTotal, peak);
+        DisplayTimingRow(Text, "  Control / targets", Category::ControlTotal, peak);
+        DisplayTimingRow(Text, "    Foot support / contacts", Category::FootSupport, peak);
+        DisplayTimingRow(Text, "    Footstep planning", Category::FootstepPlanning, peak);
+        DisplayTimingRow(Text, "    Landing target search", Category::LandingTargetSearch, peak);
+        DisplayTimingRow(Text, "    Foot trajectory", Category::TrajectoryTotal, peak);
+        DisplayTimingRow(Text, "      Swing target", Category::SwingTrajectory, peak);
+        DisplayTimingRow(Text, "      Path setup / apply", Category::TrajectorySetup, peak);
+        DisplayTimingRow(Text, "      Current path precheck", Category::CurrentPathSamples, peak);
+        DisplayTimingRow(Text, "      Current midpoints", Category::CurrentPathMidpoints, peak);
+        DisplayTimingRow(Text, "      Current bounds / split", Category::CurrentPathIntervals, peak);
+        DisplayTimingRow(Text, "      Detour build / rank", Category::DetourRanking, peak);
+        DisplayTimingRow(Text, "      Detour precheck", Category::DetourSamples, peak);
+        DisplayTimingRow(Text, "      Detour midpoints", Category::DetourMidpoints, peak);
+        DisplayTimingRow(Text, "      Detour bounds / split", Category::DetourIntervals, peak);
+        DisplayTimingRow(Text, "    Footstep IK", Category::FootstepIK, peak);
+        DisplayTimingRow(Text, "    Recovery pose targets", Category::RecoveryTargets, peak);
+        DisplayTimingRow(Text, "    Ragdoll drive targets", Category::RagdollDrives, peak);
+        DisplayTimingRow(Text, "    Other control / targets", Category::ParsControl, peak);
+        DisplayTimingRow(Text, "  Pose / animation", Category::ParsPose, peak);
+        DisplayTimingRow(Text, "  Other world work", Category::ParsOther, peak);
+        DisplayTimingRow(Text, "Mesh render prep CPU", Category::RenderPreparation, peak);
+        const FramePerformance::Statistics physics = recorder.GetStatistics(Category::PhysXStep);
         Text.SetCursorX(10.0f);
-        Text.DrawFormattedString("PhysX steps: %u | Avg/Max: last %u frames | all worlds\n",
-            physics.calls, static_cast<uint32_t>(FramePerformance::GetState().recorder.GetFrameCount()));
+        Text.DrawFormattedString("Last PhysX steps %u | History %u frames | All worlds\n",
+            physics.calls, static_cast<uint32_t>(recorder.GetFrameCount()));
         Text.SetCursorX(10.0f);
-        Text.DrawString("PARS excludes PhysX step; queries/API helpers stay in caller.\n");
+        Text.DrawString("Peak and Calls use the frame with the highest PARS CPU total.\n");
+        Text.SetCursorX(10.0f);
+        Text.DrawString("PhysX queries and API calls are timed in the calling stage.\n");
         Text.SetTextSize(24.0f);
     }
 

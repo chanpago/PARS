@@ -1,4 +1,5 @@
 ﻿#include "SkeletalMeshComponent.h"
+#include "FramePerformance.h"
 #include <cmath>
 #include <limits>
 #include "../GameFramework/Character.h"
@@ -567,6 +568,7 @@ namespace PARS
 
     bool SkeletalMeshComponent::ApplyRecoveryTargets(std::vector<Matrix4>& target, float deltaTime)
     {
+        FramePerformance::Scope recoveryTiming(FramePerformance::Category::RecoveryTargets);
         // UpdateFootSupport() 에서 계산한 발 지지 정보와 발딛기 결과를 가져옴
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const FootstepSnapshot& step = sample.footstep;

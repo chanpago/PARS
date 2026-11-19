@@ -1,5 +1,6 @@
 ﻿#include "FootstepAvoidance.h"
 #include "FootstepCollisionBounds.h"
+#include "FramePerformance.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -120,6 +121,7 @@ void FootstepAvoidance::Update(FootstepCollisionInput input, const PxVec3& chara
     {
         return;
     }
+    FramePerformance::Scope rankingTiming(FramePerformance::Category::DetourRanking);
     std::array<Candidate, 12> candidates;
     uint32_t count = 0;
     for (size_t side = 0; side < 2; ++side)
@@ -189,7 +191,8 @@ void FootstepAvoidance::Update(FootstepCollisionInput input, const PxVec3& chara
         candidateInput.legs[candidate.side].path = candidate.path;
         candidateInput.maximumIntervals = (std::min)(input.maximumIntervals,
             MaximumIntervalsPerTick - m_Snapshot.totalIntervals);
-        const FootstepCollisionSnapshot tested = PredictFootstepCollisions(candidateInput);
+        const FootstepCollisionSnapshot tested =
+            PredictFootstepCollisions(candidateInput, FootstepCollisionPass::DetourCandidate);
         ++m_Snapshot.candidatesChecked;
         m_Snapshot.totalIntervals += tested.intervalCount;
         m_Snapshot.totalQueries += tested.queryCount;
