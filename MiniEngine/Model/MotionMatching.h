@@ -2,6 +2,7 @@
 
 #include <DirectXMath.h>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace PARS
@@ -10,7 +11,16 @@ namespace PARS
     enum class MotionFrameUsage : std::uint8_t
     {
         General,
-        CrossStep
+        CrossStep,
+        Count
+    };
+
+    // 전체 후보 배열의 [firstFrameIndex, firstFrameIndex + frameCount) 구간이다.
+    struct MotionFrameRange
+    {
+    public:
+        std::size_t firstFrameIndex = 0;
+        std::size_t frameCount = 0;
     };
 
     struct MotionClipSelection

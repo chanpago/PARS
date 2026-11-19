@@ -25,6 +25,20 @@ namespace PARS
             uint32_t animationIndex;
         };
 
+        struct MotionFrameGroup
+        {
+        public:
+            MotionFrameRange range;
+            std::vector<uint32_t> clipIndices;
+        };
+
+        struct MotionDatabase
+        {
+        public:
+            std::vector<MotionFrame> frames;
+            std::array<MotionFrameGroup, static_cast<std::size_t>(MotionFrameUsage::Count)> groups;
+        };
+
     public:
         explicit AnimInstance(SkeletalMeshComponent& owner)
             : m_Owner(owner)
@@ -98,6 +112,8 @@ namespace PARS
         float GetAnimationDuration(uint32_t index) const;
         const std::string& GetAnimationName(uint32_t index) const;
         const std::vector<MotionFrame>& GetMotionFrames() const;
+        // 해당 용도의 후보가 없으면 frameCount가 0인 구간을 반환한다.
+        MotionFrameRange GetMotionFrameRange(MotionFrameUsage usage) const;
         const std::vector<GraphNode>& GetPose() const
         {
             return m_Pose;
@@ -107,7 +123,7 @@ namespace PARS
         SkeletalMeshComponent& m_Owner;
         std::shared_ptr<const Model> m_Skeleton;
         std::vector<Clip> m_Clips;
-        std::shared_ptr<const std::vector<MotionFrame>> m_MotionFrames;
+        std::shared_ptr<const MotionDatabase> m_MotionDatabase;
         std::vector<GraphNode> m_Pose;
         std::vector<GraphNode> m_BlendSource;
         uint32_t m_BlendSourceClip = 0;

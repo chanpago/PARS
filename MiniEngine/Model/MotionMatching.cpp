@@ -142,6 +142,25 @@ namespace PARS
             error = u8"모션 후보를 생성할 메시 컴포넌트의 기준 스켈레톤과 등록된 클립이 필요합니다.";
             return false;
         }
+        const std::shared_ptr<MotionDatabase> database = std::make_shared<MotionDatabase>();
+        std::vector<bool> included(m_Clips.size(), false);
+        for (const MotionClipSelection& clip : clips)
+        {
+            const size_t usageIndex = static_cast<size_t>(clip.usage);
+            if (usageIndex >= database->groups.size())
+            {
+                error = u8"알 수 없는 모션 후보 용도입니다.";
+                return false;
+            }
+            if (clip.clipIndex >= included.size() || included[clip.clipIndex])
+            {
+                error = u8"등록되지 않았거나 중복된 모션 후보 클립입니다.";
+                return false;
+            }
+            included[clip.clipIndex] = true;
+            database->groups[usageIndex].clipIndices.push_back(clip.clipIndex);
+        }
+
         PhysicsSkeleton skeleton;
         if (!m_Owner.BuildPhysicsSkeleton(skeleton, error))
         {
@@ -164,25 +183,23 @@ namespace PARS
         // 기준 포즈의 모델 전방(+Z)을 골반 본의 좌표로 옮겨 클립마다 동일한 전방 기준을 쓴다.
         bones.bindForwardInPelvis = Math::Transpose(PhysicsBoneFrame(bindPose[bones.hips]).Get3x3()) * Math::Vector3(Math::kZUnitVector);
 
-        const std::shared_ptr<std::vector<MotionFrame>> frames = std::make_shared<std::vector<MotionFrame>>();
         std::vector<MotionSample> samples;
-        std::vector<bool> included(m_Clips.size(), false);
-        for (const MotionClipSelection& clip : clips)
+        for (size_t usageIndex = 0; usageIndex < database->groups.size(); ++usageIndex)
         {
-            if (clip.clipIndex >= included.size() || included[clip.clipIndex])
+            MotionFrameGroup& group = database->groups[usageIndex];
+            group.range.firstFrameIndex = database->frames.size();
+            for (uint32_t clipIndex : group.clipIndices)
             {
-                error = u8"등록되지 않았거나 중복된 모션 후보 클립입니다.";
-                return false;
+                if (!SampleClip(*this, clipIndex, skeleton, bones, samples, error))
+                {
+                    error = GetAnimationName(clipIndex) + " - " + error;
+                    return false;
+                }
+                AppendClipFrames({clipIndex, static_cast<MotionFrameUsage>(usageIndex)}, samples, database->frames);
             }
-            included[clip.clipIndex] = true;
-            if (!SampleClip(*this, clip.clipIndex, skeleton, bones, samples, error))
-            {
-                error = GetAnimationName(clip.clipIndex) + " - " + error;
-                return false;
-            }
-            AppendClipFrames(clip, samples, *frames);
+            group.range.frameCount = database->frames.size() - group.range.firstFrameIndex;
         }
-        m_MotionFrames = frames;
+        m_MotionDatabase = database;
         error.clear();
         return true;
     }

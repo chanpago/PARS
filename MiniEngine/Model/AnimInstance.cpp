@@ -55,7 +55,7 @@ namespace PARS
     {
         m_Skeleton = std::move(skeleton);
         m_Clips.clear();
-        m_MotionFrames.reset();
+        m_MotionDatabase.reset();
         m_CurrentClip = 0;
         m_Playing = false;
         m_Time = 0.0f;
@@ -147,22 +147,24 @@ namespace PARS
 
     bool AnimInstance::ShareMotionFramesFrom(const AnimInstance& source, std::string& error)
     {
-        if (!source.m_MotionFrames || m_Skeleton != source.m_Skeleton)
+        if (!source.m_MotionDatabase || m_Skeleton != source.m_Skeleton)
         {
             error = u8"모션 후보를 공유하려면 같은 기준 스켈레톤과 생성된 후보 배열이 필요합니다.";
             return false;
         }
 
         size_t requiredCount = 0;
-        for (const MotionFrame& frame : source.GetMotionFrames())
+        for (const MotionFrameGroup& group : source.m_MotionDatabase->groups)
         {
-            const size_t index = frame.clipIndex;
-            requiredCount = std::max(requiredCount, index + 1);
-            if (index < m_Clips.size() && (m_Clips[index].source != source.m_Clips[index].source ||
-                m_Clips[index].animationIndex != source.m_Clips[index].animationIndex))
+            for (uint32_t index : group.clipIndices)
             {
-                error = u8"모션 후보의 클립 번호가 다른 애니메이션을 가리킵니다.";
-                return false;
+                requiredCount = std::max(requiredCount, static_cast<size_t>(index) + 1);
+                if (index < m_Clips.size() && (m_Clips[index].source != source.m_Clips[index].source ||
+                    m_Clips[index].animationIndex != source.m_Clips[index].animationIndex))
+                {
+                    error = u8"모션 후보의 클립 번호가 다른 애니메이션을 가리킵니다.";
+                    return false;
+                }
             }
         }
         // 후보가 가리키는 번호를 유지하면서 아직 등록되지 않은 클립만 가져온다.
@@ -170,7 +172,7 @@ namespace PARS
         {
             m_Clips.insert(m_Clips.end(), source.m_Clips.begin() + m_Clips.size(), source.m_Clips.begin() + requiredCount);
         }
-        m_MotionFrames = source.m_MotionFrames;
+        m_MotionDatabase = source.m_MotionDatabase;
         error.clear();
         return true;
     }
@@ -178,7 +180,17 @@ namespace PARS
     const std::vector<MotionFrame>& AnimInstance::GetMotionFrames() const
     {
         static const std::vector<MotionFrame> empty;
-        return m_MotionFrames ? *m_MotionFrames : empty;
+        return m_MotionDatabase ? m_MotionDatabase->frames : empty;
+    }
+
+    MotionFrameRange AnimInstance::GetMotionFrameRange(MotionFrameUsage usage) const
+    {
+        const size_t index = static_cast<size_t>(usage);
+        if (!m_MotionDatabase || index >= m_MotionDatabase->groups.size())
+        {
+            return {};
+        }
+        return m_MotionDatabase->groups[index].range;
     }
 
     void AnimInstance::Stop()

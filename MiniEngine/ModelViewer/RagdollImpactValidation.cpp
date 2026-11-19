@@ -12,6 +12,30 @@
 
 namespace
 {
+    void CheckMotionFrameRanges(const PARS::AnimInstance& animation, const std::array<const char*, 2>& crossStepNames,
+        const std::function<void(bool, const char*)>& check)
+    {
+        const std::vector<PARS::MotionFrame>& frames = animation.GetMotionFrames();
+        check(frames.size() == 679, "Only the three selected clips contribute motion candidates");
+        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::General, PARS::MotionFrameUsage::CrossStep})
+        {
+            const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
+            const bool crossStep = usage == PARS::MotionFrameUsage::CrossStep;
+            check(range.firstFrameIndex == (crossStep ? 501u : 0u) && range.frameCount == (crossStep ? 178u : 501u),
+                "The usage range points to the expected first frame and count");
+            bool valid = true;
+            for (size_t offset = 0; valid && offset < range.frameCount; ++offset)
+            {
+                const PARS::MotionFrame& frame = frames[range.firstFrameIndex + offset];
+                const char* clipName = crossStep ? crossStepNames[offset / 89] : "Idle";
+                const size_t clipFrame = crossStep ? offset % 89 : offset;
+                valid = frame.usage == usage && animation.GetAnimationName(frame.clipIndex) == clipName &&
+                    std::abs(frame.clipTimeSeconds - static_cast<float>(clipFrame) / 60.0f) < 2e-6f;
+            }
+            check(valid, "Each usage range preserves clip order and 60 Hz sample times");
+        }
+    }
+
     void ConfigureLandingComValidation(PARS::SkeletalMeshComponent& mesh, std::ostream& report)
     {
         PARS::FootstepSettings& settings = mesh.GetFootSupport().GetFootstepSettings();
@@ -734,26 +758,32 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(dummy && dummy != &player && dummy->GetController() == nullptr,
             "Idle dummy is independent of the possessed player");
         const PARS::AnimInstance& dummyAnimation = dummy->GetMesh().GetAnimInstance();
+        const PARS::AnimInstance& playerAnimation = player.GetMesh().GetAnimInstance();
         const std::vector<PARS::MotionFrame>& candidates = dummyAnimation.GetMotionFrames();
-        check(!candidates.empty() && &candidates == &player.GetMesh().GetAnimInstance().GetMotionFrames(),
+        check(&candidates == &playerAnimation.GetMotionFrames(),
             "Player and impact dummy share the initialized motion frames");
-        const char* const clipNames[] = {"Idle", "WalkStrafeLeft", "WalkStrafeRight"};
-        const std::array<size_t, 3> frameCounts = {501, 89, 89};
-        size_t firstFrame = 0;
-        for (size_t clip = 0; clip < frameCounts.size(); ++clip)
-        {
-            const PARS::MotionFrameUsage usage = clip == 0 ? PARS::MotionFrameUsage::General : PARS::MotionFrameUsage::CrossStep;
-            bool valid = firstFrame + frameCounts[clip] <= candidates.size();
-            for (size_t i = 0; valid && i < frameCounts[clip]; ++i)
-            {
-                const PARS::MotionFrame& frame = candidates[firstFrame + i];
-                valid = dummyAnimation.GetAnimationName(frame.clipIndex) == clipNames[clip] && frame.usage == usage &&
-                    std::abs(frame.clipTimeSeconds - static_cast<float>(i) / 60.0f) < 2e-6f;
-            }
-            check(valid, "Motion candidates keep their registered clip, usage and 60 Hz sample times");
-            firstFrame += frameCounts[clip];
-        }
-        check(firstFrame == candidates.size(), "Only the three selected clips contribute motion candidates");
+        CheckMotionFrameRanges(dummyAnimation, {"WalkStrafeLeft", "WalkStrafeRight"}, check);
+
+        PARS::AnimInstance mixedClips(player.GetMesh());
+        mixedClips.Initialize(player.GetMesh().GetSkeletalMesh());
+        const PARS::MotionFrameRange crossStepRange = dummyAnimation.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep);
+        const uint32_t idleClip = candidates.front().clipIndex;
+        const uint32_t leftClip = candidates[crossStepRange.firstFrameIndex].clipIndex;
+        const uint32_t rightClip = candidates.back().clipIndex;
+        std::string motionError;
+        check(mixedClips.ShareMotionFramesFrom(playerAnimation, motionError) &&
+                mixedClips.BuildMotionFrames({{rightClip, PARS::MotionFrameUsage::CrossStep}, {idleClip, PARS::MotionFrameUsage::General},
+                    {leftClip, PARS::MotionFrameUsage::CrossStep}}, motionError),
+            "Build interleaved usages on a separate animation instance");
+        CheckMotionFrameRanges(mixedClips, {"WalkStrafeRight", "WalkStrafeLeft"}, check);
+        check(!mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::Count}}, motionError) &&
+                mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep).frameCount == crossStepRange.frameCount,
+            "An invalid usage leaves the published range intact");
+        check(mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::General}}, motionError),
+            "Rebuild the index with only General candidates");
+        const PARS::MotionFrameRange emptyRange = mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep);
+        check(emptyRange.firstFrameIndex == 501 && emptyRange.frameCount == 0,
+            "An unused CrossStep range is empty at the end of the candidate array");
         check(dummy->GetMesh().IsActiveRagdoll() && dummy->GetMesh().GetRagdoll().IsRootSupported(),
             "Dummy is dynamic with angular drives and pelvis support enabled");
         const std::function<void()> tick = [&]() -> void
