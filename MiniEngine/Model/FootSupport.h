@@ -72,6 +72,7 @@ namespace PARS
         FootContactSample contact;
         int boneNode = -1;
         FootLegSetup leg;
+        physx::PxVec3 bonePosition{0};
         std::array<physx::PxVec3, 4> corners{};
         std::array<physx::PxVec3, 4> projections{};
         std::array<float, 4> distances{};
@@ -140,6 +141,7 @@ namespace PARS
     private:
         bool Prepare(SkeletalMeshComponent& mesh);
         void UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorld& physics);
+        bool SampleMotionQuery(const SkeletalMeshComponent& mesh, MotionFeatures& query);
         void UpdateFootstep(SkeletalMeshComponent& mesh);
 
     public:
@@ -185,6 +187,9 @@ namespace PARS
         uint64_t m_RagdollRevision = 0; // 마지막으로 확인한 래그돌 접촉
         uint64_t m_ContactStep = 0;     // 마지막으로 확인한 물리스텝
         uint64_t m_ContactRevision = 0; // 자체의 접촉 이력버전
+        uint64_t m_MotionSampleStep = UINT64_MAX;
+        std::array<DirectX::XMFLOAT3, 2> m_PreviousMotionFeet{};
+        int m_MotionHipsBody = -1;
         physx::PxVec3 m_PendingImpactPosition{0};
         std::array<FootSoleSettings, 2> m_Settings;
         FootstepSettings m_FootstepSettings; // 발 이동에 대한 세팅값

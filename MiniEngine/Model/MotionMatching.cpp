@@ -28,6 +28,26 @@ namespace PARS
             float time;
         };
 
+        bool MakeHeadingSpace(const Math::Matrix4& pelvis, Math::Vector3 bindForward, Math::Matrix3& toHeadingSpace)
+        {
+            const Math::Vector3 facing = PhysicsBoneFrame(pelvis).Get3x3() * bindForward;
+            const Math::Vector3 horizontal(facing.GetX(), 0.0f, facing.GetZ());
+            const float length = Math::Length(horizontal);
+            if (!std::isfinite(length) || length < 1e-5f)
+            {
+                return false;
+            }
+            const Math::Vector3 forward = horizontal / length;
+            const Math::Vector3 up(Math::kYUnitVector);
+            toHeadingSpace = Math::Transpose(Math::Matrix3(Math::Cross(up, forward), up, forward));
+            return true;
+        }
+
+        float SquaredDistance(const DirectX::XMFLOAT3& first, const DirectX::XMFLOAT3& second)
+        {
+            return Math::LengthSquare(Math::Vector3(first) - Math::Vector3(second));
+        }
+
         size_t FindJoint(const PhysicsSkeleton& skeleton, const std::string& joint)
         {
             for (size_t i = 0; i < skeleton.names.size(); ++i)
@@ -77,17 +97,11 @@ namespace PARS
 
                 const Math::Matrix4& hips = modelPose[bones.hips];
                 sample.pelvis = Math::Vector3(hips.GetW());
-                const Math::Vector3 facing = PhysicsBoneFrame(hips).Get3x3() * bones.bindForwardInPelvis;
-                const Math::Vector3 horizontal(facing.GetX(), 0.0f, facing.GetZ());
-                const float length = Math::Length(horizontal);
-                if (!std::isfinite(length) || length < 1e-5f)
+                if (!MakeHeadingSpace(hips, bones.bindForwardInPelvis, sample.toHeadingSpace))
                 {
                     error = u8"골반의 수평 전방을 계산할 수 없습니다.";
                     return false;
                 }
-                const Math::Vector3 forward = horizontal / length;
-                const Math::Vector3 up(Math::kYUnitVector);
-                sample.toHeadingSpace = Math::Transpose(Math::Matrix3(Math::Cross(up, forward), up, forward));
                 for (size_t foot = 0; foot < bones.feet.size(); ++foot)
                 {
                     const Math::Vector3 position(modelPose[bones.feet[foot]].GetW());
@@ -182,6 +196,7 @@ namespace PARS
         }
         // 기준 포즈의 모델 전방(+Z)을 골반 본의 좌표로 옮겨 클립마다 동일한 전방 기준을 쓴다.
         bones.bindForwardInPelvis = Math::Transpose(PhysicsBoneFrame(bindPose[bones.hips]).Get3x3()) * Math::Vector3(Math::kZUnitVector);
+        database->bindForwardInPelvis = bones.bindForwardInPelvis;
 
         std::vector<MotionSample> samples;
         for (size_t usageIndex = 0; usageIndex < database->groups.size(); ++usageIndex)
@@ -202,5 +217,38 @@ namespace PARS
         m_MotionDatabase = database;
         error.clear();
         return true;
+    }
+
+    bool AnimInstance::GetMotionHeadingSpace(const Math::Matrix4& pelvis, Math::Matrix3& toHeadingSpace) const
+    {
+        return m_MotionDatabase && MakeHeadingSpace(pelvis, m_MotionDatabase->bindForwardInPelvis, toHeadingSpace);
+    }
+
+    MotionMatchResult AnimInstance::FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures) const
+    {
+        const MotionFrameRange range = GetMotionFrameRange(usage);
+        const std::vector<MotionFrame>& frames = GetMotionFrames();
+        MotionMatchResult best;
+        constexpr float velocityWeight = MotionFeatures::PredictionTimeSeconds * MotionFeatures::PredictionTimeSeconds;
+        for (size_t offset = 0; offset < range.frameCount; ++offset)
+        {
+            const MotionFrame& frame = frames[range.firstFrameIndex + offset];
+            float footError = 0.0f;
+            for (size_t side = 0; side < currentFeatures.footPositions.size(); ++side)
+            {
+                footError += SquaredDistance(currentFeatures.footPositions[side], frame.features.footPositions[side]);
+                footError += velocityWeight * SquaredDistance(currentFeatures.footVelocities[side], frame.features.footVelocities[side]);
+            }
+            // 양발 오차는 평균을 내고, 속도 차이는 예측 시간 동안의 거리로 환산한다.
+            // 골반 변위에 두 배의 거리 가중치를 주어 회복할 방향을 반영한다.
+            const float score = 0.5f * footError + 4.0f * SquaredDistance(currentFeatures.futureDisplacement, frame.features.futureDisplacement);
+            if (std::isfinite(score) && score < best.score)
+            {
+                best.clipIndex = frame.clipIndex;
+                best.clipTimeSeconds = frame.clipTimeSeconds;
+                best.score = score;
+            }
+        }
+        return best;
     }
 }

@@ -35,6 +35,7 @@ namespace PARS
         struct MotionDatabase
         {
         public:
+            Math::Vector3 bindForwardInPelvis{Math::kZUnitVector};
             std::vector<MotionFrame> frames;
             std::array<MotionFrameGroup, static_cast<std::size_t>(MotionFrameUsage::Count)> groups;
         };
@@ -54,6 +55,7 @@ namespace PARS
         bool BuildMotionFrames(std::initializer_list<MotionClipSelection> clips, std::string& error);
         // 같은 기준 메시를 쓰는 캐릭터가 동일한 클립 번호로 후보 배열을 공유한다.
         bool ShareMotionFramesFrom(const AnimInstance& source, std::string& error);
+        MotionMatchResult FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures) const;
         bool PlayAnimation(uint32_t index, bool loop = true, float startTime = 0.0f);
         // 시작 시점을 지정해 발 디딤 위상을 맞출 수 있다. 일반 전환에서는 두 클립의 시간을 함께 진행한다.
         bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true, float startTime = 0.0f);
@@ -114,6 +116,7 @@ namespace PARS
         const std::vector<MotionFrame>& GetMotionFrames() const;
         // 해당 용도의 후보가 없으면 frameCount가 0인 구간을 반환한다.
         MotionFrameRange GetMotionFrameRange(MotionFrameUsage usage) const;
+        bool GetMotionHeadingSpace(const Math::Matrix4& pelvis, Math::Matrix3& toHeadingSpace) const;
         const std::vector<GraphNode>& GetPose() const
         {
             return m_Pose;

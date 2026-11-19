@@ -1181,6 +1181,19 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 PARS::FootstepPhaseLabel(command.phase), contact.hasSample && contact.grounded ? "ON" : "OFF",
                 command.IsInProgress() ? "ON" : "OFF");
             ImGui::TextWrapped(u8"  %s", PARS::FootstepReasonLabel(command.reason));
+            if (command.motionSearchStep != UINT64_MAX)
+            {
+                const PARS::MotionMatchResult& match = command.motionMatch;
+                if (match.clipIndex != UINT32_MAX)
+                {
+                    ImGui::Text(u8"교차 모션 검색  %s  %.3f초  오차 %.5f",
+                        mesh.GetAnimInstance().GetAnimationName(match.clipIndex).c_str(), match.clipTimeSeconds, match.score);
+                }
+                else
+                {
+                    ImGui::TextUnformatted(u8"교차 모션 검색  유효한 결과 없음");
+                }
+            }
             if (!command.IsInProgress() && command.phase != PARS::FootstepPhase::Landed)
             {
                 continue;

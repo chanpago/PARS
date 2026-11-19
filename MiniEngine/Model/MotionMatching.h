@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace PARS
 {
@@ -54,5 +55,13 @@ namespace PARS
         std::uint32_t clipIndex = UINT32_MAX;
         float clipTimeSeconds = 0.0f;
         MotionFrameUsage usage = MotionFrameUsage::General;
+    };
+
+    struct MotionMatchResult
+    {
+    public:
+        std::uint32_t clipIndex = UINT32_MAX;
+        float clipTimeSeconds = 0.0f;
+        float score = std::numeric_limits<float>::infinity();
     };
 }

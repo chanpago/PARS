@@ -968,6 +968,14 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             continue;
         }
         command.hasTarget = true;
+        const FootstepMode mode = command.target.recovery.mode;
+        if (command.motionSearchStep == UINT64_MAX && input.findCrossStep && command.target.recovery.hasTarget &&
+            (mode == FootstepMode::FrontCross || mode == FootstepMode::BackCross))
+        {
+            // 교차 목표와 양발 샘플이 모두 준비된 첫 스텝에서 이 명령의 결과를 확정한다.
+            command.motionSearchStep = input.completedStep;
+            command.motionMatch = input.findCrossStep();
+        }
         command.reason = command.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;
         UpdateMotion(command, foot, input);
     }

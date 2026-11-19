@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <array>
 
 namespace
@@ -33,6 +34,14 @@ namespace
                     std::abs(frame.clipTimeSeconds - static_cast<float>(clipFrame) / 60.0f) < 2e-6f;
             }
             check(valid, "Each usage range preserves clip order and 60 Hz sample times");
+            const size_t clipCount = crossStep ? crossStepNames.size() : 1;
+            for (size_t clip = 0; clip < clipCount; ++clip)
+            {
+                const PARS::MotionFrame& source = frames[range.firstFrameIndex + clip * 89 + 30];
+                const PARS::MotionMatchResult match = animation.FindMotionMatch(usage, source.features);
+                check(match.clipIndex == source.clipIndex && match.clipTimeSeconds == source.clipTimeSeconds && match.score == 0.0f,
+                    "An exact motion query finds the sampled clip and time with zero error");
+            }
         }
     }
 
@@ -65,7 +74,8 @@ namespace
             "region_valid,support_foot,region_origin_x,region_origin_z,front_ray_x,front_ray_z,back_ray_x,back_ray_z,region_width_degrees,"
             "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
-            "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected\n";
+            "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
+            "command_step,command_mode,motion_search_step,match_clip,match_time_s,match_score\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -109,7 +119,22 @@ namespace
                 << ',' << decision.hasTarget << ',' << decision.modelFeasible << ',' << decision.poseChecks
                 << ',' << decision.elapsedMilliseconds << ',' << decision.overlapAreas[0]
                 << ',' << decision.overlapAreas[1] << ',' << decision.overlapAreas[2]
-                << ',' << decision.capturePieceCount << ',' << decision.steps << ',' << decision.pathRejected << '\n';
+                << ',' << decision.capturePieceCount << ',' << decision.steps << ',' << decision.pathRejected
+                << ',' << command.startedStep << ',' << static_cast<int>(command.target.recovery.mode) << ',';
+            if (command.motionSearchStep != UINT64_MAX)
+            {
+                stream << command.motionSearchStep;
+            }
+            if (command.motionMatch.clipIndex != UINT32_MAX)
+            {
+                stream << ',' << mesh.GetAnimInstance().GetAnimationName(command.motionMatch.clipIndex)
+                    << ',' << command.motionMatch.clipTimeSeconds << ',' << command.motionMatch.score;
+            }
+            else
+            {
+                stream << ",,,";
+            }
+            stream << '\n';
         }
     }
 
@@ -770,6 +795,13 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const uint32_t idleClip = candidates.front().clipIndex;
         const uint32_t leftClip = candidates[crossStepRange.firstFrameIndex].clipIndex;
         const uint32_t rightClip = candidates.back().clipIndex;
+        const PARS::MotionMatchResult crossMatch = dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, candidates.front().features);
+        check((crossMatch.clipIndex == leftClip || crossMatch.clipIndex == rightClip) && crossMatch.score > 0.0f,
+            "A CrossStep query matching Idle exactly still chooses a frame from the two strafe clips");
+        PARS::MotionFeatures invalidQuery = candidates.front().features;
+        invalidQuery.footVelocities[1].y = std::numeric_limits<float>::quiet_NaN();
+        check(dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, invalidQuery).clipIndex == UINT32_MAX,
+            "A non-finite motion query cannot select a clip");
         std::string motionError;
         check(mixedClips.ShareMotionFramesFrom(playerAnimation, motionError) &&
                 mixedClips.BuildMotionFrames({{rightClip, PARS::MotionFrameUsage::CrossStep}, {idleClip, PARS::MotionFrameUsage::General},
@@ -784,6 +816,8 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const PARS::MotionFrameRange emptyRange = mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep);
         check(emptyRange.firstFrameIndex == 501 && emptyRange.frameCount == 0,
             "An unused CrossStep range is empty at the end of the candidate array");
+        check(mixedClips.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, candidates.front().features).clipIndex == UINT32_MAX,
+            "An empty CrossStep group produces no match");
         check(dummy->GetMesh().IsActiveRagdoll() && dummy->GetMesh().GetRagdoll().IsRootSupported(),
             "Dummy is dynamic with angular drives and pelvis support enabled");
         const std::function<void()> tick = [&]() -> void

@@ -2,8 +2,10 @@
 
 #include "FootSupportHull.h"
 #include "FootstepRecovery.h"
+#include "MotionMatching.h"
 #include <array>
 #include <cstdint>
+#include <functional>
 
 namespace PARS
 {
@@ -86,6 +88,7 @@ namespace PARS
     {
     public:
         std::function<bool(size_t, const physx::PxVec3&)> acceptsLanding;
+        std::function<MotionMatchResult()> findCrossStep;
         std::vector<physx::PxVec3> hull;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
@@ -202,7 +205,9 @@ namespace PARS
     public:
         uint64_t startedStep = 0;
         uint64_t takeoffStep = 0;
+        uint64_t motionSearchStep = UINT64_MAX;
         FootstepTarget target;
+        MotionMatchResult motionMatch;
         physx::PxVec3 startPosition{0};
         physx::PxVec3 initialTarget{0};
         physx::PxVec3 takeoffPosition{0};
