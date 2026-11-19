@@ -24,9 +24,9 @@ namespace PARS
         std::array<DirectX::XMFLOAT3, 2> footPositions{};
         // 골반 기준 발 위치의 변화율(m/s).
         std::array<DirectX::XMFLOAT3, 2> footVelocities{};
-        // 예측 시간 동안의 골반 수평 변위(m)를 로컬 X, Z 순서로 저장한다.
+        // 예측 시간 동안의 골반 변위(m)를 로컬 X(좌우), Y(상하), Z(전후) 순서로 저장한다.
         // 클립 후보에는 실제 변위를, 검색 입력에는 원하는 변위를 담는다.
-        DirectX::XMFLOAT2 futureDisplacementXZ{};
+        DirectX::XMFLOAT3 futureDisplacement{};
     };
 
     // AnimInstance에 등록한 클립의 특정 재생 시점을 검색 후보로 저장한다.
