@@ -206,6 +206,7 @@
     <ClCompile Include="FootSupport.cpp" />
     <ClInclude Include="FootstepPlanner.h" />
     <ClInclude Include="FootstepRecovery.h" />
+    <ClInclude Include="FootstepMode.h" />
     <ClInclude Include="FootstepLandingQuery.h" />
     <ClInclude Include="FootstepPoseValidation.h" />
     <ClCompile Include="FootstepRecovery.cpp">

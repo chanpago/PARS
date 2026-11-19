@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "FootstepMode.h"
 #include <DirectXMath.h>
 #include <array>
 #include <cstddef>
@@ -24,10 +25,29 @@ namespace PARS
         std::size_t frameCount = 0;
     };
 
+    // 60 Hz 후보의 프레임 번호다. 착지가 이륙보다 앞에 있으면 클립 끝을 넘어 이어진다.
+    struct CrossStepWindow
+    {
+    public:
+        FootstepMode mode = FootstepMode::Normal;
+        std::uint32_t movingFoot = 0;
+        std::uint32_t takeoffFrame = 0;
+        std::uint32_t landingFrame = 0;
+        std::uint32_t recoveryEndFrame = UINT32_MAX;
+    };
+
     struct MotionClipSelection
     {
     public:
+        MotionClipSelection() = default;
+        MotionClipSelection(std::uint32_t index, MotionFrameUsage frameUsage, CrossStepWindow window = {})
+            : clipIndex(index), crossStep(window), usage(frameUsage)
+        {
+        }
+
+    public:
         std::uint32_t clipIndex = UINT32_MAX;
+        CrossStepWindow crossStep;
         MotionFrameUsage usage = MotionFrameUsage::General;
     };
 

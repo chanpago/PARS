@@ -156,8 +156,9 @@ namespace PARS
         size_t requiredCount = 0;
         for (const MotionFrameGroup& group : source.m_MotionDatabase->groups)
         {
-            for (uint32_t index : group.clipIndices)
+            for (const MotionClipSelection& selection : group.clips)
             {
+                const uint32_t index = selection.clipIndex;
                 requiredCount = std::max(requiredCount, static_cast<size_t>(index) + 1);
                 if (index < m_Clips.size() && (m_Clips[index].source != source.m_Clips[index].source ||
                     m_Clips[index].animationIndex != source.m_Clips[index].animationIndex))

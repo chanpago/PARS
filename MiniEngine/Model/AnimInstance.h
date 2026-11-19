@@ -2,9 +2,9 @@
 
 #include "Animation.h"
 #include "MotionMatching.h"
-#include <initializer_list>
 #include <memory>
 #include <string>
+#include <vector>
 
 class Model;
 
@@ -29,7 +29,7 @@ namespace PARS
         {
         public:
             MotionFrameRange range;
-            std::vector<uint32_t> clipIndices;
+            std::vector<MotionClipSelection> clips;
         };
 
         struct MotionDatabase
@@ -52,7 +52,7 @@ namespace PARS
         void Initialize(std::shared_ptr<const Model> skeleton);
         bool AddAnimation(const std::string& name, std::shared_ptr<const Model> source, uint32_t animationIndex = 0);
         // 등록한 클립의 포즈를 샘플링해 검색 후보를 한 번에 교체한다.
-        bool BuildMotionFrames(std::initializer_list<MotionClipSelection> clips, std::string& error);
+        bool BuildMotionFrames(const std::vector<MotionClipSelection>& clips, std::string& error);
         // 같은 기준 메시를 쓰는 캐릭터가 동일한 클립 번호로 후보 배열을 공유한다.
         bool ShareMotionFramesFrom(const AnimInstance& source, std::string& error);
         MotionMatchResult FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures) const;

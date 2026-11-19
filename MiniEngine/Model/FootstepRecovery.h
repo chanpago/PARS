@@ -1,19 +1,13 @@
 ﻿#pragma once
 
 #include "FootSupportHull.h"
+#include "FootstepMode.h"
 #include <cstdint>
 #include <functional>
 
 namespace PARS
 {
     using FootstepPolygon = std::vector<physx::PxVec3>;
-
-    enum class FootstepMode
-    {
-        Normal,
-        FrontCross,
-        BackCross
-    };
 
     enum class FootstepRecoveryStatus
     {

@@ -24,8 +24,10 @@ namespace
     constexpr ExpectedMotionClip kLeftStrafeClip = {"WalkStrafeLeft", 89};
     constexpr ExpectedMotionClip kRightStrafeClip = {"WalkStrafeRight", 89};
     constexpr ExpectedMotionClip kBackCrossRecoveryClip = {"WalkStrafeLeftBackCrossRecovery", 89};
+    constexpr ExpectedMotionClip kRightBackCrossRecoveryClip = {"WalkStrafeRightBackCrossRecovery", 89};
 
-    void CheckMotionFrameRanges(const PARS::AnimInstance& animation, const std::array<ExpectedMotionClip, 3>& crossStepClips,
+    template <size_t ClipCount>
+    void CheckMotionFrameRanges(const PARS::AnimInstance& animation, const ExpectedMotionClip (&crossStepClips)[ClipCount],
         const std::function<void(bool, const char*)>& check)
     {
         const std::vector<PARS::MotionFrame>& frames = animation.GetMotionFrames();
@@ -43,7 +45,7 @@ namespace
                 range.frameCount == (crossStep ? crossStepFrameCount : kIdleClip.frameCount),
                 "The usage range points to the expected first frame and count");
             size_t clipStart = range.firstFrameIndex;
-            const size_t clipCount = crossStep ? crossStepClips.size() : 1;
+            const size_t clipCount = crossStep ? ClipCount : 1;
             for (size_t i = 0; i < clipCount; ++i)
             {
                 const ExpectedMotionClip& clip = crossStep ? crossStepClips[i] : kIdleClip;
@@ -807,7 +809,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const std::vector<PARS::MotionFrame>& candidates = dummyAnimation.GetMotionFrames();
         check(&candidates == &playerAnimation.GetMotionFrames(),
             "Player and impact dummy share the initialized motion frames");
-        CheckMotionFrameRanges(dummyAnimation, {kLeftStrafeClip, kRightStrafeClip, kBackCrossRecoveryClip}, check);
+        CheckMotionFrameRanges(dummyAnimation, {kLeftStrafeClip, kRightStrafeClip, kBackCrossRecoveryClip, kRightBackCrossRecoveryClip}, check);
 
         PARS::AnimInstance mixedClips(player.GetMesh());
         mixedClips.Initialize(player.GetMesh().GetSkeletalMesh());
@@ -815,9 +817,21 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const uint32_t idleClip = candidates.front().clipIndex;
         const uint32_t leftClip = candidates[crossStepRange.firstFrameIndex].clipIndex;
         const uint32_t rightClip = candidates[crossStepRange.firstFrameIndex + kLeftStrafeClip.frameCount].clipIndex;
-        const uint32_t recoveryClip = candidates.back().clipIndex;
+        const size_t leftRearStart = crossStepRange.firstFrameIndex + kLeftStrafeClip.frameCount + kRightStrafeClip.frameCount;
+        const uint32_t recoveryClip = candidates[leftRearStart].clipIndex;
+        const size_t rightRearStart = leftRearStart + kBackCrossRecoveryClip.frameCount;
+        const uint32_t rightRecoveryClip = candidates[rightRearStart].clipIndex;
+        const PARS::MotionFeatures& airborne = candidates[rightRearStart + 16].features;
+        const PARS::MotionFeatures& touchdown = candidates[rightRearStart + 32].features;
+        const PARS::MotionMatchResult rearMatch = dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, airborne);
+        check(rearMatch.clipIndex == rightRecoveryClip && rearMatch.score == 0.0f &&
+                std::abs(rearMatch.clipTimeSeconds - 16 / 60.0f) < 1e-5f &&
+                airborne.footPositions[0].y > airborne.footPositions[1].y + 0.10f &&
+                touchdown.footPositions[0].z < touchdown.footPositions[1].z,
+            "The rightward rear-cross candidate matches the lifted left foot and lands behind the right foot");
         const PARS::MotionMatchResult crossMatch = dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, candidates.front().features);
-        check((crossMatch.clipIndex == leftClip || crossMatch.clipIndex == rightClip || crossMatch.clipIndex == recoveryClip) && crossMatch.score > 0.0f,
+        check(crossMatch.clipIndex == leftClip || crossMatch.clipIndex == rightClip ||
+                crossMatch.clipIndex == recoveryClip || crossMatch.clipIndex == rightRecoveryClip,
             "A CrossStep query matching Idle exactly still chooses a frame from the CrossStep clips");
         PARS::MotionFeatures invalidQuery = candidates.front().features;
         invalidQuery.footVelocities[1].y = std::numeric_limits<float>::quiet_NaN();
@@ -829,8 +843,12 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                     {recoveryClip, PARS::MotionFrameUsage::CrossStep}, {leftClip, PARS::MotionFrameUsage::CrossStep}}, motionError),
             "Build interleaved usages on a separate animation instance");
         CheckMotionFrameRanges(mixedClips, {kRightStrafeClip, kBackCrossRecoveryClip, kLeftStrafeClip}, check);
+        check(!mixedClips.BuildMotionFrames({{rightRecoveryClip, PARS::MotionFrameUsage::CrossStep,
+                {PARS::FootstepMode::BackCross, 0, 4, 89, 88}}}, motionError),
+            "A rear-cross touchdown outside the authored clip is rejected");
         check(!mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::Count}}, motionError) &&
-                mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep).frameCount == crossStepRange.frameCount,
+                mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep).frameCount ==
+                    kLeftStrafeClip.frameCount + kRightStrafeClip.frameCount + kBackCrossRecoveryClip.frameCount,
             "An invalid usage leaves the published range intact");
         check(mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::General}}, motionError),
             "Rebuild the index with only General candidates");

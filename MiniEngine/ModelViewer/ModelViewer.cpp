@@ -80,13 +80,24 @@ namespace
         L"Idle/Idle.gltf", L"Walking/Walking.gltf", L"SlowRun/SlowRun.gltf"};
     const char* const kPreviewNames[] = {"Idle", "Walking", "Slow Run"};
     constexpr uint32_t kPreviewCount = 3;
-    const wchar_t* const kCrossStepFiles[] =
+    struct CrossStepAsset
     {
-        L"WalkStrafeLeft/WalkStrafeLeft.gltf",
-        L"WalkStrafeRight/WalkStrafeRight.gltf",
-        L"WalkStrafeLeftBackCrossRecovery/WalkStrafeLeftBackCrossRecovery.gltf"
+    public:
+        const wchar_t* file;
+        const char* name;
+        PARS::CrossStepWindow swing;
     };
-    const char* const kCrossStepNames[] = {"WalkStrafeLeft", "WalkStrafeRight", "WalkStrafeLeftBackCrossRecovery"};
+
+    // 60 Hz 원본의 발목·발끝 궤적으로 확인한 교차 스윙만 등록한다. 왼발은 0, 오른발은 1이다.
+    const CrossStepAsset kCrossSteps[] =
+    {
+        {L"WalkStrafeLeft/WalkStrafeLeft.gltf", "WalkStrafeLeft", {PARS::FootstepMode::FrontCross, 1, 19, 62, 65}},
+        {L"WalkStrafeRight/WalkStrafeRight.gltf", "WalkStrafeRight", {PARS::FootstepMode::FrontCross, 0, 64, 18, 22}},
+        {L"WalkStrafeLeftBackCrossRecovery/WalkStrafeLeftBackCrossRecovery.gltf", "WalkStrafeLeftBackCrossRecovery",
+            {PARS::FootstepMode::BackCross, 1, 4, 32, 88}},
+        {L"WalkStrafeRightBackCrossRecovery/WalkStrafeRightBackCrossRecovery.gltf", "WalkStrafeRightBackCrossRecovery",
+            {PARS::FootstepMode::BackCross, 0, 4, 32, 88}}
+    };
 
     std::shared_ptr<const Model> LoadAnimationModel(const std::wstring& path, bool forceRebuild,
         SkeletalMeshViewer::AnimationModels& models)
@@ -914,20 +925,20 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
     PARS::AnimInstance& motionSource = mesh.GetAnimInstance();
-    const uint32_t firstCrossStep = static_cast<uint32_t>(motionSource.GetAnimationCount());
-    for (size_t i = 0; i < _countof(kCrossStepFiles); ++i)
+    std::vector<PARS::MotionClipSelection> motionClips{{0, PARS::MotionFrameUsage::General}};
+    for (const CrossStepAsset& asset : kCrossSteps)
     {
-        const std::shared_ptr<const Model> model = LoadAnimationModel(convertedDirectory + kCrossStepFiles[i], forceRebuild, animationModels);
-        if (!motionSource.AddAnimation(kCrossStepNames[i], model))
+        const uint32_t index = static_cast<uint32_t>(motionSource.GetAnimationCount());
+        const std::shared_ptr<const Model> model = LoadAnimationModel(convertedDirectory + asset.file, forceRebuild, animationModels);
+        if (!motionSource.AddAnimation(asset.name, model))
         {
-            m_PreviewError = std::string(u8"교차딛기 클립을 등록하지 못했습니다. ") + kCrossStepNames[i];
+            m_PreviewError = std::string(u8"교차딛기 클립을 등록하지 못했습니다. ") + asset.name;
             character->Destroy();
             return;
         }
+        motionClips.emplace_back(index, PARS::MotionFrameUsage::CrossStep, asset.swing);
     }
-    if (!motionSource.BuildMotionFrames({{0, PARS::MotionFrameUsage::General},
-        {firstCrossStep, PARS::MotionFrameUsage::CrossStep}, {firstCrossStep + 1, PARS::MotionFrameUsage::CrossStep},
-        {firstCrossStep + 2, PARS::MotionFrameUsage::CrossStep}}, m_PreviewError))
+    if (!motionSource.BuildMotionFrames(motionClips, m_PreviewError))
     {
         character->Destroy();
         return;

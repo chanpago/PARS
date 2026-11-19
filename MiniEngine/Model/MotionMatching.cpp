@@ -149,7 +149,7 @@ namespace PARS
         }
     }
 
-    bool AnimInstance::BuildMotionFrames(std::initializer_list<MotionClipSelection> clips, std::string& error)
+    bool AnimInstance::BuildMotionFrames(const std::vector<MotionClipSelection>& clips, std::string& error)
     {
         if (!m_Skeleton || m_Skeleton != m_Owner.GetSkeletalMesh() || clips.size() == 0)
         {
@@ -172,7 +172,7 @@ namespace PARS
                 return false;
             }
             included[clip.clipIndex] = true;
-            database->groups[usageIndex].clipIndices.push_back(clip.clipIndex);
+            database->groups[usageIndex].clips.push_back(clip);
         }
 
         PhysicsSkeleton skeleton;
@@ -203,14 +203,28 @@ namespace PARS
         {
             MotionFrameGroup& group = database->groups[usageIndex];
             group.range.firstFrameIndex = database->frames.size();
-            for (uint32_t clipIndex : group.clipIndices)
+            for (const MotionClipSelection& clip : group.clips)
             {
-                if (!SampleClip(*this, clipIndex, skeleton, bones, samples, error))
+                if (!SampleClip(*this, clip.clipIndex, skeleton, bones, samples, error))
                 {
-                    error = GetAnimationName(clipIndex) + " - " + error;
+                    error = GetAnimationName(clip.clipIndex) + " - " + error;
                     return false;
                 }
-                AppendClipFrames({clipIndex, static_cast<MotionFrameUsage>(usageIndex)}, samples, database->frames);
+                AppendClipFrames(clip, samples, database->frames);
+                const CrossStepWindow& window = clip.crossStep;
+                if (window.mode == FootstepMode::Normal)
+                {
+                    continue;
+                }
+                const size_t last = samples.size() - 1;
+                if (clip.usage != MotionFrameUsage::CrossStep || window.movingFoot >= 2 ||
+                    (window.mode != FootstepMode::FrontCross && window.mode != FootstepMode::BackCross) ||
+                    window.takeoffFrame >= last || window.landingFrame > last || window.takeoffFrame == window.landingFrame ||
+                    (window.recoveryEndFrame != UINT32_MAX && (window.recoveryEndFrame < window.landingFrame || window.recoveryEndFrame > last)))
+                {
+                    error = GetAnimationName(clip.clipIndex) + u8" - 교차딛기 발 또는 이륙·착지 프레임이 유효하지 않습니다.";
+                    return false;
+                }
             }
             group.range.frameCount = database->frames.size() - group.range.firstFrameIndex;
         }
