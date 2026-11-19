@@ -1123,10 +1123,10 @@
       "animation": "WalkStrafeLeftBackCrossRecovery",
       "channels": 195,
       "sample_counts": [
-        115
+        89
       ],
       "durations_seconds": [
-        1.9
+        1.466667
       ],
       "textures": [
         {
@@ -1164,18 +1164,18 @@
             -99.5235595703125
           ],
           "range": [
-            40.038556694984436,
-            21.20978021621704,
-            10.047203063964844
+            40.038392663002014,
+            21.20787286758423,
+            10.039909362792969
           ]
         }
       ],
       "source": "Source/Walk Strafe Left Back Cross Recovery.fbx",
-      "source_sha256": "ad4661fa5a57e2692800f7f301bb9d56ebdcb91595b9d150f2e5f7a0217d099e",
+      "source_sha256": "c641e5e1e41b8e7f65f1403ea16ada859f1df6d50e2d4771d958d87acd0f5841",
       "blender_version": "4.4.3",
       "source_frames": [
         1.0,
-        115.0
+        89.0
       ],
       "source_bones": [
         "mixamorig1:Hips",
@@ -1247,7 +1247,7 @@
       "source_meshes": [
         "Ch36"
       ],
-      "gltf_sha256": "bbbaee2ce413e2fc8185a57f9dfea447939dbb67b197a5eea8d9316afc54f7fe",
+      "gltf_sha256": "c14c3da6c53c4e2bd40204f70d9d4d4ea08a158e1c9734dc4e87fce385da7a12",
       "frames_per_second": 60,
       "source_bones_match_first_clip": true,
       "derived_from": [

@@ -13,34 +13,53 @@
 
 namespace
 {
-    void CheckMotionFrameRanges(const PARS::AnimInstance& animation, const std::array<const char*, 2>& crossStepNames,
+    struct ExpectedMotionClip
+    {
+    public:
+        const char* name;
+        size_t frameCount;
+    };
+
+    constexpr ExpectedMotionClip kIdleClip = {"Idle", 501};
+    constexpr ExpectedMotionClip kLeftStrafeClip = {"WalkStrafeLeft", 89};
+    constexpr ExpectedMotionClip kRightStrafeClip = {"WalkStrafeRight", 89};
+    constexpr ExpectedMotionClip kBackCrossRecoveryClip = {"WalkStrafeLeftBackCrossRecovery", 89};
+
+    void CheckMotionFrameRanges(const PARS::AnimInstance& animation, const std::array<ExpectedMotionClip, 3>& crossStepClips,
         const std::function<void(bool, const char*)>& check)
     {
         const std::vector<PARS::MotionFrame>& frames = animation.GetMotionFrames();
-        check(frames.size() == 679, "Only the three selected clips contribute motion candidates");
+        size_t crossStepFrameCount = 0;
+        for (const ExpectedMotionClip& clip : crossStepClips)
+        {
+            crossStepFrameCount += clip.frameCount;
+        }
+        check(frames.size() == kIdleClip.frameCount + crossStepFrameCount, "Only the selected clips contribute motion candidates");
         for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::General, PARS::MotionFrameUsage::CrossStep})
         {
             const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
             const bool crossStep = usage == PARS::MotionFrameUsage::CrossStep;
-            check(range.firstFrameIndex == (crossStep ? 501u : 0u) && range.frameCount == (crossStep ? 178u : 501u),
+            check(range.firstFrameIndex == (crossStep ? kIdleClip.frameCount : 0) &&
+                range.frameCount == (crossStep ? crossStepFrameCount : kIdleClip.frameCount),
                 "The usage range points to the expected first frame and count");
-            bool valid = true;
-            for (size_t offset = 0; valid && offset < range.frameCount; ++offset)
+            size_t clipStart = range.firstFrameIndex;
+            const size_t clipCount = crossStep ? crossStepClips.size() : 1;
+            for (size_t i = 0; i < clipCount; ++i)
             {
-                const PARS::MotionFrame& frame = frames[range.firstFrameIndex + offset];
-                const char* clipName = crossStep ? crossStepNames[offset / 89] : "Idle";
-                const size_t clipFrame = crossStep ? offset % 89 : offset;
-                valid = frame.usage == usage && animation.GetAnimationName(frame.clipIndex) == clipName &&
-                    std::abs(frame.clipTimeSeconds - static_cast<float>(clipFrame) / 60.0f) < 2e-6f;
-            }
-            check(valid, "Each usage range preserves clip order and 60 Hz sample times");
-            const size_t clipCount = crossStep ? crossStepNames.size() : 1;
-            for (size_t clip = 0; clip < clipCount; ++clip)
-            {
-                const PARS::MotionFrame& source = frames[range.firstFrameIndex + clip * 89 + 30];
+                const ExpectedMotionClip& clip = crossStep ? crossStepClips[i] : kIdleClip;
+                bool valid = true;
+                for (size_t offset = 0; valid && offset < clip.frameCount; ++offset)
+                {
+                    const PARS::MotionFrame& frame = frames[clipStart + offset];
+                    valid = frame.usage == usage && animation.GetAnimationName(frame.clipIndex) == clip.name &&
+                        std::abs(frame.clipTimeSeconds - static_cast<float>(offset) / 60.0f) < 2e-6f;
+                }
+                check(valid, "Each usage range preserves clip order and 60 Hz sample times");
+                const PARS::MotionFrame& source = frames[clipStart + 30];
                 const PARS::MotionMatchResult match = animation.FindMotionMatch(usage, source.features);
                 check(match.clipIndex == source.clipIndex && match.clipTimeSeconds == source.clipTimeSeconds && match.score == 0.0f,
                     "An exact motion query finds the sampled clip and time with zero error");
+                clipStart += clip.frameCount;
             }
         }
     }
@@ -787,17 +806,18 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const std::vector<PARS::MotionFrame>& candidates = dummyAnimation.GetMotionFrames();
         check(&candidates == &playerAnimation.GetMotionFrames(),
             "Player and impact dummy share the initialized motion frames");
-        CheckMotionFrameRanges(dummyAnimation, {"WalkStrafeLeft", "WalkStrafeRight"}, check);
+        CheckMotionFrameRanges(dummyAnimation, {kLeftStrafeClip, kRightStrafeClip, kBackCrossRecoveryClip}, check);
 
         PARS::AnimInstance mixedClips(player.GetMesh());
         mixedClips.Initialize(player.GetMesh().GetSkeletalMesh());
         const PARS::MotionFrameRange crossStepRange = dummyAnimation.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep);
         const uint32_t idleClip = candidates.front().clipIndex;
         const uint32_t leftClip = candidates[crossStepRange.firstFrameIndex].clipIndex;
-        const uint32_t rightClip = candidates.back().clipIndex;
+        const uint32_t rightClip = candidates[crossStepRange.firstFrameIndex + kLeftStrafeClip.frameCount].clipIndex;
+        const uint32_t recoveryClip = candidates.back().clipIndex;
         const PARS::MotionMatchResult crossMatch = dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, candidates.front().features);
-        check((crossMatch.clipIndex == leftClip || crossMatch.clipIndex == rightClip) && crossMatch.score > 0.0f,
-            "A CrossStep query matching Idle exactly still chooses a frame from the two strafe clips");
+        check((crossMatch.clipIndex == leftClip || crossMatch.clipIndex == rightClip || crossMatch.clipIndex == recoveryClip) && crossMatch.score > 0.0f,
+            "A CrossStep query matching Idle exactly still chooses a frame from the CrossStep clips");
         PARS::MotionFeatures invalidQuery = candidates.front().features;
         invalidQuery.footVelocities[1].y = std::numeric_limits<float>::quiet_NaN();
         check(dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, invalidQuery).clipIndex == UINT32_MAX,
@@ -805,16 +825,16 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         std::string motionError;
         check(mixedClips.ShareMotionFramesFrom(playerAnimation, motionError) &&
                 mixedClips.BuildMotionFrames({{rightClip, PARS::MotionFrameUsage::CrossStep}, {idleClip, PARS::MotionFrameUsage::General},
-                    {leftClip, PARS::MotionFrameUsage::CrossStep}}, motionError),
+                    {recoveryClip, PARS::MotionFrameUsage::CrossStep}, {leftClip, PARS::MotionFrameUsage::CrossStep}}, motionError),
             "Build interleaved usages on a separate animation instance");
-        CheckMotionFrameRanges(mixedClips, {"WalkStrafeRight", "WalkStrafeLeft"}, check);
+        CheckMotionFrameRanges(mixedClips, {kRightStrafeClip, kBackCrossRecoveryClip, kLeftStrafeClip}, check);
         check(!mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::Count}}, motionError) &&
                 mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep).frameCount == crossStepRange.frameCount,
             "An invalid usage leaves the published range intact");
         check(mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::General}}, motionError),
             "Rebuild the index with only General candidates");
         const PARS::MotionFrameRange emptyRange = mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep);
-        check(emptyRange.firstFrameIndex == 501 && emptyRange.frameCount == 0,
+        check(emptyRange.firstFrameIndex == kIdleClip.frameCount && emptyRange.frameCount == 0,
             "An unused CrossStep range is empty at the end of the candidate array");
         check(mixedClips.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, candidates.front().features).clipIndex == UINT32_MAX,
             "An empty CrossStep group produces no match");

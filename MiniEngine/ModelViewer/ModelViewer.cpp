@@ -80,8 +80,13 @@ namespace
         L"Idle/Idle.gltf", L"Walking/Walking.gltf", L"SlowRun/SlowRun.gltf"};
     const char* const kPreviewNames[] = {"Idle", "Walking", "Slow Run"};
     constexpr uint32_t kPreviewCount = 3;
-    const wchar_t* const kCrossStepFiles[] = {L"WalkStrafeLeft/WalkStrafeLeft.gltf", L"WalkStrafeRight/WalkStrafeRight.gltf"};
-    const char* const kCrossStepNames[] = {"WalkStrafeLeft", "WalkStrafeRight"};
+    const wchar_t* const kCrossStepFiles[] =
+    {
+        L"WalkStrafeLeft/WalkStrafeLeft.gltf",
+        L"WalkStrafeRight/WalkStrafeRight.gltf",
+        L"WalkStrafeLeftBackCrossRecovery/WalkStrafeLeftBackCrossRecovery.gltf"
+    };
+    const char* const kCrossStepNames[] = {"WalkStrafeLeft", "WalkStrafeRight", "WalkStrafeLeftBackCrossRecovery"};
 
     std::shared_ptr<const Model> LoadAnimationModel(const std::wstring& path, bool forceRebuild,
         SkeletalMeshViewer::AnimationModels& models)
@@ -921,7 +926,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
     if (!motionSource.BuildMotionFrames({{0, PARS::MotionFrameUsage::General},
-        {firstCrossStep, PARS::MotionFrameUsage::CrossStep}, {firstCrossStep + 1, PARS::MotionFrameUsage::CrossStep}}, m_PreviewError))
+        {firstCrossStep, PARS::MotionFrameUsage::CrossStep}, {firstCrossStep + 1, PARS::MotionFrameUsage::CrossStep},
+        {firstCrossStep + 2, PARS::MotionFrameUsage::CrossStep}}, m_PreviewError))
     {
         character->Destroy();
         return;
