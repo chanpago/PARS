@@ -69,20 +69,13 @@ namespace
     void ConfigureLandingComValidation(PARS::SkeletalMeshComponent& mesh, std::ostream& report)
     {
         PARS::FootstepSettings& settings = mesh.GetFootSupport().GetFootstepSettings();
-        uint32_t enabled = settings.landingComClampEnabled ? 1 : 0;
-        CommandLineArgs::GetInteger(L"landingcomclamp", enabled);
-        settings.landingComClampEnabled = enabled != 0;
         uint32_t recoveryEnabled = settings.recovery.enabled ? 1 : 0;
         CommandLineArgs::GetInteger(L"footsteprecovery", recoveryEnabled);
         settings.recovery.enabled = recoveryEnabled != 0;
         uint32_t recoverySteps = settings.recovery.maximumSteps;
         CommandLineArgs::GetInteger(L"footsteprecoverysteps", recoverySteps);
         settings.recovery.maximumSteps = physx::PxClamp(recoverySteps, uint32_t(1), uint32_t(3));
-        CommandLineArgs::GetFloat(L"landingcomhysteresis", settings.landingComClampHysteresisDegrees);
-        report << "landing_com_clamp=" << settings.landingComClampEnabled
-            << " region=opposite_grounded_sole"
-            << " hysteresis=" << settings.landingComClampHysteresisDegrees
-            << " minimum_stance_ratio=" << settings.minimumStanceWidthRatio
+        report << "cross_region=support_sole_forward_line minimum_stance_ratio=" << settings.minimumStanceWidthRatio
             << " prevent_crossing=" << settings.preventCrossing << std::endl;
         report << "footstep_recovery=" << settings.recovery.enabled << " maximum_steps=" << settings.recovery.maximumSteps << std::endl;
     }
@@ -90,10 +83,10 @@ namespace
     void WriteLandingComHeader(std::ostream& stream)
     {
         stream << "frame,physics_step,side,mode,root_release,recovery,phase,started,landed,moving,grounded,locked,"
-            "enabled,limited,direction,prediction_valid,com_x,com_z,start_x,start_z,raw_x,raw_z,clamped_x,clamped_z,"
+            "prediction_valid,com_x,com_z,start_x,start_z,raw_x,raw_z,"
             "target_x,target_z,sole_x,sole_y,sole_z,leg_contacts,recovery_count,return_count,landing_error,falling,standing_up,"
-            "region_valid,support_foot,region_origin_x,region_origin_z,front_ray_x,front_ray_z,back_ray_x,back_ray_z,region_width_degrees,"
-            "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
+            "region_valid,support_foot,line_center_x,line_center_z,forward_x,forward_z,outward_x,outward_z,"
+            "start_valid,com_outside,prediction_outside,needs_step,"
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "command_step,command_mode,motion_search_step,match_clip,match_time_s,match_score,"
@@ -104,14 +97,15 @@ namespace
     {
         const PARS::FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
         const PARS::RecoverySnapshot& recovery = mesh.GetRecoverySnapshot();
-        const PARS::FootstepComPrediction& start = support.footstep.startCom;
+        const PARS::FootstepSnapshot& step = support.footstep;
         FootSoleDebug debug;
         std::string contactText;
         const uint32_t contacts = debug.GetLegContacts(&mesh, contactText);
         for (size_t side = 0; side < support.feet.size(); ++side)
         {
             const PARS::FootstepCommand& command = support.footstep.feet[side];
-            const PARS::FootstepComPrediction& landing = support.footstep.candidates[side].landingCom;
+            const PARS::FootstepTarget& target = step.candidates[side];
+            const PARS::FootstepCrossRegion& region = step.crossRegions[1 - side];
             const PARS::FootstepRecoverySnapshot& decision = support.footstep.candidates[side].recovery;
             const Math::Vector3 sole(support.feet[side].soleWorld.GetW());
             // 현재 예측, 잠긴 명령 목표, 실제 발바닥과 회복 결과를 서로 다른 열로 기록한다.
@@ -120,22 +114,16 @@ namespace
                 << ',' << static_cast<int>(recovery.state) << ',' << static_cast<int>(command.phase)
                 << ',' << command.justStarted << ',' << command.justLanded << ',' << command.IsInProgress()
                 << ',' << support.feet[side].contact.grounded << ',' << command.motion.landingTargetLocked
-                << ',' << landing.enabled << ',' << landing.limited << ',' << static_cast<int>(landing.direction)
-                << ',' << landing.valid << ',' << support.centerOfMass.x << ',' << support.centerOfMass.z
-                << ',' << support.footstep.predictedCom.x << ',' << support.footstep.predictedCom.z
-                << ',' << landing.raw.x << ',' << landing.raw.z << ',' << landing.clamped.x << ',' << landing.clamped.z
+                << ',' << target.valid << ',' << step.comProjection.x << ',' << step.comProjection.z
+                << ',' << step.predictedCom.x << ',' << step.predictedCom.z << ',' << target.landingCom.x << ',' << target.landingCom.z
                 << ',' << command.target.position.x << ',' << command.target.position.z
                 << ',' << float(sole.GetX()) << ',' << float(sole.GetY()) << ',' << float(sole.GetZ())
                 << ',' << contacts << ',' << recovery.recoveryCount << ',' << recovery.returnCount
                 << ',' << command.motion.landingError << ',' << mesh.IsFollowingFallingAnimation()
-                << ',' << mesh.IsFollowingStandingUpAnimation() << ',' << landing.region.valid << ',' << landing.region.supportFoot
-                << ',' << landing.region.origin.x << ',' << landing.region.origin.z
-                << ',' << landing.region.frontRay.x << ',' << landing.region.frontRay.z
-                << ',' << landing.region.backRay.x << ',' << landing.region.backRay.z
-                << ',' << landing.region.halfAngleRadians * 360.0f / physx::PxPi
-                << ',' << start.raw.x << ',' << start.raw.z << ',' << start.limited
-                << ',' << start.region.valid << ',' << start.region.supportFoot
-                << ',' << PARS::IsInsideFootstepLandingRegion(start.region, support.footstep.predictedCom)
+                << ',' << mesh.IsFollowingStandingUpAnimation() << ',' << region.valid << ',' << (1 - side)
+                << ',' << region.center.x << ',' << region.center.z << ',' << region.forward.x << ',' << region.forward.z
+                << ',' << region.outward.x << ',' << region.outward.z << ',' << step.hasPrediction << ',' << region.Contains(step.comProjection)
+                << ',' << (step.hasPrediction && region.Contains(step.predictedCom))
                 << ',' << support.footstep.needsStep
                 << ',' << static_cast<int>(decision.mode) << ',' << static_cast<int>(decision.status)
                 << ',' << decision.hasTarget << ',' << decision.modelFeasible << ',' << decision.poseChecks
@@ -214,49 +202,69 @@ namespace
         return compared > 0;
     }
 
-    bool LandingComDebugMatchesPrediction(const PARS::SkeletalMeshComponent& mesh)
+    bool CrossRegionDebugMatchesPlanner(const PARS::SkeletalMeshComponent& mesh)
     {
-        Math::Vector3 center(Math::kZero);
-        float mass = 0;
-        if (!mesh.GetRagdoll().GetCenterOfMass(center, mass))
+        using namespace physx;
+        const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
+        const int supportFoot = step.GetCrossRegionSupportFoot();
+        PxBounds3 ground = PxBounds3::empty();
+        std::vector<const PARS::FootstepCrossRegion*> visible;
+        for (size_t side = 0; side < step.crossRegions.size(); ++side)
+        {
+            const PARS::FootstepCrossRegion& region = step.crossRegions[side];
+            if (region.valid && (supportFoot < 0 || supportFoot == static_cast<int>(side)))
+            {
+                ground.include(region.center - PxVec3(1, 0, 1));
+                ground.include(region.center + PxVec3(1, 0, 1));
+                visible.push_back(&region);
+            }
+        }
+        FootSoleDebug debug;
+        std::vector<PxDebugLine> lines;
+        std::vector<PxDebugTriangle> triangles;
+        debug.BuildCrossRegionGeometry(mesh, ground, lines, triangles);
+        if (lines.size() != visible.size())
         {
             return false;
         }
-        const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
-        if (step.hasPrediction && step.requestedFoot >= 0 && step.requestedFoot < static_cast<int>(step.feet.size()))
+        constexpr PxU32 red = 0xffff3030;
+        for (const PARS::FootstepCrossRegion* region : visible)
         {
-            center = Math::Vector3(step.startCom.origin.x, step.startCom.origin.y, step.startCom.origin.z);
-            if (step.startCom.enabled && PARS::IsInsideFootstepLandingRegion(step.startCom.region, step.predictedCom))
+            bool lineFound = false;
+            bool fillFound = false;
+            for (const PxDebugLine& line : lines)
+            {
+                const PxVec3 edge = line.pos1 - line.pos0;
+                lineFound = lineFound || (line.color0 == red && line.color1 == red &&
+                    std::abs(edge.getNormalized().dot(region->forward)) > .9999f &&
+                    std::abs((line.pos0 - region->center).dot(region->outward)) < 1e-5f &&
+                    (line.pos0 - region->center).dot(edge) <= 0 && (line.pos1 - region->center).dot(edge) >= 0);
+            }
+            for (const PxDebugTriangle& triangle : triangles)
+            {
+                const PARS::FootstepPolygon face{triangle.pos0, triangle.pos1, triangle.pos2};
+                fillFound = fillFound || PARS::IsInsideFootSupportHull(face, region->center + region->outward * .02f);
+            }
+            if (!lineFound || !fillFound)
             {
                 return false;
             }
         }
-        FootSoleDebug debug;
-        std::vector<physx::PxDebugLine> lines;
-        debug.BuildLines(mesh, lines);
-        const physx::PxU32 regionColor = mesh.GetFootSupport().GetFootstepSettings().landingComClampEnabled ?
-            0xff55cc77 : 0xff889099;
-        float minimumX = PX_MAX_F32;
-        float maximumX = -PX_MAX_F32;
-        float minimumZ = PX_MAX_F32;
-        float maximumZ = -PX_MAX_F32;
-        unsigned regionLines = 0;
-        for (const physx::PxDebugLine& line : lines)
+        for (const PxDebugTriangle& triangle : triangles)
         {
-            if (line.color0 != regionColor || line.color1 != regionColor)
+            bool outside = false;
+            for (const PARS::FootstepCrossRegion* region : visible)
             {
-                continue;
+                outside = outside || ((triangle.pos0 - region->center).dot(region->outward) >= -1e-5f &&
+                    (triangle.pos1 - region->center).dot(region->outward) >= -1e-5f &&
+                    (triangle.pos2 - region->center).dot(region->outward) >= -1e-5f);
             }
-            minimumX = (std::min)(minimumX, (std::min)(line.pos0.x, line.pos1.x));
-            maximumX = (std::max)(maximumX, (std::max)(line.pos0.x, line.pos1.x));
-            minimumZ = (std::min)(minimumZ, (std::min)(line.pos0.z, line.pos1.z));
-            maximumZ = (std::max)(maximumZ, (std::max)(line.pos0.z, line.pos1.z));
-            ++regionLines;
+            if (!outside || triangle.color0 != red || triangle.color1 != red || triangle.color2 != red)
+            {
+                return false;
+            }
         }
-        // 예측이 있으면 같은 스텝의 원점을, 없으면 현재 COM의 미리보기 원점을 검증한다.
-        const float tolerance = (std::max)(2e-5f, (maximumX - minimumX + maximumZ - minimumZ) * .001f);
-        return regionLines >= 64 && std::abs((minimumX + maximumX) * .5f - float(center.GetX())) <= tolerance &&
-            std::abs((minimumZ + maximumZ) * .5f - float(center.GetZ())) <= tolerance;
+        return true;
     }
 }
 
@@ -272,9 +280,9 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
     std::ofstream landingCom(path + L".landing-com.csv");
     landingCom.precision(9);
     uint32_t validateFootAlignment = 0;
-    uint32_t validateLandingRegion = 0;
+    uint32_t validateCrossRegion = 0;
     CommandLineArgs::GetInteger(L"validatefootalignment", validateFootAlignment);
-    CommandLineArgs::GetInteger(L"validatelandingregion", validateLandingRegion);
+    CommandLineArgs::GetInteger(L"validatecrossregion", validateCrossRegion);
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -373,10 +381,10 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             world.Tick(1.0f / 60.0f);
             test.Update();
             RecordLandingComFrame(landingCom, mesh, frame);
-            if (validateLandingRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
+            if (validateCrossRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
                 mesh.GetFootSupport().GetSnapshot().footstep.hasGroundPlane))
             {
-                check(LandingComDebugMatchesPrediction(mesh), "Rendered region matches the cyan prediction without forbidden-sector penetration");
+                check(CrossRegionDebugMatchesPlanner(mesh), "Support lines and red ground triangles match the crossover decision regions");
                 ++validatedDebugFrames;
             }
             check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");
@@ -545,6 +553,8 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     std::ofstream capsules(path + L".capsules.csv");
     std::ofstream landingCom(path + L".landing-com.csv");
     landingCom.precision(9);
+    uint32_t validateCrossRegion = 0;
+    CommandLineArgs::GetInteger(L"validatecrossregion", validateCrossRegion);
     uint32_t kinematicPlayer = 0;
     uint32_t modeCycles = 0;
     uint32_t incoming = 0;
@@ -686,6 +696,10 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             world.Tick(1.0f / 60.0f);
             test.Update();
             RecordLandingComFrame(landingCom, dummy->GetMesh(), frame);
+            if (validateCrossRegion)
+            {
+                check(CrossRegionDebugMatchesPlanner(dummy->GetMesh()), "Support lines and red ground triangles match the crossover decision regions");
+            }
             if (contactCheck && world.IsPhysicsPaused())
             {
                 FootSoleDebug debug;

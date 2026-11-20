@@ -4,6 +4,7 @@
 #include "PhysicsWorld.h"
 #include "PhysicsPose.h"
 #include "FootstepLandingQuery.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -578,8 +579,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.normal = foot.contact.normal;
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
         target.normalImpulse = foot.contact.normalImpulse;
-        target.corners = foot.corners;
-        target.hasSoleRectangle = foot.available;
+        target.hasGroundProjection = std::find(foot.projected.begin(), foot.projected.end(), true) != foot.projected.end();
 
         // idle기준 발배치 오프셋을 현재 캐릭터 방향으로 돌림
         const PxVec3 offset = referenceFeet[side] - midpoint;

@@ -1,8 +1,9 @@
-# 발딛기 시작·착지 COM 예측 제한 명세
+# 이전 COM 부채꼴 보정 실험 기록
 
-작성·수정일: 2026년 11월 17일
+2026년 11월 20일에 지지발 전방 직선 판정으로 교체하면서 부채꼴 계산·표시·설정은 제거했다. 아래는 이전 구현의 측정 기록이다. [현재 교차 판정과 디버그 표시](FOOTSTEP_RECOVERY_REGIONS.md)
 
-현재 구현은 사용자가 확인한 두 조건을 따른다. 원점은 현재 COM을 따라 이동하고, 금지 구간은 현재 COM에서 실제 지지발 사각형의 바깥 꼭짓점으로 향하는 두 레이 사이이다. 기존 고정 45° 방식과 해당 각도 조절 설정은 제거했다.
+<details>
+<summary>2026년 11월 17일 기준 동작과 재현 방법</summary>
 
 ## 제한 대상과 입력
 
@@ -126,6 +127,8 @@ ModelViewer.exe -physics 1 -bodyimpacttest <절대경로/report.txt> -kinematicc
 `report.txt.landing-com.csv`에 현재 COM, 원래·보정 예측, 지지발 번호, 구간 원점, 두 경계 방향, 계산된 금지 폭, 저장 목표, 실제 착지와 낙상·기상을 구분해 기록한다. `start_x/z`는 보정된 시작 예측이며, `start_raw_x/z`, `start_limited`, `start_region_valid`, `start_support_foot`, `start_inside_forbidden`, `needs_step`으로 시작 보정과 실제 시작 판정을 확인한다.
 
 기존 45° 구현의 비교 기록은 `.tools/footstep-com-clamp-20261116`에 남아 있으며 현재 사각형 기반 구현의 검증 결과로 사용하지 않는다. 새 검증 산출물은 `.tools/footstep-com-foot-rays-20261116`에 저장한다.
+
+</details>
 
 ## 사각형 기반 구현의 검증 결과
 

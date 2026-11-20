@@ -2309,26 +2309,30 @@ void ModelViewer::RenderScene(void)
     if (m_PhysicsDemo && !(m_Comparison && m_Comparison->IsShowingScene()))
     {
         m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
+        std::vector<physx::PxDebugTriangle> regions;
+        std::vector<physx::PxDebugLine> lines;
         if (m_ImpactTest)
         {
             m_PhysicsDemo->RenderSpheres(gfxContext, m_Camera, viewport, scissor,
                 m_ImpactTest->GetProjectiles(), RagdollImpactTest::SphereRadius);
             if (PARS::Character* dummy = m_ImpactTest->GetDummy())
             {
-                std::vector<physx::PxDebugTriangle> regions;
+                const PARS::FootSupportSnapshot& sample = dummy->GetMesh().GetFootSupport().GetSnapshot();
+                m_DummyFootSoles.BuildCrossRegionGeometry(dummy->GetMesh(),
+                    m_PhysicsDemo->GetGroundBounds(sample.projectedCenterOfMass.y), lines, regions);
                 m_DummyFootSoles.BuildRegionTriangles(dummy->GetMesh(), regions);
-                m_PhysicsDemo->RenderDebugTriangles(gfxContext, m_Camera, viewport, scissor, regions);
             }
-            std::vector<physx::PxDebugLine> lines;
             m_ImpactTest->BuildLines(lines);
-            m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
         }
         if (PARS::Character* character = GetPreviewCharacter())
         {
-            std::vector<physx::PxDebugLine> lines;
+            const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
+            m_PlayerFootSoles.BuildCrossRegionGeometry(character->GetMesh(),
+                m_PhysicsDemo->GetGroundBounds(sample.projectedCenterOfMass.y), lines, regions);
             m_PlayerFootSoles.BuildLines(character->GetMesh(), lines);
-            m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
         }
+        m_PhysicsDemo->RenderDebugTriangles(gfxContext, m_Camera, viewport, scissor, regions);
+        m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);
     }
 #endif
     // 일부 시스템은 동적/스키닝 메시를 더 잘 추적하려고 픽셀별 속도 버퍼를 생성한다.

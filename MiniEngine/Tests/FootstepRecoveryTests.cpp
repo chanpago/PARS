@@ -256,8 +256,7 @@ namespace
             foot.position = geometry.feet[side].position;
             foot.contactPosition = foot.position;
             foot.stanceOffset = foot.position;
-            foot.hasSoleRectangle = true;
-            std::copy(geometry.feet[side].sole.begin(), geometry.feet[side].sole.end(), foot.corners.begin());
+            foot.hasGroundProjection = true;
             foot.reach = geometry.feet[side];
             foot.calfLength = .5f;
             foot.normalImpulse = input.bodyWeight * input.fixedDeltaTime * .5f;
@@ -271,36 +270,55 @@ namespace
 
     void TestTakeoffModeSelection()
     {
-        FootstepSettings settings;
+        const FootstepSettings settings;
         FootstepInput input = PlannerInput();
         input.com.z = 0;
         input.velocity = PxVec3(-.04f, 0, 0);
         FootstepPlanner planner;
         planner.Update(input, settings);
-        Check(planner.GetSnapshot().startCom.limited && !planner.GetSnapshot().needsStep && planner.GetSnapshot().startCount == 0,
-            "A short prediction inside the support hull cannot start a crossover just by entering the cone");
+        const FootstepSnapshot& step = planner.GetSnapshot();
+        Check(!step.crossRegions[0].Contains(step.predictedCom) && !step.needsStep && step.startCount == 0,
+            "A prediction between the feet cannot start a crossover in a stable stance");
 
-        input.velocity = PxVec3(-.30f, 0, .12f);
-        settings.landingComClampEnabled = false;
-        planner.Reset();
-        planner.Update(input, settings);
-        Check(planner.GetSnapshot().feet[1].justStarted && planner.GetSnapshot().feet[1].target.recovery.mode == FootstepMode::Normal,
-            "Without the cone preference the same recoverable demand starts a normal step");
-        settings.landingComClampEnabled = true;
+        for (size_t moving = 0; moving < input.feet.size(); ++moving)
+        {
+            const size_t support = 1 - moving;
+            const float sign = support == 0 ? -1.0f : 1.0f;
+            for (float speed : {-.06f, .06f})
+            {
+                input = PlannerInput();
+                input.requestedFoot = static_cast<int>(moving);
+                input.com = PxVec3(sign * .14f, 1, 0);
+                input.velocity = PxVec3(sign * speed, 0, .16f);
+                input.hull = Rectangle(-.5f, .5f, -.4f, .4f);
+                planner.Reset();
+                planner.Update(input, settings);
+                Check(step.crossRegions[support].Contains(step.comProjection) &&
+                    step.crossRegions[support].Contains(step.predictedCom) == (speed > 0) &&
+                    IsInsideFootSupportHull(input.hull, step.predictedCom) && step.feet[moving].justStarted &&
+                    step.feet[moving].target.recovery.mode != FootstepMode::Normal,
+                    "Current COM outside either support line requests a crossover even with the prediction back inside");
+            }
+        }
+
         for (const FootstepMode mode : {FootstepMode::FrontCross, FootstepMode::BackCross})
         {
             input = PlannerInput();
             input.com.z = 0;
             input.velocity = PxVec3(-.30f, 0, mode == FootstepMode::FrontCross ? .12f : -.12f);
+            if (mode == FootstepMode::BackCross)
+            {
+                input.hull = Rectangle(-.5f, .5f, -.4f, .4f);
+            }
             planner.Reset();
             planner.Update(input, settings);
-            const FootstepSnapshot& step = planner.GetSnapshot();
             const FootstepCommand& command = step.feet[1];
             const size_t modeIndex = static_cast<size_t>(mode);
-            Check(step.startCom.limited && !IsInsideFootSupportHull(input.hull, step.startCom.raw) &&
+            Check(!step.crossRegions[0].Contains(step.comProjection) && step.crossRegions[0].Contains(step.predictedCom) &&
+                IsInsideFootSupportHull(input.hull, step.predictedCom) == (mode == FootstepMode::BackCross) &&
                 step.candidates[1].recovery.overlapAreas[0] > 0 && step.candidates[1].recovery.overlapAreas[modeIndex] > 0 &&
                 command.justStarted && command.target.recovery.hasTarget && command.target.recovery.mode == mode,
-                "A valid crossover beats an available normal target on the first grounded cone sample");
+                "A predicted crossing selects a valid crossover on the first grounded sample");
 
             const PxVec3 firstTarget = command.target.position;
             input.feet[1].grounded = false;
@@ -338,8 +356,8 @@ namespace
         planner.Reset();
         planner.Update(input, settings);
         const FootstepCommand& fallback = planner.GetSnapshot().feet[1];
-        Check(planner.GetSnapshot().startCom.limited && fallback.justStarted && fallback.target.recovery.hasTarget &&
-            fallback.target.recovery.poseRejected && fallback.target.recovery.mode == FootstepMode::Normal,
+        Check(step.crossRegions[0].Contains(step.predictedCom) && fallback.justStarted &&
+            fallback.target.recovery.hasTarget && fallback.target.recovery.poseRejected && fallback.target.recovery.mode == FootstepMode::Normal,
             "Rejected cross poses leave a pose check for a valid normal fallback");
     }
 
@@ -422,8 +440,8 @@ namespace
             "a raw inward demand branches before normal COM and minimum-width corrections");
         Check(first.target.position.x < input.feet[0].position.x,
             "the legacy crossing clamp is not applied to the selected crossover target");
-        Check(!first.target.landingCom.enabled && !first.target.landingCom.limited,
-            "crossover debug metadata does not claim that the bypassed normal COM clamp was applied");
+        Check(first.target.landingCom == PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime, 0,
+            input.com.z + input.velocity.z * settings.landingPredictionTime), "Crossover landing COM keeps the linear prediction");
         Check(first.target.recovery.capture.empty() && !planner.GetSnapshot().candidates[1].recovery.capture.empty(),
             "prediction copies keep only decision metadata while the debug candidate keeps region geometry");
         planner.ReportRecoveryPath(1, first.target.position, false);

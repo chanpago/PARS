@@ -19,6 +19,8 @@ public:
     void BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
     void BuildRegionTriangles(const PARS::SkeletalMeshComponent& mesh,
         std::vector<physx::PxDebugTriangle>& triangles) const;
+    void BuildCrossRegionGeometry(const PARS::SkeletalMeshComponent& mesh, const physx::PxBounds3& ground,
+        std::vector<physx::PxDebugLine>& lines, std::vector<physx::PxDebugTriangle>& triangles) const;
 
 public:
     uint32_t GetLegContacts(PARS::SkeletalMeshComponent* dummy, std::string& text) const;
@@ -39,7 +41,7 @@ private:
     bool m_ShowCenterOfMass = true;
     bool m_ShowBuffer = true;
     bool m_ShowFootstep = true;
-    bool m_ShowLandingComClamp = true;
+    bool m_ShowCrossRegion = true;
     bool m_ShowLandingFoot = true;
     bool m_ShowRecoveryRegions = true;
 };

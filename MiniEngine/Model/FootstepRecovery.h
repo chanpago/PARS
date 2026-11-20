@@ -106,6 +106,7 @@ namespace PARS
     };
 
     // 볼록 조각을 별도로 보존한다. 조각 사이의 금지 공간을 볼록 껍질로 채우지 않는다.
+    FootstepPolygon ClipFootstepPolygon(const FootstepPolygon& polygon, const physx::PxVec3& normal, float offset);
     FootstepPolygon IntersectFootstepPolygons(const FootstepPolygon& first, const FootstepPolygon& second);
     float FootstepPolygonArea(const FootstepPolygon& polygon);
     physx::PxVec3 ClosestFootstepPoint(const FootstepPolygon& polygon, const physx::PxVec3& point);
