@@ -305,11 +305,33 @@ uint32_t FootSoleDebug::GetLegContacts(PARS::SkeletalMeshComponent* dummy, std::
     return AppendLegContacts(dummy, u8"더미", text);
 }
 
+std::string FootSoleDebug::GetFollowedAnimationText(const PARS::SkeletalMeshComponent& mesh)
+{
+    const PARS::AnimInstance& animation = mesh.GetAnimInstance();
+    const PARS::CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
+    const bool crossStep = playback.clipIndex < animation.GetAnimationCount();
+    const uint32_t clip = crossStep ? playback.clipIndex : animation.GetCurrentAnimationIndex();
+    if (clip >= animation.GetAnimationCount())
+    {
+        return u8"없음";
+    }
+
+    const float time = crossStep ? playback.timeSeconds : animation.GetAnimationTime();
+    char timing[128];
+    std::snprintf(timing, sizeof(timing), " (%.2f / %.2f s)", time, animation.GetAnimationDuration(clip));
+    std::string text = animation.GetAnimationName(clip) + timing;
+    if (crossStep && playback.blendingOut)
+    {
+        text += u8" · 기본 자세 복귀 중";
+    }
+    return text;
+}
+
 std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponent& mesh) const
 {
     const PARS::FootstepCollisionSnapshot& prediction = mesh.GetFootstepCollisionSnapshot();
     const PARS::FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
-    std::string decisionText;
+    std::string statusText;
     const PARS::FootstepRecoverySnapshot* decision = VisibleRecovery(mesh);
     if (decision)
     {
@@ -317,21 +339,24 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
         std::snprintf(message, sizeof(message), u8"[딛기 판단] %s · %s · 최대 %u스텝 · %.3fms\n",
             RecoveryDecisionLabel(*decision), PARS::FootstepRecoveryStatusLabel(decision->status),
             decision->steps, decision->elapsedMilliseconds);
-        decisionText = message;
+        statusText = message;
     }
+    statusText += u8"[추종 애니메이션] ";
+    statusText += GetFollowedAnimationText(mesh);
+    statusText += '\n';
     if (!support.footstep.IsInProgress())
     {
-        return decisionText + u8"[더미] 목표 경로 예측: 이동 명령 없음";
+        return statusText + u8"[더미] 목표 경로 예측: 이동 명령 없음";
     }
     if (!mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled)
     {
-        return decisionText + u8"[더미] 이동 경로 충돌 예측 꺼짐";
+        return statusText + u8"[더미] 이동 경로 충돌 예측 꺼짐";
     }
     if (prediction.status == PARS::FootstepCollisionStatus::Unavailable ||
         prediction.status == PARS::FootstepCollisionStatus::Inactive ||
         prediction.revision != support.footstep.revision || prediction.completedStep != support.footstep.completedStep)
     {
-        return decisionText + u8"[더미] 목표 경로 예측: 검사 불가 (유효한 다리 자세·충돌 형상 필요)";
+        return statusText + u8"[더미] 목표 경로 예측: 검사 불가 (유효한 다리 자세·충돌 형상 필요)";
     }
 
     const PARS::FootstepAvoidanceSnapshot& avoidance = mesh.GetFootstepAvoidanceSnapshot();
@@ -355,7 +380,7 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
         u8"[더미] %s · %s · 후보 %u개 · 전체 %u구간 / %u쌍 · %.3fms · 추종 오차 %.1fcm",
         route, state, avoidance.candidatesChecked, avoidance.totalIntervals, avoidance.totalQueries,
         prediction.elapsedMilliseconds, prediction.maximumTrackingError * 100);
-    std::string text = decisionText + summary;
+    std::string text = statusText + summary;
     if (prediction.assumesTakeoff)
     {
         text += u8" (들기 완료 후 이륙 가정)";

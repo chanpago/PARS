@@ -7,6 +7,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <limits>
 #include <array>
@@ -578,6 +579,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             "Open actual-character body impact validation");
         std::string error;
         check(test.Reset(), "Reset grounded Idle dummy with original automatic support");
+        const FootSoleDebug overlay;
+        check(overlay.GetLegPredictionText(dummy->GetMesh()).find(u8"[추종 애니메이션] Idle (0.00 / ") != std::string::npos,
+            "Top overlay shows the idle clip and time before a step");
         ConfigureLandingComValidation(dummy->GetMesh(), report);
         WriteLandingComHeader(landingCom);
         if (contactCheck)
@@ -799,6 +803,12 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 check(!playback.blendingOut && playback.searchStep == matched->motionSearchStep &&
                     playback.clipIndex == matched->motionMatch.clipIndex && std::abs(playback.timeSeconds - expectedTime) < 1e-5f,
                     "The active cross-step follows its matched clip on the physics clock");
+                char timingPrefix[64];
+                std::snprintf(timingPrefix, sizeof(timingPrefix), " (%.2f / ", expectedTime);
+                const std::string expectedLabel = std::string(u8"[추종 애니메이션] ") +
+                    dummyMesh.GetAnimInstance().GetAnimationName(matched->motionMatch.clipIndex) + timingPrefix;
+                check(overlay.GetLegPredictionText(dummyMesh).find(expectedLabel) != std::string::npos,
+                    "Top overlay shows the matched cross-step clip and current sample time");
             }
             if (playback.clipIndex != UINT32_MAX && !playback.blendingOut && playback.blendAlpha == 1.0f)
             {

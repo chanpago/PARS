@@ -578,13 +578,7 @@ void RagdollImpactTest::DrawUI(Character* player)
             SkeletalMeshComponent& mesh = dummy->GetMesh();
             ImGui::Text(u8"물리 모드: %s", mesh.IsActiveRagdoll() ? u8"액티브 래그돌" :
                 mesh.IsRagdoll() ? u8"패시브 래그돌" : mesh.IsBlendingToKinematic() ? u8"키네마틱 복귀 보간" : u8"키네마틱");
-            const AnimInstance& animation = mesh.GetAnimInstance();
-            const CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
-            const bool crossStep = playback.clipIndex != UINT32_MAX;
-            const uint32_t clip = crossStep ? playback.clipIndex : animation.GetCurrentAnimationIndex();
-            const float clipTime = crossStep ? playback.timeSeconds : animation.GetAnimationTime();
-            ImGui::Text(u8"추종 애니메이션  %s (%.2f / %.2f s)%s", animation.GetAnimationName(clip).c_str(),
-                clipTime, animation.GetAnimationDuration(clip), playback.blendingOut ? u8" · 기본 자세 복귀 중" : "");
+            ImGui::Text(u8"추종 애니메이션  %s", FootSoleDebug::GetFollowedAnimationText(mesh).c_str());
             float stableDuration = mesh.GetKinematicStableDuration();
             if (ImGui::DragFloat(u8"A영역 복귀 대기 시간", &stableDuration, .1f, .1f, 10.0f, "%.1f s", ImGuiSliderFlags_AlwaysClamp))
             {
