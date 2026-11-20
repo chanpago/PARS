@@ -175,6 +175,15 @@ namespace
         result = SelectFootstepRecovery(input, settings);
         Check(result.hasTarget && !result.modelFeasible && result.status == FootstepRecoveryStatus::BestEffort,
             "unreachable recovery is reported as best effort rather than feasible");
+        const FootstepRecoverySettings threeSteps;
+        input.modeLocked = true;
+        for (FootstepMode mode : {FootstepMode::Normal, FootstepMode::FrontCross, FootstepMode::BackCross})
+        {
+            input.previousMode = mode;
+            result = SelectFootstepRecovery(input, threeSteps);
+            Check(result.hasTarget && result.status == FootstepRecoveryStatus::BestEffort && result.mode == mode,
+                "three-step best-effort search stays within the mode chosen for the step");
+        }
         input = Input();
         input.feet[1].hip.y = 2;
         result = SelectFootstepRecovery(input, settings);
@@ -334,7 +343,7 @@ namespace
             checksRun <= settings.maximumPoseChecks, "both regions share a single pose-check budget");
     }
 
-    void TestPlannerIntegration()
+    FootstepInput PlannerInput()
     {
         FootstepInput input;
         input.active = true;
@@ -372,6 +381,67 @@ namespace
         {
             return true;
         };
+        return input;
+    }
+
+    void TestStepModeLock()
+    {
+        FootstepInput input = PlannerInput();
+        FootstepSettings settings;
+        settings.recovery.maximumSteps = 1;
+        FootstepPlanner planner;
+        const FootstepCommand& command = planner.GetSnapshot().feet[1];
+        const FootstepRecoverySnapshot& search = planner.GetSnapshot().candidates[1].recovery;
+
+        input.com.z = 0;
+        input.velocity = PxVec3(0, 0, .6f);
+        planner.Update(input, settings);
+        Check(command.justStarted && command.target.recovery.hasTarget && command.target.recovery.mode == FootstepMode::Normal,
+            "the forward step starts in normal mode");
+        const PxVec3 normalTarget = command.target.position;
+
+        input.feet[1].grounded = false;
+        input.com.z = .15f;
+        input.velocity = PxVec3(-.8f, 0, 0);
+        ++input.completedStep;
+        planner.Update(input, settings);
+        Check(command.phase == FootstepPhase::Airborne && !command.motion.landingTargetLocked &&
+            search.overlapAreas[0] == 0 && search.overlapAreas[1] > 0 && !search.hasTarget &&
+            command.target.recovery.mode == FootstepMode::Normal && command.target.position == normalTarget,
+            "an airborne normal step holds its landing when only a crossover overlaps");
+
+        input.com.z = 0;
+        input.velocity = PxVec3(0, 0, 1.1f);
+        ++input.completedStep;
+        planner.Update(input, settings);
+        Check(search.hasTarget && command.target.recovery.mode == FootstepMode::Normal &&
+            (command.target.position - normalTarget).magnitude() > .01f,
+            "the same normal step can still adjust its landing position");
+
+        input.com.z = -.15f;
+        input.velocity = PxVec3(-.8f, 0, 0);
+        input.feet[1].grounded = true;
+        input.completedStep += static_cast<uint64_t>(std::ceil(settings.stepDuration / input.fixedDeltaTime));
+        planner.Update(input, settings);
+        Check(command.justLanded && command.target.recovery.mode == FootstepMode::Normal,
+            "the normal step retains its mode through landing");
+        ++input.completedStep;
+        planner.Update(input, settings);
+        Check(command.justStarted && command.target.recovery.mode == FootstepMode::BackCross,
+            "the next step of the same foot can select a rear crossover");
+        const PxVec3 crossTarget = command.target.position;
+
+        input.feet[1].grounded = false;
+        input.requestedFoot = 0;
+        ++input.completedStep;
+        planner.Update(input, settings);
+        Check(command.phase == FootstepPhase::Airborne && command.target.recovery.mode == FootstepMode::BackCross &&
+            command.target.position == crossTarget, "selecting the other foot preserves the ongoing crossover");
+    }
+
+    void TestPlannerIntegration()
+    {
+        FootstepInput input = PlannerInput();
         FootstepSettings settings;
         settings.recovery.maximumSteps = 1;
         Check(!settings.pathAvoidanceEnabled, "Footstep path avoidance defaults to off");
@@ -445,6 +515,7 @@ void TestFootstepRecovery()
     TestCaptureAndTiming();
     TestThreeStepReachForBothFeet();
     TestOneStepCaptureMargin();
+    TestStepModeLock();
     TestPlannerIntegration();
     FootstepRecoveryInput input = Input();
     input.velocity = PxVec3(-1.5f, 0, .5f);

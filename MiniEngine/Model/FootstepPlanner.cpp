@@ -256,6 +256,7 @@ namespace
             return normal;
         }
         const FootstepCommand& command = state.feet[side];
+        const bool inProgress = command.IsInProgress();
         FootstepRecoveryInput request;
         request.movingFoot = side;
         request.com = input.com;
@@ -266,14 +267,15 @@ namespace
         request.preferred = PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime,
             request.groundHeight, input.com.z + input.velocity.z * settings.landingPredictionTime) +
             PxVec3(input.feet[side].stanceOffset.x, 0, input.feet[side].stanceOffset.z) * settings.stanceScale;
-        request.stepping = needsStep || command.IsInProgress();
-        request.locked = command.IsInProgress() && command.motion.landingTargetLocked;
+        request.modeLocked = inProgress;
+        request.stepping = needsStep || inProgress;
+        request.locked = inProgress && command.motion.landingTargetLocked;
         request.lockedTarget = command.target.position;
-        request.previousMode = command.IsInProgress() ? command.target.recovery.mode : FootstepMode::Normal;
-        request.hasRejectedTarget = command.IsInProgress() && command.target.recovery.pathRejected && !request.locked;
+        request.previousMode = inProgress ? command.target.recovery.mode : FootstepMode::Normal;
+        request.hasRejectedTarget = inProgress && command.target.recovery.pathRejected && !request.locked;
         request.rejectedTarget = command.target.position;
         const float transfer = (std::max)(settings.recovery.transferTime, settings.supportConfirmationTime);
-        request.firstStepTime = command.IsInProgress() ?
+        request.firstStepTime = inProgress ?
             (std::max)(input.fixedDeltaTime, GetFootstepRemainingTime(command) +
                 (command.hasTakenOff ? 0 : transfer)) : settings.stepDuration * 1.5f + transfer;
         request.followingStepTime = settings.stepDuration * 1.5f + transfer;
@@ -295,10 +297,10 @@ namespace
             return input.acceptsLanding && input.acceptsLanding(side, position);
         };
         normal.recovery = SelectFootstepRecovery(request, settings.recovery);
-        normal.recovery.pathRejected = command.IsInProgress() && command.target.recovery.pathRejected;
-        if (!normal.recovery.hasTarget && command.IsInProgress())
+        normal.recovery.pathRejected = inProgress && command.target.recovery.pathRejected;
+        if (!normal.recovery.hasTarget && inProgress)
         {
-            // 새 후보가 거절되면 진행 중인 교차 목표를 일반 목표로 덮어쓰지 않는다.
+            // 이번 걸음의 모드에서 새 후보를 찾지 못하면 직전 착지점을 유지한다.
             normal.position = command.target.position;
             normal.raw = command.target.raw;
             normal.recovery.mode = command.target.recovery.mode;
@@ -953,7 +955,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         {
             continue;
         }
-        if (!command.motion.landingTargetLocked && candidate.valid)
+        // 이 발의 회복 탐색을 건너뛴 틱에는 기본 일반 목표가 교차 명령을 덮어쓸 수 없다.
+        if (!command.motion.landingTargetLocked && candidate.valid && candidate.recovery.mode == command.target.recovery.mode)
         {
             AssignTarget(command, candidate);
             if (candidate.landingCom.enabled && candidate.landingCom.direction != FootstepLandingDirection::None)

@@ -299,6 +299,10 @@ namespace
         }
         for (size_t mode : order)
         {
+            if (input.modeLocked && mode != previous)
+            {
+                continue;
+            }
             const std::vector<FootstepPolygon> pieces = hasOverlap ? result.intersections[mode] :
                 std::vector<FootstepPolygon>{result.reachable[mode]};
             const PxVec3 preferred = mode == 0 ? input.normalTarget : input.preferred;

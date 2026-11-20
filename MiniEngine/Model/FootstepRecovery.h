@@ -69,6 +69,7 @@ namespace PARS
         bool stepping = false;
         bool locked = false;
         bool hasRejectedTarget = false;
+        bool modeLocked = false; // 진행 중인 걸음은 이전 모드 안에서만 착지점을 갱신한다.
     };
 
     struct FootstepNormalReach
