@@ -9,11 +9,10 @@
 
 namespace PARS
 {
-    // 발 플래너가 교차딛기를 선택했을 때만 CrossStep 후보를 검색한다.
     enum class MotionFrameUsage : std::uint8_t
     {
-        General,
-        CrossStep,
+        Idle,
+        Walking,
         Count
     };
 
@@ -25,30 +24,19 @@ namespace PARS
         std::size_t frameCount = 0;
     };
 
-    // 60 Hz 후보의 프레임 번호다. 착지가 이륙보다 앞에 있으면 클립 끝을 넘어 이어진다.
-    struct CrossStepWindow
+    // 한 보행 주기 안의 이동발(왼발 0, 오른발 1)과 그 발이 착지하는 방식이다.
+    struct WalkingSwing
     {
     public:
+        std::uint32_t movingFoot = UINT32_MAX;
         FootstepMode mode = FootstepMode::Normal;
-        std::uint32_t movingFoot = 0;
-        std::uint32_t takeoffFrame = 0;
-        std::uint32_t landingFrame = 0;
-        std::uint32_t recoveryEndFrame = UINT32_MAX;
     };
 
     struct MotionClipSelection
     {
     public:
-        MotionClipSelection() = default;
-        MotionClipSelection(std::uint32_t index, MotionFrameUsage frameUsage, CrossStepWindow window = {})
-            : clipIndex(index), crossStep(window), usage(frameUsage)
-        {
-        }
-
-    public:
         std::uint32_t clipIndex = UINT32_MAX;
-        CrossStepWindow crossStep;
-        MotionFrameUsage usage = MotionFrameUsage::General;
+        MotionFrameUsage usage = MotionFrameUsage::Idle;
     };
 
     // 클립 후보와 현재 캐릭터가 공유하는 특징이다. 캐릭터가 바라보는 수평 방향을 로컬 전방으로 쓴다.
@@ -74,7 +62,8 @@ namespace PARS
         MotionFeatures features{};
         std::uint32_t clipIndex = UINT32_MAX;
         float clipTimeSeconds = 0.0f;
-        MotionFrameUsage usage = MotionFrameUsage::General;
+        WalkingSwing swing;
+        MotionFrameUsage usage = MotionFrameUsage::Idle;
     };
 
     struct MotionMatchResult

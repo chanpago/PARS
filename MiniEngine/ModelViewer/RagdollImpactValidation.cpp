@@ -4,6 +4,7 @@
 #include "GameFramework/PlayerController.h"
 #include "PreviewAnimInstance.h"
 #include "Util/CommandLineArg.h"
+#include <algorithm>
 #include <fstream>
 #include <stdexcept>
 #include <cmath>
@@ -19,45 +20,83 @@ namespace
     public:
         const char* name;
         size_t frameCount;
+        PARS::WalkingSwing crossedLanding{};
     };
 
     constexpr ExpectedMotionClip kIdleClip = {"Idle", 501};
-    constexpr ExpectedMotionClip kLeftStrafeClip = {"WalkStrafeLeft", 89};
-    constexpr ExpectedMotionClip kRightStrafeClip = {"WalkStrafeRight", 89};
-    constexpr ExpectedMotionClip kBackCrossRecoveryClip = {"WalkStrafeLeftBackCrossRecovery", 89};
-    constexpr ExpectedMotionClip kRightBackCrossRecoveryClip = {"WalkStrafeRightBackCrossRecovery", 89};
+    constexpr ExpectedMotionClip kWalkingClips[] =
+    {
+        {"M_Neutral_Walk_Loop_F", 243},
+        {"M_Neutral_Walk_Loop_B", 245},
+        {"M_Neutral_Walk_Loop_FL", 243, {1, PARS::FootstepMode::FrontCross}},
+        {"M_Neutral_Walk_Loop_FR", 243, {0, PARS::FootstepMode::FrontCross}},
+        {"M_Neutral_Walk_Loop_BL", 245, {1, PARS::FootstepMode::BackCross}},
+        {"M_Neutral_Walk_Loop_BR", 245, {0, PARS::FootstepMode::BackCross}},
+        {"M_Neutral_Walk_Loop_LL", 225, {1, PARS::FootstepMode::BackCross}},
+        {"M_Neutral_Walk_Loop_LR", 241, {1, PARS::FootstepMode::FrontCross}},
+        {"M_Neutral_Walk_Loop_RL", 241, {0, PARS::FootstepMode::FrontCross}},
+        {"M_Neutral_Walk_Loop_RR", 225, {0, PARS::FootstepMode::BackCross}}
+    };
 
     template <size_t ClipCount>
-    void CheckMotionFrameRanges(const PARS::AnimInstance& animation, const ExpectedMotionClip (&crossStepClips)[ClipCount],
+    void CheckMotionFrameRanges(const PARS::AnimInstance& animation, const ExpectedMotionClip (&walkingClips)[ClipCount],
         const std::function<void(bool, const char*)>& check)
     {
         const std::vector<PARS::MotionFrame>& frames = animation.GetMotionFrames();
-        size_t crossStepFrameCount = 0;
-        for (const ExpectedMotionClip& clip : crossStepClips)
+        size_t walkingFrameCount = 0;
+        for (const ExpectedMotionClip& clip : walkingClips)
         {
-            crossStepFrameCount += clip.frameCount;
+            walkingFrameCount += clip.frameCount;
         }
-        check(frames.size() == kIdleClip.frameCount + crossStepFrameCount, "Only the selected clips contribute motion candidates");
-        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::General, PARS::MotionFrameUsage::CrossStep})
+        check(frames.size() == kIdleClip.frameCount + walkingFrameCount, "Only the selected clips contribute motion candidates");
+        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::Idle, PARS::MotionFrameUsage::Walking})
         {
             const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
-            const bool crossStep = usage == PARS::MotionFrameUsage::CrossStep;
-            check(range.firstFrameIndex == (crossStep ? kIdleClip.frameCount : 0) &&
-                range.frameCount == (crossStep ? crossStepFrameCount : kIdleClip.frameCount),
+            const bool walking = usage == PARS::MotionFrameUsage::Walking;
+            check(range.firstFrameIndex == (walking ? kIdleClip.frameCount : 0) &&
+                range.frameCount == (walking ? walkingFrameCount : kIdleClip.frameCount),
                 "The usage range points to the expected first frame and count");
             size_t clipStart = range.firstFrameIndex;
-            const size_t clipCount = crossStep ? ClipCount : 1;
+            const size_t clipCount = walking ? ClipCount : 1;
             for (size_t i = 0; i < clipCount; ++i)
             {
-                const ExpectedMotionClip& clip = crossStep ? crossStepClips[i] : kIdleClip;
+                const ExpectedMotionClip& clip = walking ? walkingClips[i] : kIdleClip;
                 bool valid = true;
-                for (size_t offset = 0; valid && offset < clip.frameCount; ++offset)
+                bool hasNormal = false;
+                bool hasCross = false;
+                for (size_t offset = 0; offset < clip.frameCount; ++offset)
                 {
                     const PARS::MotionFrame& frame = frames[clipStart + offset];
                     valid = frame.usage == usage && animation.GetAnimationName(frame.clipIndex) == clip.name &&
                         std::abs(frame.clipTimeSeconds - static_cast<float>(offset) / 60.0f) < 2e-6f;
+                    if (walking)
+                    {
+                        valid = valid && frame.swing.movingFoot < 2;
+                        if (frame.swing.mode == PARS::FootstepMode::Normal)
+                        {
+                            hasNormal = true;
+                        }
+                        else
+                        {
+                            hasCross = true;
+                            valid = valid && frame.swing.movingFoot == clip.crossedLanding.movingFoot &&
+                                frame.swing.mode == clip.crossedLanding.mode;
+                        }
+                    }
+                    if (!valid)
+                    {
+                        const std::string message = std::string(clip.name) + " frame " + std::to_string(offset) +
+                            ", moving foot " + std::to_string(frame.swing.movingFoot) +
+                            ", mode " + std::to_string(static_cast<int>(frame.swing.mode));
+                        check(false, message.c_str());
+                    }
                 }
-                check(valid, "Each usage range preserves clip order and 60 Hz sample times");
+                check(valid, clip.name);
+                if (walking)
+                {
+                    check(hasNormal && hasCross == (clip.crossedLanding.movingFoot < 2),
+                        "Walking swing labels reproduce the ordinary and crossed landings in the source FBX");
+                }
                 const PARS::MotionFrame& source = frames[clipStart + 30];
                 const PARS::MotionMatchResult match = animation.FindMotionMatch(usage, source.features);
                 check(match.clipIndex == source.clipIndex && match.clipTimeSeconds == source.clipTimeSeconds && match.score == 0.0f,
@@ -145,7 +184,7 @@ namespace
             {
                 stream << ",,,";
             }
-            const PARS::CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
+            const PARS::WalkingPlayback& playback = mesh.GetWalkingPlayback();
             if (playback.movingFoot == static_cast<int>(side))
             {
                 stream << ',' << mesh.GetAnimInstance().GetAnimationName(playback.clipIndex)
@@ -159,9 +198,9 @@ namespace
         }
     }
 
-    bool CrossStepSpineDrivesMatchClip(const PARS::SkeletalMeshComponent& mesh, const PARS::PhysicsSkeleton& skeleton)
+    bool WalkingSpineDrivesMatchClip(const PARS::SkeletalMeshComponent& mesh, const PARS::PhysicsSkeleton& skeleton)
     {
-        const PARS::CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
+        const PARS::WalkingPlayback& playback = mesh.GetWalkingPlayback();
         const PARS::Ragdoll& ragdoll = mesh.GetRagdoll();
         const PARS::PhysicsAsset& asset = *mesh.GetPhysicsAsset();
         const std::vector<Math::Quaternion>& drives = ragdoll.GetJointDriveTargets();
@@ -391,8 +430,8 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");
             if (mesh.IsFalling() || mesh.IsFollowingStandingUpAnimation())
             {
-                check(mesh.GetCrossStepPlayback().clipIndex == UINT32_MAX,
-                    "Falling and standing up release the cross-step drive pose");
+                check(mesh.GetWalkingPlayback().clipIndex == UINT32_MAX,
+                    "Falling and standing up release the walking drive pose");
             }
             if (mesh.GetPhysicsMode() != previousMode)
             {
@@ -785,11 +824,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const SkeletalMeshComponent& dummyMesh = dummy->GetMesh();
             const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
             const FootstepSnapshot& step = dummySupport.footstep;
-            const CrossStepPlayback& playback = dummyMesh.GetCrossStepPlayback();
+            const WalkingPlayback& playback = dummyMesh.GetWalkingPlayback();
             const FootstepCommand* matched = nullptr;
             for (const FootstepCommand& command : step.feet)
             {
-                if (command.IsInProgress() && command.target.recovery.mode != FootstepMode::Normal &&
+                if (command.IsInProgress() &&
                     command.motionMatch.clipIndex != UINT32_MAX && (!matched || command.motionSearchStep > matched->motionSearchStep))
                 {
                     matched = &command;
@@ -799,21 +838,21 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 !dummyMesh.GetRecoverySnapshot().blending)
             {
                 const float elapsed = static_cast<float>((step.completedStep - matched->motionSearchStep) * PhysicsWorld::FixedDeltaTime);
-                const float expectedTime = dummyMesh.GetAnimInstance().GetCrossStepPlaybackTime(matched->motionMatch, elapsed);
+                const float expectedTime = dummyMesh.GetAnimInstance().GetWalkingPlaybackTime(matched->motionMatch, elapsed);
                 check(!playback.blendingOut && playback.searchStep == matched->motionSearchStep &&
                     playback.clipIndex == matched->motionMatch.clipIndex && std::abs(playback.timeSeconds - expectedTime) < 1e-5f,
-                    "The active cross-step follows its matched clip on the physics clock");
+                    "The active step follows its matched walking clip on the physics clock");
                 char timingPrefix[64];
                 std::snprintf(timingPrefix, sizeof(timingPrefix), " (%.2f / ", expectedTime);
                 const std::string expectedLabel = std::string(u8"[추종 애니메이션] ") +
                     dummyMesh.GetAnimInstance().GetAnimationName(matched->motionMatch.clipIndex) + timingPrefix;
                 check(overlay.GetLegPredictionText(dummyMesh).find(expectedLabel) != std::string::npos,
-                    "Top overlay shows the matched cross-step clip and current sample time");
+                    "Top overlay shows the matched walking clip and current sample time");
             }
             if (playback.clipIndex != UINT32_MAX && !playback.blendingOut && playback.blendAlpha == 1.0f)
             {
-                check(CrossStepSpineDrivesMatchClip(dummyMesh, dummySkeleton),
-                    "Spine drive targets match the sampled cross-step clip after joint limits");
+                check(WalkingSpineDrivesMatchClip(dummyMesh, dummySkeleton),
+                    "Spine drive targets match the sampled walking clip after joint limits");
             }
             const FootstepAvoidanceSnapshot& avoidance = dummyMesh.GetFootstepAvoidanceSnapshot();
             const FootstepCollisionSnapshot& prediction = dummyMesh.GetFootstepCollisionSnapshot();
@@ -918,64 +957,57 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const std::vector<PARS::MotionFrame>& candidates = dummyAnimation.GetMotionFrames();
         check(&candidates == &playerAnimation.GetMotionFrames(),
             "Player and impact dummy share the initialized motion frames");
-        CheckMotionFrameRanges(dummyAnimation, {kLeftStrafeClip, kRightStrafeClip, kBackCrossRecoveryClip, kRightBackCrossRecoveryClip}, check);
+        CheckMotionFrameRanges(dummyAnimation, kWalkingClips, check);
 
         PARS::AnimInstance mixedClips(player.GetMesh());
         mixedClips.Initialize(player.GetMesh().GetSkeletalMesh());
-        const PARS::MotionFrameRange crossStepRange = dummyAnimation.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep);
+        const PARS::MotionFrameRange walkingRange = dummyAnimation.GetMotionFrameRange(PARS::MotionFrameUsage::Walking);
         const uint32_t idleClip = candidates.front().clipIndex;
-        const uint32_t leftClip = candidates[crossStepRange.firstFrameIndex].clipIndex;
-        const uint32_t rightClip = candidates[crossStepRange.firstFrameIndex + kLeftStrafeClip.frameCount].clipIndex;
-        const size_t leftRearStart = crossStepRange.firstFrameIndex + kLeftStrafeClip.frameCount + kRightStrafeClip.frameCount;
-        const uint32_t recoveryClip = candidates[leftRearStart].clipIndex;
-        const size_t rightRearStart = leftRearStart + kBackCrossRecoveryClip.frameCount;
-        const uint32_t rightRecoveryClip = candidates[rightRearStart].clipIndex;
+        const uint32_t forwardClip = candidates[walkingRange.firstFrameIndex].clipIndex;
+        const uint32_t backwardClip = candidates[walkingRange.firstFrameIndex + kWalkingClips[0].frameCount].clipIndex;
         const float fixedStep = PhysicsWorld::FixedDeltaTime;
-        const float rightDuration = dummyAnimation.GetAnimationDuration(rightClip);
-        const PARS::MotionMatchResult wrapped{rightClip, rightDuration - fixedStep, 0.0f};
-        check(std::abs(dummyAnimation.GetCrossStepPlaybackTime(wrapped, 0) - wrapped.clipTimeSeconds) < 1e-6f &&
-                std::abs(dummyAnimation.GetCrossStepPlaybackTime(wrapped, 2.0f * fixedStep) - fixedStep) < 1e-6f,
-            "A wrapped cross-step starts at the match and continues across the clip boundary");
-        const float recoveryDuration = dummyAnimation.GetAnimationDuration(recoveryClip);
-        const PARS::MotionMatchResult oneShot{recoveryClip, recoveryDuration - fixedStep, 0.0f};
-        check(dummyAnimation.GetCrossStepPlaybackTime(oneShot, 2.0f * fixedStep) == recoveryDuration,
-            "A one-shot recovery holds its last pose if the physical step outlasts the clip");
-        const PARS::MotionFeatures& airborne = candidates[rightRearStart + 16].features;
-        const PARS::MotionFeatures& touchdown = candidates[rightRearStart + 32].features;
-        const PARS::MotionMatchResult rearMatch = dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, airborne);
-        check(rearMatch.clipIndex == rightRecoveryClip && rearMatch.score == 0.0f &&
-                std::abs(rearMatch.clipTimeSeconds - 16 / 60.0f) < 1e-5f &&
-                airborne.footPositions[0].y > airborne.footPositions[1].y + 0.10f &&
-                touchdown.footPositions[0].z < touchdown.footPositions[1].z,
-            "The rightward rear-cross candidate matches the lifted left foot and lands behind the right foot");
-        const PARS::MotionMatchResult crossMatch = dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, candidates.front().features);
-        check(crossMatch.clipIndex == leftClip || crossMatch.clipIndex == rightClip ||
-                crossMatch.clipIndex == recoveryClip || crossMatch.clipIndex == rightRecoveryClip,
-            "A CrossStep query matching Idle exactly still chooses a frame from the CrossStep clips");
-        PARS::MotionFeatures invalidQuery = candidates.front().features;
+        const float duration = dummyAnimation.GetAnimationDuration(forwardClip);
+        const PARS::MotionMatchResult wrapped{forwardClip, duration - fixedStep, 0.0f};
+        check(std::abs(dummyAnimation.GetWalkingPlaybackTime(wrapped, 0) - wrapped.clipTimeSeconds) < 1e-6f &&
+                std::abs(dummyAnimation.GetWalkingPlaybackTime(wrapped, duration + 2.0f * fixedStep) - fixedStep) < 1e-6f,
+            "A walking match keeps its start time and can advance across multiple loop boundaries");
+        const PARS::MotionFeatures& query = candidates.front().features;
+        for (uint32_t side = 0; side < 2; ++side)
+        {
+            for (PARS::FootstepMode mode : {PARS::FootstepMode::Normal, PARS::FootstepMode::FrontCross, PARS::FootstepMode::BackCross})
+            {
+                const PARS::MotionMatchResult match = dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::Walking, query, {side, mode});
+                const std::vector<PARS::MotionFrame>::const_iterator found = std::find_if(candidates.begin(), candidates.end(),
+                    [&match](const PARS::MotionFrame& frame) -> bool
+                    {
+                        return frame.clipIndex == match.clipIndex && frame.clipTimeSeconds == match.clipTimeSeconds;
+                    });
+                check(found != candidates.end() && found->usage == PARS::MotionFrameUsage::Walking &&
+                        found->swing.movingFoot == side && found->swing.mode == mode,
+                    "Walking can match either foot for an ordinary, front-cross or back-cross step from the same query");
+            }
+        }
+        PARS::MotionFeatures invalidQuery = query;
         invalidQuery.footVelocities[1].y = std::numeric_limits<float>::quiet_NaN();
-        check(dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, invalidQuery).clipIndex == UINT32_MAX,
+        check(dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::Walking, invalidQuery).clipIndex == UINT32_MAX,
             "A non-finite motion query cannot select a clip");
         std::string motionError;
         check(mixedClips.ShareMotionFramesFrom(playerAnimation, motionError) &&
-                mixedClips.BuildMotionFrames({{rightClip, PARS::MotionFrameUsage::CrossStep}, {idleClip, PARS::MotionFrameUsage::General},
-                    {recoveryClip, PARS::MotionFrameUsage::CrossStep}, {leftClip, PARS::MotionFrameUsage::CrossStep}}, motionError),
+                mixedClips.BuildMotionFrames({{backwardClip, PARS::MotionFrameUsage::Walking}, {idleClip, PARS::MotionFrameUsage::Idle},
+                    {forwardClip, PARS::MotionFrameUsage::Walking}}, motionError),
             "Build interleaved usages on a separate animation instance");
-        CheckMotionFrameRanges(mixedClips, {kRightStrafeClip, kBackCrossRecoveryClip, kLeftStrafeClip}, check);
-        check(!mixedClips.BuildMotionFrames({{rightRecoveryClip, PARS::MotionFrameUsage::CrossStep,
-                {PARS::FootstepMode::BackCross, 0, 4, 89, 88}}}, motionError),
-            "A rear-cross touchdown outside the authored clip is rejected");
+        CheckMotionFrameRanges(mixedClips, {kWalkingClips[1], kWalkingClips[0]}, check);
         check(!mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::Count}}, motionError) &&
-                mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep).frameCount ==
-                    kLeftStrafeClip.frameCount + kRightStrafeClip.frameCount + kBackCrossRecoveryClip.frameCount,
+                mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::Walking).frameCount ==
+                    kWalkingClips[0].frameCount + kWalkingClips[1].frameCount,
             "An invalid usage leaves the published range intact");
-        check(mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::General}}, motionError),
-            "Rebuild the index with only General candidates");
-        const PARS::MotionFrameRange emptyRange = mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::CrossStep);
+        check(mixedClips.BuildMotionFrames({{idleClip, PARS::MotionFrameUsage::Idle}}, motionError),
+            "Rebuild the index with only Idle candidates");
+        const PARS::MotionFrameRange emptyRange = mixedClips.GetMotionFrameRange(PARS::MotionFrameUsage::Walking);
         check(emptyRange.firstFrameIndex == kIdleClip.frameCount && emptyRange.frameCount == 0,
-            "An unused CrossStep range is empty at the end of the candidate array");
-        check(mixedClips.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, candidates.front().features).clipIndex == UINT32_MAX,
-            "An empty CrossStep group produces no match");
+            "An unused Walking range is empty at the end of the candidate array");
+        check(mixedClips.FindMotionMatch(PARS::MotionFrameUsage::Walking, query).clipIndex == UINT32_MAX,
+            "An empty Walking group produces no match");
         check(dummy->GetMesh().IsActiveRagdoll() && dummy->GetMesh().GetRagdoll().IsRootSupported(),
             "Dummy is dynamic with angular drives and pelvis support enabled");
         const std::function<void()> tick = [&]() -> void

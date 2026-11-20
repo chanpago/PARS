@@ -729,7 +729,7 @@ namespace PARS
             return false;
         }
         m_RagdollSourcePose = GetRagdollAnimationPose();
-        ResetCrossStepPlayback();
+        ResetWalkingPlayback();
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;

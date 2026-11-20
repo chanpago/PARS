@@ -25,6 +25,7 @@ namespace PARS
             Math::Vector3 pelvis;
             Math::Matrix3 toHeadingSpace;
             std::array<Math::Vector3, 2> feet;
+            std::array<Math::Vector3, 2> modelFeet;
             float time;
         };
 
@@ -105,6 +106,7 @@ namespace PARS
                 for (size_t foot = 0; foot < bones.feet.size(); ++foot)
                 {
                     const Math::Vector3 position(modelPose[bones.feet[foot]].GetW());
+                    sample.modelFeet[foot] = position;
                     sample.feet[foot] = sample.toHeadingSpace * (position - sample.pelvis);
                     if (DirectX::XMVector3IsNaN(sample.feet[foot]) || DirectX::XMVector3IsInfinite(sample.feet[foot]))
                     {
@@ -116,35 +118,95 @@ namespace PARS
             return true;
         }
 
+        void MarkWalkingSwings(const std::vector<MotionSample>& samples, MotionFrame* frames)
+        {
+            // 마지막 키는 다음 주기의 첫 자세다. 모델 공간 발목 이동량으로 양발이 지지를 교대하는 시점을 찾는다.
+            const size_t period = samples.size() - 1;
+            const Math::Vector3 travel = samples.back().pelvis - samples.front().pelvis;
+            // 30 Hz 원본의 양옆 키까지 비교해 루프 봉합부의 한 보간 프레임을 지지발 교대로 오인하지 않는다.
+            const size_t radius = (std::min)(size_t(2), period / 2);
+            for (size_t i = 0; i < period; ++i)
+            {
+                const MotionSample& previous = samples[(i + period - radius) % period];
+                const MotionSample& next = samples[(i + radius) % period];
+                const Math::Vector3 wrap = i < radius || i + radius >= period ? travel : Math::Vector3(Math::kZero);
+                const float left = Math::LengthSquare(next.modelFeet[0] - previous.modelFeet[0] + wrap);
+                const float right = Math::LengthSquare(next.modelFeet[1] - previous.modelFeet[1] + wrap);
+                frames[i].swing.movingFoot = left > right ? 0 : 1;
+            }
+
+            bool hasTransfer = false;
+            for (size_t i = 0; i < period; ++i)
+            {
+                const uint32_t movingFoot = frames[i].swing.movingFoot;
+                if (movingFoot == frames[(i + 1) % period].swing.movingFoot)
+                {
+                    continue;
+                }
+                hasTransfer = true;
+                const Math::Vector3 separation = samples[i].modelFeet[0] - samples[i].modelFeet[1];
+                FootstepMode mode = FootstepMode::Normal;
+                // 믹사모 기준 자세에서 +X는 왼쪽, +Z는 전방이다. 착지 때 발의 좌우 순서와 앞뒤를 읽는다.
+                if (separation.GetX() < 0.0f)
+                {
+                    const float forward = movingFoot == 0 ? float(separation.GetZ()) : -float(separation.GetZ());
+                    mode = forward >= 0.0f ? FootstepMode::FrontCross : FootstepMode::BackCross;
+                }
+                size_t swingFrame = i;
+                do
+                {
+                    frames[swingFrame].swing.mode = mode;
+                    swingFrame = swingFrame == 0 ? period - 1 : swingFrame - 1;
+                }
+                while (frames[swingFrame].swing.movingFoot == movingFoot);
+            }
+            if (!hasTransfer)
+            {
+                for (size_t i = 0; i < period; ++i)
+                {
+                    frames[i].swing = {};
+                }
+            }
+            frames[period].swing = frames[0].swing;
+        }
+
         void AppendClipFrames(const MotionClipSelection& clip, const std::vector<MotionSample>& samples,
             std::vector<MotionFrame>& frames)
         {
             const size_t last = samples.size() - 1;
+            const size_t start = frames.size();
+            const bool walking = clip.usage == MotionFrameUsage::Walking;
+            const Math::Vector3 travel = samples.back().pelvis - samples.front().pelvis;
             const double lookahead = MotionFeatures::PredictionTimeSeconds * static_cast<double>(last) / samples.back().time;
             for (size_t i = 0; i <= last; ++i)
             {
                 const MotionSample& sample = samples[i];
-                // 내부 프레임은 중앙 차분을, 양 끝은 클립 안에서의 단측 차분을 사용한다.
-                const MotionSample& previous = samples[i == 0 ? 0 : i - 1];
-                const MotionSample& next = samples[std::min(i + 1, last)];
+                const MotionSample& previous = samples[i == 0 ? (walking ? last - 1 : 0) : i - 1];
+                const MotionSample& next = samples[i == last ? (walking ? 1 : last) : i + 1];
+                const float interval = walking ? 2.0f * samples.back().time / static_cast<float>(last) : next.time - previous.time;
                 MotionFrame frame;
                 frame.clipIndex = clip.clipIndex;
                 frame.clipTimeSeconds = sample.time;
                 frame.usage = clip.usage;
                 for (size_t foot = 0; foot < sample.feet.size(); ++foot)
                 {
-                    const Math::Vector3 velocity = (next.feet[foot] - previous.feet[foot]) / (next.time - previous.time);
+                    const Math::Vector3 velocity = (next.feet[foot] - previous.feet[foot]) / interval;
                     DirectX::XMStoreFloat3(&frame.features.footPositions[foot], sample.feet[foot]);
                     DirectX::XMStoreFloat3(&frame.features.footVelocities[foot], velocity);
                 }
-                // 예측 구간이 클립 끝을 넘으면 마지막 골반 위치에서 멈춘다.
-                const double future = std::min(i + lookahead, static_cast<double>(last));
+                // 루프 끝에서도 원본의 진행 방향과 속도를 유지해 골반의 미래 변위를 계산한다.
+                const double cycles = walking ? std::floor((i + lookahead) / last) : 0.0;
+                const double future = std::min(i + lookahead - cycles * last, static_cast<double>(last));
                 const size_t first = static_cast<size_t>(future);
                 const size_t second = std::min(first + 1, last);
                 const Math::Vector3 futurePelvis = Math::Lerp(samples[first].pelvis, samples[second].pelvis,
-                    static_cast<float>(future - first));
+                    static_cast<float>(future - first)) + travel * static_cast<float>(cycles);
                 DirectX::XMStoreFloat3(&frame.features.futureDisplacement, sample.toHeadingSpace * (futurePelvis - sample.pelvis));
                 frames.push_back(frame);
+            }
+            if (walking)
+            {
+                MarkWalkingSwings(samples, frames.data() + start);
             }
         }
     }
@@ -211,20 +273,6 @@ namespace PARS
                     return false;
                 }
                 AppendClipFrames(clip, samples, database->frames);
-                const CrossStepWindow& window = clip.crossStep;
-                if (window.mode == FootstepMode::Normal)
-                {
-                    continue;
-                }
-                const size_t last = samples.size() - 1;
-                if (clip.usage != MotionFrameUsage::CrossStep || window.movingFoot >= 2 ||
-                    (window.mode != FootstepMode::FrontCross && window.mode != FootstepMode::BackCross) ||
-                    window.takeoffFrame >= last || window.landingFrame > last || window.takeoffFrame == window.landingFrame ||
-                    (window.recoveryEndFrame != UINT32_MAX && (window.recoveryEndFrame < window.landingFrame || window.recoveryEndFrame > last)))
-                {
-                    error = GetAnimationName(clip.clipIndex) + u8" - 교차딛기 발 또는 이륙·착지 프레임이 유효하지 않습니다.";
-                    return false;
-                }
             }
             group.range.frameCount = database->frames.size() - group.range.firstFrameIndex;
         }
@@ -238,28 +286,19 @@ namespace PARS
         return m_MotionDatabase && MakeHeadingSpace(pelvis, m_MotionDatabase->bindForwardInPelvis, toHeadingSpace);
     }
 
-    float AnimInstance::GetCrossStepPlaybackTime(const MotionMatchResult& match, float elapsed) const
+    float AnimInstance::GetWalkingPlaybackTime(const MotionMatchResult& match, float elapsed) const
     {
         const float duration = GetAnimationDuration(match.clipIndex);
+        if (duration <= 0.0f)
+        {
+            return 0.0f;
+        }
         const float time = match.clipTimeSeconds + elapsed;
-        if (time <= duration || !m_MotionDatabase)
-        {
-            return (std::min)(time, duration);
-        }
-
-        // 이륙 뒤 클립 경계를 넘어 착지하는 교차 스윙만 한 번 이어서 재생한다.
-        const MotionFrameGroup& group = m_MotionDatabase->groups[static_cast<size_t>(MotionFrameUsage::CrossStep)];
-        for (const MotionClipSelection& clip : group.clips)
-        {
-            if (clip.clipIndex == match.clipIndex && clip.crossStep.takeoffFrame > clip.crossStep.landingFrame)
-            {
-                return (std::min)(time - duration, duration);
-            }
-        }
-        return duration;
+        return time <= duration ? time : std::fmod(time, duration);
     }
 
-    MotionMatchResult AnimInstance::FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures) const
+    MotionMatchResult AnimInstance::FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures,
+        const WalkingSwing& swing) const
     {
         const MotionFrameRange range = GetMotionFrameRange(usage);
         const std::vector<MotionFrame>& frames = GetMotionFrames();
@@ -268,6 +307,10 @@ namespace PARS
         for (size_t offset = 0; offset < range.frameCount; ++offset)
         {
             const MotionFrame& frame = frames[range.firstFrameIndex + offset];
+            if (swing.movingFoot != UINT32_MAX && (frame.swing.movingFoot != swing.movingFoot || frame.swing.mode != swing.mode))
+            {
+                continue;
+            }
             float footError = 0.0f;
             for (size_t side = 0; side < currentFeatures.footPositions.size(); ++side)
             {

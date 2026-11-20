@@ -1,0 +1,245 @@
+"""Blender 4.4: blender -b -P Tools/RetargetWalking.py
+
+Source/UnrealWalking의 루프를 기존 Idle 메시와 바인드 포즈에 맞춰 변환한다.
+"""
+import hashlib
+import json
+import math
+import struct
+from copy import deepcopy
+from pathlib import Path
+
+import bpy
+from mathutils import Matrix, Quaternion, Vector
+
+
+ASSETS = Path(__file__).resolve().parents[1] / "Assets/Characters/Mixamo"
+DEST = ASSETS / "Converted/WalkingLoops"
+AXES = Matrix.Rotation(-math.pi / 2, 4, "X")
+MAPPING = dict(Hips="pelvis", Spine="spine_01", Spine1="spine_03", Spine2="spine_05",
+               Neck="neck_01", Head="head")
+AIM = dict(Spine="Spine1", Spine1="Spine2", Spine2="Neck", Neck="Head")
+for side, suffix in (("Left", "_l"), ("Right", "_r")):
+    for chain in [(("Shoulder", "clavicle"), ("Arm", "upperarm"), ("ForeArm", "lowerarm"), ("Hand", "hand")),
+                  (("UpLeg", "thigh"), ("Leg", "calf"), ("Foot", "foot"), ("ToeBase", "ball"))]:
+        for i, (name, source) in enumerate(chain):
+            MAPPING[side + name] = source + suffix
+            if i + 1 < len(chain) and name != "Foot":
+                AIM[side + name] = side + chain[i + 1][0]
+    for finger in ("Thumb", "Index", "Middle", "Ring", "Pinky"):
+        for i in range(1, 4):
+            name = side + "Hand" + finger
+            MAPPING[name + str(i)] = f"{finger.lower()}_0{i}{suffix}"
+            if i < 3:
+                AIM[name + str(i)] = name + str(i + 1)
+
+
+def rotation(matrix):
+    return matrix.to_quaternion().normalized()
+
+
+def read_transform(node):
+    x, y, z, w = node.get("rotation", (0, 0, 0, 1))
+    return Matrix.LocRotScale(Vector(node.get("translation", (0, 0, 0))), Quaternion((w, x, y, z)),
+                              Vector(node.get("scale", (1, 1, 1))))
+
+
+def palm_frame(bones, side):
+    wrist = bones[side + "Hand"].translation
+    index = bones[side + "HandIndex1"].translation - wrist
+    pinky = bones[side + "HandPinky1"].translation - wrist
+    along = (index + pinky).normalized()
+    normal = index.cross(pinky).normalized()
+    return Matrix((along, normal.cross(along), normal)).transposed().to_quaternion()
+
+
+def pointed(orientation, rest_direction, direction):
+    return ((orientation @ rest_direction).rotation_difference(direction) @ orientation).normalized()
+
+
+class Retarget:
+    def __init__(self, template, rig):
+        self.nodes = template["nodes"]
+        self.local = {}
+        self.bind = {}
+        self.parent = {}
+        self.indices = {}
+
+        def visit(index, parent=None):
+            node = self.nodes[index]
+            name = node["name"].split(":")[-1]
+            self.indices[name] = index
+            self.parent[name] = parent
+            self.local[name] = read_transform(node)
+            self.bind[name] = self.bind[parent] @ self.local[name] if parent else self.local[name]
+            for child in node.get("children", []):
+                visit(child, name)
+
+        for index in template["scenes"][template["scene"]]["nodes"]:
+            visit(index)
+        self.rig = rig
+        base = AXES @ rig.matrix_world
+        self.source_bind = {name: base @ rig.data.bones[source].matrix_local for name, source in MAPPING.items()}
+        self.aim_local = {}
+        self.offset = {}
+        for name in MAPPING:
+            target = rotation(self.bind[name])
+            source = rotation(self.source_bind[name])
+            aligned = target
+            if name in AIM:
+                child = AIM[name]
+                direction = self.bind[child].translation - self.bind[name].translation
+                self.aim_local[name] = target.inverted() @ direction
+                aligned = pointed(target, self.aim_local[name], self.source_bind[child].translation - self.source_bind[name].translation)
+            self.offset[name] = source.inverted() @ aligned
+
+        def leg_length(pose):
+            return sum((pose[b].translation - pose[a].translation).length for a, b in
+                       (("LeftUpLeg", "LeftLeg"), ("LeftLeg", "LeftFoot")))
+
+        self.scale = leg_length(self.bind) / leg_length(self.source_bind)
+
+    def sample(self):
+        base = AXES @ self.rig.matrix_world
+        source = {name: base @ self.rig.pose.bones[bone].matrix for name, bone in MAPPING.items()}
+        desired = {name: rotation(matrix) @ self.offset[name] for name, matrix in source.items()}
+        for name, child in AIM.items():
+            desired[name] = pointed(desired[name], self.aim_local[name], source[child].translation - source[name].translation)
+
+        bind = self.bind
+        hips = bind["Hips"].translation + self.scale * (source["Hips"].translation - self.source_bind["Hips"].translation)
+        ankles = {}
+        for side in ("Left", "Right"):
+            hand = side + "Hand"
+            desired[hand] = palm_frame(source, side) @ palm_frame(bind, side).inverted() @ rotation(bind[hand])
+            thigh, calf, foot, toe = (side + n for n in ("UpLeg", "Leg", "Foot", "ToeBase"))
+            ankle = hips + self.scale * (source[foot].translation - source["Hips"].translation)
+            ankle.y = bind[foot].translation.y + self.scale * (source[foot].translation.y - self.source_bind[foot].translation.y)
+            toe_y = bind[toe].translation.y + self.scale * (source[toe].translation.y - self.source_bind[toe].translation.y)
+            toe_offset = desired[foot] @ (rotation(bind[foot]).inverted() @ (bind[toe].translation - bind[foot].translation))
+            ankle.y = max(ankle.y, toe_y - toe_offset.y)
+            ankles[side] = ankle
+
+        # 두 발의 월드 궤적을 보존할 수 있는 높이까지만 골반을 올린다.
+        for side, ankle in ankles.items():
+            thigh, calf, foot = (side + n for n in ("UpLeg", "Leg", "Foot"))
+            leg = self.aim_local[thigh].length + self.aim_local[calf].length
+            hip_offset = desired["Hips"] @ (rotation(bind["Hips"]).inverted() @ (bind[thigh].translation - bind["Hips"].translation))
+            delta = hips + hip_offset - ankle
+            vertical_reach = math.sqrt(max(0, (leg - 0.0001) ** 2 - delta.x ** 2 - delta.z ** 2))
+            hips.y = min(hips.y, ankle.y + vertical_reach - hip_offset.y)
+
+        world = {}
+        keys = {}
+        knees = {}
+        for name, local in self.local.items():
+            parent = world.get(self.parent[name], Matrix.Identity(4))
+            position = parent @ local.translation
+            if name not in desired:
+                world[name] = parent @ local
+                continue
+            if name.endswith("UpLeg"):
+                side = name[:-5]
+                calf = side + "Leg"
+                axis = ankles[side] - position
+                distance = axis.length
+                axis.normalize()
+                pole = source[calf].translation - source[name].translation
+                pole = (pole - axis * pole.dot(axis)).normalized()
+                upper = self.aim_local[name].length
+                lower = self.aim_local[calf].length
+                along = (upper ** 2 - lower ** 2 + distance ** 2) / (2 * distance)
+                knees[side] = position + axis * along + pole * math.sqrt(max(0, upper ** 2 - along ** 2))
+                desired[name] = pointed(desired[name], self.aim_local[name], knees[side] - position)
+            elif name in ("LeftLeg", "RightLeg"):
+                desired[name] = pointed(desired[name], self.aim_local[name], ankles[name[:-3]] - position)
+            local_rot = (rotation(parent).inverted() @ desired[name]).normalized()
+            translation = local.translation
+            if name == "Hips":
+                translation = parent.inverted() @ hips
+                keys[(self.indices[name], "translation")] = tuple(translation)
+            keys[(self.indices[name], "rotation")] = (local_rot.x, local_rot.y, local_rot.z, local_rot.w)
+            world[name] = parent @ Matrix.LocRotScale(translation, local_rot, local.to_scale())
+        return keys
+
+
+def save_clip(template, name, frames, fps):
+    doc = deepcopy(template)
+    times = [(i / fps,) for i in range(len(frames))]
+    # 기존 메시 및 역바인드 행렬은 Idle의 바이너리를 공유한다.
+    first_animation = min(s["input"] for s in doc["animations"][0]["samplers"])
+    first_view = doc["accessors"][first_animation]["bufferView"]
+    doc["accessors"] = doc["accessors"][:first_animation]
+    doc["bufferViews"] = doc["bufferViews"][:first_view]
+    doc["buffers"][0]["uri"] = "../Idle/Idle.bin"
+    data = bytearray()
+
+    def accessor(rows):
+        width = len(rows[0])
+        offset = len(data)
+        pack = struct.Struct("<" + "f" * width).pack
+        for row in rows:
+            data.extend(pack(*row))
+        view = len(doc["bufferViews"])
+        doc["bufferViews"].append(dict(buffer=1, byteOffset=offset, byteLength=len(data) - offset))
+        item = dict(bufferView=view, componentType=5126, count=len(rows), type={1:"SCALAR", 3:"VEC3", 4:"VEC4"}[width])
+        if width == 1:
+            item.update(min=list(rows[0]), max=list(rows[-1]))
+        doc["accessors"].append(item)
+        return len(doc["accessors"]) - 1
+
+    time_index = accessor(times)
+    animation = dict(name=name, channels=[], samplers=[])
+    for node, path in frames[0]:
+        rows = [f[(node, path)] for f in frames]
+        if path == "rotation":
+            for i in range(1, len(rows)):
+                if sum(a * b for a, b in zip(rows[i-1], rows[i])) < 0:
+                    rows[i] = tuple(-x for x in rows[i])
+        animation["channels"].append(dict(sampler=len(animation["samplers"]), target=dict(node=node, path=path)))
+        animation["samplers"].append(dict(input=time_index, output=accessor(rows), interpolation="LINEAR"))
+    doc["animations"] = [animation]
+    doc["buffers"].append(dict(uri=name + ".bin", byteLength=len(data)))
+    (DEST / (name + ".bin")).write_bytes(data)
+    path = DEST / (name + ".gltf")
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def main():
+    template = json.loads((ASSETS / "Converted/Idle/Idle.gltf").read_bytes())
+    manifest_path = ASSETS / "manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    idle = next(clip for clip in manifest["clips"] if clip["animation"] == "Idle")
+    DEST.mkdir(parents=True, exist_ok=True)
+    sources = sorted((ASSETS / "Source/UnrealWalking").glob("*.fbx"))
+    if len(sources) != 10:
+        raise ValueError("UnrealWalking 원본 10개가 필요합니다.")
+    entries = []
+    for file in sources:
+        name = file.name.split(".")[0]
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        bpy.ops.import_scene.fbx(filepath=str(file), automatic_bone_orientation=False)
+        scene = bpy.context.scene
+        rig = next(obj for obj in scene.objects if obj.type == "ARMATURE")
+        start, end = map(int, rig.animation_data.action.frame_range)
+        fps = scene.render.fps / scene.render.fps_base
+        scene.frame_set(start)
+        retarget = Retarget(template, rig)
+        samples = []
+        for frame in range(start, end + 1):
+            scene.frame_set(frame)
+            samples.append(retarget.sample())
+        path = save_clip(template, name, samples, fps)
+        entries.append(dict(animation=name, path=path.relative_to(ASSETS).as_posix(), source=file.relative_to(ASSETS).as_posix(),
+                            source_sha256=hashlib.sha256(file.read_bytes()).hexdigest(), gltf_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                            blender_version=bpy.app.version_string, source_frames=[start, end], frames_per_second=fps,
+                            sample_counts=[len(samples)], durations_seconds=[round((end-start)/fps, 6)], channels=len(samples[0]),
+                            meshes=1, skins=1, joints=idle["joints"], source_rig="Unreal", source_bone_count=len(rig.data.bones),
+                            target_skeleton=idle["path"], textures=idle["textures"]))
+    manifest["clips"] = [clip for clip in manifest["clips"] if not clip["path"].startswith("Converted/WalkingLoops/")] + entries
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

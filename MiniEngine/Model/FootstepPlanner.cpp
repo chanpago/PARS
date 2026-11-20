@@ -12,6 +12,12 @@ namespace
 
     void AssignTarget(FootstepCommand& command, const FootstepTarget& target)
     {
+        if (command.target.recovery.mode != target.recovery.mode)
+        {
+            // 이륙 전에 딛기 방식이 바뀌면 새 방식에 맞는 구간을 다시 선택한다.
+            command.motionSearchStep = UINT64_MAX;
+            command.motionMatch = {};
+        }
         command.target = target;
         // 영역 도형은 이번 틱의 후보에만 보관한다. 경로 검사에서 명령을 복사할 때 힙 할당을 반복하지 않는다.
         command.target.recovery.reachable = {};
@@ -855,13 +861,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             continue;
         }
         command.hasTarget = true;
-        const FootstepMode mode = command.target.recovery.mode;
-        if (command.motionSearchStep == UINT64_MAX && input.findCrossStep && command.target.recovery.hasTarget &&
-            (mode == FootstepMode::FrontCross || mode == FootstepMode::BackCross))
+        if (command.motionSearchStep == UINT64_MAX && input.findWalkingStep)
         {
-            // 교차 목표와 양발 샘플이 모두 준비된 첫 스텝에서 이 명령의 결과를 확정한다.
             command.motionSearchStep = input.completedStep;
-            command.motionMatch = input.findCrossStep();
+            command.motionMatch = input.findWalkingStep({static_cast<uint32_t>(side), command.target.recovery.mode});
         }
         command.reason = command.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;
         UpdateMotion(command, foot, input);

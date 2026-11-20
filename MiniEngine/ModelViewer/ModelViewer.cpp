@@ -80,23 +80,9 @@ namespace
         L"Idle/Idle.gltf", L"Walking/Walking.gltf", L"SlowRun/SlowRun.gltf"};
     const char* const kPreviewNames[] = {"Idle", "Walking", "Slow Run"};
     constexpr uint32_t kPreviewCount = 3;
-    struct CrossStepAsset
+    const char* const kWalkingDirections[] =
     {
-    public:
-        const wchar_t* file;
-        const char* name;
-        PARS::CrossStepWindow swing;
-    };
-
-    // 60 Hz 원본의 발목·발끝 궤적으로 확인한 교차 스윙만 등록한다. 왼발은 0, 오른발은 1이다.
-    const CrossStepAsset kCrossSteps[] =
-    {
-        {L"WalkStrafeLeft/WalkStrafeLeft.gltf", "WalkStrafeLeft", {PARS::FootstepMode::FrontCross, 1, 19, 62, 65}},
-        {L"WalkStrafeRight/WalkStrafeRight.gltf", "WalkStrafeRight", {PARS::FootstepMode::FrontCross, 0, 64, 18, 22}},
-        {L"WalkStrafeLeftBackCrossRecovery/WalkStrafeLeftBackCrossRecovery.gltf", "WalkStrafeLeftBackCrossRecovery",
-            {PARS::FootstepMode::BackCross, 1, 4, 32, 88}},
-        {L"WalkStrafeRightBackCrossRecovery/WalkStrafeRightBackCrossRecovery.gltf", "WalkStrafeRightBackCrossRecovery",
-            {PARS::FootstepMode::BackCross, 0, 4, 32, 88}}
+        "F", "B", "FL", "FR", "BL", "BR", "LL", "LR", "RL", "RR"
     };
 
     std::shared_ptr<const Model> LoadAnimationModel(const std::wstring& path, bool forceRebuild,
@@ -925,18 +911,20 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
     PARS::AnimInstance& motionSource = mesh.GetAnimInstance();
-    std::vector<PARS::MotionClipSelection> motionClips{{0, PARS::MotionFrameUsage::General}};
-    for (const CrossStepAsset& asset : kCrossSteps)
+    std::vector<PARS::MotionClipSelection> motionClips{{0, PARS::MotionFrameUsage::Idle}};
+    for (const char* direction : kWalkingDirections)
     {
         const uint32_t index = static_cast<uint32_t>(motionSource.GetAnimationCount());
-        const std::shared_ptr<const Model> model = LoadAnimationModel(convertedDirectory + asset.file, forceRebuild, animationModels);
-        if (!motionSource.AddAnimation(asset.name, model))
+        const std::string name = std::string("M_Neutral_Walk_Loop_") + direction;
+        const std::wstring path = convertedDirectory + L"WalkingLoops/" + Utility::UTF8ToWideString(name) + L".gltf";
+        const std::shared_ptr<const Model> model = LoadAnimationModel(path, forceRebuild, animationModels);
+        if (!motionSource.AddAnimation(name, model))
         {
-            m_PreviewError = std::string(u8"교차딛기 클립을 등록하지 못했습니다. ") + asset.name;
+            m_PreviewError = std::string(u8"보행 클립을 등록하지 못했습니다. ") + name;
             character->Destroy();
             return;
         }
-        motionClips.emplace_back(index, PARS::MotionFrameUsage::CrossStep, asset.swing);
+        motionClips.push_back({index, PARS::MotionFrameUsage::Walking});
     }
     if (!motionSource.BuildMotionFrames(motionClips, m_PreviewError))
     {

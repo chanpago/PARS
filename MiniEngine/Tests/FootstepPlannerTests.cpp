@@ -95,7 +95,7 @@ namespace
         }
     }
 
-    void TestCrossStepMotionSearch()
+    void TestWalkingMotionSearch()
     {
         FootstepSettings settings = TestSettings();
         settings.stepDuration = .15f;
@@ -117,39 +117,46 @@ namespace
                 foot.position + PxVec3(.04f, 0, .1f), foot.position + PxVec3(-.04f, 0, .1f)};
         }
         uint32_t searches = 0;
-        input.findCrossStep = [&searches]() -> MotionMatchResult
+        WalkingSwing lastSwing;
+        input.findWalkingStep = [&searches, &lastSwing](const WalkingSwing& swing) -> MotionMatchResult
         {
+            lastSwing = swing;
             ++searches;
             return {3, .5f, .125f};
         };
         FootstepPlanner planner;
         planner.Update(input, settings);
         Check(planner.GetSnapshot().feet[1].justStarted && planner.GetSnapshot().feet[1].target.recovery.mode == FootstepMode::Normal &&
-                searches == 0, "A committed normal step does not search motion candidates");
+                searches == 1 && lastSwing.movingFoot == 1 && lastSwing.mode == FootstepMode::Normal,
+            "A committed normal step searches Walking for the requested foot");
         input.velocity = PxVec3(-1.0f, 0, 0);
         input.com.z = .15f;
         Advance(planner, input, settings);
         const FootstepCommand& command = planner.GetSnapshot().feet[1];
-        Check(!command.justStarted && command.target.recovery.mode == FootstepMode::FrontCross && searches == 1 &&
+        Check(!command.justStarted && command.target.recovery.mode == FootstepMode::FrontCross && searches == 2 &&
+                lastSwing.movingFoot == 1 && lastSwing.mode == FootstepMode::FrontCross &&
                 command.motionSearchStep == input.completedStep && command.motionMatch.clipIndex == 3 &&
                 command.motionMatch.clipTimeSeconds == .5f && command.motionMatch.score == .125f,
-            "A normal step retargeted to a front cross stores exactly one motion match");
+            "A grounded change of step mode selects the matching swing from Walking");
         const uint64_t searchStep = command.motionSearchStep;
         planner.Update(input, settings);
+        input.feet[1].grounded = false;
         input.com.z = -.15f;
         Advance(planner, input, settings, 3);
-        Check(searches == 1 && command.motionSearchStep == searchStep, "Repeated ticks and retargets keep the first cross match");
+        Check(searches == 2 && command.motionSearchStep == searchStep, "Repeated ticks and airborne retargets keep the takeoff match");
         planner.Reset();
+        input.feet[1].grounded = true;
         Advance(planner, input, settings);
         Check(command.justStarted && command.target.recovery.mode == FootstepMode::BackCross &&
-                command.motionSearchStep == input.completedStep && searches == 2,
+                command.motionSearchStep == input.completedStep && searches == 3 &&
+                lastSwing.movingFoot == 1 && lastSwing.mode == FootstepMode::BackCross,
             "A new back-cross command starts its own motion search");
         planner.Reset();
-        input.findCrossStep = {};
+        input.findWalkingStep = {};
         Advance(planner, input, settings);
         Check(command.justStarted && command.target.recovery.mode == FootstepMode::BackCross && command.motionSearchStep == UINT64_MAX,
             "A cross step waits for a usable motion query after a reset");
-        input.findCrossStep = [&searches]() -> MotionMatchResult
+        input.findWalkingStep = [&searches](const WalkingSwing&) -> MotionMatchResult
         {
             ++searches;
             return {};
@@ -157,7 +164,7 @@ namespace
         Advance(planner, input, settings);
         const uint64_t firstReadyStep = input.completedStep;
         Advance(planner, input, settings, 2);
-        Check(searches == 3 && command.motionSearchStep == firstReadyStep && command.motionMatch.clipIndex == UINT32_MAX,
+        Check(searches == 4 && command.motionSearchStep == firstReadyStep && command.motionMatch.clipIndex == UINT32_MAX,
             "A cross step records one unsuccessful search on the first usable sample");
     }
 
@@ -794,7 +801,7 @@ void TestFootstepPlanner()
 {
     TestFootstepRecovery();
     checks = 0;
-    TestCrossStepMotionSearch();
+    TestWalkingMotionSearch();
     TestPredictionAndTrajectory();
     TestImpactSelection();
     TestIndependentCommands();

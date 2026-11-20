@@ -382,7 +382,7 @@ bool PARS::FootSupport::SampleMotionQuery(const SkeletalMeshComponent& mesh, Mot
     m_MotionSampleStep = UINT64_MAX;
     const AnimInstance& animation = mesh.GetAnimInstance();
     const Ragdoll& ragdoll = mesh.GetRagdoll();
-    if (animation.GetMotionFrameRange(MotionFrameUsage::CrossStep).frameCount == 0 ||
+    if (animation.GetMotionFrameRange(MotionFrameUsage::Walking).frameCount == 0 ||
         m_MotionHipsBody < 0 || static_cast<size_t>(m_MotionHipsBody) >= ragdoll.GetBodyCount() ||
         !m_Snapshot.feet[0].available || !m_Snapshot.feet[1].available)
     {
@@ -472,9 +472,9 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     MotionFeatures motionQuery;
     if (SampleMotionQuery(mesh, motionQuery))
     {
-        input.findCrossStep = [&animation, &motionQuery]() -> MotionMatchResult
+        input.findWalkingStep = [&animation, &motionQuery](const WalkingSwing& swing) -> MotionMatchResult
         {
-            return animation.FindMotionMatch(MotionFrameUsage::CrossStep, motionQuery);
+            return animation.FindMotionMatch(MotionFrameUsage::Walking, motionQuery, swing);
         };
     }
     FootstepLandingQuery landingQuery;

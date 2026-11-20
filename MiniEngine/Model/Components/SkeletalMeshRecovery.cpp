@@ -536,7 +536,7 @@ namespace PARS
 
     void SkeletalMeshComponent::ResetRecovery()
     {
-        ResetCrossStepPlayback();
+        ResetWalkingPlayback();
         m_FootstepAvoidance.Reset();
         m_FootstepCollision = {};
         m_Recovery.Reset();
@@ -712,7 +712,7 @@ namespace PARS
         // 지지가 해제되거나 발딛기가 중단됐다면 발 보정 정보를 정리
         if (input.fallen)
         {
-            ResetCrossStepPlayback();
+            ResetWalkingPlayback();
             m_HasRecoverySoles = false;
             m_RecoveryBlendSource.clear();
             m_FootstepIK.Reset();
@@ -756,7 +756,7 @@ namespace PARS
         // 복귀 중에는 캡처한 물리 자세에서 현재 애니메이션 자세로 보간
         if (recovery.state == RecoveryState::Animation && recovery.blending)
         {
-            ResetCrossStepPlayback();
+            ResetWalkingPlayback();
             std::vector<GraphNode> pose = m_AnimInstance->GetPose();
             if (m_RecoveryBlendSource.size() != pose.size() || !BlendRecoveryPose(m_RecoveryBlendSource, pose, recovery.blendAlpha))
             {
@@ -774,8 +774,8 @@ namespace PARS
             {
                 m_RecoveryBlendSource.clear();
             }
-            // 지지 영역은 위에서 계산한 대기 자세를 유지하고, 관절 목표에는 교차 포즈를 먼저 적용한다.
-            if (!ApplyCrossStepDrivePose(step, deltaTime, target))
+            // 지지 영역은 위에서 계산한 대기 자세를 유지하고, 관절 목표에는 매칭한 보행 자세를 먼저 적용한다.
+            if (!ApplyWalkingDrivePose(step, deltaTime, target))
             {
                 return false;
             }
@@ -806,9 +806,9 @@ namespace PARS
                 {
                     PxTransform sole(PxIdentity);
                     const FootSoleSample& foot = sample.feet[side];
-                    const bool hasCrossStepHeading = !m_CrossStepPose.empty() && foot.boneNode >= 0 &&
+                    const bool hasWalkingHeading = !m_WalkingPose.empty() && foot.boneNode >= 0 &&
                         static_cast<size_t>(foot.boneNode) < target.size();
-                    const PxTransform heading = hasCrossStepHeading ?
+                    const PxTransform heading = hasWalkingHeading ?
                         ToRecoveryFrame(target[foot.boneNode]) * ToRecoveryFrame(foot.soleInBone) : animatedSoles[side];
                     if (MakeFootSoleTarget(command.motion.position, command.target.normal, heading, sole))
                     {

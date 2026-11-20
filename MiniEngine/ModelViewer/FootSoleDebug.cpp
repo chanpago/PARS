@@ -308,19 +308,19 @@ uint32_t FootSoleDebug::GetLegContacts(PARS::SkeletalMeshComponent* dummy, std::
 std::string FootSoleDebug::GetFollowedAnimationText(const PARS::SkeletalMeshComponent& mesh)
 {
     const PARS::AnimInstance& animation = mesh.GetAnimInstance();
-    const PARS::CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
-    const bool crossStep = playback.clipIndex < animation.GetAnimationCount();
-    const uint32_t clip = crossStep ? playback.clipIndex : animation.GetCurrentAnimationIndex();
+    const PARS::WalkingPlayback& playback = mesh.GetWalkingPlayback();
+    const bool walking = playback.clipIndex < animation.GetAnimationCount();
+    const uint32_t clip = walking ? playback.clipIndex : animation.GetCurrentAnimationIndex();
     if (clip >= animation.GetAnimationCount())
     {
         return u8"없음";
     }
 
-    const float time = crossStep ? playback.timeSeconds : animation.GetAnimationTime();
+    const float time = walking ? playback.timeSeconds : animation.GetAnimationTime();
     char timing[128];
     std::snprintf(timing, sizeof(timing), " (%.2f / %.2f s)", time, animation.GetAnimationDuration(clip));
     std::string text = animation.GetAnimationName(clip) + timing;
-    if (crossStep && playback.blendingOut)
+    if (walking && playback.blendingOut)
     {
         text += u8" · 기본 자세 복귀 중";
     }
@@ -1056,15 +1056,15 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 const PARS::MotionMatchResult& match = command.motionMatch;
                 if (match.clipIndex != UINT32_MAX)
                 {
-                    ImGui::Text(u8"교차 모션 검색  %s  %.3f초  오차 %.5f",
+                    ImGui::Text(u8"보행 모션 검색  %s  %.3f초  오차 %.5f",
                         mesh.GetAnimInstance().GetAnimationName(match.clipIndex).c_str(), match.clipTimeSeconds, match.score);
                 }
                 else
                 {
-                    ImGui::TextUnformatted(u8"교차 모션 검색  유효한 결과 없음");
+                    ImGui::TextUnformatted(u8"보행 모션 검색  유효한 결과 없음");
                 }
             }
-            const PARS::CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
+            const PARS::WalkingPlayback& playback = mesh.GetWalkingPlayback();
             if (playback.movingFoot == static_cast<int>(side))
             {
                 ImGui::Text(u8"관절 목표  %s  %.3f초  ·  %s %.0f%%",

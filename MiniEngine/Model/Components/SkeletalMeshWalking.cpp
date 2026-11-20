@@ -4,15 +4,15 @@ using namespace Math;
 
 namespace PARS
 {
-    void SkeletalMeshComponent::ResetCrossStepPlayback()
+    void SkeletalMeshComponent::ResetWalkingPlayback()
     {
-        m_CrossStepPlayback = {};
-        m_CrossStepTransitionStep = 0;
-        m_CrossStepBlendSource.clear();
-        m_CrossStepPose.clear();
+        m_WalkingPlayback = {};
+        m_WalkingTransitionStep = 0;
+        m_WalkingBlendSource.clear();
+        m_WalkingPose.clear();
     }
 
-    bool SkeletalMeshComponent::ApplyCrossStepDrivePose(const FootstepSnapshot& step, float deltaTime,
+    bool SkeletalMeshComponent::ApplyWalkingDrivePose(const FootstepSnapshot& step, float deltaTime,
         std::vector<Matrix4>& target)
     {
         const FootstepCommand* selected = nullptr;
@@ -21,7 +21,7 @@ namespace PARS
         {
             const FootstepCommand& command = step.feet[side];
             // 매 스텝의 착지 후보가 잠시 비어도 이 명령에서 이미 선택한 포즈는 계속 진행한다.
-            if (command.IsInProgress() && command.target.recovery.mode != FootstepMode::Normal &&
+            if (command.IsInProgress() &&
                 command.motionMatch.clipIndex < m_AnimInstance->GetAnimationCount() &&
                 command.motionSearchStep <= step.completedStep &&
                 (!selected || command.motionSearchStep > selected->motionSearchStep))
@@ -34,64 +34,64 @@ namespace PARS
         const std::vector<GraphNode>& base = m_AnimInstance->GetPose();
         if (selected)
         {
-            if (m_CrossStepPlayback.searchStep != selected->motionSearchStep ||
-                m_CrossStepPlayback.movingFoot != movingFoot || m_CrossStepPlayback.blendingOut)
+            if (m_WalkingPlayback.searchStep != selected->motionSearchStep ||
+                m_WalkingPlayback.movingFoot != movingFoot || m_WalkingPlayback.blendingOut)
             {
                 // 연속 딛기에서도 직전 물리 목표에서 새 클립으로 이어진다.
-                m_CrossStepBlendSource = m_CrossStepPose.empty() ? base : m_CrossStepPose;
-                m_CrossStepTransitionStep = step.completedStep;
-                m_CrossStepPlayback.searchStep = selected->motionSearchStep;
-                m_CrossStepPlayback.clipIndex = selected->motionMatch.clipIndex;
-                m_CrossStepPlayback.movingFoot = movingFoot;
-                m_CrossStepPlayback.blendingOut = false;
+                m_WalkingBlendSource = m_WalkingPose.empty() ? base : m_WalkingPose;
+                m_WalkingTransitionStep = step.completedStep;
+                m_WalkingPlayback.searchStep = selected->motionSearchStep;
+                m_WalkingPlayback.clipIndex = selected->motionMatch.clipIndex;
+                m_WalkingPlayback.movingFoot = movingFoot;
+                m_WalkingPlayback.blendingOut = false;
             }
             const float elapsed = static_cast<float>(step.completedStep - selected->motionSearchStep) * deltaTime;
-            m_CrossStepPlayback.timeSeconds = m_AnimInstance->GetCrossStepPlaybackTime(selected->motionMatch, elapsed);
-            if (!m_AnimInstance->SampleAnimationPose(m_CrossStepPlayback.clipIndex, m_CrossStepPlayback.timeSeconds, m_CrossStepPose))
+            m_WalkingPlayback.timeSeconds = m_AnimInstance->GetWalkingPlaybackTime(selected->motionMatch, elapsed);
+            if (!m_AnimInstance->SampleAnimationPose(m_WalkingPlayback.clipIndex, m_WalkingPlayback.timeSeconds, m_WalkingPose))
             {
-                ResetCrossStepPlayback();
+                ResetWalkingPlayback();
                 return true;
             }
         }
         else
         {
-            if (m_CrossStepPose.empty())
+            if (m_WalkingPose.empty())
             {
                 return true;
             }
-            if (!m_CrossStepPlayback.blendingOut)
+            if (!m_WalkingPlayback.blendingOut)
             {
-                // 착지하거나 일반딛기로 바뀌면 마지막으로 구동한 자세에서 현재 기본 자세로 복귀한다.
-                m_CrossStepBlendSource = m_CrossStepPose;
-                m_CrossStepTransitionStep = step.completedStep;
-                m_CrossStepPlayback.blendingOut = true;
+                // 딛기가 끝나면 마지막으로 구동한 자세에서 현재 기본 자세로 복귀한다.
+                m_WalkingBlendSource = m_WalkingPose;
+                m_WalkingTransitionStep = step.completedStep;
+                m_WalkingPlayback.blendingOut = true;
             }
-            m_CrossStepPose = base;
+            m_WalkingPose = base;
         }
 
         constexpr float blendDuration = 0.1f;
-        const float blendTime = (static_cast<float>(step.completedStep - m_CrossStepTransitionStep) + 1.0f) * deltaTime;
+        const float blendTime = (static_cast<float>(step.completedStep - m_WalkingTransitionStep) + 1.0f) * deltaTime;
         const float t = Min(blendTime / blendDuration, 1.0f);
-        m_CrossStepPlayback.blendAlpha = t * t * (3.0f - 2.0f * t);
-        if (t >= 1.0f && m_CrossStepPlayback.blendingOut)
+        m_WalkingPlayback.blendAlpha = t * t * (3.0f - 2.0f * t);
+        if (t >= 1.0f && m_WalkingPlayback.blendingOut)
         {
-            ResetCrossStepPlayback();
+            ResetWalkingPlayback();
             return true;
         }
-        BlendAnimationPoses(m_CrossStepBlendSource.data(), m_CrossStepPose.data(),
-            static_cast<uint32_t>(m_CrossStepPose.size()), m_CrossStepPlayback.blendAlpha);
+        BlendAnimationPoses(m_WalkingBlendSource.data(), m_WalkingPose.data(),
+            static_cast<uint32_t>(m_WalkingPose.size()), m_WalkingPlayback.blendAlpha);
 
         const int rootBody = m_Ragdoll.GetImpactRootBody();
         const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
         if (rootBody < 0 || static_cast<size_t>(rootBody) >= nodes.size() ||
             nodes[rootBody] < 0 || static_cast<size_t>(nodes[rootBody]) >= target.size())
         {
-            ResetCrossStepPlayback();
+            ResetWalkingPlayback();
             return true;
         }
         const int pelvis = nodes[rootBody];
         const Vector3 basePelvis(target[pelvis].GetW());
-        if (!EvaluatePhysicsPose(m_PhysicsSkeleton, m_CrossStepPose, Matrix4(GetComponentTransform()), target, m_PhysicsError))
+        if (!EvaluatePhysicsPose(m_PhysicsSkeleton, m_WalkingPose, Matrix4(GetComponentTransform()), target, m_PhysicsError))
         {
             return false;
         }

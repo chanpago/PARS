@@ -696,20 +696,32 @@
       "source_bones_match_first_clip": true
     },
     {
-      "path": "Converted/WalkStrafeLeft/WalkStrafeLeft.gltf",
+      "animation": "M_Neutral_Walk_Loop_B",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_B.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_B.FBX.fbx",
+      "source_sha256": "b5fe21b56c2a9215fdd779cb19eff3b79de24295d1f77a64801d57da0056dcd0",
+      "gltf_sha256": "ba9c74ea3e971b7bad5f3f255bc5ac385335500544a4e0d1c9485fd22447dd77",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        123
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        123
+      ],
+      "durations_seconds": [
+        4.066667
+      ],
+      "channels": 53,
       "meshes": 1,
       "skins": 1,
       "joints": [
         65
       ],
-      "animation": "WalkStrafeLeft",
-      "channels": 195,
-      "sample_counts": [
-        89
-      ],
-      "durations_seconds": [
-        1.466667
-      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
       "textures": [
         {
           "uri": "../Textures/Ch36_1001_Specular.png",
@@ -731,403 +743,35 @@
           "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
           "bytes": 9555040
         }
-      ],
-      "movement": [
-        {
-          "node": "mixamorig1:Hips",
-          "start": [
-            0.22163522243499756,
-            0.5326519012451172,
-            -98.48194122314453
-          ],
-          "end": [
-            86.77696228027344,
-            0.5326523780822754,
-            -98.55482482910156
-          ],
-          "range": [
-            86.55532705783844,
-            3.427225112915039,
-            3.744415283203125
-          ]
-        }
-      ],
-      "source": "Source/Walk Strafe Left.fbx",
-      "source_sha256": "a1e1f06f9a583120423c7fb6515c98085aa38102f138336345d47adc06e2bc63",
-      "blender_version": "4.4.3",
-      "source_frames": [
-        1.0,
-        89.0
-      ],
-      "source_bones": [
-        "mixamorig1:Hips",
-        "mixamorig1:Spine",
-        "mixamorig1:Spine1",
-        "mixamorig1:Spine2",
-        "mixamorig1:Neck",
-        "mixamorig1:Head",
-        "mixamorig1:HeadTop_End",
-        "mixamorig1:LeftShoulder",
-        "mixamorig1:LeftArm",
-        "mixamorig1:LeftForeArm",
-        "mixamorig1:LeftHand",
-        "mixamorig1:LeftHandThumb1",
-        "mixamorig1:LeftHandThumb2",
-        "mixamorig1:LeftHandThumb3",
-        "mixamorig1:LeftHandThumb4",
-        "mixamorig1:LeftHandIndex1",
-        "mixamorig1:LeftHandIndex2",
-        "mixamorig1:LeftHandIndex3",
-        "mixamorig1:LeftHandIndex4",
-        "mixamorig1:LeftHandMiddle1",
-        "mixamorig1:LeftHandMiddle2",
-        "mixamorig1:LeftHandMiddle3",
-        "mixamorig1:LeftHandMiddle4",
-        "mixamorig1:LeftHandRing1",
-        "mixamorig1:LeftHandRing2",
-        "mixamorig1:LeftHandRing3",
-        "mixamorig1:LeftHandRing4",
-        "mixamorig1:LeftHandPinky1",
-        "mixamorig1:LeftHandPinky2",
-        "mixamorig1:LeftHandPinky3",
-        "mixamorig1:LeftHandPinky4",
-        "mixamorig1:RightShoulder",
-        "mixamorig1:RightArm",
-        "mixamorig1:RightForeArm",
-        "mixamorig1:RightHand",
-        "mixamorig1:RightHandThumb1",
-        "mixamorig1:RightHandThumb2",
-        "mixamorig1:RightHandThumb3",
-        "mixamorig1:RightHandThumb4",
-        "mixamorig1:RightHandIndex1",
-        "mixamorig1:RightHandIndex2",
-        "mixamorig1:RightHandIndex3",
-        "mixamorig1:RightHandIndex4",
-        "mixamorig1:RightHandMiddle1",
-        "mixamorig1:RightHandMiddle2",
-        "mixamorig1:RightHandMiddle3",
-        "mixamorig1:RightHandMiddle4",
-        "mixamorig1:RightHandRing1",
-        "mixamorig1:RightHandRing2",
-        "mixamorig1:RightHandRing3",
-        "mixamorig1:RightHandRing4",
-        "mixamorig1:RightHandPinky1",
-        "mixamorig1:RightHandPinky2",
-        "mixamorig1:RightHandPinky3",
-        "mixamorig1:RightHandPinky4",
-        "mixamorig1:LeftUpLeg",
-        "mixamorig1:LeftLeg",
-        "mixamorig1:LeftFoot",
-        "mixamorig1:LeftToeBase",
-        "mixamorig1:LeftToe_End",
-        "mixamorig1:RightUpLeg",
-        "mixamorig1:RightLeg",
-        "mixamorig1:RightFoot",
-        "mixamorig1:RightToeBase",
-        "mixamorig1:RightToe_End"
-      ],
-      "source_meshes": [
-        "Ch36"
-      ],
-      "gltf_sha256": "235dcd7615714f1fea995f74023188b08a52ed2c07f970916ecf7c30ae836cd0",
-      "frames_per_second": 60,
-      "source_bones_match_first_clip": true
-    },
-    {
-      "path": "Converted/WalkStrafeRight/WalkStrafeRight.gltf",
-      "meshes": 1,
-      "skins": 1,
-      "joints": [
-        65
-      ],
-      "animation": "WalkStrafeRight",
-      "channels": 195,
-      "sample_counts": [
-        89
-      ],
-      "durations_seconds": [
-        1.466667
-      ],
-      "textures": [
-        {
-          "uri": "../Textures/Ch36_1001_Specular.png",
-          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
-          "bytes": 58789
-        },
-        {
-          "uri": "../Textures/Ch36_1001_Normal.png",
-          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
-          "bytes": 18176270
-        },
-        {
-          "uri": "../Textures/Ch36_1001_Diffuse.png",
-          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
-          "bytes": 9771290
-        },
-        {
-          "uri": "../Textures/Ch36_1001_Glossiness.png",
-          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
-          "bytes": 9555040
-        }
-      ],
-      "movement": [
-        {
-          "node": "mixamorig1:Hips",
-          "start": [
-            -0.14021921157836914,
-            0.41262054443359375,
-            -97.38304901123047
-          ],
-          "end": [
-            -86.6955795288086,
-            0.41262125968933105,
-            -97.45591735839844
-          ],
-          "range": [
-            86.55536031723022,
-            3.4383544921875,
-            3.76104736328125
-          ]
-        }
-      ],
-      "source": "Source/Walk Strafe Right.fbx",
-      "source_sha256": "873ff10a3c90b70d689bf73a079fdf4699358c36903f32f155cb908d7376d46c",
-      "blender_version": "4.4.3",
-      "source_frames": [
-        1.0,
-        89.0
-      ],
-      "source_bones": [
-        "mixamorig1:Hips",
-        "mixamorig1:Spine",
-        "mixamorig1:Spine1",
-        "mixamorig1:Spine2",
-        "mixamorig1:Neck",
-        "mixamorig1:Head",
-        "mixamorig1:HeadTop_End",
-        "mixamorig1:LeftShoulder",
-        "mixamorig1:LeftArm",
-        "mixamorig1:LeftForeArm",
-        "mixamorig1:LeftHand",
-        "mixamorig1:LeftHandThumb1",
-        "mixamorig1:LeftHandThumb2",
-        "mixamorig1:LeftHandThumb3",
-        "mixamorig1:LeftHandThumb4",
-        "mixamorig1:LeftHandIndex1",
-        "mixamorig1:LeftHandIndex2",
-        "mixamorig1:LeftHandIndex3",
-        "mixamorig1:LeftHandIndex4",
-        "mixamorig1:LeftHandMiddle1",
-        "mixamorig1:LeftHandMiddle2",
-        "mixamorig1:LeftHandMiddle3",
-        "mixamorig1:LeftHandMiddle4",
-        "mixamorig1:LeftHandRing1",
-        "mixamorig1:LeftHandRing2",
-        "mixamorig1:LeftHandRing3",
-        "mixamorig1:LeftHandRing4",
-        "mixamorig1:LeftHandPinky1",
-        "mixamorig1:LeftHandPinky2",
-        "mixamorig1:LeftHandPinky3",
-        "mixamorig1:LeftHandPinky4",
-        "mixamorig1:RightShoulder",
-        "mixamorig1:RightArm",
-        "mixamorig1:RightForeArm",
-        "mixamorig1:RightHand",
-        "mixamorig1:RightHandThumb1",
-        "mixamorig1:RightHandThumb2",
-        "mixamorig1:RightHandThumb3",
-        "mixamorig1:RightHandThumb4",
-        "mixamorig1:RightHandIndex1",
-        "mixamorig1:RightHandIndex2",
-        "mixamorig1:RightHandIndex3",
-        "mixamorig1:RightHandIndex4",
-        "mixamorig1:RightHandMiddle1",
-        "mixamorig1:RightHandMiddle2",
-        "mixamorig1:RightHandMiddle3",
-        "mixamorig1:RightHandMiddle4",
-        "mixamorig1:RightHandRing1",
-        "mixamorig1:RightHandRing2",
-        "mixamorig1:RightHandRing3",
-        "mixamorig1:RightHandRing4",
-        "mixamorig1:RightHandPinky1",
-        "mixamorig1:RightHandPinky2",
-        "mixamorig1:RightHandPinky3",
-        "mixamorig1:RightHandPinky4",
-        "mixamorig1:LeftUpLeg",
-        "mixamorig1:LeftLeg",
-        "mixamorig1:LeftFoot",
-        "mixamorig1:LeftToeBase",
-        "mixamorig1:LeftToe_End",
-        "mixamorig1:RightUpLeg",
-        "mixamorig1:RightLeg",
-        "mixamorig1:RightFoot",
-        "mixamorig1:RightToeBase",
-        "mixamorig1:RightToe_End"
-      ],
-      "source_meshes": [
-        "Ch36"
-      ],
-      "gltf_sha256": "c404864eb6d7e491843ab969d69348c439715f99c2cf3e97ec07bce712434abc",
-      "frames_per_second": 60,
-      "source_bones_match_first_clip": true
-    },
-    {
-      "path": "Converted/WalkStrafeLeftBackCrossRecovery/WalkStrafeLeftBackCrossRecovery.gltf",
-      "meshes": 1,
-      "skins": 1,
-      "joints": [
-        65
-      ],
-      "animation": "WalkStrafeLeftBackCrossRecovery",
-      "channels": 195,
-      "sample_counts": [
-        89
-      ],
-      "durations_seconds": [
-        1.466667
-      ],
-      "textures": [
-        {
-          "uri": "../Textures/Ch36_1001_Specular.png",
-          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
-          "bytes": 58789
-        },
-        {
-          "uri": "../Textures/Ch36_1001_Normal.png",
-          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
-          "bytes": 18176270
-        },
-        {
-          "uri": "../Textures/Ch36_1001_Diffuse.png",
-          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
-          "bytes": 9771290
-        },
-        {
-          "uri": "../Textures/Ch36_1001_Glossiness.png",
-          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
-          "bytes": 9555040
-        }
-      ],
-      "movement": [
-        {
-          "node": "mixamorig1:Hips",
-          "start": [
-            0.04645383358001709,
-            0.5141587257385254,
-            -99.52363586425781
-          ],
-          "end": [
-            39.48534393310547,
-            -20.39604949951172,
-            -99.5235595703125
-          ],
-          "range": [
-            40.038392663002014,
-            21.20787286758423,
-            10.039909362792969
-          ]
-        }
-      ],
-      "source": "Source/Walk Strafe Left Back Cross Recovery.fbx",
-      "source_sha256": "c641e5e1e41b8e7f65f1403ea16ada859f1df6d50e2d4771d958d87acd0f5841",
-      "blender_version": "4.4.3",
-      "source_frames": [
-        1.0,
-        89.0
-      ],
-      "source_bones": [
-        "mixamorig1:Hips",
-        "mixamorig1:Spine",
-        "mixamorig1:Spine1",
-        "mixamorig1:Spine2",
-        "mixamorig1:Neck",
-        "mixamorig1:Head",
-        "mixamorig1:HeadTop_End",
-        "mixamorig1:LeftShoulder",
-        "mixamorig1:LeftArm",
-        "mixamorig1:LeftForeArm",
-        "mixamorig1:LeftHand",
-        "mixamorig1:LeftHandThumb1",
-        "mixamorig1:LeftHandThumb2",
-        "mixamorig1:LeftHandThumb3",
-        "mixamorig1:LeftHandThumb4",
-        "mixamorig1:LeftHandIndex1",
-        "mixamorig1:LeftHandIndex2",
-        "mixamorig1:LeftHandIndex3",
-        "mixamorig1:LeftHandIndex4",
-        "mixamorig1:LeftHandMiddle1",
-        "mixamorig1:LeftHandMiddle2",
-        "mixamorig1:LeftHandMiddle3",
-        "mixamorig1:LeftHandMiddle4",
-        "mixamorig1:LeftHandRing1",
-        "mixamorig1:LeftHandRing2",
-        "mixamorig1:LeftHandRing3",
-        "mixamorig1:LeftHandRing4",
-        "mixamorig1:LeftHandPinky1",
-        "mixamorig1:LeftHandPinky2",
-        "mixamorig1:LeftHandPinky3",
-        "mixamorig1:LeftHandPinky4",
-        "mixamorig1:RightShoulder",
-        "mixamorig1:RightArm",
-        "mixamorig1:RightForeArm",
-        "mixamorig1:RightHand",
-        "mixamorig1:RightHandThumb1",
-        "mixamorig1:RightHandThumb2",
-        "mixamorig1:RightHandThumb3",
-        "mixamorig1:RightHandThumb4",
-        "mixamorig1:RightHandIndex1",
-        "mixamorig1:RightHandIndex2",
-        "mixamorig1:RightHandIndex3",
-        "mixamorig1:RightHandIndex4",
-        "mixamorig1:RightHandMiddle1",
-        "mixamorig1:RightHandMiddle2",
-        "mixamorig1:RightHandMiddle3",
-        "mixamorig1:RightHandMiddle4",
-        "mixamorig1:RightHandRing1",
-        "mixamorig1:RightHandRing2",
-        "mixamorig1:RightHandRing3",
-        "mixamorig1:RightHandRing4",
-        "mixamorig1:RightHandPinky1",
-        "mixamorig1:RightHandPinky2",
-        "mixamorig1:RightHandPinky3",
-        "mixamorig1:RightHandPinky4",
-        "mixamorig1:LeftUpLeg",
-        "mixamorig1:LeftLeg",
-        "mixamorig1:LeftFoot",
-        "mixamorig1:LeftToeBase",
-        "mixamorig1:LeftToe_End",
-        "mixamorig1:RightUpLeg",
-        "mixamorig1:RightLeg",
-        "mixamorig1:RightFoot",
-        "mixamorig1:RightToeBase",
-        "mixamorig1:RightToe_End"
-      ],
-      "source_meshes": [
-        "Ch36"
-      ],
-      "gltf_sha256": "c14c3da6c53c4e2bd40204f70d9d4d4ea08a158e1c9734dc4e87fce385da7a12",
-      "frames_per_second": 60,
-      "source_bones_match_first_clip": true,
-      "derived_from": [
-        "Source/Walk Strafe Left.fbx",
-        "Source/Idle.fbx"
       ]
     },
     {
-      "path": "Converted/WalkStrafeRightBackCrossRecovery/WalkStrafeRightBackCrossRecovery.gltf",
+      "animation": "M_Neutral_Walk_Loop_BL",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_BL.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_BL.FBX.fbx",
+      "source_sha256": "0de582902250abb358329c910807fece9d1c9e46ed0c6aaa29554a3015dce1e2",
+      "gltf_sha256": "d00dd0f87c036d8341598e4e9719ed8c20bea036596d30219ca347a7cc2677fa",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        123
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        123
+      ],
+      "durations_seconds": [
+        4.066667
+      ],
+      "channels": 53,
       "meshes": 1,
       "skins": 1,
       "joints": [
         65
       ],
-      "animation": "WalkStrafeRightBackCrossRecovery",
-      "channels": 195,
-      "sample_counts": [
-        89
-      ],
-      "durations_seconds": [
-        1.466667
-      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
       "textures": [
         {
           "uri": "../Textures/Ch36_1001_Specular.png",
@@ -1149,109 +793,406 @@
           "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
           "bytes": 9555040
         }
-      ],
-      "movement": [
-        {
-          "node": "mixamorig1:Hips",
-          "start": [
-            -0.04649960622191429,
-            0.5141720771789551,
-            -99.52364349365234
-          ],
-          "end": [
-            -39.485389709472656,
-            -20.396038055419922,
-            -99.52356719970703
-          ],
-          "range": [
-            40.038392666727304,
-            21.20787477493286,
-            10.0399169921875
-          ]
-        }
-      ],
-      "source": "Source/Walk Strafe Right Back Cross Recovery.fbx",
-      "source_sha256": "ed74c7c4c03d08f06cb14be7fda38362ad38cafb0ac5c31c124381543a9f1b34",
+      ]
+    },
+    {
+      "animation": "M_Neutral_Walk_Loop_BR",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_BR.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_BR.FBX.fbx",
+      "source_sha256": "c7be5ecfde0966a8493f9dffd3fe3f9fd4b15bb22a5272482c4c2891d00945f2",
+      "gltf_sha256": "46bb6aad929287a8e56921badf0c9fcd4554f63d9fdb735c9a4ba9fcb79f2f09",
       "blender_version": "4.4.3",
       "source_frames": [
-        1.0,
-        89.0
+        1,
+        123
       ],
-      "source_bones": [
-        "mixamorig1:Hips",
-        "mixamorig1:Spine",
-        "mixamorig1:Spine1",
-        "mixamorig1:Spine2",
-        "mixamorig1:Neck",
-        "mixamorig1:Head",
-        "mixamorig1:HeadTop_End",
-        "mixamorig1:LeftShoulder",
-        "mixamorig1:LeftArm",
-        "mixamorig1:LeftForeArm",
-        "mixamorig1:LeftHand",
-        "mixamorig1:LeftHandThumb1",
-        "mixamorig1:LeftHandThumb2",
-        "mixamorig1:LeftHandThumb3",
-        "mixamorig1:LeftHandThumb4",
-        "mixamorig1:LeftHandIndex1",
-        "mixamorig1:LeftHandIndex2",
-        "mixamorig1:LeftHandIndex3",
-        "mixamorig1:LeftHandIndex4",
-        "mixamorig1:LeftHandMiddle1",
-        "mixamorig1:LeftHandMiddle2",
-        "mixamorig1:LeftHandMiddle3",
-        "mixamorig1:LeftHandMiddle4",
-        "mixamorig1:LeftHandRing1",
-        "mixamorig1:LeftHandRing2",
-        "mixamorig1:LeftHandRing3",
-        "mixamorig1:LeftHandRing4",
-        "mixamorig1:LeftHandPinky1",
-        "mixamorig1:LeftHandPinky2",
-        "mixamorig1:LeftHandPinky3",
-        "mixamorig1:LeftHandPinky4",
-        "mixamorig1:RightShoulder",
-        "mixamorig1:RightArm",
-        "mixamorig1:RightForeArm",
-        "mixamorig1:RightHand",
-        "mixamorig1:RightHandThumb1",
-        "mixamorig1:RightHandThumb2",
-        "mixamorig1:RightHandThumb3",
-        "mixamorig1:RightHandThumb4",
-        "mixamorig1:RightHandIndex1",
-        "mixamorig1:RightHandIndex2",
-        "mixamorig1:RightHandIndex3",
-        "mixamorig1:RightHandIndex4",
-        "mixamorig1:RightHandMiddle1",
-        "mixamorig1:RightHandMiddle2",
-        "mixamorig1:RightHandMiddle3",
-        "mixamorig1:RightHandMiddle4",
-        "mixamorig1:RightHandRing1",
-        "mixamorig1:RightHandRing2",
-        "mixamorig1:RightHandRing3",
-        "mixamorig1:RightHandRing4",
-        "mixamorig1:RightHandPinky1",
-        "mixamorig1:RightHandPinky2",
-        "mixamorig1:RightHandPinky3",
-        "mixamorig1:RightHandPinky4",
-        "mixamorig1:LeftUpLeg",
-        "mixamorig1:LeftLeg",
-        "mixamorig1:LeftFoot",
-        "mixamorig1:LeftToeBase",
-        "mixamorig1:LeftToe_End",
-        "mixamorig1:RightUpLeg",
-        "mixamorig1:RightLeg",
-        "mixamorig1:RightFoot",
-        "mixamorig1:RightToeBase",
-        "mixamorig1:RightToe_End"
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        123
       ],
-      "source_meshes": [
-        "Ch36"
+      "durations_seconds": [
+        4.066667
       ],
-      "gltf_sha256": "7f7dbe5f5386d521b89a5f0fc478bac9a00c87572822f3fea6c1845757c16da3",
-      "frames_per_second": 60,
-      "source_bones_match_first_clip": true,
-      "derived_from": [
-        "Source/Walk Strafe Left Back Cross Recovery.fbx"
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ]
+    },
+    {
+      "animation": "M_Neutral_Walk_Loop_F",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_F.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_F.FBX.fbx",
+      "source_sha256": "12081c87b1065a2ff5ad80526f15832d1d1cb3a100d4275141004b7495081369",
+      "gltf_sha256": "74ac62a4a533c6e30e9c4befda0e25d7d3b7293b94ab0a92edc116086ebfefb6",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        122
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        122
+      ],
+      "durations_seconds": [
+        4.033333
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ]
+    },
+    {
+      "animation": "M_Neutral_Walk_Loop_FL",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_FL.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_FL.FBX.fbx",
+      "source_sha256": "84e76e5d293393a8936fc97e583d3b373c7bd4d697a53ef45bc4f9c89ac88c48",
+      "gltf_sha256": "c182b57e528bf535b6550fe4cc7f9176c42c9868bdbcf01d89167445ea6a7284",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        122
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        122
+      ],
+      "durations_seconds": [
+        4.033333
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ]
+    },
+    {
+      "animation": "M_Neutral_Walk_Loop_FR",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_FR.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_FR.FBX.fbx",
+      "source_sha256": "f793d4a362a786c995c98c25594127fd0299c492878912c8113d476c4a9b2559",
+      "gltf_sha256": "7272943c1029a33b55e0137be35ec3d233861a2d6b17496db13f0318d66048e7",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        122
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        122
+      ],
+      "durations_seconds": [
+        4.033333
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ]
+    },
+    {
+      "animation": "M_Neutral_Walk_Loop_LL",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_LL.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_LL.FBX.fbx",
+      "source_sha256": "f7ee9b3b5c6b50fe917a37f0d199e4e5d32529371702a69af4004df88e5dc7d2",
+      "gltf_sha256": "1dc5df8a3498246db2b71ca25d78b906365bb3595715e94d439987c6d55d1a66",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        113
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        113
+      ],
+      "durations_seconds": [
+        3.733333
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ]
+    },
+    {
+      "animation": "M_Neutral_Walk_Loop_LR",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_LR.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_LR.FBX.fbx",
+      "source_sha256": "f4fd3880218cada7e00a1c0fff095e87d4ab2304ef9457b4c9511156af39e1dd",
+      "gltf_sha256": "2c517ff46d7d75f0adc5dcc206508e3a0e8bbebcd4eaa3b7b7b255916d020dc6",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        121
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        121
+      ],
+      "durations_seconds": [
+        4.0
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ]
+    },
+    {
+      "animation": "M_Neutral_Walk_Loop_RL",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_RL.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_RL.FBX.fbx",
+      "source_sha256": "3d96529d82c7d0445d0ebc42c0a50d9dad9d85cbffdcbd5d7dc38fa1cc4fda7b",
+      "gltf_sha256": "5ef6af8f5a6afe1bcdb6ed8b131ac76c249836a90fd30c6e6dc4d304b5042b82",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        121
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        121
+      ],
+      "durations_seconds": [
+        4.0
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ]
+    },
+    {
+      "animation": "M_Neutral_Walk_Loop_RR",
+      "path": "Converted/WalkingLoops/M_Neutral_Walk_Loop_RR.gltf",
+      "source": "Source/UnrealWalking/M_Neutral_Walk_Loop_RR.FBX.fbx",
+      "source_sha256": "cd60145b2fe441f968fde3a8df4c61ef2e709293c2940fcf68cdd3131368c6bc",
+      "gltf_sha256": "bc52623e4873568063ed6a8796c65f6f42f3bfc0baba84860c0918af5bac5bed",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        113
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        113
+      ],
+      "durations_seconds": [
+        3.733333
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
       ]
     }
   ]

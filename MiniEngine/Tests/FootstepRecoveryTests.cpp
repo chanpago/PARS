@@ -373,7 +373,7 @@ namespace
             return acceptLanding;
         };
         unsigned searches = 0;
-        input.findCrossStep = [&searches]() -> MotionMatchResult
+        input.findWalkingStep = [&searches](const WalkingSwing&) -> MotionMatchResult
         {
             ++searches;
             return {};
@@ -395,8 +395,8 @@ namespace
             step.candidates[1].recovery.overlapAreas[2] > 0 && step.candidates[1].recovery.overlapAreas[0] == 0 &&
             command.target.recovery.mode == FootstepMode::Normal && command.target.recovery.status == FootstepRecoveryStatus::BestEffort &&
             IsInsideFootSupportHull(step.candidates[1].recovery.reachable[0], command.target.position) &&
-            (command.target.position - takeoffTarget).magnitude() > 1e-4f && searches == 0,
-            "Late back-cross demand adjusts only the normal landing and cannot start a cross motion search");
+            (command.target.position - takeoffTarget).magnitude() > 1e-4f && searches == 1,
+            "Late back-cross demand adjusts the normal landing while keeping its original Walking search");
         const PxVec3 accepted = command.target.position;
         acceptLanding = false;
         input.feet[1].grounded = true;
@@ -421,7 +421,7 @@ namespace
         Check(command.justLanded && command.target.recovery.mode == FootstepMode::Normal, "The normal step lands in its takeoff mode");
         ++input.completedStep;
         planner.Update(input, settings);
-        Check(command.justStarted && command.target.recovery.mode == FootstepMode::BackCross && searches == 1,
+        Check(command.justStarted && command.target.recovery.mode == FootstepMode::BackCross && searches == 2,
             "The next step can select the still-needed crossover after landing and load confirmation");
     }
 

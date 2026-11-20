@@ -86,7 +86,7 @@ namespace PARS
     {
     public:
         std::function<bool(size_t, const physx::PxVec3&)> acceptsLanding;
-        std::function<MotionMatchResult()> findCrossStep;
+        std::function<MotionMatchResult(const WalkingSwing&)> findWalkingStep;
         std::vector<physx::PxVec3> hull;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
