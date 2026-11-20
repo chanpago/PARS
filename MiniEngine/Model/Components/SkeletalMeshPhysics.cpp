@@ -365,7 +365,7 @@ namespace PARS
         const std::vector<PxTransform>& sourcePose, float deltaTime)
     {
         const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
-        if (!step.IsInProgress())
+        if (!m_FootSupport.GetFootstepSettings().pathAvoidanceEnabled || !step.IsInProgress())
         {
             m_FootstepAvoidance.Reset();
             return;

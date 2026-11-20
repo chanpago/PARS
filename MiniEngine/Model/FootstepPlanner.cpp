@@ -700,6 +700,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         command.justLanded = false;
         command.hasTarget = false;
         command.motion.valid = false;
+        if (!settings.pathAvoidanceEnabled)
+        {
+            command.target.recovery.pathRejected = false;
+        }
         if (!settings.landingComClampEnabled)
         {
             command.landingComDirection = FootstepLandingDirection::None;

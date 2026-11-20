@@ -488,7 +488,8 @@ void RagdollImpactTest::DrawContactOverlay(float topInset) const
         text = u8"[더미] 이동 다리의 실제 자기 접촉: 없음";
     }
     text += '\n';
-    text += m_FootSoles.GetLegPredictionText(dummy->GetMesh());
+    const PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
+    text += m_FootSoles.GetLegPredictionText(mesh);
     text += m_ContactCheckEnabled ? u8"\n접촉 확인 모드: 켜짐 (T: 끄기)" : u8"\n접촉 확인 모드: 꺼짐 (T: 켜기)";
     if (contactPaused)
     {
@@ -502,7 +503,8 @@ void RagdollImpactTest::DrawContactOverlay(float topInset) const
     {
         text += u8"\n시뮬레이션 중 · P: 일시정지";
     }
-    const bool predicted = dummy->GetMesh().GetFootstepCollisionSnapshot().overlapPairs != 0;
+    const bool predicted = mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled &&
+        mesh.GetFootstepCollisionSnapshot().overlapPairs != 0;
     m_FootSoles.DrawContactOverlay(text, touching || predicted, topInset);
 }
 

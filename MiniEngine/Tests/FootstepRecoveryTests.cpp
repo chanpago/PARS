@@ -268,6 +268,8 @@ namespace
         };
         FootstepSettings settings;
         settings.recovery.maximumSteps = 1;
+        Check(!settings.pathAvoidanceEnabled, "Footstep path avoidance defaults to off");
+        settings.pathAvoidanceEnabled = true;
         settings.recovery.transferTime = .025f;
         FootstepPlanner planner;
         planner.Update(input, settings);
@@ -307,11 +309,16 @@ namespace
         }
         const PxVec3 locked = planner.GetSnapshot().feet[1].target.position;
         Check(planner.GetSnapshot().feet[1].motion.landingTargetLocked, "integration keeps the existing 75 percent lock");
+        planner.ReportRecoveryPath(1, locked, false);
+        Check(planner.GetSnapshot().feet[1].target.recovery.pathRejected, "The locked path records the last rejection");
+        settings.pathAvoidanceEnabled = false;
         input.velocity = PxVec3(1, 0, 2);
         ++input.completedStep;
         planner.Update(input, settings);
         Check((planner.GetSnapshot().feet[1].target.position - locked).magnitude() < 1e-6f,
             "new recovery choices cannot move the locked horizontal target");
+        Check(planner.GetSnapshot().feet[1].motion.valid && !planner.GetSnapshot().feet[1].target.recovery.pathRejected,
+            "Disabling path avoidance clears the previous rejection while the swing continues");
         input.active = false;
         input.velocity = PxVec3(0);
         input.feet[1].grounded = true;

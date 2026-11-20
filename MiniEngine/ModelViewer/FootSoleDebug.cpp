@@ -519,6 +519,10 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     decisionText += u8"[추종 애니메이션] ";
     decisionText += GetFollowedAnimationText(mesh);
     decisionText += '\n';
+    if (!mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled)
+    {
+        return decisionText + u8"[더미] 이동 경로 충돌 예측 꺼짐";
+    }
     if (!support.footstep.IsInProgress())
     {
         return decisionText + u8"[더미] 목표 경로 예측: 이동 명령 없음";
@@ -763,7 +767,7 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     if (m_ShowFootstep)
     {
         const PARS::FootstepCollisionSnapshot& prediction = mesh.GetFootstepCollisionSnapshot();
-        if (prediction.sampleCount > 0 &&
+        if (mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled && prediction.sampleCount > 0 &&
             prediction.revision == sample.footstep.revision && prediction.completedStep == sample.footstep.completedStep)
         {
             for (size_t side = 0; side < prediction.moving.size(); ++side)
@@ -1066,10 +1070,11 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         }
         ImGui::Checkbox(u8"발딛기 판단·목표 3D 표시", &m_ShowFootstep);
         ImGui::Checkbox(u8"회복·일반·교차 영역 색칠", &m_ShowRecoveryRegions);
+        ImGui::Checkbox(u8"이동 경로 충돌 예측 및 우회", &settings.pathAvoidanceEnabled);
         ImGui::Checkbox(u8"회복 영역으로 일반 / 교차 선택", &settings.recovery.enabled);
         if (settings.recovery.enabled)
         {
-            ImGui::TextWrapped(u8"색칠된 도달 영역은 현재 골반·다리 길이·발 크기의 근사입니다. 실제 PA 관절 제한·착지 자세와 이동 경로는 후보별로 검사합니다.");
+            ImGui::TextWrapped(u8"색칠된 도달 영역은 현재 골반·다리 길이·발 크기의 근사입니다. 착지 후보마다 PA 관절 제한과 착지 자세를 검사합니다.");
             int maximumSteps = static_cast<int>(settings.recovery.maximumSteps);
             if (ImGui::SliderInt(u8"회복 예측 최대 발딛기 수", &maximumSteps, 1, 3))
             {
@@ -1092,7 +1097,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                     decision->overlapAreas[0] * 10000, decision->overlapAreas[1] * 10000, decision->overlapAreas[2] * 10000);
                 ImGui::Text(u8"착지 자세 %u회 / 영역 %u조각 / 착지 예측 %.3fs / 경로 %s",
                     decision->poseChecks, decision->capturePieceCount, decision->predictionTime,
-                    decision->pathRejected ? u8"미확보" : u8"아래 충돌 예측 참조");
+                    !settings.pathAvoidanceEnabled ? u8"예측 꺼짐" : decision->pathRejected ? u8"미확보" : u8"아래 충돌 예측 참조");
                 if (decision->hasTarget)
                 {
                     ImGui::Text(u8"선택 목표의 필요 스텝: %u / 착지 자세 통과 %s / 검사 예산 %s",

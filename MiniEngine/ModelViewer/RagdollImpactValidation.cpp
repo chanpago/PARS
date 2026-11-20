@@ -593,6 +593,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         if (contactCheck)
         {
             check(!test.IsContactCheckEnabled(), "Contact pause starts disabled");
+            dummy->GetMesh().GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled = true;
             // 검사 전용 복사본에서 허벅지 접촉을 유도하며 저장된 PA 파일은 수정하지 않는다.
             PhysicsAsset contactAsset = *dummy->GetMesh().GetPhysicsAsset();
             for (PhysicsBody& body : contactAsset.bodies)
