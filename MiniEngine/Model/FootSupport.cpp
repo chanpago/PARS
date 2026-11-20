@@ -469,14 +469,6 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     // 플래너에 넘길 현재 상태를 FootstepInput에 모음
     // mesh에서 정보를 가져온다.
     FootstepInput input;
-    MotionFeatures motionQuery;
-    if (SampleMotionQuery(mesh, motionQuery))
-    {
-        input.findWalkingStep = [&animation, &motionQuery](const WalkingSwing& swing) -> MotionMatchResult
-        {
-            return animation.FindMotionMatch(MotionFrameUsage::Walking, motionQuery, swing);
-        };
-    }
     FootstepLandingQuery landingQuery;
     std::array<FootstepReachInput, 2> reaches;
     if (m_FootstepSettings.recovery.enabled && idle && mesh.UsesAutomaticRootSupport())
@@ -540,6 +532,21 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     forward.y = 0;
     input.hasReference = m_HasIdleReference && forward.isFinite() && forward.normalize() > 1e-6f;
     input.supportRight = PxVec3(forward.z, 0, -forward.x);
+
+    MotionFeatures motionQuery;
+    if (SampleMotionQuery(mesh, motionQuery))
+    {
+        if (input.hasVelocity)
+        {
+            // 현재 COM에서 예측 COM으로 향하는 방향은 플래너에 전달한 전신 COM의 수평 속도 방향과 같다.
+            motionQuery.walkingAngleDegrees = GetWalkingTravelAngleDegrees({forward.x, forward.z},
+                {input.velocity.x, input.velocity.z});
+        }
+        input.findWalkingStep = [&animation, &motionQuery](const WalkingSwing& swing) -> MotionMatchResult
+        {
+            return animation.FindMotionMatch(MotionFrameUsage::Walking, motionQuery, swing);
+        };
+    }
 
     // 저장한 Idle 발 본 자세를 발바닥 위치로 변환
     // Idle 기분 왼발, 오른발의 발바닥 중심 위치를 담을 배열

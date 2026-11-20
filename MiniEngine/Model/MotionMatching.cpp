@@ -7,6 +7,21 @@
 
 namespace PARS
 {
+    float GetWalkingTravelAngleDegrees(const DirectX::XMFLOAT2& forwardXZ, const DirectX::XMFLOAT2& velocityXZ)
+    {
+        // 0.2초 동안 1cm도 움직이지 않을 때는 작은 흔들림에 진행각을 부여하지 않는다.
+        constexpr float minimumSpeed = 0.05f;
+        const float speed = std::hypot(velocityXZ.x, velocityXZ.y);
+        const float lateral = forwardXZ.y * velocityXZ.x - forwardXZ.x * velocityXZ.y;
+        const float forward = forwardXZ.x * velocityXZ.x + forwardXZ.y * velocityXZ.y;
+        if (!std::isfinite(speed) || speed < minimumSpeed || !std::isfinite(lateral) || !std::isfinite(forward) ||
+            (lateral == 0.0f && forward == 0.0f))
+        {
+            return std::numeric_limits<float>::quiet_NaN();
+        }
+        return DirectX::XMConvertToDegrees(std::atan2(lateral, forward));
+    }
+
     namespace
     {
         constexpr double SamplesPerSecond = 60.0;
@@ -47,6 +62,21 @@ namespace PARS
         float SquaredDistance(const DirectX::XMFLOAT3& first, const DirectX::XMFLOAT3& second)
         {
             return Math::LengthSquare(Math::Vector3(first) - Math::Vector3(second));
+        }
+
+        int WalkingAngleError(float requestedDegrees, float clipDegrees)
+        {
+            if (!std::isfinite(requestedDegrees))
+            {
+                return 0;
+            }
+            if (!std::isfinite(clipDegrees))
+            {
+                return 181;
+            }
+            // ±180도 경계를 잇고, 각도 오차를 1도 단위로 비교해 같은 진행 방향의 클립끼리는 자세로 고른다.
+            const float difference = std::remainder(requestedDegrees - clipDegrees, 360.0f);
+            return static_cast<int>(std::lround(std::abs(difference)));
         }
 
         size_t FindJoint(const PhysicsSkeleton& skeleton, const std::string& joint)
@@ -177,6 +207,10 @@ namespace PARS
             const size_t start = frames.size();
             const bool walking = clip.usage == MotionFrameUsage::Walking;
             const Math::Vector3 travel = samples.back().pelvis - samples.front().pelvis;
+            // 루프의 처음과 끝은 같은 보행 위상이다. 모델 전방(+Z) 기준 순이동으로 골반의 좌우 흔들림을 제외한다.
+            const Math::Vector3 meanVelocity = travel / samples.back().time;
+            const float walkingAngle = walking ? GetWalkingTravelAngleDegrees({0.0f, 1.0f},
+                {meanVelocity.GetX(), meanVelocity.GetZ()}) : std::numeric_limits<float>::quiet_NaN();
             const double lookahead = MotionFeatures::PredictionTimeSeconds * static_cast<double>(last) / samples.back().time;
             for (size_t i = 0; i <= last; ++i)
             {
@@ -188,6 +222,7 @@ namespace PARS
                 frame.clipIndex = clip.clipIndex;
                 frame.clipTimeSeconds = sample.time;
                 frame.usage = clip.usage;
+                frame.features.walkingAngleDegrees = walkingAngle;
                 for (size_t foot = 0; foot < sample.feet.size(); ++foot)
                 {
                     const Math::Vector3 velocity = (next.feet[foot] - previous.feet[foot]) / interval;
@@ -303,11 +338,19 @@ namespace PARS
         const MotionFrameRange range = GetMotionFrameRange(usage);
         const std::vector<MotionFrame>& frames = GetMotionFrames();
         MotionMatchResult best;
+        int bestAngleError = std::numeric_limits<int>::max();
+        const float requestedAngle = usage == MotionFrameUsage::Walking ? currentFeatures.walkingAngleDegrees :
+            std::numeric_limits<float>::quiet_NaN();
         constexpr float velocityWeight = MotionFeatures::PredictionTimeSeconds * MotionFeatures::PredictionTimeSeconds;
         for (size_t offset = 0; offset < range.frameCount; ++offset)
         {
             const MotionFrame& frame = frames[range.firstFrameIndex + offset];
             if (swing.movingFoot != UINT32_MAX && (frame.swing.movingFoot != swing.movingFoot || frame.swing.mode != swing.mode))
+            {
+                continue;
+            }
+            const int angleError = WalkingAngleError(requestedAngle, frame.features.walkingAngleDegrees);
+            if (angleError > bestAngleError)
             {
                 continue;
             }
@@ -320,11 +363,14 @@ namespace PARS
             // 양발 오차는 평균을 내고, 속도 차이는 예측 시간 동안의 거리로 환산한다.
             // 골반 변위에 두 배의 거리 가중치를 주어 회복할 방향을 반영한다.
             const float score = 0.5f * footError + 4.0f * SquaredDistance(currentFeatures.futureDisplacement, frame.features.futureDisplacement);
-            if (std::isfinite(score) && score < best.score)
+            if (std::isfinite(score) && (angleError < bestAngleError || score < best.score))
             {
+                bestAngleError = angleError;
                 best.clipIndex = frame.clipIndex;
                 best.clipTimeSeconds = frame.clipTimeSeconds;
                 best.score = score;
+                best.requestedAngleDegrees = requestedAngle;
+                best.clipAngleDegrees = frame.features.walkingAngleDegrees;
             }
         }
         return best;

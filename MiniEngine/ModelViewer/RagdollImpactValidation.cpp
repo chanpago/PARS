@@ -106,6 +106,55 @@ namespace
         }
     }
 
+    void CheckWalkingTravelDirection(const PARS::AnimInstance& animation, const PARS::MotionFrame& backwardFrame,
+        const std::function<void(bool, const char*)>& check)
+    {
+        const float lateral = PARS::GetWalkingTravelAngleDegrees({0, 1}, {2, 0});
+        const float rotated = PARS::GetWalkingTravelAngleDegrees({1, 0}, {0, -2});
+        check(std::abs(lateral - 90.0f) < 1e-4f && std::abs(rotated - lateral) < 1e-4f,
+            "Rotating the character and its COM motion together preserves the signed walking direction");
+        check(!std::isfinite(PARS::GetWalkingTravelAngleDegrees({0, 0}, {2, 0})),
+            "An undefined character forward supplies no direction preference");
+
+        struct DirectionCase
+        {
+        public:
+            const char* expectedClip;
+            PARS::WalkingSwing swing;
+            float requestedDegrees;
+        };
+
+        const DirectionCase cases[] =
+        {
+            {"M_Neutral_Walk_Loop_F", {1, PARS::FootstepMode::Normal}, 0.0f},
+            {"M_Neutral_Walk_Loop_F", {1, PARS::FootstepMode::Normal}, 88.4f},
+            {"M_Neutral_Walk_Loop_B", {1, PARS::FootstepMode::Normal}, -179.8f},
+            {"M_Neutral_Walk_Loop_B", {0, PARS::FootstepMode::Normal}, 179.8f},
+            {"M_Neutral_Walk_Loop_LR", {1, PARS::FootstepMode::FrontCross}, 90.0f},
+            {"M_Neutral_Walk_Loop_RL", {0, PARS::FootstepMode::FrontCross}, -90.0f},
+            {"M_Neutral_Walk_Loop_LL", {1, PARS::FootstepMode::BackCross}, 90.0f},
+            {"M_Neutral_Walk_Loop_RR", {0, PARS::FootstepMode::BackCross}, -90.0f},
+            {"M_Neutral_Walk_Loop_FL", {1, PARS::FootstepMode::FrontCross}, 45.0f},
+            {"M_Neutral_Walk_Loop_FR", {0, PARS::FootstepMode::FrontCross}, -45.0f},
+            {"M_Neutral_Walk_Loop_BL", {1, PARS::FootstepMode::BackCross}, 135.0f},
+            {"M_Neutral_Walk_Loop_BR", {0, PARS::FootstepMode::BackCross}, -135.0f}
+        };
+        PARS::MotionFeatures query = backwardFrame.features;
+        for (const DirectionCase& test : cases)
+        {
+            query.walkingAngleDegrees = test.requestedDegrees;
+            const PARS::MotionMatchResult match = animation.FindMotionMatch(PARS::MotionFrameUsage::Walking, query, test.swing);
+            check(animation.GetAnimationName(match.clipIndex) == test.expectedClip &&
+                    match.requestedAngleDegrees == test.requestedDegrees && std::isfinite(match.clipAngleDegrees),
+                test.expectedClip);
+        }
+        query.walkingAngleDegrees = PARS::GetWalkingTravelAngleDegrees({0, 1}, {0.001f, 0.001f});
+        const PARS::MotionMatchResult resting = animation.FindMotionMatch(PARS::MotionFrameUsage::Walking, query, backwardFrame.swing);
+        check(!std::isfinite(resting.requestedAngleDegrees) && resting.clipIndex == backwardFrame.clipIndex &&
+                resting.clipTimeSeconds == backwardFrame.clipTimeSeconds && resting.score == 0.0f,
+            "Near-stationary COM falls back to the existing pose and displacement score");
+    }
+
     void ConfigureLandingComValidation(PARS::SkeletalMeshComponent& mesh, std::ostream& report)
     {
         PARS::FootstepSettings& settings = mesh.GetFootSupport().GetFootstepSettings();
@@ -130,7 +179,7 @@ namespace
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "command_step,command_mode,motion_search_step,match_clip,match_time_s,match_score,"
-            "drive_clip,drive_time_s,drive_blend_alpha,drive_blending_out\n";
+            "drive_clip,drive_time_s,drive_blend_alpha,drive_blending_out,match_com_angle_deg,match_clip_angle_deg\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -193,6 +242,16 @@ namespace
             else
             {
                 stream << ",,,,";
+            }
+            stream << ',';
+            if (std::isfinite(command.motionMatch.requestedAngleDegrees))
+            {
+                stream << command.motionMatch.requestedAngleDegrees;
+            }
+            stream << ',';
+            if (std::isfinite(command.motionMatch.clipAngleDegrees))
+            {
+                stream << command.motionMatch.clipAngleDegrees;
             }
             stream << '\n';
         }
@@ -965,6 +1024,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const uint32_t idleClip = candidates.front().clipIndex;
         const uint32_t forwardClip = candidates[walkingRange.firstFrameIndex].clipIndex;
         const uint32_t backwardClip = candidates[walkingRange.firstFrameIndex + kWalkingClips[0].frameCount].clipIndex;
+        CheckWalkingTravelDirection(dummyAnimation, candidates[walkingRange.firstFrameIndex + kWalkingClips[0].frameCount + 30], check);
         const float fixedStep = PhysicsWorld::FixedDeltaTime;
         const float duration = dummyAnimation.GetAnimationDuration(forwardClip);
         const PARS::MotionMatchResult wrapped{forwardClip, duration - fixedStep, 0.0f};

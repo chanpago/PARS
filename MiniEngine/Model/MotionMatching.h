@@ -39,6 +39,9 @@ namespace PARS
         MotionFrameUsage usage = MotionFrameUsage::Idle;
     };
 
+    // 월드 XZ 평면에서 캐릭터 전방을 0도로 삼는다. 진행 방향을 구할 수 없으면 NaN을 반환한다.
+    float GetWalkingTravelAngleDegrees(const DirectX::XMFLOAT2& forwardXZ, const DirectX::XMFLOAT2& velocityXZ);
+
     // 클립 후보와 현재 캐릭터가 공유하는 특징이다. 캐릭터가 바라보는 수평 방향을 로컬 전방으로 쓴다.
     struct MotionFeatures
     {
@@ -53,6 +56,8 @@ namespace PARS
         // 예측 시간 동안의 골반 변위(m)를 로컬 X(좌우), Y(상하), Z(전후) 순서로 저장한다.
         // 클립 후보에는 실제 변위를, 검색 입력에는 원하는 변위를 담는다.
         DirectX::XMFLOAT3 futureDisplacement{};
+        // 검색 입력은 전신 COM 속도, 보행 클립은 루프 한 주기의 평균 진행 속도로 계산한다.
+        float walkingAngleDegrees = std::numeric_limits<float>::quiet_NaN();
     };
 
     // AnimInstance에 등록한 클립의 특정 재생 시점을 검색 후보로 저장한다.
@@ -72,5 +77,7 @@ namespace PARS
         std::uint32_t clipIndex = UINT32_MAX;
         float clipTimeSeconds = 0.0f;
         float score = std::numeric_limits<float>::infinity();
+        float requestedAngleDegrees = std::numeric_limits<float>::quiet_NaN();
+        float clipAngleDegrees = std::numeric_limits<float>::quiet_NaN();
     };
 }

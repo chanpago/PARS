@@ -1056,8 +1056,13 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 const PARS::MotionMatchResult& match = command.motionMatch;
                 if (match.clipIndex != UINT32_MAX)
                 {
-                    ImGui::Text(u8"보행 모션 검색  %s  %.3f초  오차 %.5f",
+                    ImGui::Text(u8"보행 모션 검색  %s  %.3f초  자세·변위 오차 %.5f",
                         mesh.GetAnimInstance().GetAnimationName(match.clipIndex).c_str(), match.clipTimeSeconds, match.score);
+                    if (std::isfinite(match.requestedAngleDegrees) && std::isfinite(match.clipAngleDegrees))
+                    {
+                        ImGui::Text(u8"검색 시 전방 기준 진행각  COM %+.1f도 / 클립 %+.1f도",
+                            match.requestedAngleDegrees, match.clipAngleDegrees);
+                    }
                 }
                 else
                 {
