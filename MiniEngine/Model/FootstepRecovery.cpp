@@ -18,13 +18,14 @@ namespace
         return a.x * b.z - a.z * b.x;
     }
 
-    FootstepPolygon Clip(const FootstepPolygon& polygon, const PxVec3& normal, float offset)
+    void Clip(const FootstepPolygon& polygon, const PxVec3& normal, float offset, FootstepPolygon& result)
     {
-        FootstepPolygon result;
+        result.clear();
         if (polygon.empty())
         {
-            return result;
+            return;
         }
+        result.reserve(polygon.size() + 1);
         PxVec3 previous = polygon.back();
         float previousDistance = previous.dot(normal) - offset;
         for (const PxVec3& current : polygon)
@@ -42,7 +43,10 @@ namespace
             previous = current;
             previousDistance = distance;
         }
-        return result.size() >= 3 ? result : FootstepPolygon{};
+        if (result.size() < 3)
+        {
+            result.clear();
+        }
     }
 
     FootstepPolygon Transform(const FootstepPolygon& polygon, float scale, const PxVec3& translation)
@@ -145,6 +149,7 @@ namespace
         {
             return result;
         }
+        result.reserve(CircleVertices);
         for (uint32_t index = 0; index < CircleVertices; ++index)
         {
             const float angle = PxTwoPi * static_cast<float>(index) / CircleVertices;
@@ -163,33 +168,48 @@ namespace
         return result;
     }
 
-    std::array<FootstepPolygon, 3> Reach(const FootstepRecoveryInput& input,
+    FootstepNormalReach MakeNormalReach(const FootstepRecoveryInput& input,
         const FootstepRecoverySettings& settings, size_t side)
     {
-        std::array<FootstepPolygon, 3> result;
+        FootstepNormalReach result;
         const FootstepReachInput& foot = input.feet[side];
         const FootstepReachInput& support = input.feet[1 - side];
         if (!foot.available || !support.available || foot.sole.size() < 3 || support.sole.size() < 3 ||
             !foot.hip.isFinite() || !foot.ankleOffset.isFinite() || !foot.outward.isFinite() ||
             std::abs(foot.outward.magnitudeSquared() - 1.0f) > .01f ||
-            !std::isfinite(foot.legLength) || foot.legLength <= 0 || !std::isfinite(foot.maximumDistance) ||
-            foot.maximumDistance <= 0 || !std::isfinite(foot.minimumWidth) || foot.minimumWidth < 0)
+            !std::isfinite(foot.legLength) || foot.legLength <= 0 ||
+            !std::isfinite(foot.minimumWidth) || foot.minimumWidth < 0)
         {
             return result;
         }
         const float height = foot.hip.y - (input.groundHeight + foot.ankleOffset.y);
         const float length = foot.legLength * .9999f;
         const float radiusSquared = length * length - height * height;
-        if (radiusSquared <= 0)
+        if (!std::isfinite(radiusSquared) || radiusSquared <= 0)
         {
             return result;
         }
-        const PxVec3 center(foot.hip.x - foot.ankleOffset.x, input.groundHeight, foot.hip.z - foot.ankleOffset.z);
-        const FootstepPolygon reachable = IntersectFootstepPolygons(Circle(center, std::sqrt(radiusSquared)),
-            Circle(PxVec3(foot.stepOrigin.x, input.groundHeight, foot.stepOrigin.z), foot.maximumDistance));
         const float physicalWidth = HalfExtent(foot, foot.outward) + HalfExtent(support, foot.outward) + settings.clearance;
-        const float width = (std::max)(foot.minimumWidth, physicalWidth);
-        result[0] = Clip(reachable, foot.outward, support.position.dot(foot.outward) + width);
+        result.center = PxVec3(foot.hip.x - foot.ankleOffset.x, input.groundHeight, foot.hip.z - foot.ankleOffset.z);
+        result.radius = std::sqrt(radiusSquared);
+        result.outward = foot.outward;
+        result.minimumProjection = support.position.dot(foot.outward) + (std::max)(foot.minimumWidth, physicalWidth);
+        return result;
+    }
+
+    std::array<FootstepPolygon, 3> Reach(const FootstepRecoveryInput& input,
+        const FootstepRecoverySettings& settings, size_t side, const FootstepNormalReach& normal)
+    {
+        std::array<FootstepPolygon, 3> result;
+        const FootstepReachInput& foot = input.feet[side];
+        const FootstepReachInput& support = input.feet[1 - side];
+        if (normal.radius <= 0 || !std::isfinite(foot.maximumDistance) || foot.maximumDistance <= 0)
+        {
+            return result;
+        }
+        const FootstepPolygon reachable = IntersectFootstepPolygons(Circle(normal.center, normal.radius),
+            Circle(PxVec3(foot.stepOrigin.x, input.groundHeight, foot.stepOrigin.z), foot.maximumDistance));
+        Clip(reachable, normal.outward, normal.minimumProjection, result[0]);
         const float lengthClearance = HalfExtent(foot, input.forward) + HalfExtent(support, input.forward) + settings.clearance;
         const float angles[] = {settings.frontAngleDegrees, settings.backAngleDegrees};
         for (size_t cross = 0; cross < 2; ++cross)
@@ -197,7 +217,7 @@ namespace
             const PxVec3 forward = input.forward * (cross == 0 ? 1.0f : -1.0f);
             const PxVec3 boundary = forward + foot.outward * std::tan(angles[cross] * PxPi / 180.0f);
             // 발 사각형과 대각선 경계로 지지발 근처를 제외하고, 실제 PA 관절은 후보에서 검사한다.
-            result[cross + 1] = Clip(reachable, boundary, support.position.dot(boundary) + lengthClearance);
+            Clip(reachable, boundary, support.position.dot(boundary) + lengthClearance, result[cross + 1]);
         }
         return result;
     }
@@ -220,7 +240,23 @@ namespace
         return delta.x * delta.x + delta.z * delta.z;
     }
 
-    void EvaluateIntersections(FootstepRecoverySnapshot& result)
+    void ExpandOneStepCapture(FootstepPolygon& polygon, float scale)
+    {
+        // 볼록 다각형의 꼭짓점 평균을 기준으로 수평 치수만 늘린다.
+        const PxVec3 origin = polygon.front();
+        PxVec3 offset(0);
+        for (const PxVec3& point : polygon)
+        {
+            offset += point - origin;
+        }
+        const PxVec3 center = origin + offset / static_cast<float>(polygon.size());
+        for (PxVec3& point : polygon)
+        {
+            point += (point - center) * (scale - 1.0f);
+        }
+    }
+
+    bool EvaluateIntersections(FootstepRecoverySnapshot& result)
     {
         for (size_t mode = 0; mode < 3; ++mode)
         {
@@ -235,10 +271,11 @@ namespace
             }
             result.overlapAreas[mode] = FootstepUnionArea(result.intersections[mode]);
         }
+        return result.overlapAreas[0] > 0 || result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0;
     }
 
     void SelectTarget(const FootstepRecoveryInput& input, const FootstepRecoverySettings& settings,
-        FootstepRecoverySnapshot& result)
+        bool hasOverlap, FootstepPolygon& tested, FootstepRecoverySnapshot& result)
     {
         struct Candidate
         {
@@ -262,7 +299,7 @@ namespace
         }
         for (size_t mode : order)
         {
-            const std::vector<FootstepPolygon> pieces = result.modelFeasible ? result.intersections[mode] :
+            const std::vector<FootstepPolygon> pieces = hasOverlap ? result.intersections[mode] :
                 std::vector<FootstepPolygon>{result.reachable[mode]};
             const PxVec3 preferred = mode == 0 ? input.normalTarget : input.preferred;
             std::vector<Candidate> local;
@@ -276,7 +313,7 @@ namespace
                 candidate.mode = mode;
                 candidate.position = ClosestFootstepPoint(piece, preferred);
                 candidate.distance = DistanceSquared(candidate.position, preferred);
-                if (!result.modelFeasible)
+                if (!hasOverlap)
                 {
                     candidate.distance = std::numeric_limits<float>::max();
                     for (const FootstepPolygon& capture : result.capture)
@@ -331,14 +368,13 @@ namespace
             });
             candidates.insert(candidates.end(), local.begin(), local.end());
         }
-        if (!result.modelFeasible)
+        if (!hasOverlap)
         {
             std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) -> bool
             {
                 return a.distance < b.distance;
             });
         }
-        FootstepPolygon tested;
         for (const Candidate& candidate : candidates)
         {
             if (input.hasRejectedTarget && DistanceSquared(candidate.position, input.rejectedTarget) < .0001f)
@@ -369,26 +405,41 @@ namespace
             result.target = candidate.position;
             result.mode = static_cast<FootstepMode>(candidate.mode);
             result.hasTarget = true;
-            result.status = result.modelFeasible ? FootstepRecoveryStatus::Feasible : FootstepRecoveryStatus::BestEffort;
+            result.modelFeasible = hasOverlap;
+            result.status = hasOverlap ? FootstepRecoveryStatus::Feasible : FootstepRecoveryStatus::BestEffort;
             return;
         }
         result.status = result.poseRejected ? FootstepRecoveryStatus::PoseRejected : FootstepRecoveryStatus::NoReach;
     }
 }
 
+FootstepPolygon FootstepNormalReach::BuildPolygon() const
+{
+    FootstepPolygon polygon;
+    Clip(Circle(center, radius), outward, minimumProjection, polygon);
+    return polygon;
+}
+
 FootstepPolygon PARS::IntersectFootstepPolygons(const FootstepPolygon& first, const FootstepPolygon& second)
 {
-    FootstepPolygon result = first;
-    if (second.size() < 3)
+    if (first.empty() || second.size() < 3)
     {
         return {};
     }
+    // 볼록 다각형은 경계 하나로 자를 때 꼭짓점이 최대 하나 늘어난다.
+    const size_t vertexCapacity = first.size() + second.size();
+    FootstepPolygon result;
+    result.reserve(vertexCapacity);
+    result.assign(first.begin(), first.end());
+    FootstepPolygon clipped;
+    clipped.reserve(vertexCapacity);
     for (size_t index = 0; index < second.size() && !result.empty(); ++index)
     {
         const PxVec3& a = second[index];
         const PxVec3 edge = second[(index + 1) % second.size()] - a;
         const PxVec3 inward(-edge.z, 0, edge.x);
-        result = Clip(result, inward, a.dot(inward));
+        Clip(result, inward, a.dot(inward), clipped);
+        result.swap(clipped);
     }
     return result;
 }
@@ -435,6 +486,10 @@ PxVec3 PARS::ClosestFootstepPoint(const FootstepPolygon& polygon, const PxVec3& 
 
 float PARS::FootstepUnionArea(const std::vector<FootstepPolygon>& polygons)
 {
+    if (polygons.size() == 1)
+    {
+        return FootstepPolygonArea(polygons.front());
+    }
     // 각 다각형의 경계 중 다른 조각 내부에 가려지지 않은 구간만 적분한다.
     // 수직 단면마다 모든 변을 재검색하는 방식보다 비용의 증가를 제한할 수 있다.
     double area2 = 0;
@@ -519,18 +574,8 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     FootstepRecoverySnapshot result;
     result.preferred = input.preferred;
-    const float height = input.com.y - input.groundHeight;
-    if (!settings.enabled || input.movingFoot > 1 || !input.com.isFinite() || !input.velocity.isFinite() ||
-        !std::isfinite(height) || height < .05f || !std::isfinite(input.firstStepTime) || input.firstStepTime <= 0 ||
-        !std::isfinite(input.followingStepTime) || input.followingStepTime <= 0 ||
-        settings.maximumSteps < 1 || settings.maximumSteps > 3 || settings.maximumPoseChecks == 0 || settings.maximumPoseChecks > 6 ||
-        !std::isfinite(settings.frontAngleDegrees) || settings.frontAngleDegrees < 0 || settings.frontAngleDegrees >= 80 ||
-        !std::isfinite(settings.backAngleDegrees) || settings.backAngleDegrees < 0 || settings.backAngleDegrees >= 80 ||
-        !std::isfinite(settings.clearance) || settings.clearance < 0 ||
-        !std::isfinite(settings.switchAreaRatio) || settings.switchAreaRatio < 0 ||
-        !input.forward.isFinite() || std::abs(input.forward.magnitudeSquared() - 1) > .01f ||
-        !input.normalTarget.isFinite() || !input.preferred.isFinite() || !input.lockedTarget.isFinite() ||
-        static_cast<size_t>(input.previousMode) > 2)
+    if (!settings.enabled || input.movingFoot > 1 || !std::isfinite(input.groundHeight) ||
+        !std::isfinite(settings.clearance) || settings.clearance < 0)
     {
         return result;
     }
@@ -549,6 +594,22 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
             }
         }
     }
+    result.normalReach = MakeNormalReach(input, settings, side);
+    const float height = input.com.y - input.groundHeight;
+    if (!input.com.isFinite() || !input.velocity.isFinite() || !std::isfinite(height) || height < .05f ||
+        !std::isfinite(input.firstStepTime) || input.firstStepTime <= 0 ||
+        !std::isfinite(input.followingStepTime) || input.followingStepTime <= 0 ||
+        settings.maximumSteps < 1 || settings.maximumSteps > 3 || settings.maximumPoseChecks == 0 || settings.maximumPoseChecks > 6 ||
+        !std::isfinite(settings.frontAngleDegrees) || settings.frontAngleDegrees < 0 || settings.frontAngleDegrees >= 80 ||
+        !std::isfinite(settings.backAngleDegrees) || settings.backAngleDegrees < 0 || settings.backAngleDegrees >= 80 ||
+        !std::isfinite(settings.switchAreaRatio) || settings.switchAreaRatio < 0 ||
+        (settings.maximumSteps == 1 && (!std::isfinite(settings.oneStepCaptureScale) || settings.oneStepCaptureScale < 1.0f)) ||
+        !input.forward.isFinite() || std::abs(input.forward.magnitudeSquared() - 1) > .01f ||
+        !input.normalTarget.isFinite() || !input.preferred.isFinite() || !input.lockedTarget.isFinite() ||
+        static_cast<size_t>(input.previousMode) > 2)
+    {
+        return result;
+    }
     const float omega = std::sqrt(9.81f / height);
     const float exponent = omega * input.firstStepTime;
     if (exponent > 12 || input.feet[1 - side].sole.size() < 3)
@@ -559,7 +620,14 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     const float discount = std::exp(-omega * input.followingStepTime);
     result.icp = PxVec3(input.com.x + input.velocity.x / omega, input.groundHeight, input.com.z + input.velocity.z / omega);
     result.predictionTime = input.firstStepTime;
-    const std::array<std::array<FootstepPolygon, 3>, 2> reaches{{Reach(input, settings, 0), Reach(input, settings, 1)}};
+    const uint32_t maximum = input.stepping ? settings.maximumSteps : 1;
+    std::array<std::array<FootstepPolygon, 3>, 2> reaches;
+    reaches[side] = Reach(input, settings, side, result.normalReach);
+    if (maximum > 1)
+    {
+        const size_t other = 1 - side;
+        reaches[other] = Reach(input, settings, other, MakeNormalReach(input, settings, other));
+    }
     result.reachable = reaches[side];
     std::array<FootstepPolygon, 2> soles;
     std::array<std::vector<FootstepPolygon>, 2> errors;
@@ -571,7 +639,6 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     // 고정 착지 시각의 ICP 집합이다. 압력 중심을 지지발 안에서 선택하는 LIP 모델을 사용한다.
     const FootstepPolygon future = Transform(input.feet[1 - side].sole, 1 - growth,
         PxVec3(growth * result.icp.x, input.groundHeight, growth * result.icp.z));
-    const uint32_t maximum = input.stepping ? settings.maximumSteps : 1;
     std::array<std::vector<FootstepPolygon>, 3> captureBySteps;
     for (uint32_t steps = 1; steps <= maximum; ++steps)
     {
@@ -589,6 +656,11 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         std::array<std::vector<FootstepPolygon>, 2> nextErrors;
         for (size_t stance = 0; stance < 2; ++stance)
         {
+            // 마지막 전개에서는 이번 이동발의 회복 영역만 읽는다.
+            if (steps + 1 == maximum && stance != side)
+            {
+                continue;
+            }
             nextErrors[stance].push_back(soles[stance]);
             const size_t next = 1 - stance;
             const FootstepPolygon pressure = Transform(soles[stance], 1 - discount, PxVec3(0));
@@ -609,8 +681,6 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         errors = std::move(nextErrors);
     }
     RemoveContained(result.capture);
-    EvaluateIntersections(result);
-    result.modelFeasible = result.overlapAreas[0] > 0 || result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0;
     result.capturePieceCount = static_cast<uint32_t>(result.capture.size());
     result.usesFutureReachApproximation = result.steps > 1;
     if (result.capturePieceCount > MaximumCapturePieces)
@@ -618,6 +688,21 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         result.status = FootstepRecoveryStatus::Unavailable;
         result.budgetExhausted = true;
         return result;
+    }
+    bool hasOverlap = EvaluateIntersections(result);
+    result.modelFeasible = hasOverlap;
+    const bool expand = settings.maximumSteps == 1 && settings.oneStepCaptureScale > 1.0f &&
+        !result.capture.empty() && result.capture.front().size() >= 3;
+    FootstepPolygon tested;
+    if (expand)
+    {
+        // 원래 영역의 자세 후보를 먼저 검사한다. 확장 영역도 같은 틱의 검사 예산을 공유한다.
+        if (input.stepping && !input.locked && hasOverlap)
+        {
+            SelectTarget(input, settings, hasOverlap, tested, result);
+        }
+        ExpandOneStepCapture(result.capture.front(), settings.oneStepCaptureScale);
+        hasOverlap = EvaluateIntersections(result);
     }
     if (!input.stepping)
     {
@@ -631,9 +716,9 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         result.modelFeasible = Contains(result.intersections[static_cast<size_t>(result.mode)], result.target);
         result.status = FootstepRecoveryStatus::Locked;
     }
-    else
+    else if (!result.hasTarget)
     {
-        SelectTarget(input, settings, result);
+        SelectTarget(input, settings, hasOverlap, tested, result);
     }
     if (result.hasTarget && result.modelFeasible)
     {
@@ -643,6 +728,15 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
             {
                 result.requiredSteps = steps;
                 break;
+            }
+        }
+        if (expand && result.requiredSteps == 0)
+        {
+            result.modelFeasible = false;
+            result.targetInCaptureMargin = true;
+            if (!input.locked)
+            {
+                result.status = FootstepRecoveryStatus::BestEffort;
             }
         }
     }
@@ -675,7 +769,7 @@ const char* PARS::FootstepRecoveryStatusLabel(FootstepRecoveryStatus status)
     case FootstepRecoveryStatus::Feasible:
         return u8"모델상 회복 후보";
     case FootstepRecoveryStatus::BestEffort:
-        return u8"회복 영역 밖 / 최선 시도";
+        return u8"모델 영역 밖 / 최선 시도";
     case FootstepRecoveryStatus::NoReach:
         return u8"도달 영역 없음";
     case FootstepRecoveryStatus::PoseRejected:

@@ -167,13 +167,15 @@ namespace
         uint32_t recoverySteps = settings.recovery.maximumSteps;
         CommandLineArgs::GetInteger(L"footsteprecoverysteps", recoverySteps);
         settings.recovery.maximumSteps = physx::PxClamp(recoverySteps, uint32_t(1), uint32_t(3));
+        CommandLineArgs::GetFloat(L"footstepcapturescale", settings.recovery.oneStepCaptureScale);
         CommandLineArgs::GetFloat(L"landingcomhysteresis", settings.landingComClampHysteresisDegrees);
         report << "landing_com_clamp=" << settings.landingComClampEnabled
             << " region=opposite_grounded_sole"
             << " hysteresis=" << settings.landingComClampHysteresisDegrees
             << " minimum_stance_ratio=" << settings.minimumStanceWidthRatio
             << " prevent_crossing=" << settings.preventCrossing << std::endl;
-        report << "footstep_recovery=" << settings.recovery.enabled << " maximum_steps=" << settings.recovery.maximumSteps << std::endl;
+        report << "footstep_recovery=" << settings.recovery.enabled << " maximum_steps=" << settings.recovery.maximumSteps
+            << " one_step_capture_scale=" << settings.recovery.oneStepCaptureScale << std::endl;
     }
 
     void WriteLandingComHeader(std::ostream& stream)
@@ -185,7 +187,7 @@ namespace
             "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
-            "animation_clip,animation_time_s,com_velocity_x,com_velocity_z\n";
+            "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -232,7 +234,8 @@ namespace
                 << ',' << decision.overlapAreas[1] << ',' << decision.overlapAreas[2]
                 << ',' << decision.capturePieceCount << ',' << decision.steps << ',' << decision.pathRejected
                 << ',' << animation.GetAnimationName(animation.GetCurrentAnimationIndex()) << ',' << animation.GetAnimationTime()
-                << ',' << support.centerOfMassVelocity.x << ',' << support.centerOfMassVelocity.z << '\n';
+                << ',' << support.centerOfMassVelocity.x << ',' << support.centerOfMassVelocity.z
+                << ',' << decision.targetInCaptureMargin << '\n';
         }
     }
 
@@ -470,6 +473,27 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 PhysicsGroundContact contact;
                 const bool grounded = mesh.GetRagdoll().GetBodyGroundContact(body, contact);
                 const FootstepCommand& command = support.footstep.feet[side];
+                const FootstepRecoverySnapshot& search = support.footstep.candidates[side].recovery;
+                const bool rejected = !command.justStarted && search.status == FootstepRecoveryStatus::PoseRejected;
+                const bool crossover = search.hasTarget && search.mode != FootstepMode::Normal;
+                if (command.IsInProgress() && support.footstep.requestedFoot == static_cast<int>(side) && (rejected || crossover))
+                {
+                    const FootSoleDebug overlay;
+                    const std::string text = overlay.GetLegPredictionText(mesh);
+                    std::string expectedCommand = side == 0 ? u8"왼발 " : u8"오른발 ";
+                    expectedCommand += FootstepModeLabel(command.target.recovery.mode);
+                    if (rejected)
+                    {
+                        expectedCommand += u8" (기존 목표 유지)";
+                    }
+                    const std::string expectedSearch = std::string(u8"\n[착지 탐색] ") +
+                        (rejected ? u8"착지 자세 검사 실패" : FootstepModeLabel(search.mode));
+                    const size_t searchLine = text.find(expectedSearch);
+                    check(text.find(u8"[딛기 명령] ") == 0 && searchLine != std::string::npos &&
+                        text.find(expectedCommand) < searchLine, rejected ?
+                        "Top overlay keeps the executing mode when landing poses fail" :
+                        "Top overlay reports the executing mode when a crossover target is selected");
+                }
                 if (command.justStarted)
                 {
                     ++footCommands;

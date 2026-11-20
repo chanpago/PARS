@@ -37,7 +37,8 @@ namespace
         {
             for (const PARS::FootstepTarget& candidate : step.candidates)
             {
-                if (candidate.recovery.status == PARS::FootstepRecoveryStatus::Preview)
+                if (candidate.recovery.status == PARS::FootstepRecoveryStatus::Preview ||
+                    candidate.recovery.normalReach.radius > 0)
                 {
                     return &candidate.recovery;
                 }
@@ -45,26 +46,19 @@ namespace
             return nullptr;
         }
         const PARS::FootstepRecoverySnapshot& recovery = step.candidates[step.requestedFoot].recovery;
-        return recovery.status == PARS::FootstepRecoveryStatus::Unavailable ? nullptr : &recovery;
+        return recovery.status != PARS::FootstepRecoveryStatus::Unavailable || recovery.normalReach.radius > 0 ?
+            &recovery : nullptr;
     }
 
-    bool ShowNormalReachRegion(const PARS::FootstepRecoverySnapshot& recovery)
+    bool ShowCrossReachRegions(const PARS::FootstepRecoverySnapshot& recovery)
     {
         if (recovery.status == PARS::FootstepRecoveryStatus::Preview)
         {
-            // 대기 중에는 착지 자세를 검사하지 않으므로 일반 영역과 회복 영역의 겹침을 사용한다.
-            return recovery.overlapAreas[NormalModeIndex] > 0.0f;
+            return recovery.overlapAreas[NormalModeIndex] <= 0.0f;
         }
-        return recovery.hasTarget && recovery.mode == PARS::FootstepMode::Normal && recovery.modelFeasible;
-    }
-
-    const char* RecoveryDecisionLabel(const PARS::FootstepRecoverySnapshot& recovery)
-    {
-        if (recovery.hasTarget)
-        {
-            return PARS::FootstepModeLabel(recovery.mode);
-        }
-        return ShowNormalReachRegion(recovery) ? u8"일반 검토" : u8"교차 검토";
+        return recovery.status != PARS::FootstepRecoveryStatus::Unavailable &&
+            (!recovery.hasTarget || recovery.mode != PARS::FootstepMode::Normal ||
+                (!recovery.modelFeasible && !recovery.targetInCaptureMargin));
     }
 
     void AppendRegion(std::vector<PxDebugTriangle>& triangles, const PARS::FootstepPolygon& polygon,
@@ -91,17 +85,13 @@ namespace
     void AppendVisibleRecoveryRegions(std::vector<Primitive>& primitives, const PARS::FootstepRecoverySnapshot& recovery,
         float captureLift, float reachLift)
     {
-        const bool showNormal = ShowNormalReachRegion(recovery);
-        if (showNormal)
-        {
-            // 검정 위에 초록을 그려 두 영역이 겹치는 부분을 드러낸다.
-            AppendRegion(primitives, recovery.reachable[NormalModeIndex], RecoveryModeColors[NormalModeIndex], reachLift);
-        }
+        // 검정은 고관절 도달 원에서 지지발 쪽 최소 간격을 제외한 범위다.
+        AppendRegion(primitives, recovery.normalReach.BuildPolygon(), RecoveryModeColors[NormalModeIndex], reachLift);
         for (const PARS::FootstepPolygon& piece : recovery.capture)
         {
             AppendRegion(primitives, piece, RecoveryCaptureColor, captureLift);
         }
-        if (!showNormal)
+        if (ShowCrossReachRegions(recovery))
         {
             for (size_t mode = static_cast<size_t>(PARS::FootstepMode::FrontCross); mode < recovery.reachable.size(); ++mode)
             {
@@ -114,6 +104,48 @@ namespace
     const char* FootLabel(int foot)
     {
         return foot == 0 ? u8"왼발" : foot == 1 ? u8"오른발" : u8"없음";
+    }
+
+    std::string FootstepDecisionText(const PARS::FootstepSnapshot& step, const PARS::FootstepRecoverySnapshot* decision)
+    {
+        std::string text;
+        for (size_t side = 0; side < step.feet.size(); ++side)
+        {
+            const PARS::FootstepCommand& command = step.feet[side];
+            if (!command.IsInProgress())
+            {
+                continue;
+            }
+            text += text.empty() ? u8"[딛기 명령] " : " / ";
+            text += FootLabel(static_cast<int>(side));
+            text += ' ';
+            text += PARS::FootstepModeLabel(command.target.recovery.mode);
+            const PARS::FootstepRecoveryStatus status = step.candidates[side].recovery.status;
+            if (!command.justStarted && (status == PARS::FootstepRecoveryStatus::PoseRejected ||
+                status == PARS::FootstepRecoveryStatus::NoReach))
+            {
+                text += u8" (기존 목표 유지)";
+            }
+        }
+        if (!decision)
+        {
+            return text;
+        }
+        if (text.empty())
+        {
+            text = u8"[딛기 명령] 없음";
+        }
+        text += u8"\n[착지 탐색] ";
+        if (decision->hasTarget)
+        {
+            text += PARS::FootstepModeLabel(decision->mode);
+            text += u8" · ";
+        }
+        char result[160];
+        std::snprintf(result, sizeof(result), u8"%s · 최대 %u스텝 · %.3fms",
+            PARS::FootstepRecoveryStatusLabel(decision->status), decision->steps, decision->elapsedMilliseconds);
+        text += result;
+        return text;
     }
 
     const char* LandingDirectionLabel(PARS::FootstepLandingDirection direction)
@@ -506,15 +538,10 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
 {
     const PARS::FootstepCollisionSnapshot& prediction = mesh.GetFootstepCollisionSnapshot();
     const PARS::FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
-    std::string decisionText;
-    const PARS::FootstepRecoverySnapshot* decision = VisibleRecovery(mesh);
-    if (decision)
+    std::string decisionText = FootstepDecisionText(support.footstep, VisibleRecovery(mesh));
+    if (!decisionText.empty())
     {
-        char message[384];
-        std::snprintf(message, sizeof(message), u8"[딛기 판단] %s · %s · 최대 %u스텝 · %.3fms\n",
-            RecoveryDecisionLabel(*decision), PARS::FootstepRecoveryStatusLabel(decision->status),
-            decision->steps, decision->elapsedMilliseconds);
-        decisionText = message;
+        decisionText += '\n';
     }
     decisionText += u8"[추종 애니메이션] ";
     decisionText += GetFollowedAnimationText(mesh);
@@ -654,7 +681,10 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
         {
             Point(lines, ToMath(recovery->target + PxVec3(0, .025f, 0)), RecoveryTargetColor, .04f);
         }
-        Point(lines, ToMath(recovery->icp + PxVec3(0, .03f, 0)), RecoveryCaptureColor, .03f);
+        if (recovery->predictionTime > 0)
+        {
+            Point(lines, ToMath(recovery->icp + PxVec3(0, .03f, 0)), RecoveryCaptureColor, .03f);
+        }
     }
     Vector3 currentCenter(kZero);
     float currentMass = 0;
@@ -1074,39 +1104,48 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         ImGui::Checkbox(u8"회복 영역으로 일반 / 교차 선택", &settings.recovery.enabled);
         if (settings.recovery.enabled)
         {
-            ImGui::TextWrapped(u8"색칠된 도달 영역은 현재 골반·다리 길이·발 크기의 근사입니다. 착지 후보마다 PA 관절 제한과 착지 자세를 검사합니다.");
+            ImGui::TextWrapped(u8"검정은 고관절과 다리 길이로 닿는 범위에서 지지발 옆 최소 간격을 제외한 영역입니다. 실제 착지점에는 최대 보폭과 자세 검사를 적용합니다.");
             int maximumSteps = static_cast<int>(settings.recovery.maximumSteps);
             if (ImGui::SliderInt(u8"회복 예측 최대 발딛기 수", &maximumSteps, 1, 3))
             {
                 settings.recovery.maximumSteps = static_cast<uint32_t>(maximumSteps);
             }
+            if (settings.recovery.maximumSteps == 1)
+            {
+                ImGui::SliderFloat(u8"1스텝 회복 영역 배율", &settings.recovery.oneStepCaptureScale,
+                    1.0f, 2.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
+            }
             ImGui::SliderFloat(u8"하중 이동 예측 시간", &settings.recovery.transferTime, .01f, .3f, "%.3fs");
             ImGui::SliderFloat(u8"앞 교차 경계 각도", &settings.recovery.frontAngleDegrees, 0.0f, 60.0f, "%.1f도");
             ImGui::SliderFloat(u8"뒤 교차 경계 각도", &settings.recovery.backAngleDegrees, 0.0f, 60.0f, "%.1f도");
             const PARS::FootstepRecoverySnapshot* decision = VisibleRecovery(mesh);
+            const std::string decisionText = FootstepDecisionText(step, decision);
+            if (!decisionText.empty())
+            {
+                ImGui::TextUnformatted(decisionText.c_str());
+            }
             if (decision)
             {
                 if (m_ShowRecoveryRegions)
                 {
-                    ImGui::TextUnformatted(ShowNormalReachRegion(*decision) ? u8"표시 영역 · 연초록 회복 / 검정 일반" :
-                        u8"표시 영역 · 연초록 회복 / 연주황 앞 교차 / 연보라 뒤 교차");
+                    ImGui::TextUnformatted(ShowCrossReachRegions(*decision) ?
+                        u8"영역 색상 · 검정 일반 도달 / 연초록 회복 / 연주황 앞 교차 / 연보라 뒤 교차" :
+                        u8"영역 색상 · 검정 일반 도달 / 연초록 회복");
                 }
-                ImGui::Text(u8"%s / %s / 최대 %u스텝 / %.3fms", RecoveryDecisionLabel(*decision),
-                    PARS::FootstepRecoveryStatusLabel(decision->status), decision->steps, decision->elapsedMilliseconds);
-                ImGui::Text(u8"겹침 면적: 일반 %.1f / 앞 %.1f / 뒤 %.1f cm2",
+                ImGui::Text(u8"최대 보폭 적용 후 겹침 · 일반 %.1f / 앞 %.1f / 뒤 %.1f cm²",
                     decision->overlapAreas[0] * 10000, decision->overlapAreas[1] * 10000, decision->overlapAreas[2] * 10000);
                 ImGui::Text(u8"착지 자세 %u회 / 영역 %u조각 / 착지 예측 %.3fs / 경로 %s",
                     decision->poseChecks, decision->capturePieceCount, decision->predictionTime,
                     !settings.pathAvoidanceEnabled ? u8"예측 꺼짐" : decision->pathRejected ? u8"미확보" : u8"아래 충돌 예측 참조");
-                if (decision->hasTarget)
+                if (decision->targetInCaptureMargin)
+                {
+                    ImGui::TextUnformatted(u8"확장 영역의 착지 후보 · 한 걸음 회복 미확정");
+                }
+                else if (decision->hasTarget)
                 {
                     ImGui::Text(u8"선택 목표의 필요 스텝: %u / 착지 자세 통과 %s / 검사 예산 %s",
                         decision->requiredSteps, decision->poseRejected ? u8"일부 거절 후 선택" : "ON",
                         decision->budgetExhausted ? u8"도달" : "OK");
-                }
-                else if (decision->status != PARS::FootstepRecoveryStatus::Preview)
-                {
-                    ImGui::TextUnformatted(u8"새 착지 후보 미확보: 기존 목표 유지 / 성공으로 판정하지 않음");
                 }
                 if (decision->usesFutureReachApproximation)
                 {

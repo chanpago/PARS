@@ -28,6 +28,7 @@ namespace PARS
         float backAngleDegrees = 30.0f;
         float clearance = .005f;
         float switchAreaRatio = .15f;
+        float oneStepCaptureScale = 1.25f;
         uint32_t maximumSteps = 3;
         uint32_t maximumPoseChecks = 6;
         bool enabled = true;
@@ -70,6 +71,18 @@ namespace PARS
         bool hasRejectedTarget = false;
     };
 
+    struct FootstepNormalReach
+    {
+    public:
+        FootstepPolygon BuildPolygon() const;
+
+    public:
+        physx::PxVec3 center{0};
+        float radius = 0;
+        physx::PxVec3 outward{0};
+        float minimumProjection = 0;
+    };
+
     struct FootstepRecoverySnapshot
     {
     public:
@@ -77,6 +90,7 @@ namespace PARS
         std::vector<FootstepPolygon> capture;
         std::array<std::vector<FootstepPolygon>, 3> intersections;
         double elapsedMilliseconds = 0;
+        FootstepNormalReach normalReach;
         physx::PxVec3 icp{0};
         physx::PxVec3 target{0};
         physx::PxVec3 preferred{0};
@@ -94,6 +108,7 @@ namespace PARS
         bool budgetExhausted = false;
         bool pathRejected = false;
         bool usesFutureReachApproximation = false;
+        bool targetInCaptureMargin = false;
     };
 
     // 볼록 조각을 별도로 보존한다. 조각 사이의 금지 공간을 볼록 껍질로 채우지 않는다.

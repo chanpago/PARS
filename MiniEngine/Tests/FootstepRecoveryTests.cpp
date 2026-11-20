@@ -104,6 +104,44 @@ namespace
         }
     }
 
+    void TestNormalReachDisplay()
+    {
+        FootstepRecoverySettings settings;
+        settings.maximumSteps = 1;
+        settings.oneStepCaptureScale = 1.0f;
+        FootstepRecoveryInput input = Input();
+        input.velocity = PxVec3(-.8f, 0, 0);
+        input.com.z = .15f;
+        const FootstepRecoverySnapshot cross = SelectFootstepRecovery(input, settings);
+        const FootstepPolygon geometry = cross.normalReach.BuildPolygon();
+        const PxVec3 beyondShortStep(.45f, 0, 0);
+        Check(cross.mode == FootstepMode::FrontCross && cross.overlapAreas[0] == 0 &&
+            IsInsideFootSupportHull(geometry, beyondShortStep) && !IsInsideFootSupportHull(geometry, PxVec3(.02f, 0, 0)),
+            "black reach exists during a crossover and excludes the stance-foot clearance");
+
+        input.velocity = PxVec3(0);
+        input.feet[input.movingFoot].maximumDistance = .08f;
+        input.acceptsTarget = [](const PxVec3&) -> bool
+        {
+            return false;
+        };
+        const FootstepRecoverySnapshot rejected = SelectFootstepRecovery(input, settings);
+        Check(rejected.status == FootstepRecoveryStatus::PoseRejected && rejected.normalReach.BuildPolygon() == geometry &&
+            !IsInsideFootSupportHull(rejected.reachable[0], beyondShortStep),
+            "pose rejection and the command stride cap preserve the geometric overlay");
+        input.stepping = false;
+        const FootstepRecoverySnapshot preview = SelectFootstepRecovery(input, settings);
+        Check(preview.status == FootstepRecoveryStatus::Preview && preview.normalReach.BuildPolygon() == geometry,
+            "preview and swing use the same geometric overlay");
+        input.firstStepTime = 0;
+        const FootstepRecoverySnapshot noPrediction = SelectFootstepRecovery(input, settings);
+        Check(noPrediction.status == FootstepRecoveryStatus::Unavailable && noPrediction.normalReach.BuildPolygon() == geometry,
+            "the geometric overlay can be drawn before a capture prediction is available");
+        input.feet[input.movingFoot].hip.y = 2;
+        const FootstepRecoverySnapshot unreachable = SelectFootstepRecovery(input, settings);
+        Check(unreachable.normalReach.BuildPolygon().empty(), "black reach ends when the leg cannot reach the ground");
+    }
+
     void TestModeChoice()
     {
         FootstepRecoverySettings settings;
@@ -164,6 +202,7 @@ namespace
     {
         FootstepRecoverySettings settings;
         settings.maximumSteps = 1;
+        settings.oneStepCaptureScale = 1.0f;
         FootstepRecoveryInput input = Input();
         input.velocity = PxVec3(.3f, 0, .5f);
         const FootstepRecoverySnapshot first = SelectFootstepRecovery(input, settings);
@@ -226,6 +265,73 @@ namespace
         const FootstepRecoverySnapshot turned = SelectFootstepRecovery(input, settings);
         Check(turned.mode == beforeTurn.mode && std::abs(turned.overlapAreas[1] - beforeTurn.overlapAreas[1]) < 1e-5f,
             "crossover selection follows character forward rather than world axes");
+    }
+
+    void TestThreeStepReachForBothFeet()
+    {
+        const FootstepRecoverySettings threeSteps;
+        Check(threeSteps.maximumSteps == 3, "the default planner considers three recovery steps");
+        FootstepRecoverySettings twoSteps = threeSteps;
+        twoSteps.maximumSteps = 2;
+        for (size_t side = 0; side < 2; ++side)
+        {
+            FootstepRecoveryInput input = Input();
+            input.movingFoot = side;
+            input.velocity = input.feet[side].outward * -1.3f + input.forward * 1.4f;
+            input.normalTarget.x = input.feet[side].position.x;
+            input.preferred = input.normalTarget;
+            const FootstepRecoverySnapshot two = SelectFootstepRecovery(input, twoSteps);
+            const FootstepRecoverySnapshot three = SelectFootstepRecovery(input, threeSteps);
+            Check(!two.modelFeasible && three.hasTarget && three.modelFeasible && three.requiredSteps == 3,
+                "either moving foot can use a landing that requires all three steps");
+        }
+    }
+
+    void TestOneStepCaptureMargin()
+    {
+        FootstepRecoverySettings settings;
+        settings.maximumSteps = 1;
+        FootstepRecoverySettings exact = settings;
+        exact.oneStepCaptureScale = 1.0f;
+        FootstepRecoveryInput input = Input();
+        const FootstepRecoverySnapshot original = SelectFootstepRecovery(input, exact);
+        const FootstepRecoverySnapshot expanded = SelectFootstepRecovery(input, settings);
+        Check(expanded.steps == 1 && expanded.capture.size() == 1 && original.capture.size() == 1,
+            "one-step expansion keeps a single capture polygon");
+        Check(std::abs(FootstepPolygonArea(expanded.capture.front()) / FootstepPolygonArea(original.capture.front()) -
+            settings.oneStepCaptureScale * settings.oneStepCaptureScale) < 1e-4f && expanded.reachable == original.reachable,
+            "only the capture polygon grows by the configured linear scale");
+        Check(expanded.hasTarget && expanded.modelFeasible && expanded.requiredSteps == 1 && !expanded.targetInCaptureMargin &&
+            expanded.mode == original.mode && (expanded.target - original.target).magnitude() < 1e-6f,
+            "a model-feasible landing keeps priority over the margin");
+
+        const PxVec3 edge = ClosestFootstepPoint(original.capture.front(), PxVec3(.14f, 0, 1));
+        const PxVec3 marginTarget = edge + PxVec3(0, 0, .02f);
+        input.feet[1].stepOrigin = marginTarget;
+        input.feet[1].maximumDistance = .003f;
+        input.normalTarget = marginTarget;
+        const FootstepRecoverySnapshot margin = SelectFootstepRecovery(input, settings);
+        Check(margin.hasTarget && margin.status == FootstepRecoveryStatus::BestEffort && margin.targetInCaptureMargin &&
+            !margin.modelFeasible && margin.requiredSteps == 0 && !InAny(original.capture, margin.target) &&
+            InAny(margin.intersections[static_cast<size_t>(margin.mode)], margin.target),
+            "a margin-only reachable target is accepted without claiming one-step capture");
+        input.locked = true;
+        input.previousMode = margin.mode;
+        input.lockedTarget = margin.target;
+        const FootstepRecoverySnapshot locked = SelectFootstepRecovery(input, settings);
+        Check(locked.status == FootstepRecoveryStatus::Locked && locked.target == margin.target &&
+            locked.targetInCaptureMargin && !locked.modelFeasible && locked.poseChecks == 0,
+            "a locked margin target stays fixed and retains its classification");
+        input = Input();
+        uint32_t checksRun = 0;
+        input.acceptsTarget = [&checksRun](const PxVec3&) -> bool
+        {
+            ++checksRun;
+            return false;
+        };
+        const FootstepRecoverySnapshot rejected = SelectFootstepRecovery(input, settings);
+        Check(!rejected.hasTarget && rejected.poseRejected && checksRun == rejected.poseChecks &&
+            checksRun <= settings.maximumPoseChecks, "both regions share a single pose-check budget");
     }
 
     void TestPlannerIntegration()
@@ -334,8 +440,11 @@ void TestFootstepRecovery()
 {
     checks = 0;
     TestPolygonGeometry();
+    TestNormalReachDisplay();
     TestModeChoice();
     TestCaptureAndTiming();
+    TestThreeStepReachForBothFeet();
+    TestOneStepCaptureMargin();
     TestPlannerIntegration();
     FootstepRecoveryInput input = Input();
     input.velocity = PxVec3(-1.5f, 0, .5f);
@@ -351,6 +460,6 @@ void TestFootstepRecovery()
         maximum = (std::max)(maximum, result.elapsedMilliseconds);
     }
     const double total = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-    std::printf("PASS: %u recovery-region checks; 120 three-step decisions avg %.3f ms, max %.3f ms (geometry only)\n",
-        checks, total / 120, maximum);
+    std::printf("PASS: %u recovery-region checks; 120 %u-step decisions avg %.3f ms, max %.3f ms (geometry only)\n",
+        checks, settings.maximumSteps, total / 120, maximum);
 }
