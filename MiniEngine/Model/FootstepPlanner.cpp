@@ -248,14 +248,26 @@ namespace
     }
 
     FootstepTarget MakeRecoveryTarget(const FootstepInput& input, const FootstepSettings& settings,
-        const FootstepSnapshot& state, size_t side, bool needsStep, FootstepTarget normal)
+        const FootstepSnapshot& state, size_t side, bool rawNeedsStep, FootstepTarget normal)
     {
+        const FootstepCommand& command = state.feet[side];
         if (!settings.recovery.enabled || !normal.valid || !input.feet[0].reach.available ||
             !input.feet[1].reach.available || (input.active && !input.feet[1 - side].grounded) || state.groundNormal.y < .995f)
         {
+            if (command.phase == FootstepPhase::Airborne)
+            {
+                normal.recovery.mode = command.target.recovery.mode;
+                normal.recovery.modeLocked = true;
+                if (normal.valid && (command.target.recovery.status != FootstepRecoveryStatus::Unavailable ||
+                    normal.recovery.mode != FootstepMode::Normal))
+                {
+                    // 회복 입력이 끊기면 공중에서 확정한 목표를 일반 후보로 교체하지 않는다.
+                    normal.valid = false;
+                    normal.reason = FootstepReason::InvalidTarget;
+                }
+            }
             return normal;
         }
-        const FootstepCommand& command = state.feet[side];
         FootstepRecoveryInput request;
         request.movingFoot = side;
         request.com = input.com;
@@ -266,10 +278,19 @@ namespace
         request.preferred = PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime,
             request.groundHeight, input.com.z + input.velocity.z * settings.landingPredictionTime) +
             PxVec3(input.feet[side].stanceOffset.x, 0, input.feet[side].stanceOffset.z) * settings.stanceScale;
-        request.stepping = needsStep || command.IsInProgress();
+        request.stepping = rawNeedsStep || state.needsStep || command.IsInProgress();
         request.locked = command.IsInProgress() && command.motion.landingTargetLocked;
         request.lockedTarget = command.target.position;
         request.previousMode = command.IsInProgress() ? command.target.recovery.mode : FootstepMode::Normal;
+        if (command.phase == FootstepPhase::Airborne)
+        {
+            request.modeSelection = FootstepModeSelection::KeepPrevious;
+        }
+        else if (rawNeedsStep && state.startCom.limited && input.feet[side].grounded)
+        {
+            // 보정 전 시작 예측이 지지 영역 밖이면서 지지발 부채꼴 안이면 이륙 전에 교차를 먼저 검사한다.
+            request.modeSelection = FootstepModeSelection::PreferCross;
+        }
         request.hasRejectedTarget = command.IsInProgress() && command.target.recovery.pathRejected && !request.locked;
         request.rejectedTarget = command.target.position;
         const float transfer = (std::max)(settings.recovery.transferTime, settings.supportConfirmationTime);
@@ -870,13 +891,20 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.needsStep = state.hasPrediction && validArea && !IsInsideFootSupportHull(input.hull, state.predictedCom);
     state.reason = !state.hasPrediction ? FootstepReason::InvalidCom : !validArea ? FootstepReason::NoSupportArea :
         state.needsStep ? FootstepReason::ValidTarget : FootstepReason::PredictedInside;
+    const bool rawNeedsStep = state.hasPrediction && validArea && !IsInsideFootSupportHull(input.hull, state.startCom.raw);
+    for (size_t side = 0; side < state.feet.size(); ++side)
+    {
+        const bool requested = state.requestedFoot == static_cast<int>(side);
+        if (requested || state.feet[side].IsInProgress())
+        {
+            // 새 충격이 반대 발을 요청해도 진행 중인 발은 자신의 딛기 종류 안에서 계속 착지를 계획한다.
+            state.candidates[side] = MakeRecoveryTarget(input, settings, state, side, requested && rawNeedsStep,
+                state.candidates[side]);
+        }
+    }
     if (state.requestedFoot >= 0 && state.requestedFoot < 2)
     {
         const size_t side = static_cast<size_t>(state.requestedFoot);
-        // 시작 COM 보정 결과를 판단 계층의 입력으로 사용하지 않는다.
-        const bool rawNeedsStep = state.startCom.valid && validArea && !IsInsideFootSupportHull(input.hull, state.startCom.raw);
-        state.candidates[side] = MakeRecoveryTarget(input, settings, state, side,
-            rawNeedsStep || state.needsStep, state.candidates[side]);
         const FootstepRecoverySnapshot& recovery = state.candidates[side].recovery;
         if (rawNeedsStep && recovery.hasTarget)
         {

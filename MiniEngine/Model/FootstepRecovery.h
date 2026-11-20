@@ -20,6 +20,13 @@ namespace PARS
         Locked
     };
 
+    enum class FootstepModeSelection
+    {
+        Automatic,
+        PreferCross,
+        KeepPrevious
+    };
+
     struct FootstepRecoverySettings
     {
     public:
@@ -65,6 +72,7 @@ namespace PARS
         float firstStepTime = 0;
         float followingStepTime = 0;
         FootstepMode previousMode = FootstepMode::Normal;
+        FootstepModeSelection modeSelection = FootstepModeSelection::Automatic;
         bool stepping = false;
         bool locked = false;
         bool hasRejectedTarget = false;
@@ -89,6 +97,7 @@ namespace PARS
         float predictionTime = 0;
         uint32_t capturePieceCount = 0;
         bool hasTarget = false;
+        bool modeLocked = false;
         bool modelFeasible = false;
         bool poseRejected = false;
         bool budgetExhausted = false;

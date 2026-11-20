@@ -33,7 +33,16 @@ namespace
     const PARS::FootstepRecoverySnapshot* VisibleRecovery(const PARS::SkeletalMeshComponent& mesh)
     {
         const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
-        if (step.requestedFoot < 0 || step.requestedFoot > 1)
+        int visibleFoot = step.requestedFoot;
+        for (size_t side = 0; side < step.feet.size(); ++side)
+        {
+            if (step.feet[side].phase == PARS::FootstepPhase::Airborne)
+            {
+                visibleFoot = static_cast<int>(side);
+                break;
+            }
+        }
+        if (visibleFoot < 0 || visibleFoot > 1)
         {
             for (const PARS::FootstepTarget& candidate : step.candidates)
             {
@@ -44,12 +53,16 @@ namespace
             }
             return nullptr;
         }
-        const PARS::FootstepRecoverySnapshot& recovery = step.candidates[step.requestedFoot].recovery;
-        return recovery.status == PARS::FootstepRecoveryStatus::Unavailable ? nullptr : &recovery;
+        const PARS::FootstepRecoverySnapshot& recovery = step.candidates[visibleFoot].recovery;
+        return recovery.modeLocked || recovery.status != PARS::FootstepRecoveryStatus::Unavailable ? &recovery : nullptr;
     }
 
     bool ShowNormalReachRegion(const PARS::FootstepRecoverySnapshot& recovery)
     {
+        if (recovery.modeLocked)
+        {
+            return recovery.mode == PARS::FootstepMode::Normal;
+        }
         if (recovery.status == PARS::FootstepRecoveryStatus::Preview)
         {
             // 대기 중에는 착지 자세를 검사하지 않으므로 일반 영역과 회복 영역의 겹침을 사용한다.
@@ -60,7 +73,7 @@ namespace
 
     const char* RecoveryDecisionLabel(const PARS::FootstepRecoverySnapshot& recovery)
     {
-        if (recovery.hasTarget)
+        if (recovery.modeLocked || recovery.hasTarget)
         {
             return PARS::FootstepModeLabel(recovery.mode);
         }
@@ -105,6 +118,10 @@ namespace
         {
             for (size_t mode = static_cast<size_t>(PARS::FootstepMode::FrontCross); mode < recovery.reachable.size(); ++mode)
             {
+                if (recovery.modeLocked && mode != static_cast<size_t>(recovery.mode))
+                {
+                    continue;
+                }
                 const float lift = reachLift + static_cast<float>(mode) * .002f;
                 AppendRegion(primitives, recovery.reachable[mode], RecoveryModeColors[mode], lift);
             }
@@ -1082,8 +1099,15 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             {
                 if (m_ShowRecoveryRegions)
                 {
-                    ImGui::TextUnformatted(ShowNormalReachRegion(*decision) ? u8"표시 영역 · 연초록 회복 / 검정 일반" :
-                        u8"표시 영역 · 연초록 회복 / 연주황 앞 교차 / 연보라 뒤 교차");
+                    if (decision->modeLocked)
+                    {
+                        ImGui::Text(u8"표시 영역 · 연초록 회복 / %s 딛기 (이륙 시 확정)", PARS::FootstepModeLabel(decision->mode));
+                    }
+                    else
+                    {
+                        ImGui::TextUnformatted(ShowNormalReachRegion(*decision) ? u8"표시 영역 · 연초록 회복 / 검정 일반" :
+                            u8"표시 영역 · 연초록 회복 / 연주황 앞 교차 / 연보라 뒤 교차");
+                    }
                 }
                 ImGui::Text(u8"%s / %s / 최대 %u스텝 / %.3fms", RecoveryDecisionLabel(*decision),
                     PARS::FootstepRecoveryStatusLabel(decision->status), decision->steps, decision->elapsedMilliseconds);
