@@ -238,6 +238,27 @@ namespace PARS
         return m_MotionDatabase && MakeHeadingSpace(pelvis, m_MotionDatabase->bindForwardInPelvis, toHeadingSpace);
     }
 
+    float AnimInstance::GetCrossStepPlaybackTime(const MotionMatchResult& match, float elapsed) const
+    {
+        const float duration = GetAnimationDuration(match.clipIndex);
+        const float time = match.clipTimeSeconds + elapsed;
+        if (time <= duration || !m_MotionDatabase)
+        {
+            return (std::min)(time, duration);
+        }
+
+        // 이륙 뒤 클립 경계를 넘어 착지하는 교차 스윙만 한 번 이어서 재생한다.
+        const MotionFrameGroup& group = m_MotionDatabase->groups[static_cast<size_t>(MotionFrameUsage::CrossStep)];
+        for (const MotionClipSelection& clip : group.clips)
+        {
+            if (clip.clipIndex == match.clipIndex && clip.crossStep.takeoffFrame > clip.crossStep.landingFrame)
+            {
+                return (std::min)(time - duration, duration);
+            }
+        }
+        return duration;
+    }
+
     MotionMatchResult AnimInstance::FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures) const
     {
         const MotionFrameRange range = GetMotionFrameRange(usage);

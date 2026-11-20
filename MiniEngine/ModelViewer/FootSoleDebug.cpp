@@ -1234,6 +1234,13 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                     ImGui::TextUnformatted(u8"교차 모션 검색  유효한 결과 없음");
                 }
             }
+            const PARS::CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
+            if (playback.movingFoot == static_cast<int>(side))
+            {
+                ImGui::Text(u8"관절 목표  %s  %.3f초  ·  %s %.0f%%",
+                    mesh.GetAnimInstance().GetAnimationName(playback.clipIndex).c_str(), playback.timeSeconds,
+                    playback.blendingOut ? u8"기본 자세 복귀" : u8"모캡 적용", playback.blendAlpha * 100.0f);
+            }
             if (!command.IsInProgress() && command.phase != PARS::FootstepPhase::Landed)
             {
                 continue;

@@ -728,7 +728,8 @@ namespace PARS
         {
             return false;
         }
-        m_RagdollSourcePose = m_AnimInstance->GetPose();
+        m_RagdollSourcePose = GetRagdollAnimationPose();
+        ResetCrossStepPlayback();
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
@@ -782,11 +783,11 @@ namespace PARS
 
     void SkeletalMeshComponent::UpdatePhysicsPose()
     {
-        const std::vector<GraphNode>& source = IsActiveRagdoll() ? m_AnimInstance->GetPose() : m_RagdollSourcePose;
+        const std::vector<GraphNode>& source = IsActiveRagdoll() ? GetRagdollAnimationPose() : m_RagdollSourcePose;
         if (IsActiveRagdoll())
         {
             std::vector<Matrix4> animated;
-            if (EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, animated, m_PhysicsError))
+            if (EvaluatePhysicsPose(m_PhysicsSkeleton, source, Matrix4(GetComponentTransform()), animated, m_PhysicsError))
             {
                 for (size_t i = 0; i < m_Ragdoll.GetBodyCount(); ++i)
                 {

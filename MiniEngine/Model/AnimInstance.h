@@ -116,6 +116,7 @@ namespace PARS
         const std::vector<MotionFrame>& GetMotionFrames() const;
         // 해당 용도의 후보가 없으면 frameCount가 0인 구간을 반환한다.
         MotionFrameRange GetMotionFrameRange(MotionFrameUsage usage) const;
+        float GetCrossStepPlaybackTime(const MotionMatchResult& match, float elapsed) const;
         bool GetMotionHeadingSpace(const Math::Matrix4& pelvis, Math::Matrix3& toHeadingSpace) const;
         const std::vector<GraphNode>& GetPose() const
         {

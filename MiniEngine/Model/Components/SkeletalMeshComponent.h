@@ -29,6 +29,18 @@ namespace PARS
         Inactive,
         Error
     };
+
+    struct CrossStepPlayback
+    {
+    public:
+        uint64_t searchStep = UINT64_MAX;
+        uint32_t clipIndex = UINT32_MAX;
+        int movingFoot = -1;
+        float timeSeconds = 0.0f;
+        float blendAlpha = 0.0f;
+        bool blendingOut = false;
+    };
+
     class SkeletalMeshComponent : public SkinnedMeshComponent
     {
     private:
@@ -80,6 +92,8 @@ namespace PARS
         void UpdatePhysicsPose();
         void UpdateFootSupport();
         void UpdateHorizontalBalance(float deltaTime);
+        bool ApplyCrossStepDrivePose(const FootstepSnapshot& step, float deltaTime, std::vector<Math::Matrix4>& target);
+        void ResetCrossStepPlayback();
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
             const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
@@ -142,6 +156,10 @@ namespace PARS
         const FootstepIKSnapshot& GetFootstepIKSnapshot() const
         {
             return m_FootstepIK.GetSnapshot();
+        }
+        const CrossStepPlayback& GetCrossStepPlayback() const
+        {
+            return m_CrossStepPlayback;
         }
         const FootstepCollisionSnapshot& GetFootstepCollisionSnapshot() const
         {
@@ -269,6 +287,12 @@ namespace PARS
         }
 
     private:
+        const std::vector<GraphNode>& GetRagdollAnimationPose() const
+        {
+            return m_CrossStepPose.empty() ? m_AnimInstance->GetPose() : m_CrossStepPose;
+        }
+
+    private:
         ModelInstance m_ModelInstance;
         FootSupport m_FootSupport;
         std::unique_ptr<AnimInstance> m_AnimInstance;
@@ -284,6 +308,10 @@ namespace PARS
         FallArmBrace m_FallArmBrace;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
+        std::vector<GraphNode> m_CrossStepPose;
+        std::vector<GraphNode> m_CrossStepBlendSource;
+        CrossStepPlayback m_CrossStepPlayback;
+        uint64_t m_CrossStepTransitionStep = 0;
         std::vector<GraphNode> m_KinematicBlendSource;
         std::vector<GraphNode> m_KinematicBlendPose;
         PhysicsSkeleton m_PhysicsSkeleton;

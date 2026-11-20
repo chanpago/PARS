@@ -190,6 +190,10 @@ namespace PARS
         Math::Vector3 GetRootSupportForce() const;
         float GetRootRotationError() const;
         size_t GetDrivenJointCount() const;
+        const std::vector<Math::Quaternion>& GetJointDriveTargets() const
+        {
+            return m_DriveTargets;
+        }
         float GetMaxDriveError(size_t* worstJoint = nullptr) const;
         float GetMaxTargetClampAngle() const
         {

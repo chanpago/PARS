@@ -96,7 +96,8 @@ namespace
             "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
-            "command_step,command_mode,motion_search_step,match_clip,match_time_s,match_score\n";
+            "command_step,command_mode,motion_search_step,match_clip,match_time_s,match_score,"
+            "drive_clip,drive_time_s,drive_blend_alpha,drive_blending_out\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -155,8 +156,62 @@ namespace
             {
                 stream << ",,,";
             }
+            const PARS::CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
+            if (playback.movingFoot == static_cast<int>(side))
+            {
+                stream << ',' << mesh.GetAnimInstance().GetAnimationName(playback.clipIndex)
+                    << ',' << playback.timeSeconds << ',' << playback.blendAlpha << ',' << playback.blendingOut;
+            }
+            else
+            {
+                stream << ",,,,";
+            }
             stream << '\n';
         }
+    }
+
+    bool CrossStepSpineDrivesMatchClip(const PARS::SkeletalMeshComponent& mesh, const PARS::PhysicsSkeleton& skeleton)
+    {
+        const PARS::CrossStepPlayback& playback = mesh.GetCrossStepPlayback();
+        const PARS::Ragdoll& ragdoll = mesh.GetRagdoll();
+        const PARS::PhysicsAsset& asset = *mesh.GetPhysicsAsset();
+        const std::vector<Math::Quaternion>& drives = ragdoll.GetJointDriveTargets();
+        std::vector<GraphNode> pose;
+        std::vector<Math::Matrix4> world;
+        std::string error;
+        if (!ragdoll.AreDrivesEnabled() || drives.size() != asset.constraints.size() ||
+            !mesh.GetAnimInstance().SampleAnimationPose(playback.clipIndex, playback.timeSeconds, pose) ||
+            !PARS::EvaluatePhysicsPose(skeleton, pose, Math::Matrix4(mesh.GetComponentTransform()), world, error))
+        {
+            return false;
+        }
+        // 다리 IK와 팔 보정의 영향을 받지 않는 척추에서 원본 클립과 실제 제출된 관절 목표를 대조한다.
+        size_t compared = 0;
+        for (size_t i = 0; i < asset.constraints.size(); ++i)
+        {
+            const PARS::PhysicsConstraint& joint = asset.constraints[i];
+            if (joint.childBone.find("Spine") == std::string::npos)
+            {
+                continue;
+            }
+            const int parent = asset.FindBody(joint.parentBone);
+            const int child = asset.FindBody(joint.childBone);
+            const std::vector<int>& nodes = ragdoll.GetBoneNodes();
+            const Math::Matrix4 a = PARS::PhysicsBoneFrame(world[nodes[parent]]) * asset.bodies[parent].GetLocalTransform();
+            const Math::Matrix4 b = PARS::PhysicsBoneFrame(world[nodes[child]]) * asset.bodies[child].GetLocalTransform();
+            Math::Quaternion expected = PARS::EvaluateJointDriveTarget(joint, a, b, !ragdoll.UsesArticulation());
+            if (ragdoll.UsesArticulation())
+            {
+                expected = PARS::ClampArticulationDriveTarget(joint, expected);
+            }
+            const float cosine = std::abs(DirectX::XMVectorGetX(DirectX::XMQuaternionDot(expected, drives[i])));
+            if (!(cosine >= .999999f))
+            {
+                return false;
+            }
+            ++compared;
+        }
+        return compared > 0;
     }
 
     bool LandingComDebugMatchesPrediction(const PARS::SkeletalMeshComponent& mesh)
@@ -289,7 +344,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 secondShot = seenActive;
             }
             const float beforeTimer = mesh.GetKinematicStableTime();
-            const bool beforeFalling = mesh.IsFollowingFallingAnimation();
+            const bool beforeFalling = mesh.IsFalling();
             const Vector3 beforeRoot = test.GetDummy()->GetActorLocation();
             Vector3 expectedRootOffset(kZero);
             bool beforeBothGrounded = true;
@@ -325,6 +380,11 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 ++validatedDebugFrames;
             }
             check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");
+            if (mesh.IsFalling() || mesh.IsFollowingStandingUpAnimation())
+            {
+                check(mesh.GetCrossStepPlayback().clipIndex == UINT32_MAX,
+                    "Falling and standing up release the cross-step drive pose");
+            }
             if (mesh.GetPhysicsMode() != previousMode)
             {
                 report << "transition_frame=" << frame << " from=" << static_cast<int>(previousMode)
@@ -706,6 +766,31 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const float time = (frame + 1) / 60.0f;
             const SkeletalMeshComponent& dummyMesh = dummy->GetMesh();
             const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
+            const FootstepSnapshot& step = dummySupport.footstep;
+            const CrossStepPlayback& playback = dummyMesh.GetCrossStepPlayback();
+            const FootstepCommand* matched = nullptr;
+            for (const FootstepCommand& command : step.feet)
+            {
+                if (command.IsInProgress() && command.target.recovery.mode != FootstepMode::Normal &&
+                    command.motionMatch.clipIndex != UINT32_MAX && (!matched || command.motionSearchStep > matched->motionSearchStep))
+                {
+                    matched = &command;
+                }
+            }
+            if (matched && dummyMesh.IsActiveRagdoll() && !dummyMesh.IsFalling() && !step.aborted &&
+                !dummyMesh.GetRecoverySnapshot().blending)
+            {
+                const float elapsed = static_cast<float>((step.completedStep - matched->motionSearchStep) * PhysicsWorld::FixedDeltaTime);
+                const float expectedTime = dummyMesh.GetAnimInstance().GetCrossStepPlaybackTime(matched->motionMatch, elapsed);
+                check(!playback.blendingOut && playback.searchStep == matched->motionSearchStep &&
+                    playback.clipIndex == matched->motionMatch.clipIndex && std::abs(playback.timeSeconds - expectedTime) < 1e-5f,
+                    "The active cross-step follows its matched clip on the physics clock");
+            }
+            if (playback.clipIndex != UINT32_MAX && !playback.blendingOut && playback.blendAlpha == 1.0f)
+            {
+                check(CrossStepSpineDrivesMatchClip(dummyMesh, dummySkeleton),
+                    "Spine drive targets match the sampled cross-step clip after joint limits");
+            }
             const FootstepAvoidanceSnapshot& avoidance = dummyMesh.GetFootstepAvoidanceSnapshot();
             const FootstepCollisionSnapshot& prediction = dummyMesh.GetFootstepCollisionSnapshot();
             states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()
@@ -821,6 +906,16 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         const uint32_t recoveryClip = candidates[leftRearStart].clipIndex;
         const size_t rightRearStart = leftRearStart + kBackCrossRecoveryClip.frameCount;
         const uint32_t rightRecoveryClip = candidates[rightRearStart].clipIndex;
+        const float fixedStep = PhysicsWorld::FixedDeltaTime;
+        const float rightDuration = dummyAnimation.GetAnimationDuration(rightClip);
+        const PARS::MotionMatchResult wrapped{rightClip, rightDuration - fixedStep, 0.0f};
+        check(std::abs(dummyAnimation.GetCrossStepPlaybackTime(wrapped, 0) - wrapped.clipTimeSeconds) < 1e-6f &&
+                std::abs(dummyAnimation.GetCrossStepPlaybackTime(wrapped, 2.0f * fixedStep) - fixedStep) < 1e-6f,
+            "A wrapped cross-step starts at the match and continues across the clip boundary");
+        const float recoveryDuration = dummyAnimation.GetAnimationDuration(recoveryClip);
+        const PARS::MotionMatchResult oneShot{recoveryClip, recoveryDuration - fixedStep, 0.0f};
+        check(dummyAnimation.GetCrossStepPlaybackTime(oneShot, 2.0f * fixedStep) == recoveryDuration,
+            "A one-shot recovery holds its last pose if the physical step outlasts the clip");
         const PARS::MotionFeatures& airborne = candidates[rightRearStart + 16].features;
         const PARS::MotionFeatures& touchdown = candidates[rightRearStart + 32].features;
         const PARS::MotionMatchResult rearMatch = dummyAnimation.FindMotionMatch(PARS::MotionFrameUsage::CrossStep, airborne);
