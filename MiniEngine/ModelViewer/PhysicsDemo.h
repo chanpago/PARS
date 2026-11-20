@@ -77,7 +77,6 @@ public:
     }
     Math::Vector3 GetSpawnLocation(float halfHeight) const;
     Math::Vector3 GetDummySpawnOrigin() const;
-    physx::PxBounds3 GetGroundBounds(float height) const;
 
 private:
     PARS::World& m_GameWorld;

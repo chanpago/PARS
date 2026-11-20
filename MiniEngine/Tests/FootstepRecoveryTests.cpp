@@ -228,7 +228,7 @@ namespace
             "crossover selection follows character forward rather than world axes");
     }
 
-    FootstepInput PlannerInput()
+    void TestPlannerIntegration()
     {
         FootstepInput input;
         input.active = true;
@@ -256,7 +256,8 @@ namespace
             foot.position = geometry.feet[side].position;
             foot.contactPosition = foot.position;
             foot.stanceOffset = foot.position;
-            foot.hasGroundProjection = true;
+            foot.hasSoleRectangle = true;
+            std::copy(geometry.feet[side].sole.begin(), geometry.feet[side].sole.end(), foot.corners.begin());
             foot.reach = geometry.feet[side];
             foot.calfLength = .5f;
             foot.normalImpulse = input.bodyWeight * input.fixedDeltaTime * .5f;
@@ -265,173 +266,8 @@ namespace
         {
             return true;
         };
-        return input;
-    }
-
-    void TestTakeoffModeSelection()
-    {
-        const FootstepSettings settings;
-        FootstepInput input = PlannerInput();
-        input.com.z = 0;
-        input.velocity = PxVec3(-.04f, 0, 0);
-        FootstepPlanner planner;
-        planner.Update(input, settings);
-        const FootstepSnapshot& step = planner.GetSnapshot();
-        Check(!step.crossRegions[0].Contains(step.predictedCom) && !step.needsStep && step.startCount == 0,
-            "A prediction between the feet cannot start a crossover in a stable stance");
-
-        for (size_t moving = 0; moving < input.feet.size(); ++moving)
-        {
-            const size_t support = 1 - moving;
-            const float sign = support == 0 ? -1.0f : 1.0f;
-            for (float speed : {-.06f, .06f})
-            {
-                input = PlannerInput();
-                input.requestedFoot = static_cast<int>(moving);
-                input.com = PxVec3(sign * .14f, 1, 0);
-                input.velocity = PxVec3(sign * speed, 0, .16f);
-                input.hull = Rectangle(-.5f, .5f, -.4f, .4f);
-                planner.Reset();
-                planner.Update(input, settings);
-                Check(step.crossRegions[support].Contains(step.comProjection) &&
-                    step.crossRegions[support].Contains(step.predictedCom) == (speed > 0) &&
-                    IsInsideFootSupportHull(input.hull, step.predictedCom) && step.feet[moving].justStarted &&
-                    step.feet[moving].target.recovery.mode != FootstepMode::Normal,
-                    "Current COM outside either support line requests a crossover even with the prediction back inside");
-            }
-        }
-
-        for (const FootstepMode mode : {FootstepMode::FrontCross, FootstepMode::BackCross})
-        {
-            input = PlannerInput();
-            input.com.z = 0;
-            input.velocity = PxVec3(-.30f, 0, mode == FootstepMode::FrontCross ? .12f : -.12f);
-            if (mode == FootstepMode::BackCross)
-            {
-                input.hull = Rectangle(-.5f, .5f, -.4f, .4f);
-            }
-            planner.Reset();
-            planner.Update(input, settings);
-            const FootstepCommand& command = step.feet[1];
-            const size_t modeIndex = static_cast<size_t>(mode);
-            Check(!step.crossRegions[0].Contains(step.comProjection) && step.crossRegions[0].Contains(step.predictedCom) &&
-                IsInsideFootSupportHull(input.hull, step.predictedCom) == (mode == FootstepMode::BackCross) &&
-                step.candidates[1].recovery.overlapAreas[0] > 0 && step.candidates[1].recovery.overlapAreas[modeIndex] > 0 &&
-                command.justStarted && command.target.recovery.hasTarget && command.target.recovery.mode == mode,
-                "A predicted crossing selects a valid crossover on the first grounded sample");
-
-            const PxVec3 firstTarget = command.target.position;
-            input.feet[1].grounded = false;
-            input.com.z = mode == FootstepMode::FrontCross ? -.15f : .15f;
-            input.velocity = PxVec3(-.8f, 0, 0);
-            ++input.completedStep;
-            planner.Update(input, settings);
-            Check(command.hasTakenOff && !command.motion.landingTargetLocked && command.target.recovery.modeLocked &&
-                command.target.recovery.mode == mode && command.target.recovery.hasTarget &&
-                IsInsideFootSupportHull(step.candidates[1].recovery.reachable[modeIndex], command.target.position) &&
-                (command.target.position - firstTarget).magnitude() > 1e-4f,
-                "Takeoff keeps the grounded cross direction while adjusting the landing within its reach");
-
-            input.requestedFoot = 0;
-            ++input.completedStep;
-            planner.Update(input, settings);
-            Check(command.target.recovery.mode == mode && step.candidates[1].recovery.hasTarget &&
-                step.candidates[1].recovery.mode == mode, "A request for the other foot still replans the airborne foot in its own mode");
-            const PxVec3 accepted = command.target.position;
-            input.feet[0].reach.available = false;
-            ++input.completedStep;
-            planner.Update(input, settings);
-            Check(command.target.recovery.mode == mode && command.target.position == accepted && !step.candidates[1].valid &&
-                step.candidates[1].recovery.modeLocked && step.candidates[1].recovery.mode == mode,
-                "Unavailable recovery geometry holds the last cross target and reports its committed mode");
-        }
-
-        input = PlannerInput();
-        input.com.z = 0;
-        input.velocity = PxVec3(-.30f, 0, .12f);
-        input.acceptsLanding = [](size_t, const PxVec3& target) -> bool
-        {
-            return std::abs(target.z) < .10f;
-        };
-        planner.Reset();
-        planner.Update(input, settings);
-        const FootstepCommand& fallback = planner.GetSnapshot().feet[1];
-        Check(step.crossRegions[0].Contains(step.predictedCom) && fallback.justStarted &&
-            fallback.target.recovery.hasTarget && fallback.target.recovery.poseRejected && fallback.target.recovery.mode == FootstepMode::Normal,
-            "Rejected cross poses leave a pose check for a valid normal fallback");
-    }
-
-    void TestAirborneNormalStep()
-    {
-        const FootstepSettings settings;
-        FootstepInput input = PlannerInput();
-        input.com.z = 0;
-        input.velocity = PxVec3(0, 0, .6f);
-        bool acceptLanding = true;
-        input.acceptsLanding = [&acceptLanding](size_t, const PxVec3&) -> bool
-        {
-            return acceptLanding;
-        };
-        unsigned searches = 0;
-        input.findWalkingStep = [&searches](const WalkingSwing&) -> MotionMatchResult
-        {
-            ++searches;
-            return {};
-        };
-        FootstepPlanner planner;
-        planner.Update(input, settings);
-        const FootstepSnapshot& step = planner.GetSnapshot();
-        const FootstepCommand& command = step.feet[1];
-        Check(command.justStarted && command.target.recovery.mode == FootstepMode::Normal, "The test step starts normal");
-        input.feet[1].grounded = false;
-        ++input.completedStep;
-        planner.Update(input, settings);
-        const PxVec3 takeoffTarget = command.target.position;
-        input.velocity = PxVec3(-.8f, 0, 0);
-        input.com.z = -.15f;
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(command.hasTakenOff && command.motion.progress > 0 && !command.motion.landingTargetLocked &&
-            step.candidates[1].recovery.overlapAreas[2] > 0 && step.candidates[1].recovery.overlapAreas[0] == 0 &&
-            command.target.recovery.mode == FootstepMode::Normal && command.target.recovery.status == FootstepRecoveryStatus::BestEffort &&
-            IsInsideFootSupportHull(step.candidates[1].recovery.reachable[0], command.target.position) &&
-            (command.target.position - takeoffTarget).magnitude() > 1e-4f && searches == 1,
-            "Late back-cross demand adjusts the normal landing while keeping its original Walking search");
-        const PxVec3 accepted = command.target.position;
-        acceptLanding = false;
-        input.feet[1].grounded = true;
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(command.phase == FootstepPhase::Airborne && command.target.position == accepted &&
-            !step.candidates[1].recovery.hasTarget && step.candidates[1].recovery.modeLocked &&
-            step.candidates[1].recovery.mode == FootstepMode::Normal,
-            "Brief contact and rejected poses still report the airborne normal mode and hold its target");
-        acceptLanding = true;
-        input.feet[1].grounded = false;
-        const uint32_t swingSamples = static_cast<uint32_t>(std::ceil(settings.stepDuration / input.fixedDeltaTime));
-        for (uint32_t sample = 0; sample < swingSamples; ++sample)
-        {
-            ++input.completedStep;
-            planner.Update(input, settings);
-        }
-        Check(command.motion.landingTargetLocked && command.motion.progress == 1, "The airborne step reaches its landing lock");
-        input.feet[1].grounded = true;
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(command.justLanded && command.target.recovery.mode == FootstepMode::Normal, "The normal step lands in its takeoff mode");
-        ++input.completedStep;
-        planner.Update(input, settings);
-        Check(command.justStarted && command.target.recovery.mode == FootstepMode::BackCross && searches == 2,
-            "The next step can select the still-needed crossover after landing and load confirmation");
-    }
-
-    void TestPlannerIntegration()
-    {
-        FootstepInput input = PlannerInput();
         FootstepSettings settings;
-        Check(settings.recovery.maximumSteps == 1 && !settings.pathAvoidanceEnabled,
-            "Default recovery plans one step with path avoidance off");
-        settings.pathAvoidanceEnabled = true;
+        settings.recovery.maximumSteps = 1;
         settings.recovery.transferTime = .025f;
         FootstepPlanner planner;
         planner.Update(input, settings);
@@ -440,8 +276,8 @@ namespace
             "a raw inward demand branches before normal COM and minimum-width corrections");
         Check(first.target.position.x < input.feet[0].position.x,
             "the legacy crossing clamp is not applied to the selected crossover target");
-        Check(first.target.landingCom == PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime, 0,
-            input.com.z + input.velocity.z * settings.landingPredictionTime), "Crossover landing COM keeps the linear prediction");
+        Check(!first.target.landingCom.enabled && !first.target.landingCom.limited,
+            "crossover debug metadata does not claim that the bypassed normal COM clamp was applied");
         Check(first.target.recovery.capture.empty() && !planner.GetSnapshot().candidates[1].recovery.capture.empty(),
             "prediction copies keep only decision metadata while the debug candidate keeps region geometry");
         planner.ReportRecoveryPath(1, first.target.position, false);
@@ -471,16 +307,11 @@ namespace
         }
         const PxVec3 locked = planner.GetSnapshot().feet[1].target.position;
         Check(planner.GetSnapshot().feet[1].motion.landingTargetLocked, "integration keeps the existing 75 percent lock");
-        planner.ReportRecoveryPath(1, locked, false);
-        Check(planner.GetSnapshot().feet[1].target.recovery.pathRejected, "The locked path records the last rejection");
-        settings.pathAvoidanceEnabled = false;
         input.velocity = PxVec3(1, 0, 2);
         ++input.completedStep;
         planner.Update(input, settings);
         Check((planner.GetSnapshot().feet[1].target.position - locked).magnitude() < 1e-6f,
             "new recovery choices cannot move the locked horizontal target");
-        Check(planner.GetSnapshot().feet[1].motion.valid && !planner.GetSnapshot().feet[1].target.recovery.pathRejected,
-            "Disabling avoidance clears the previous rejection while the swing remains active");
         input.active = false;
         input.velocity = PxVec3(0);
         input.feet[1].grounded = true;
@@ -498,13 +329,10 @@ void TestFootstepRecovery()
     TestPolygonGeometry();
     TestModeChoice();
     TestCaptureAndTiming();
-    TestTakeoffModeSelection();
-    TestAirborneNormalStep();
     TestPlannerIntegration();
     FootstepRecoveryInput input = Input();
     input.velocity = PxVec3(-1.5f, 0, .5f);
-    FootstepRecoverySettings settings;
-    settings.maximumSteps = 3;
+    const FootstepRecoverySettings settings;
     const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     double maximum = 0;
     for (uint32_t frame = 0; frame < 120; ++frame)

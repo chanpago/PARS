@@ -158,13 +158,20 @@ namespace
     void ConfigureLandingComValidation(PARS::SkeletalMeshComponent& mesh, std::ostream& report)
     {
         PARS::FootstepSettings& settings = mesh.GetFootSupport().GetFootstepSettings();
+        uint32_t enabled = settings.landingComClampEnabled ? 1 : 0;
+        CommandLineArgs::GetInteger(L"landingcomclamp", enabled);
+        settings.landingComClampEnabled = enabled != 0;
         uint32_t recoveryEnabled = settings.recovery.enabled ? 1 : 0;
         CommandLineArgs::GetInteger(L"footsteprecovery", recoveryEnabled);
         settings.recovery.enabled = recoveryEnabled != 0;
         uint32_t recoverySteps = settings.recovery.maximumSteps;
         CommandLineArgs::GetInteger(L"footsteprecoverysteps", recoverySteps);
         settings.recovery.maximumSteps = physx::PxClamp(recoverySteps, uint32_t(1), uint32_t(3));
-        report << "cross_region=support_sole_forward_line minimum_stance_ratio=" << settings.minimumStanceWidthRatio
+        CommandLineArgs::GetFloat(L"landingcomhysteresis", settings.landingComClampHysteresisDegrees);
+        report << "landing_com_clamp=" << settings.landingComClampEnabled
+            << " region=opposite_grounded_sole"
+            << " hysteresis=" << settings.landingComClampHysteresisDegrees
+            << " minimum_stance_ratio=" << settings.minimumStanceWidthRatio
             << " prevent_crossing=" << settings.preventCrossing << std::endl;
         report << "footstep_recovery=" << settings.recovery.enabled << " maximum_steps=" << settings.recovery.maximumSteps << std::endl;
     }
@@ -172,14 +179,12 @@ namespace
     void WriteLandingComHeader(std::ostream& stream)
     {
         stream << "frame,physics_step,side,mode,root_release,recovery,phase,started,landed,moving,grounded,locked,"
-            "prediction_valid,com_x,com_z,start_x,start_z,raw_x,raw_z,"
+            "enabled,limited,direction,prediction_valid,com_x,com_z,start_x,start_z,raw_x,raw_z,clamped_x,clamped_z,"
             "target_x,target_z,sole_x,sole_y,sole_z,leg_contacts,recovery_count,return_count,landing_error,falling,standing_up,"
-            "region_valid,support_foot,line_center_x,line_center_z,forward_x,forward_z,outward_x,outward_z,"
-            "start_valid,com_outside,prediction_outside,needs_step,"
+            "region_valid,support_foot,region_origin_x,region_origin_z,front_ray_x,front_ray_z,back_ray_x,back_ray_z,region_width_degrees,"
+            "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
-            "command_step,command_mode,motion_search_step,match_clip,match_time_s,match_score,"
-            "drive_clip,drive_time_s,drive_blend_alpha,drive_blending_out,match_com_angle_deg,match_clip_angle_deg,"
             "animation_clip,animation_time_s,com_velocity_x,com_velocity_z\n";
     }
 
@@ -187,15 +192,15 @@ namespace
     {
         const PARS::FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
         const PARS::RecoverySnapshot& recovery = mesh.GetRecoverySnapshot();
-        const PARS::FootstepSnapshot& step = support.footstep;
+        const PARS::AnimInstance& animation = mesh.GetAnimInstance();
+        const PARS::FootstepComPrediction& start = support.footstep.startCom;
         FootSoleDebug debug;
         std::string contactText;
         const uint32_t contacts = debug.GetLegContacts(&mesh, contactText);
         for (size_t side = 0; side < support.feet.size(); ++side)
         {
             const PARS::FootstepCommand& command = support.footstep.feet[side];
-            const PARS::FootstepTarget& target = step.candidates[side];
-            const PARS::FootstepCrossRegion& region = step.crossRegions[1 - side];
+            const PARS::FootstepComPrediction& landing = support.footstep.candidates[side].landingCom;
             const PARS::FootstepRecoverySnapshot& decision = support.footstep.candidates[side].recovery;
             const Math::Vector3 sole(support.feet[side].soleWorld.GetW());
             // 현재 예측, 잠긴 명령 목표, 실제 발바닥과 회복 결과를 서로 다른 열로 기록한다.
@@ -204,169 +209,76 @@ namespace
                 << ',' << static_cast<int>(recovery.state) << ',' << static_cast<int>(command.phase)
                 << ',' << command.justStarted << ',' << command.justLanded << ',' << command.IsInProgress()
                 << ',' << support.feet[side].contact.grounded << ',' << command.motion.landingTargetLocked
-                << ',' << target.valid << ',' << step.comProjection.x << ',' << step.comProjection.z
-                << ',' << step.predictedCom.x << ',' << step.predictedCom.z << ',' << target.landingCom.x << ',' << target.landingCom.z
+                << ',' << landing.enabled << ',' << landing.limited << ',' << static_cast<int>(landing.direction)
+                << ',' << landing.valid << ',' << support.centerOfMass.x << ',' << support.centerOfMass.z
+                << ',' << support.footstep.predictedCom.x << ',' << support.footstep.predictedCom.z
+                << ',' << landing.raw.x << ',' << landing.raw.z << ',' << landing.clamped.x << ',' << landing.clamped.z
                 << ',' << command.target.position.x << ',' << command.target.position.z
                 << ',' << float(sole.GetX()) << ',' << float(sole.GetY()) << ',' << float(sole.GetZ())
                 << ',' << contacts << ',' << recovery.recoveryCount << ',' << recovery.returnCount
                 << ',' << command.motion.landingError << ',' << mesh.IsFollowingFallingAnimation()
-                << ',' << mesh.IsFollowingStandingUpAnimation() << ',' << region.valid << ',' << (1 - side)
-                << ',' << region.center.x << ',' << region.center.z << ',' << region.forward.x << ',' << region.forward.z
-                << ',' << region.outward.x << ',' << region.outward.z << ',' << step.hasPrediction << ',' << region.Contains(step.comProjection)
-                << ',' << (step.hasPrediction && region.Contains(step.predictedCom))
+                << ',' << mesh.IsFollowingStandingUpAnimation() << ',' << landing.region.valid << ',' << landing.region.supportFoot
+                << ',' << landing.region.origin.x << ',' << landing.region.origin.z
+                << ',' << landing.region.frontRay.x << ',' << landing.region.frontRay.z
+                << ',' << landing.region.backRay.x << ',' << landing.region.backRay.z
+                << ',' << landing.region.halfAngleRadians * 360.0f / physx::PxPi
+                << ',' << start.raw.x << ',' << start.raw.z << ',' << start.limited
+                << ',' << start.region.valid << ',' << start.region.supportFoot
+                << ',' << PARS::IsInsideFootstepLandingRegion(start.region, support.footstep.predictedCom)
                 << ',' << support.footstep.needsStep
                 << ',' << static_cast<int>(decision.mode) << ',' << static_cast<int>(decision.status)
                 << ',' << decision.hasTarget << ',' << decision.modelFeasible << ',' << decision.poseChecks
                 << ',' << decision.elapsedMilliseconds << ',' << decision.overlapAreas[0]
                 << ',' << decision.overlapAreas[1] << ',' << decision.overlapAreas[2]
                 << ',' << decision.capturePieceCount << ',' << decision.steps << ',' << decision.pathRejected
-                << ',' << command.startedStep << ',' << static_cast<int>(command.target.recovery.mode) << ',';
-            if (command.motionSearchStep != UINT64_MAX)
-            {
-                stream << command.motionSearchStep;
-            }
-            if (command.motionMatch.clipIndex != UINT32_MAX)
-            {
-                stream << ',' << mesh.GetAnimInstance().GetAnimationName(command.motionMatch.clipIndex)
-                    << ',' << command.motionMatch.clipTimeSeconds << ',' << command.motionMatch.score;
-            }
-            else
-            {
-                stream << ",,,";
-            }
-            const PARS::WalkingPlayback& playback = mesh.GetWalkingPlayback();
-            if (playback.movingFoot == static_cast<int>(side))
-            {
-                stream << ',' << mesh.GetAnimInstance().GetAnimationName(playback.clipIndex)
-                    << ',' << playback.timeSeconds << ',' << playback.blendAlpha << ',' << playback.blendingOut;
-            }
-            else
-            {
-                stream << ",,,,";
-            }
-            stream << ',';
-            if (std::isfinite(command.motionMatch.requestedAngleDegrees))
-            {
-                stream << command.motionMatch.requestedAngleDegrees;
-            }
-            stream << ',';
-            if (std::isfinite(command.motionMatch.clipAngleDegrees))
-            {
-                stream << command.motionMatch.clipAngleDegrees;
-            }
-            const PARS::AnimInstance& animation = mesh.GetAnimInstance();
-            stream << ',' << animation.GetAnimationName(animation.GetCurrentAnimationIndex()) << ',' << animation.GetAnimationTime()
+                << ',' << animation.GetAnimationName(animation.GetCurrentAnimationIndex()) << ',' << animation.GetAnimationTime()
                 << ',' << support.centerOfMassVelocity.x << ',' << support.centerOfMassVelocity.z << '\n';
         }
     }
 
-    bool WalkingSpineDrivesMatchClip(const PARS::SkeletalMeshComponent& mesh, const PARS::PhysicsSkeleton& skeleton)
+    bool LandingComDebugMatchesPrediction(const PARS::SkeletalMeshComponent& mesh)
     {
-        const PARS::WalkingPlayback& playback = mesh.GetWalkingPlayback();
-        const PARS::Ragdoll& ragdoll = mesh.GetRagdoll();
-        const PARS::PhysicsAsset& asset = *mesh.GetPhysicsAsset();
-        const std::vector<Math::Quaternion>& drives = ragdoll.GetJointDriveTargets();
-        std::vector<GraphNode> pose;
-        std::vector<Math::Matrix4> world;
-        std::string error;
-        if (!ragdoll.AreDrivesEnabled() || drives.size() != asset.constraints.size() ||
-            !mesh.GetAnimInstance().SampleAnimationPose(playback.clipIndex, playback.timeSeconds, pose) ||
-            !PARS::EvaluatePhysicsPose(skeleton, pose, Math::Matrix4(mesh.GetComponentTransform()), world, error))
+        Math::Vector3 center(Math::kZero);
+        float mass = 0;
+        if (!mesh.GetRagdoll().GetCenterOfMass(center, mass))
         {
             return false;
         }
-        // 다리 IK와 팔 보정의 영향을 받지 않는 척추에서 원본 클립과 실제 제출된 관절 목표를 대조한다.
-        size_t compared = 0;
-        for (size_t i = 0; i < asset.constraints.size(); ++i)
+        const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
+        if (step.hasPrediction && step.requestedFoot >= 0 && step.requestedFoot < static_cast<int>(step.feet.size()))
         {
-            const PARS::PhysicsConstraint& joint = asset.constraints[i];
-            if (joint.childBone.find("Spine") == std::string::npos)
-            {
-                continue;
-            }
-            const int parent = asset.FindBody(joint.parentBone);
-            const int child = asset.FindBody(joint.childBone);
-            const std::vector<int>& nodes = ragdoll.GetBoneNodes();
-            const Math::Matrix4 a = PARS::PhysicsBoneFrame(world[nodes[parent]]) * asset.bodies[parent].GetLocalTransform();
-            const Math::Matrix4 b = PARS::PhysicsBoneFrame(world[nodes[child]]) * asset.bodies[child].GetLocalTransform();
-            Math::Quaternion expected = PARS::EvaluateJointDriveTarget(joint, a, b, !ragdoll.UsesArticulation());
-            if (ragdoll.UsesArticulation())
-            {
-                expected = PARS::ClampArticulationDriveTarget(joint, expected);
-            }
-            const float cosine = std::abs(DirectX::XMVectorGetX(DirectX::XMQuaternionDot(expected, drives[i])));
-            if (!(cosine >= .999999f))
+            center = Math::Vector3(step.startCom.origin.x, step.startCom.origin.y, step.startCom.origin.z);
+            if (step.startCom.enabled && PARS::IsInsideFootstepLandingRegion(step.startCom.region, step.predictedCom))
             {
                 return false;
-            }
-            ++compared;
-        }
-        return compared > 0;
-    }
-
-    bool CrossRegionDebugMatchesPlanner(const PARS::SkeletalMeshComponent& mesh)
-    {
-        using namespace physx;
-        const PARS::FootstepSnapshot& step = mesh.GetFootSupport().GetSnapshot().footstep;
-        const int supportFoot = step.GetCrossRegionSupportFoot();
-        PxBounds3 ground = PxBounds3::empty();
-        std::vector<const PARS::FootstepCrossRegion*> visible;
-        for (size_t side = 0; side < step.crossRegions.size(); ++side)
-        {
-            const PARS::FootstepCrossRegion& region = step.crossRegions[side];
-            if (region.valid && (supportFoot < 0 || supportFoot == static_cast<int>(side)))
-            {
-                ground.include(region.center - PxVec3(1, 0, 1));
-                ground.include(region.center + PxVec3(1, 0, 1));
-                visible.push_back(&region);
             }
         }
         FootSoleDebug debug;
-        std::vector<PxDebugLine> lines;
-        std::vector<PxDebugTriangle> triangles;
-        debug.BuildCrossRegionGeometry(mesh, ground, lines, triangles);
-        if (lines.size() != visible.size())
+        std::vector<physx::PxDebugLine> lines;
+        debug.BuildLines(mesh, lines);
+        const physx::PxU32 regionColor = mesh.GetFootSupport().GetFootstepSettings().landingComClampEnabled ?
+            0xff55cc77 : 0xff889099;
+        float minimumX = PX_MAX_F32;
+        float maximumX = -PX_MAX_F32;
+        float minimumZ = PX_MAX_F32;
+        float maximumZ = -PX_MAX_F32;
+        unsigned regionLines = 0;
+        for (const physx::PxDebugLine& line : lines)
         {
-            return false;
+            if (line.color0 != regionColor || line.color1 != regionColor)
+            {
+                continue;
+            }
+            minimumX = (std::min)(minimumX, (std::min)(line.pos0.x, line.pos1.x));
+            maximumX = (std::max)(maximumX, (std::max)(line.pos0.x, line.pos1.x));
+            minimumZ = (std::min)(minimumZ, (std::min)(line.pos0.z, line.pos1.z));
+            maximumZ = (std::max)(maximumZ, (std::max)(line.pos0.z, line.pos1.z));
+            ++regionLines;
         }
-        constexpr PxU32 red = 0xffff3030;
-        for (const PARS::FootstepCrossRegion* region : visible)
-        {
-            bool lineFound = false;
-            bool fillFound = false;
-            for (const PxDebugLine& line : lines)
-            {
-                const PxVec3 edge = line.pos1 - line.pos0;
-                lineFound = lineFound || (line.color0 == red && line.color1 == red &&
-                    std::abs(edge.getNormalized().dot(region->forward)) > .9999f &&
-                    std::abs((line.pos0 - region->center).dot(region->outward)) < 1e-5f &&
-                    (line.pos0 - region->center).dot(edge) <= 0 && (line.pos1 - region->center).dot(edge) >= 0);
-            }
-            for (const PxDebugTriangle& triangle : triangles)
-            {
-                const PARS::FootstepPolygon face{triangle.pos0, triangle.pos1, triangle.pos2};
-                fillFound = fillFound || PARS::IsInsideFootSupportHull(face, region->center + region->outward * .02f);
-            }
-            if (!lineFound || !fillFound)
-            {
-                return false;
-            }
-        }
-        for (const PxDebugTriangle& triangle : triangles)
-        {
-            bool outside = false;
-            for (const PARS::FootstepCrossRegion* region : visible)
-            {
-                outside = outside || ((triangle.pos0 - region->center).dot(region->outward) >= -1e-5f &&
-                    (triangle.pos1 - region->center).dot(region->outward) >= -1e-5f &&
-                    (triangle.pos2 - region->center).dot(region->outward) >= -1e-5f);
-            }
-            if (!outside || triangle.color0 != red || triangle.color1 != red || triangle.color2 != red)
-            {
-                return false;
-            }
-        }
-        return true;
+        // 예측이 있으면 같은 스텝의 원점을, 없으면 현재 COM의 미리보기 원점을 검증한다.
+        const float tolerance = (std::max)(2e-5f, (maximumX - minimumX + maximumZ - minimumZ) * .001f);
+        return regionLines >= 64 && std::abs((minimumX + maximumX) * .5f - float(center.GetX())) <= tolerance &&
+            std::abs((minimumZ + maximumZ) * .5f - float(center.GetZ())) <= tolerance;
     }
 }
 
@@ -382,9 +294,9 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
     std::ofstream landingCom(path + L".landing-com.csv");
     landingCom.precision(9);
     uint32_t validateFootAlignment = 0;
-    uint32_t validateCrossRegion = 0;
+    uint32_t validateLandingRegion = 0;
     CommandLineArgs::GetInteger(L"validatefootalignment", validateFootAlignment);
-    CommandLineArgs::GetInteger(L"validatecrossregion", validateCrossRegion);
+    CommandLineArgs::GetInteger(L"validatelandingregion", validateLandingRegion);
     const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
     {
         report << (condition ? "PASS: " : "FAIL: ") << message << std::endl;
@@ -454,7 +366,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 secondShot = seenActive;
             }
             const float beforeTimer = mesh.GetKinematicStableTime();
-            const bool beforeFalling = mesh.IsFalling();
+            const bool beforeFalling = mesh.IsFollowingFallingAnimation();
             const Vector3 beforeRoot = test.GetDummy()->GetActorLocation();
             Vector3 expectedRootOffset(kZero);
             bool beforeBothGrounded = true;
@@ -483,18 +395,13 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             world.Tick(1.0f / 60.0f);
             test.Update();
             RecordLandingComFrame(landingCom, mesh, frame);
-            if (validateCrossRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
+            if (validateLandingRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
                 mesh.GetFootSupport().GetSnapshot().footstep.hasGroundPlane))
             {
-                check(CrossRegionDebugMatchesPlanner(mesh), "Support lines and red ground triangles match the crossover decision regions");
+                check(LandingComDebugMatchesPrediction(mesh), "Rendered region matches the cyan prediction without forbidden-sector penetration");
                 ++validatedDebugFrames;
             }
             check(mesh.GetRagdoll().IsFinite() && mesh.GetPhysicsError().empty(), "Finite physical state and no controller error");
-            if (mesh.IsFalling() || mesh.IsFollowingStandingUpAnimation())
-            {
-                check(mesh.GetWalkingPlayback().clipIndex == UINT32_MAX,
-                    "Falling and standing up release the walking drive pose");
-            }
             if (mesh.GetPhysicsMode() != previousMode)
             {
                 report << "transition_frame=" << frame << " from=" << static_cast<int>(previousMode)
@@ -655,8 +562,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     std::ofstream capsules(path + L".capsules.csv");
     std::ofstream landingCom(path + L".landing-com.csv");
     landingCom.precision(9);
-    uint32_t validateCrossRegion = 0;
-    CommandLineArgs::GetInteger(L"validatecrossregion", validateCrossRegion);
     uint32_t kinematicPlayer = 0;
     uint32_t modeCycles = 0;
     uint32_t incoming = 0;
@@ -698,7 +603,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 }
             }
             check(dummy->GetMesh().SetPhysicsAsset(contactAsset, error), "Prepare a repeatable physical thigh-contact fixture");
-            dummy->GetMesh().GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled = true;
             test.SetContactCheckEnabled(true);
         }
         PlayerController* controller = dynamic_cast<PlayerController*>(player.GetController());
@@ -801,10 +705,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             world.Tick(1.0f / 60.0f);
             test.Update();
             RecordLandingComFrame(landingCom, dummy->GetMesh(), frame);
-            if (validateCrossRegion)
-            {
-                check(CrossRegionDebugMatchesPlanner(dummy->GetMesh()), "Support lines and red ground triangles match the crossover decision regions");
-            }
             if (contactCheck && world.IsPhysicsPaused())
             {
                 FootSoleDebug debug;
@@ -885,37 +785,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const float time = (frame + 1) / 60.0f;
             const SkeletalMeshComponent& dummyMesh = dummy->GetMesh();
             const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
-            const FootstepSnapshot& step = dummySupport.footstep;
-            const WalkingPlayback& playback = dummyMesh.GetWalkingPlayback();
-            const FootstepCommand* matched = nullptr;
-            for (const FootstepCommand& command : step.feet)
-            {
-                if (command.IsInProgress() &&
-                    command.motionMatch.clipIndex != UINT32_MAX && (!matched || command.motionSearchStep > matched->motionSearchStep))
-                {
-                    matched = &command;
-                }
-            }
-            if (matched && dummyMesh.IsActiveRagdoll() && !dummyMesh.IsFalling() && !step.aborted &&
-                !dummyMesh.GetRecoverySnapshot().blending)
-            {
-                const float elapsed = static_cast<float>((step.completedStep - matched->motionSearchStep) * PhysicsWorld::FixedDeltaTime);
-                const float expectedTime = dummyMesh.GetAnimInstance().GetWalkingPlaybackTime(matched->motionMatch, elapsed);
-                check(!playback.blendingOut && playback.searchStep == matched->motionSearchStep &&
-                    playback.clipIndex == matched->motionMatch.clipIndex && std::abs(playback.timeSeconds - expectedTime) < 1e-5f,
-                    "The active step follows its matched walking clip on the physics clock");
-                char timingPrefix[64];
-                std::snprintf(timingPrefix, sizeof(timingPrefix), " (%.2f / ", expectedTime);
-                const std::string expectedLabel = std::string(u8"[추종 애니메이션] ") +
-                    dummyMesh.GetAnimInstance().GetAnimationName(matched->motionMatch.clipIndex) + timingPrefix;
-                check(overlay.GetLegPredictionText(dummyMesh).find(expectedLabel) != std::string::npos,
-                    "Top overlay shows the matched walking clip and current sample time");
-            }
-            if (playback.clipIndex != UINT32_MAX && !playback.blendingOut && playback.blendAlpha == 1.0f)
-            {
-                check(WalkingSpineDrivesMatchClip(dummyMesh, dummySkeleton),
-                    "Spine drive targets match the sampled walking clip after joint limits");
-            }
             const FootstepAvoidanceSnapshot& avoidance = dummyMesh.GetFootstepAvoidanceSnapshot();
             const FootstepCollisionSnapshot& prediction = dummyMesh.GetFootstepCollisionSnapshot();
             states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()

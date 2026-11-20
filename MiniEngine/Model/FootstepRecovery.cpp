@@ -18,6 +18,33 @@ namespace
         return a.x * b.z - a.z * b.x;
     }
 
+    FootstepPolygon Clip(const FootstepPolygon& polygon, const PxVec3& normal, float offset)
+    {
+        FootstepPolygon result;
+        if (polygon.empty())
+        {
+            return result;
+        }
+        PxVec3 previous = polygon.back();
+        float previousDistance = previous.dot(normal) - offset;
+        for (const PxVec3& current : polygon)
+        {
+            const float distance = current.dot(normal) - offset;
+            if ((distance >= 0) != (previousDistance >= 0))
+            {
+                result.push_back(previous + (current - previous) *
+                    (previousDistance / (previousDistance - distance)));
+            }
+            if (distance >= 0)
+            {
+                result.push_back(current);
+            }
+            previous = current;
+            previousDistance = distance;
+        }
+        return result.size() >= 3 ? result : FootstepPolygon{};
+    }
+
     FootstepPolygon Transform(const FootstepPolygon& polygon, float scale, const PxVec3& translation)
     {
         FootstepPolygon result;
@@ -162,7 +189,7 @@ namespace
             Circle(PxVec3(foot.stepOrigin.x, input.groundHeight, foot.stepOrigin.z), foot.maximumDistance));
         const float physicalWidth = HalfExtent(foot, foot.outward) + HalfExtent(support, foot.outward) + settings.clearance;
         const float width = (std::max)(foot.minimumWidth, physicalWidth);
-        result[0] = ClipFootstepPolygon(reachable, foot.outward, support.position.dot(foot.outward) + width);
+        result[0] = Clip(reachable, foot.outward, support.position.dot(foot.outward) + width);
         const float lengthClearance = HalfExtent(foot, input.forward) + HalfExtent(support, input.forward) + settings.clearance;
         const float angles[] = {settings.frontAngleDegrees, settings.backAngleDegrees};
         for (size_t cross = 0; cross < 2; ++cross)
@@ -170,7 +197,7 @@ namespace
             const PxVec3 forward = input.forward * (cross == 0 ? 1.0f : -1.0f);
             const PxVec3 boundary = forward + foot.outward * std::tan(angles[cross] * PxPi / 180.0f);
             // 발 사각형과 대각선 경계로 지지발 근처를 제외하고, 실제 PA 관절은 후보에서 검사한다.
-            result[cross + 1] = ClipFootstepPolygon(reachable, boundary, support.position.dot(boundary) + lengthClearance);
+            result[cross + 1] = Clip(reachable, boundary, support.position.dot(boundary) + lengthClearance);
         }
         return result;
     }
@@ -219,7 +246,6 @@ namespace
             size_t mode = 0;
             PxVec3 position{0};
             float distance = 0;
-            bool firstInMode = false;
         };
         std::vector<Candidate> candidates;
         std::array<size_t, 3> order{{0, 1, 2}};
@@ -228,11 +254,6 @@ namespace
             std::swap(order[1], order[2]);
         }
         const size_t previous = static_cast<size_t>(input.previousMode);
-        if (result.modeLocked)
-        {
-            // 다른 딛기 영역만 회복 가능해도 이륙한 발은 자기 영역 안에서 최선의 착지점을 찾는다.
-            result.modelFeasible = result.overlapAreas[previous] > 0;
-        }
         if (previous > 0 && previous < 3 && result.overlapAreas[previous] > 0 &&
             result.overlapAreas[previous] * (1 + settings.switchAreaRatio) >= result.overlapAreas[order[1]])
         {
@@ -241,10 +262,6 @@ namespace
         }
         for (size_t mode : order)
         {
-            if (result.modeLocked && mode != previous)
-            {
-                continue;
-            }
             const std::vector<FootstepPolygon> pieces = result.modelFeasible ? result.intersections[mode] :
                 std::vector<FootstepPolygon>{result.reachable[mode]};
             const PxVec3 preferred = mode == 0 ? input.normalTarget : input.preferred;
@@ -312,10 +329,6 @@ namespace
             {
                 return a.distance < b.distance;
             });
-            if (!local.empty())
-            {
-                local.front().firstInMode = true;
-            }
             candidates.insert(candidates.end(), local.begin(), local.end());
         }
         if (!result.modelFeasible)
@@ -325,30 +338,9 @@ namespace
                 return a.distance < b.distance;
             });
         }
-        bool reserveNormalCheck = false;
-        if (input.modeSelection == FootstepModeSelection::PreferCross)
-        {
-            const std::vector<Candidate>::iterator normalBegin = std::stable_partition(candidates.begin(), candidates.end(),
-                [](const Candidate& candidate) -> bool
-                {
-                    return candidate.mode != static_cast<size_t>(FootstepMode::Normal);
-                });
-            // 한쪽 교차의 대안들이 검사 예산을 소진하기 전에 앞·뒤 대표점을 각각 시도한다.
-            std::stable_partition(candidates.begin(), normalBegin, [](const Candidate& candidate) -> bool
-            {
-                return candidate.firstInMode;
-            });
-            reserveNormalCheck = normalBegin != candidates.end() && settings.maximumPoseChecks > 1;
-        }
         FootstepPolygon tested;
         for (const Candidate& candidate : candidates)
         {
-            if (reserveNormalCheck && candidate.mode != static_cast<size_t>(FootstepMode::Normal) &&
-                result.poseChecks + 1 >= settings.maximumPoseChecks)
-            {
-                // 교차 자세가 거절되면 남은 한 번으로 일반 착지 후보도 검증한다.
-                continue;
-            }
             if (input.hasRejectedTarget && DistanceSquared(candidate.position, input.rejectedTarget) < .0001f)
             {
                 continue;
@@ -384,33 +376,6 @@ namespace
     }
 }
 
-FootstepPolygon PARS::ClipFootstepPolygon(const FootstepPolygon& polygon, const PxVec3& normal, float offset)
-{
-    FootstepPolygon result;
-    if (polygon.empty())
-    {
-        return result;
-    }
-    PxVec3 previous = polygon.back();
-    float previousDistance = previous.dot(normal) - offset;
-    for (const PxVec3& current : polygon)
-    {
-        const float distance = current.dot(normal) - offset;
-        if ((distance >= 0) != (previousDistance >= 0))
-        {
-            result.push_back(previous + (current - previous) *
-                (previousDistance / (previousDistance - distance)));
-        }
-        if (distance >= 0)
-        {
-            result.push_back(current);
-        }
-        previous = current;
-        previousDistance = distance;
-    }
-    return result.size() >= 3 ? result : FootstepPolygon{};
-}
-
 FootstepPolygon PARS::IntersectFootstepPolygons(const FootstepPolygon& first, const FootstepPolygon& second)
 {
     FootstepPolygon result = first;
@@ -423,7 +388,7 @@ FootstepPolygon PARS::IntersectFootstepPolygons(const FootstepPolygon& first, co
         const PxVec3& a = second[index];
         const PxVec3 edge = second[(index + 1) % second.size()] - a;
         const PxVec3 inward(-edge.z, 0, edge.x);
-        result = ClipFootstepPolygon(result, inward, a.dot(inward));
+        result = Clip(result, inward, a.dot(inward));
     }
     return result;
 }
@@ -554,11 +519,6 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     FootstepRecoverySnapshot result;
     result.preferred = input.preferred;
-    result.modeLocked = input.stepping && (input.modeSelection == FootstepModeSelection::KeepPrevious || input.locked);
-    if (result.modeLocked)
-    {
-        result.mode = input.previousMode;
-    }
     const float height = input.com.y - input.groundHeight;
     if (!settings.enabled || input.movingFoot > 1 || !input.com.isFinite() || !input.velocity.isFinite() ||
         !std::isfinite(height) || height < .05f || !std::isfinite(input.firstStepTime) || input.firstStepTime <= 0 ||
@@ -665,6 +625,7 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     }
     else if (input.locked)
     {
+        result.mode = input.previousMode;
         result.target = input.lockedTarget;
         result.hasTarget = true;
         result.modelFeasible = Contains(result.intersections[static_cast<size_t>(result.mode)], result.target);

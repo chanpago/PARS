@@ -13,9 +13,9 @@ namespace
     constexpr uint32_t MaximumCandidateChecks = 6;
     constexpr uint32_t MaximumIntervalsPerTick = 384;
 
-    bool WithinPoseLimits(const FootstepCollisionSnapshot& result)
+    bool Accept(const FootstepCollisionSnapshot& result)
     {
-        return !result.reachLimited && !result.jointLimited;
+        return result.status == FootstepCollisionStatus::Clear && !result.reachLimited && !result.jointLimited;
     }
 
     float Angle(const PxQuat& first, const PxQuat& second)
@@ -103,8 +103,8 @@ void FootstepAvoidance::Update(FootstepCollisionInput input, const PxVec3& chara
         return;
     }
     const bool hasDetour = m_Snapshot.paths[0].enabled || m_Snapshot.paths[1].enabled;
-    if (m_Snapshot.collision.PassedCollisionCheck() &&
-        (!hasDetour || WithinPoseLimits(m_Snapshot.collision)))
+    if (m_Snapshot.collision.status == FootstepCollisionStatus::Clear &&
+        (!hasDetour || Accept(m_Snapshot.collision)))
     {
         // 이미 통과한 경로는 유지하여 틱마다 앞·뒤 우회가 뒤집히는 것을 막는다.
         m_Snapshot.status = hasDetour ?
@@ -196,7 +196,7 @@ void FootstepAvoidance::Update(FootstepCollisionInput input, const PxVec3& chara
         ++m_Snapshot.candidatesChecked;
         m_Snapshot.totalIntervals += tested.intervalCount;
         m_Snapshot.totalQueries += tested.queryCount;
-        if (tested.status == FootstepCollisionStatus::Clear && WithinPoseLimits(tested))
+        if (Accept(tested))
         {
             m_Snapshot.paths[candidate.side] = candidate.path;
             m_Snapshot.directions[candidate.side] = candidate.direction;

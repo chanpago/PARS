@@ -1,5 +1,4 @@
 ﻿#include "SkeletalMeshComponent.h"
-#include "EngineTuning.h"
 #include "FramePerformance.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
@@ -11,12 +10,6 @@
 
 using namespace Math;
 using namespace physx;
-
-namespace
-{
-    BoolVar CheckCurrentPathIntervals("PARS/Current Bounds and Split", false);
-}
-
 namespace PARS
 {
     bool SkeletalMeshComponent::ClearPhysicsAsset()
@@ -372,7 +365,7 @@ namespace PARS
         const std::vector<PxTransform>& sourcePose, float deltaTime)
     {
         const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
-        if (!step.IsInProgress() || !m_FootSupport.GetFootstepSettings().pathAvoidanceEnabled)
+        if (!step.IsInProgress())
         {
             m_FootstepAvoidance.Reset();
             return;
@@ -383,7 +376,6 @@ namespace PARS
         prediction.completedStep = step.completedStep;
         prediction.revision = step.revision;
         prediction.fixedDeltaTime = deltaTime;
-        prediction.checkCurrentPathIntervals = CheckCurrentPathIntervals;
         const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
         for (size_t side = 0; side < prediction.legs.size(); ++side)
         {
@@ -447,7 +439,7 @@ namespace PARS
             if (step.feet[side].IsInProgress())
             {
                 m_FootSupport.ReportRecoveryPath(side, step.feet[side].target.position,
-                    m_FootstepCollision.PassedCollisionCheck() &&
+                    m_FootstepCollision.status == FootstepCollisionStatus::Clear &&
                     !m_FootstepCollision.reachLimited && !m_FootstepCollision.jointLimited);
             }
         }
@@ -728,8 +720,7 @@ namespace PARS
         {
             return false;
         }
-        m_RagdollSourcePose = GetRagdollAnimationPose();
-        ResetWalkingPlayback();
+        m_RagdollSourcePose = m_AnimInstance->GetPose();
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
@@ -783,11 +774,11 @@ namespace PARS
 
     void SkeletalMeshComponent::UpdatePhysicsPose()
     {
-        const std::vector<GraphNode>& source = IsActiveRagdoll() ? GetRagdollAnimationPose() : m_RagdollSourcePose;
+        const std::vector<GraphNode>& source = IsActiveRagdoll() ? m_AnimInstance->GetPose() : m_RagdollSourcePose;
         if (IsActiveRagdoll())
         {
             std::vector<Matrix4> animated;
-            if (EvaluatePhysicsPose(m_PhysicsSkeleton, source, Matrix4(GetComponentTransform()), animated, m_PhysicsError))
+            if (EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, animated, m_PhysicsError))
             {
                 for (size_t i = 0; i < m_Ragdoll.GetBodyCount(); ++i)
                 {

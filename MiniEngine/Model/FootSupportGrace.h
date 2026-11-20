@@ -88,7 +88,7 @@ namespace PARS
         }
 
     public:
-        static constexpr double Duration = 0.35;
+        static constexpr double Duration = 0.2;
 
     private:
         double m_OutsideTime = 0;

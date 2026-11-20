@@ -20,13 +20,6 @@ namespace PARS
         Locked
     };
 
-    enum class FootstepModeSelection
-    {
-        Automatic,
-        PreferCross,
-        KeepPrevious
-    };
-
     struct FootstepRecoverySettings
     {
     public:
@@ -35,7 +28,7 @@ namespace PARS
         float backAngleDegrees = 30.0f;
         float clearance = .005f;
         float switchAreaRatio = .15f;
-        uint32_t maximumSteps = 1;
+        uint32_t maximumSteps = 3;
         uint32_t maximumPoseChecks = 6;
         bool enabled = true;
     };
@@ -72,7 +65,6 @@ namespace PARS
         float firstStepTime = 0;
         float followingStepTime = 0;
         FootstepMode previousMode = FootstepMode::Normal;
-        FootstepModeSelection modeSelection = FootstepModeSelection::Automatic;
         bool stepping = false;
         bool locked = false;
         bool hasRejectedTarget = false;
@@ -97,7 +89,6 @@ namespace PARS
         float predictionTime = 0;
         uint32_t capturePieceCount = 0;
         bool hasTarget = false;
-        bool modeLocked = false;
         bool modelFeasible = false;
         bool poseRejected = false;
         bool budgetExhausted = false;
@@ -106,7 +97,6 @@ namespace PARS
     };
 
     // 볼록 조각을 별도로 보존한다. 조각 사이의 금지 공간을 볼록 껍질로 채우지 않는다.
-    FootstepPolygon ClipFootstepPolygon(const FootstepPolygon& polygon, const physx::PxVec3& normal, float offset);
     FootstepPolygon IntersectFootstepPolygons(const FootstepPolygon& first, const FootstepPolygon& second);
     float FootstepPolygonArea(const FootstepPolygon& polygon);
     physx::PxVec3 ClosestFootstepPoint(const FootstepPolygon& polygon, const physx::PxVec3& point);

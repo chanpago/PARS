@@ -195,7 +195,6 @@
     <ClCompile Include="MotionMatching.cpp" />
     <ClInclude Include="Components\MeshComponent.h" />
     <ClCompile Include="Components\SkeletalMeshComponent.cpp" />
-    <ClCompile Include="Components\SkeletalMeshWalking.cpp" />
     <ClCompile Include="Components\SkeletalMeshPhysics.cpp" />
     <ClCompile Include="Components\SkeletalMeshRecovery.cpp" />
     <ClCompile Include="PhysicsPose.cpp" />

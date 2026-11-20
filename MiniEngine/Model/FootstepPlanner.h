@@ -2,10 +2,8 @@
 
 #include "FootSupportHull.h"
 #include "FootstepRecovery.h"
-#include "MotionMatching.h"
 #include <array>
 #include <cstdint>
-#include <functional>
 
 namespace PARS
 {
@@ -27,8 +25,9 @@ namespace PARS
         float maximumLandingLowering = .03f;
         float supportLoadRatio = .25f;
         float supportConfirmationTime = .01f;
+        float landingComClampHysteresisDegrees = 5.0f;
         bool preventCrossing = true;
-        bool pathAvoidanceEnabled = false;
+        bool landingComClampEnabled = true;
     };
 
     enum class FootstepPhase
@@ -74,19 +73,19 @@ namespace PARS
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
+        std::array<physx::PxVec3, 4> corners{physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0)};
         float calfLength = 0;
         float normalImpulse = 0;
         bool available = false;
         bool hasContactSample = false;
         bool grounded = false;
-        bool hasGroundProjection = false;
+        bool hasSoleRectangle = false;
     };
 
     struct FootstepInput
     {
     public:
         std::function<bool(size_t, const physx::PxVec3&)> acceptsLanding;
-        std::function<MotionMatchResult(const WalkingSwing&)> findWalkingStep;
         std::vector<physx::PxVec3> hull;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
@@ -111,16 +110,43 @@ namespace PARS
         bool hasImpact = false;
     };
 
-    // 지지발 중심을 지나는 캐릭터 전방 직선과 그 바깥쪽 수평 반평면이다.
-    struct FootstepCrossRegion
+    enum class FootstepLandingDirection
+    {
+        None,
+        Front,
+        Back
+    };
+
+    // 현재 COM에서 지지발 사각형의 양쪽 접선 꼭짓점으로 향하는 금지 부채꼴이다.
+    struct FootstepLandingRegion
     {
     public:
-        bool Contains(const physx::PxVec3& point) const;
+        std::array<physx::PxVec3, 4> corners{physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0)};
+        physx::PxVec3 origin{0};
+        physx::PxVec3 frontRay{0};
+        physx::PxVec3 backRay{0};
+        physx::PxVec3 centerRay{0};
+        float halfAngleRadians = 0;
+        int supportFoot = -1;
+        bool valid = false;
+        bool containsCom = false;
+    };
 
+    FootstepLandingRegion BuildFootstepLandingRegion(const physx::PxVec3& origin,
+        const std::array<physx::PxVec3, 4>& corners, const physx::PxVec3& forward);
+    bool IsInsideFootstepLandingRegion(const FootstepLandingRegion& region, const physx::PxVec3& point);
+
+    // 시작·착지 예측의 원래 값과 보정 결과를 실제 물리 상태와 구분해 저장한다.
+    struct FootstepComPrediction
+    {
     public:
-        physx::PxVec3 center{0};
-        physx::PxVec3 forward{0};
-        physx::PxVec3 outward{0};
+        physx::PxVec3 origin{0};
+        physx::PxVec3 raw{0};
+        physx::PxVec3 clamped{0};
+        FootstepLandingRegion region;
+        FootstepLandingDirection direction = FootstepLandingDirection::None;
+        bool enabled = false;
+        bool limited = false;
         bool valid = false;
     };
 
@@ -134,7 +160,7 @@ namespace PARS
         physx::PxVec3 normal{0};
         float travelDistance = 0;
         float separationDistance = 0;
-        physx::PxVec3 landingCom{0};
+        FootstepComPrediction landingCom;
         bool valid = false;
         bool lengthLimited = false;
         bool crossingLimited = false;
@@ -176,9 +202,7 @@ namespace PARS
     public:
         uint64_t startedStep = 0;
         uint64_t takeoffStep = 0;
-        uint64_t motionSearchStep = UINT64_MAX;
         FootstepTarget target;
-        MotionMatchResult motionMatch;
         physx::PxVec3 startPosition{0};
         physx::PxVec3 initialTarget{0};
         physx::PxVec3 takeoffPosition{0};
@@ -186,6 +210,7 @@ namespace PARS
         float initialDistance = 0;
         FootstepPhase phase = FootstepPhase::Idle;
         FootstepReason reason = FootstepReason::NotEvaluated;
+        FootstepLandingDirection landingComDirection = FootstepLandingDirection::None;
         bool hasTarget = false;
         bool hasTakenOff = false;
         bool justStarted = false;
@@ -210,7 +235,6 @@ namespace PARS
     public:
         bool IsInProgress() const;
         float GetMaximumInitialDistance() const;
-        int GetCrossRegionSupportFoot() const;
 
     public:
         uint64_t completedStep = 0;
@@ -220,8 +244,7 @@ namespace PARS
         uint64_t abortCount = 0;
         std::array<FootstepCommand, 2> feet;
         std::array<FootstepTarget, 2> candidates;
-        std::array<FootstepCrossRegion, 2> crossRegions;
-        physx::PxVec3 comProjection{0};
+        FootstepComPrediction startCom;
         physx::PxVec3 predictedCom{0};
         physx::PxVec3 groundPosition{0};
         physx::PxVec3 groundNormal{0, 1, 0};

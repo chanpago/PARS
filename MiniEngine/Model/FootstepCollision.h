@@ -41,7 +41,6 @@ namespace PARS
         uint32_t maximumIntervals = 128;
         bool includeTrackingError = true;
         bool rejectInvalidPoses = false;
-        bool checkCurrentPathIntervals = true;
     };
 
     enum class FootstepCollisionStatus
@@ -50,8 +49,7 @@ namespace PARS
         Unavailable,
         Clear,
         Collision,
-        Uncertain,
-        SamplesClear
+        Uncertain
     };
 
     struct FootstepCollisionSample
@@ -67,12 +65,6 @@ namespace PARS
 
     struct FootstepCollisionSnapshot
     {
-    public:
-        bool PassedCollisionCheck() const
-        {
-            return status == FootstepCollisionStatus::Clear || status == FootstepCollisionStatus::SamplesClear;
-        }
-
     public:
         uint64_t completedStep = 0;
         uint64_t revision = 0;
@@ -101,8 +93,7 @@ namespace PARS
     };
 
     // 한 호출 안에서는 골반·지지 다리를 고정한 계획 궤적과 관측한 추종 오차 범위를 검사한다.
-    // 전체 구간이 분리되면 Clear, 예산·수치 한계에 도달하면 Uncertain을 반환한다.
-    // 현재 경로의 구간 검사를 끈 경우 샘플만 통과한 결과는 SamplesClear로 구분한다.
+    // 이 모델의 시간 구간 전체가 분리되어야 통과하며, 예산·수치 한계는 미확인으로 반환한다.
     // 미래 외력이나 지지 다리의 운동을 보장하지 않으므로 매 물리 틱 다시 검사해야 한다.
     // 관절 제한 콜백과 도달 제한은 평가한 자세에서 확인하는 별도 후보 거절 조건이다.
     FootstepCollisionSnapshot PredictFootstepCollisions(const FootstepCollisionInput& input,

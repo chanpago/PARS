@@ -343,24 +343,6 @@ Math::Vector3 PhysicsDemo::GetSpawnLocation(float halfHeight) const
     return Math::Vector3(2, halfHeight, m_Map == MapId::Cliff ? 2.0f : 0.0f);
 }
 
-PxBounds3 PhysicsDemo::GetGroundBounds(float height) const
-{
-    if (m_MapBoxes.empty())
-    {
-        return PxBounds3::empty();
-    }
-    const PxBounds3 ground = m_MapBoxes.front().body->getWorldBounds(1.0f);
-    if (m_Map == MapId::Cliff)
-    {
-        const PxBounds3 lower = m_MapBoxes[1].body->getWorldBounds(1.0f);
-        if (std::abs(height - lower.maximum.y) < std::abs(height - ground.maximum.y))
-        {
-            return lower;
-        }
-    }
-    return ground;
-}
-
 Math::Vector3 PhysicsDemo::GetDummySpawnOrigin() const
 {
     // 절벽 앞쪽 경계(Z=-6)에서 30cm 안쪽에 더미를 배치한다.

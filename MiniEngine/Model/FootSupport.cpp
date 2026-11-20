@@ -4,7 +4,6 @@
 #include "PhysicsWorld.h"
 #include "PhysicsPose.h"
 #include "FootstepLandingQuery.h"
-#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -32,19 +31,6 @@ namespace
             std::memcmp(&a.offset, &b.offset, sizeof(a.offset)) == 0 &&
             std::memcmp(&a.rotation, &b.rotation, sizeof(a.rotation)) == 0 &&
             std::memcmp(&a.halfExtents, &b.halfExtents, sizeof(a.halfExtents)) == 0;
-    }
-
-    int FindBodyByLeaf(const PARS::PhysicsAsset& asset, const char* leaf)
-    {
-        for (size_t count = asset.bodies.size(); count > 0; --count)
-        {
-            const size_t body = count - 1;
-            if (Matches(asset.bodies[body].bone, leaf))
-            {
-                return static_cast<int>(body);
-            }
-        }
-        return -1;
     }
 
     int FindAncestor(const PARS::PhysicsSkeleton& skeleton, int node, const char* name)
@@ -103,7 +89,18 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
     }
 
     // 좌우 발 본에 연결된 PA 바디를 찾는다. 바디 인덱스와 스켈레톤의 본 인덱스는 서로 다르다.
-    m_MotionHipsBody = FindBodyByLeaf(*asset, "Hips");
+    // idices배열에 왼발,오른발의 물리바디 인덱스를 저장하기 위해 선언한다
+    std::array<int, 2> indices{-1, -1};
+    for (size_t side = 0; side < m_Feet.size(); ++side)
+    {
+        for (size_t body = 0; body < asset->bodies.size(); ++body)
+        {
+            if (Matches(asset->bodies[body].bone, FootNames[side]))
+            {
+                indices[side] = static_cast<int>(body);
+            }
+        }
+    }
     // 본 계층과 모델에 저장된 기준 자세를 사용한다. 현재 애니메이션 프레임이나 물리 자세는 사용하지 않는다.
     // 컴포넌트 변환을 단위행렬로 두어 캐릭터의 월드 위치·방향을 제외한 기준 본 변환을 구한다.
     PARS::PhysicsSkeleton skeleton;
@@ -127,7 +124,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
     bool found = false;
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
-        const int index = FindBodyByLeaf(*asset, FootNames[side]);
+        const int index = indices[side];
         if (index < 0 || size_t(index) >= ragdoll.GetBodyCount() || size_t(index) >= ragdoll.GetBoneNodes().size())
         {
             continue;
@@ -230,8 +227,6 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
 
 void PARS::FootSupport::OnPhysicsAssetChanged(const PhysicsAsset& asset)
 {
-    m_MotionHipsBody = FindBodyByLeaf(asset, "Hips");
-    m_MotionSampleStep = UINT64_MAX;
     // 같은 PA 재적용이나 드라이브 변경만으로 사용자가 조절한 발바닥 설정을 지우지 않는다.
     // 바디 순서·형상이 달라졌거나 빠진 발이 추가됐을 수 있을 때만 다음 갱신에서 다시 찾는다.
     for (const Sole& sole : m_Feet)
@@ -258,7 +253,6 @@ void PARS::FootSupport::Reset()
 
 void PARS::FootSupport::ResetFootstep()
 {
-    m_MotionSampleStep = UINT64_MAX;
     m_FootstepPlanner.Reset();
     m_BufferGrace.Reset();
     m_HasIdleReference = false;
@@ -299,7 +293,6 @@ void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorl
     // 이전 접촉이력을 계속 사용해도 되는지 확인한다.
     if (m_ContactWorld != &physics || m_ClockRevision != physics.GetClockRevision() || m_RagdollRevision != ragdoll.GetContactRevision())
     {
-        m_MotionSampleStep = UINT64_MAX;
         m_Contacts = {};
         m_ContactWorld = &physics;
         m_ClockRevision = physics.GetClockRevision();
@@ -369,58 +362,6 @@ bool PARS::FootSupport::SetBufferScale(float scale)
     }
     m_BufferScale = scale;
     return true;
-}
-
-bool PARS::FootSupport::SampleMotionQuery(const SkeletalMeshComponent& mesh, MotionFeatures& query)
-{
-    const uint64_t step = m_Snapshot.completedPhysicsStep;
-    if (m_MotionSampleStep == step)
-    {
-        return false;
-    }
-    const bool consecutive = m_MotionSampleStep < step && step - m_MotionSampleStep == 1;
-    m_MotionSampleStep = UINT64_MAX;
-    const AnimInstance& animation = mesh.GetAnimInstance();
-    const Ragdoll& ragdoll = mesh.GetRagdoll();
-    if (animation.GetMotionFrameRange(MotionFrameUsage::Walking).frameCount == 0 ||
-        m_MotionHipsBody < 0 || static_cast<size_t>(m_MotionHipsBody) >= ragdoll.GetBodyCount() ||
-        !m_Snapshot.feet[0].available || !m_Snapshot.feet[1].available)
-    {
-        return false;
-    }
-    const Matrix4 hips = ragdoll.GetBoneWorld(m_MotionHipsBody);
-    const Vector3 pelvis(hips.GetW());
-    Matrix3 toHeadingSpace;
-    if (!animation.GetMotionHeadingSpace(hips, toHeadingSpace))
-    {
-        return false;
-    }
-    for (size_t side = 0; side < m_Snapshot.feet.size(); ++side)
-    {
-        const PxVec3& ankle = m_Snapshot.feet[side].bonePosition;
-        const Vector3 local = toHeadingSpace * (Vector3(ankle.x, ankle.y, ankle.z) - pelvis);
-        if (!ToPx(local).isFinite())
-        {
-            return false;
-        }
-        DirectX::XMStoreFloat3(&query.footPositions[side], local);
-        if (consecutive)
-        {
-            const Vector3 velocity = (local - Vector3(m_PreviousMotionFeet[side])) / static_cast<float>(PhysicsWorld::FixedDeltaTime);
-            DirectX::XMStoreFloat3(&query.footVelocities[side], velocity);
-        }
-    }
-    m_PreviousMotionFeet = query.footPositions;
-    m_MotionSampleStep = step;
-    if (!consecutive)
-    {
-        return false;
-    }
-    // 충격 직후 골반 본 원점의 실제 속도를 예측 시간 동안 유지한다고 가정한다.
-    const PxVec3 velocity = ragdoll.GetBodyPointVelocity(m_MotionHipsBody, ToPx(pelvis));
-    const Vector3 displacement = toHeadingSpace * Vector3(velocity.x, velocity.y, velocity.z) * MotionFeatures::PredictionTimeSeconds;
-    DirectX::XMStoreFloat3(&query.futureDisplacement, displacement);
-    return velocity.isFinite();
 }
 
 void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
@@ -533,21 +474,6 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.hasReference = m_HasIdleReference && forward.isFinite() && forward.normalize() > 1e-6f;
     input.supportRight = PxVec3(forward.z, 0, -forward.x);
 
-    MotionFeatures motionQuery;
-    if (SampleMotionQuery(mesh, motionQuery))
-    {
-        if (input.hasVelocity)
-        {
-            // 현재 COM에서 예측 COM으로 향하는 방향은 플래너에 전달한 전신 COM의 수평 속도 방향과 같다.
-            motionQuery.walkingAngleDegrees = GetWalkingTravelAngleDegrees({forward.x, forward.z},
-                {input.velocity.x, input.velocity.z});
-        }
-        input.findWalkingStep = [&animation, &motionQuery](const WalkingSwing& swing) -> MotionMatchResult
-        {
-            return animation.FindMotionMatch(MotionFrameUsage::Walking, motionQuery, swing);
-        };
-    }
-
     // 저장한 Idle 발 본 자세를 발바닥 위치로 변환
     // Idle 기분 왼발, 오른발의 발바닥 중심 위치를 담을 배열
     std::array<PxVec3, 2> referenceFeet{PxVec3(0), PxVec3(0)};
@@ -586,7 +512,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.normal = foot.contact.normal;
         target.calfLength = foot.leg.available ? foot.leg.calfLength : 0;
         target.normalImpulse = foot.contact.normalImpulse;
-        target.hasGroundProjection = std::find(foot.projected.begin(), foot.projected.end(), true) != foot.projected.end();
+        target.corners = foot.corners;
+        target.hasSoleRectangle = foot.available;
 
         // idle기준 발배치 오프셋을 현재 캐릭터 방향으로 돌림
         const PxVec3 offset = referenceFeet[side] - midpoint;
@@ -677,9 +604,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         foot.boneNode = ragdoll.GetBoneNodes()[sole.bodyIndex];
         foot.leg = sole.leg;
         foot.contact = m_Contacts[side];
-        const Matrix4 footBone = ragdoll.GetBoneWorld(sole.bodyIndex);
-        foot.bonePosition = ToPx(Vector3(footBone.GetW()));
-        const Matrix4 bodyWorld = footBone * sole.source.GetLocalTransform();
+        const Matrix4 bodyWorld = ragdoll.GetBoneWorld(sole.bodyIndex) * sole.source.GetLocalTransform();
         const Quaternion rotation = Quaternion(Vector3(kZUnitVector), XMConvertToRadians(settings.rotation.z)) *
             Quaternion(Vector3(kYUnitVector), XMConvertToRadians(settings.rotation.y)) *
             Quaternion(Vector3(kXUnitVector), XMConvertToRadians(settings.rotation.x));

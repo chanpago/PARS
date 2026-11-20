@@ -2355,18 +2355,12 @@ void ModelViewer::RenderScene(void)
                 m_ImpactTest->GetProjectiles(), RagdollImpactTest::SphereRadius);
             if (PARS::Character* dummy = m_ImpactTest->GetDummy())
             {
-                const PARS::FootSupportSnapshot& sample = dummy->GetMesh().GetFootSupport().GetSnapshot();
-                m_DummyFootSoles.BuildCrossRegionGeometry(dummy->GetMesh(),
-                    m_PhysicsDemo->GetGroundBounds(sample.projectedCenterOfMass.y), lines, regions);
                 m_DummyFootSoles.BuildRegionTriangles(dummy->GetMesh(), regions);
             }
             m_ImpactTest->BuildLines(lines);
         }
         if (PARS::Character* character = GetPreviewCharacter())
         {
-            const PARS::FootSupportSnapshot& sample = character->GetMesh().GetFootSupport().GetSnapshot();
-            m_PlayerFootSoles.BuildCrossRegionGeometry(character->GetMesh(),
-                m_PhysicsDemo->GetGroundBounds(sample.projectedCenterOfMass.y), lines, regions);
             m_PlayerFootSoles.BuildLines(character->GetMesh(), lines);
         }
         m_PhysicsDemo->RenderDebugTriangles(gfxContext, m_Camera, viewport, scissor, regions);

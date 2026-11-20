@@ -296,7 +296,7 @@ namespace
         std::printf("PASS: %u curved IK intervals contain dense transformed geometry\n", checked);
     }
 
-    FootstepCollisionInput MakeAvoidanceFixture(float obstacleTime = .15f)
+    FootstepCollisionInput MakeAvoidanceFixture()
     {
         FootstepCollisionInput input = MakeInput();
         input.includeTrackingError = false;
@@ -305,39 +305,9 @@ namespace
         input.legs[1].shapes[2].geometry.storeAny(PxSphereGeometry(.012f));
         std::array<PxTransform, 3> middle;
         LegIKResult solved;
-        PredictFootstepLeg(input.legs[0], obstacleTime, middle, solved);
+        PredictFootstepLeg(input.legs[0], .15f, middle, solved);
         input.legs[1].shapes[2].actualPose = middle[2];
         return input;
-    }
-
-    void TestCurrentPathPrecheckOnly()
-    {
-        using FramePerformance::Category;
-        FootstepCollisionInput input = MakeAvoidanceFixture(.125f);
-        input.checkCurrentPathIntervals = false;
-        FootstepAvoidance avoidance;
-        FramePerformance::BeginFrame();
-        avoidance.Update(input, PxVec3(0, 0, 1));
-        FramePerformance::EndFrame();
-        const FramePerformance::Recorder& timings = FramePerformance::GetState().recorder;
-        const FootstepAvoidanceSnapshot& snapshot = avoidance.GetSnapshot();
-        Check(snapshot.status == FootstepAvoidanceStatus::Detouring &&
-            snapshot.collision.status == FootstepCollisionStatus::Clear &&
-            timings.GetStatistics(Category::DetourIntervals).calls > 0,
-            "A sampled collision still triggers a fully checked detour");
-
-        ++input.completedStep;
-        FramePerformance::BeginFrame();
-        avoidance.Update(input, PxVec3(0, 0, 1));
-        FramePerformance::EndFrame();
-        Check(snapshot.status == FootstepAvoidanceStatus::Detouring &&
-            snapshot.collision.status == FootstepCollisionStatus::SamplesClear &&
-            snapshot.collision.sampleCount == FootstepCollisionSampleCount &&
-            snapshot.candidatesChecked == 0 && snapshot.totalIntervals == 0 &&
-            timings.GetStatistics(Category::CurrentPathSamples).calls == 1 &&
-            timings.GetStatistics(Category::CurrentPathMidpoints).calls == 0 &&
-            timings.GetStatistics(Category::CurrentPathIntervals).calls == 0,
-            "The current path keeps its samples and skips interval work");
     }
 
     void TestAvoidanceAndContinuity()
@@ -435,6 +405,5 @@ void TestFootstepCollision()
     TestIntervalsAndTracking();
     TestBoundsContainCurvedIK();
     TestAvoidanceAndContinuity();
-    TestCurrentPathPrecheckOnly();
     std::puts("PASS: FootstepCollision continuous bounds, tracking, primitives, avoidance and failure handling");
 }

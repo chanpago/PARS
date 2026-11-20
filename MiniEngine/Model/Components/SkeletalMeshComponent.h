@@ -39,17 +39,6 @@ namespace PARS
         Count
     };
 
-    struct WalkingPlayback
-    {
-    public:
-        uint64_t searchStep = UINT64_MAX;
-        uint32_t clipIndex = UINT32_MAX;
-        int movingFoot = -1;
-        float timeSeconds = 0.0f;
-        float blendAlpha = 0.0f;
-        bool blendingOut = false;
-    };
-
     class SkeletalMeshComponent : public SkinnedMeshComponent
     {
     private:
@@ -101,8 +90,6 @@ namespace PARS
         void UpdatePhysicsPose();
         void UpdateFootSupport();
         void UpdateHorizontalBalance(float deltaTime);
-        bool ApplyWalkingDrivePose(const FootstepSnapshot& step, float deltaTime, std::vector<Math::Matrix4>& target);
-        void ResetWalkingPlayback();
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
             const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
@@ -165,10 +152,6 @@ namespace PARS
         const FootstepIKSnapshot& GetFootstepIKSnapshot() const
         {
             return m_FootstepIK.GetSnapshot();
-        }
-        const WalkingPlayback& GetWalkingPlayback() const
-        {
-            return m_WalkingPlayback;
         }
         const FootstepCollisionSnapshot& GetFootstepCollisionSnapshot() const
         {
@@ -299,10 +282,6 @@ namespace PARS
     private:
         bool IsFallingClip(uint32_t animationIndex) const;
         uint32_t SelectFallingAnimation() const;
-        const std::vector<GraphNode>& GetRagdollAnimationPose() const
-        {
-            return m_WalkingPose.empty() ? m_AnimInstance->GetPose() : m_WalkingPose;
-        }
 
     private:
         ModelInstance m_ModelInstance;
@@ -320,10 +299,6 @@ namespace PARS
         FallArmBrace m_FallArmBrace;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
-        std::vector<GraphNode> m_WalkingPose;
-        std::vector<GraphNode> m_WalkingBlendSource;
-        WalkingPlayback m_WalkingPlayback;
-        uint64_t m_WalkingTransitionStep = 0;
         std::vector<GraphNode> m_KinematicBlendSource;
         std::vector<GraphNode> m_KinematicBlendPose;
         PhysicsSkeleton m_PhysicsSkeleton;
