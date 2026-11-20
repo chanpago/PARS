@@ -52,8 +52,7 @@ Character* RagdollImpactTest::GetDummy() const
     return m_World.FindActor<Character>(m_Dummy);
 }
 
-bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::shared_ptr<const Model> falling,
-    std::shared_ptr<const Model> standingUp, const PhysicsAsset& asset, const AnimInstance& motionSource)
+bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const PhysicsAsset& asset, const AnimInstance& motionSource)
 {
     m_Asset = asset;
     if (std::none_of(m_Asset.constraints.begin(), m_Asset.constraints.end(), HasEnabledAngularDrive))
@@ -71,20 +70,15 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, std::share
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
     mesh.SetFootCandidateDebugVisible(true);
     mesh.SetArmDriveStrength(.1f);
-    mesh.SetFallingAnimationEnabled(false);
     if (!mesh.SetSkeletalMesh(idle))
     {
         m_Message = u8"더미 메시를 초기화하지 못했습니다.";
         return false;
     }
-    // 낙상 클립은 선택적으로 켤 수 있게 등록하고, 기본 상태에서는 Idle과 착지 후 기상을 사용한다.
     if (!mesh.SetAnimInstance(std::make_unique<AnimInstance>(mesh)) ||
-        !mesh.GetAnimInstance().AddAnimation("Idle", idle) ||
-        !mesh.GetAnimInstance().AddAnimation("Falling Down", falling) ||
-        !mesh.GetAnimInstance().AddAnimation("Standing Up", standingUp) ||
-        !mesh.SetFallingAnimation(1) || !mesh.SetStandingUpAnimation(2, 0) || !mesh.GetAnimInstance().PlayAnimation(0))
+        !mesh.GetAnimInstance().AddAnimation("Idle", idle) || !mesh.GetAnimInstance().PlayAnimation(0))
     {
-        m_Message = u8"더미의 Idle, Falling Down 또는 Standing Up 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
+        m_Message = u8"더미의 Idle 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
         return false;
     }
     if (!mesh.GetAnimInstance().ShareMotionFramesFrom(motionSource, m_Message) || !mesh.SetPhysicsAsset(m_Asset, m_Message))

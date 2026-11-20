@@ -179,7 +179,8 @@ namespace
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "command_step,command_mode,motion_search_step,match_clip,match_time_s,match_score,"
-            "drive_clip,drive_time_s,drive_blend_alpha,drive_blending_out,match_com_angle_deg,match_clip_angle_deg\n";
+            "drive_clip,drive_time_s,drive_blend_alpha,drive_blending_out,match_com_angle_deg,match_clip_angle_deg,"
+            "animation_clip,animation_time_s,com_velocity_x,com_velocity_z\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -253,7 +254,9 @@ namespace
             {
                 stream << command.motionMatch.clipAngleDegrees;
             }
-            stream << '\n';
+            const PARS::AnimInstance& animation = mesh.GetAnimInstance();
+            stream << ',' << animation.GetAnimationName(animation.GetCurrentAnimationIndex()) << ',' << animation.GetAnimationTime()
+                << ',' << support.centerOfMassVelocity.x << ',' << support.centerOfMassVelocity.z << '\n';
         }
     }
 

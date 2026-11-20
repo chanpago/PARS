@@ -856,7 +856,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         }
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip(u8"끄면 Falling Down 시퀀스를 생략하고 Idle을 기본 목표로 사용합니다. 손 뻗기와 착지 후 기상은 유지합니다.");
+            ImGui::SetTooltip(u8"낙상 시작 시 캐릭터 기준으로 넘어지는 방향의 클립을 한 번 재생합니다. 끄면 Idle 자세에서 손 뻗기와 착지 후 기상을 처리합니다.");
         }
         PARS::FallArmSettings& fallArms = mesh.GetFallArmSettings();
         ImGui::Checkbox(u8"낙상 중 손 뻗기 / 버티기", &fallArms.enabled);

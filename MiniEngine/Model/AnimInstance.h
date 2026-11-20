@@ -64,7 +64,7 @@ namespace PARS
         bool SampleAnimationPose(uint32_t index, float time, std::vector<GraphNode>& pose) const;
         void Stop();
         void Reset();
-        void UpdateAnimation(float deltaTime);
+        void UpdateAnimation(float deltaTime, bool allowClipSelection = true);
 
     protected:
         virtual void NativeUpdateAnimation(float deltaTime)

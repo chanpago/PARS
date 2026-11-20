@@ -1,5 +1,6 @@
 ﻿#include "SkeletalMeshComponent.h"
 #include "FramePerformance.h"
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include "../GameFramework/Character.h"
@@ -12,7 +13,8 @@ namespace PARS
 {
     bool SkeletalMeshComponent::SetFallingAnimation(uint32_t animationIndex)
     {
-        if (animationIndex >= m_AnimInstance->GetAnimationCount())
+        if (animationIndex >= m_AnimInstance->GetAnimationCount() ||
+            animationIndex == m_StandingUpAnimationIndex || animationIndex == m_StandingIdleAnimationIndex)
         {
             return false;
         }
@@ -20,17 +22,74 @@ namespace PARS
         return true;
     }
 
+    bool SkeletalMeshComponent::SetDirectionalFallingAnimation(FallDirection direction, uint32_t animationIndex)
+    {
+        const size_t slot = static_cast<size_t>(direction);
+        if (slot >= m_DirectionalFallingAnimations.size() || animationIndex >= m_AnimInstance->GetAnimationCount() ||
+            animationIndex == m_StandingUpAnimationIndex || animationIndex == m_StandingIdleAnimationIndex)
+        {
+            return false;
+        }
+        m_DirectionalFallingAnimations[slot] = animationIndex;
+        return true;
+    }
+
+    bool SkeletalMeshComponent::IsFallingClip(uint32_t animationIndex) const
+    {
+        return animationIndex < m_AnimInstance->GetAnimationCount() && (animationIndex == m_FallingAnimationIndex ||
+            std::find(m_DirectionalFallingAnimations.begin(), m_DirectionalFallingAnimations.end(), animationIndex) !=
+                m_DirectionalFallingAnimations.end());
+    }
+
     bool SkeletalMeshComponent::IsFollowingFallingAnimation() const
     {
-        return m_FallingAnimationIndex < m_AnimInstance->GetAnimationCount() &&
-            m_AnimInstance->GetCurrentAnimationIndex() == m_FallingAnimationIndex;
+        return IsFallingClip(m_AnimInstance->GetCurrentAnimationIndex());
+    }
+
+    uint32_t SkeletalMeshComponent::SelectFallingAnimation() const
+    {
+        const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
+        PxVec3 travel = support.centerOfMassVelocity;
+        if (!support.hasCenterOfMassVelocity || !travel.isFinite() || std::hypot(travel.x, travel.z) < 0.05f)
+        {
+            // 천천히 쓰러질 때는 지지 영역 밖으로 기운 쪽을 사용한다.
+            if (!support.hasCenterOfMass || !support.balance.hasDirection || support.balance.zone == FootSupportZone::Inside)
+            {
+                return m_FallingAnimationIndex;
+            }
+            travel = support.centerOfMass - support.balance.center;
+            if (!travel.isFinite() || std::hypot(travel.x, travel.z) < 0.02f)
+            {
+                return m_FallingAnimationIndex;
+            }
+        }
+
+        // 보행과 같은 캐릭터 정면을 사용한다. 이 Mixamo 기준 자세에서 로컬 +X는 캐릭터의 왼쪽이다.
+        const Vector3 facing(GetComponentTransform().GetZ());
+        const float forward = float(facing.GetX()) * travel.x + float(facing.GetZ()) * travel.z;
+        const float left = float(facing.GetZ()) * travel.x - float(facing.GetX()) * travel.z;
+        if (!std::isfinite(forward) || !std::isfinite(left) || (forward == 0.0f && left == 0.0f))
+        {
+            return m_FallingAnimationIndex;
+        }
+        FallDirection direction;
+        if (std::abs(forward) >= std::abs(left))
+        {
+            direction = forward >= 0.0f ? FallDirection::Forward : FallDirection::Backward;
+        }
+        else
+        {
+            direction = left >= 0.0f ? FallDirection::Left : FallDirection::Right;
+        }
+        const uint32_t index = m_DirectionalFallingAnimations[static_cast<size_t>(direction)];
+        return index < m_AnimInstance->GetAnimationCount() ? index : m_FallingAnimationIndex;
     }
 
     bool SkeletalMeshComponent::SetStandingUpAnimation(uint32_t animationIndex, uint32_t idleAnimationIndex)
     {
         if (animationIndex >= m_AnimInstance->GetAnimationCount() ||
             idleAnimationIndex >= m_AnimInstance->GetAnimationCount() || animationIndex == idleAnimationIndex ||
-            animationIndex == m_FallingAnimationIndex || idleAnimationIndex == m_FallingAnimationIndex ||
+            IsFallingClip(animationIndex) || IsFallingClip(idleAnimationIndex) ||
             m_AnimInstance->GetAnimationName(idleAnimationIndex) != "Idle")
         {
             return false;
@@ -61,7 +120,13 @@ namespace PARS
             m_StandingUpState = StandingUpState::None;
             return true;
         }
-        if (!m_FallingAnimationEnabled || m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount())
+        // 한 번 고른 클립은 착지와 감속으로 COM 방향이 바뀌어도 끝까지 유지한다.
+        if (m_FallingAnimationEnabled && IsFollowingFallingAnimation())
+        {
+            return UpdateStandingUpAnimation(deltaTime);
+        }
+        const uint32_t fallClip = m_FallingAnimationEnabled ? SelectFallingAnimation() : UINT32_MAX;
+        if (fallClip >= m_AnimInstance->GetAnimationCount())
         {
             // 낙상 클립을 꺼도 물리 낙상과 착지 후 기상은 계속 처리한다.
             if (IsFollowingFallingAnimation() || IsFollowingStandingUpAnimation())
@@ -83,13 +148,8 @@ namespace PARS
             }
             return UpdateStandingUpAnimation(deltaTime);
         }
-        if (IsFollowingFallingAnimation())
-        {
-            return UpdateStandingUpAnimation(deltaTime);
-        }
-
         // 낙상은 한 번 재생하고 착지 후 기상을 기다린다. 위치와 회전 지지는 이미 해제된 상태다.
-        if (!m_AnimInstance->TransitionToAnimation(m_FallingAnimationIndex, .2f, false))
+        if (!m_AnimInstance->TransitionToAnimation(fallClip, .2f, false))
         {
             m_PhysicsError = "Cannot transition to the falling animation.";
             return false;
@@ -152,8 +212,7 @@ namespace PARS
             float(Length(velocity)) <= m_RecoverySettings.maximumReturnSpeed;
         bool grounded = false;
         float groundHeight = -std::numeric_limits<float>::infinity();
-        const bool requireBodyContact = !m_FallingAnimationEnabled ||
-            m_FallingAnimationIndex >= m_AnimInstance->GetAnimationCount();
+        const bool requireBodyContact = !m_FallingAnimationEnabled || !IsFollowingFallingAnimation();
         const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
         const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
         for (size_t body = 0; body < m_Ragdoll.GetBodyCount(); ++body)

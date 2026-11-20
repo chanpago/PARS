@@ -1,11 +1,13 @@
 """Blender 4.4: blender -b -P Tools/RetargetWalking.py
 
 Source/UnrealWalking의 루프를 기존 Idle 메시와 바인드 포즈에 맞춰 변환한다.
+낙상 클립은 blender -b -P Tools/RetargetWalking.py -- shove 로 변환한다.
 """
 import hashlib
 import json
 import math
 import struct
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -14,7 +16,13 @@ from mathutils import Matrix, Quaternion, Vector
 
 
 ASSETS = Path(__file__).resolve().parents[1] / "Assets/Characters/Mixamo"
-DEST = ASSETS / "Converted/WalkingLoops"
+# 원본 접미사는 밀어온 쪽이다. 골반이 움직이기 직전의 원본 프레임부터 굽는다.
+SHOVE_FALLS = {
+    "M_relaxed_ragdoll_shove_stand_B_V": ("ShoveFallForward", 16),
+    "M_relaxed_ragdoll_shove_stand_F_V": ("ShoveFallBackward", 18),
+    "M_relaxed_ragdoll_shove_stand_L_V": ("ShoveFallRight", 20),
+    "M_relaxed_ragdoll_shove_stand_R_V": ("ShoveFallLeft", 15),
+}
 AXES = Matrix.Rotation(-math.pi / 2, 4, "X")
 MAPPING = dict(Hips="pelvis", Spine="spine_01", Spine1="spine_03", Spine2="spine_05",
                Neck="neck_01", Head="head")
@@ -58,7 +66,7 @@ def pointed(orientation, rest_direction, direction):
 
 
 class Retarget:
-    def __init__(self, template, rig):
+    def __init__(self, template, rig, falling=False):
         self.nodes = template["nodes"]
         self.local = {}
         self.bind = {}
@@ -78,7 +86,13 @@ class Retarget:
         for index in template["scenes"][template["scene"]]["nodes"]:
             visit(index)
         self.rig = rig
-        base = AXES @ rig.matrix_world
+        self.to_model = AXES
+        self.match_ankles = not falling
+        if falling:
+            # 촬영을 위해 배치한 첫 프레임의 위치와 회전만 제거하고 이후 낙상 궤적은 보존한다.
+            placement = Matrix.LocRotScale(rig.matrix_world.translation, rotation(rig.matrix_world), None)
+            self.to_model = AXES @ placement.inverted()
+        base = self.to_model @ rig.matrix_world
         self.source_bind = {name: base @ rig.data.bones[source].matrix_local for name, source in MAPPING.items()}
         self.aim_local = {}
         self.offset = {}
@@ -100,7 +114,7 @@ class Retarget:
         self.scale = leg_length(self.bind) / leg_length(self.source_bind)
 
     def sample(self):
-        base = AXES @ self.rig.matrix_world
+        base = self.to_model @ self.rig.matrix_world
         source = {name: base @ self.rig.pose.bones[bone].matrix for name, bone in MAPPING.items()}
         desired = {name: rotation(matrix) @ self.offset[name] for name, matrix in source.items()}
         for name, child in AIM.items():
@@ -112,6 +126,8 @@ class Retarget:
         for side in ("Left", "Right"):
             hand = side + "Hand"
             desired[hand] = palm_frame(source, side) @ palm_frame(bind, side).inverted() @ rotation(bind[hand])
+            if not self.match_ankles:
+                continue
             thigh, calf, foot, toe = (side + n for n in ("UpLeg", "Leg", "Foot", "ToeBase"))
             ankle = hips + self.scale * (source[foot].translation - source["Hips"].translation)
             ankle.y = bind[foot].translation.y + self.scale * (source[foot].translation.y - self.source_bind[foot].translation.y)
@@ -138,7 +154,7 @@ class Retarget:
             if name not in desired:
                 world[name] = parent @ local
                 continue
-            if name.endswith("UpLeg"):
+            if self.match_ankles and name.endswith("UpLeg"):
                 side = name[:-5]
                 calf = side + "Leg"
                 axis = ankles[side] - position
@@ -151,7 +167,7 @@ class Retarget:
                 along = (upper ** 2 - lower ** 2 + distance ** 2) / (2 * distance)
                 knees[side] = position + axis * along + pole * math.sqrt(max(0, upper ** 2 - along ** 2))
                 desired[name] = pointed(desired[name], self.aim_local[name], knees[side] - position)
-            elif name in ("LeftLeg", "RightLeg"):
+            elif self.match_ankles and name in ("LeftLeg", "RightLeg"):
                 desired[name] = pointed(desired[name], self.aim_local[name], ankles[name[:-3]] - position)
             local_rot = (rotation(parent).inverted() @ desired[name]).normalized()
             translation = local.translation
@@ -163,7 +179,7 @@ class Retarget:
         return keys
 
 
-def save_clip(template, name, frames, fps):
+def save_clip(template, destination, name, frames, fps):
     doc = deepcopy(template)
     times = [(i / fps,) for i in range(len(frames))]
     # 기존 메시 및 역바인드 행렬은 Idle의 바이너리를 공유한다.
@@ -200,8 +216,8 @@ def save_clip(template, name, frames, fps):
         animation["samplers"].append(dict(input=time_index, output=accessor(rows), interpolation="LINEAR"))
     doc["animations"] = [animation]
     doc["buffers"].append(dict(uri=name + ".bin", byteLength=len(data)))
-    (DEST / (name + ".bin")).write_bytes(data)
-    path = DEST / (name + ".gltf")
+    (destination / (name + ".bin")).write_bytes(data)
+    path = destination / (name + ".gltf")
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -211,10 +227,18 @@ def main():
     manifest_path = ASSETS / "manifest.json"
     manifest = json.loads(manifest_path.read_bytes())
     idle = next(clip for clip in manifest["clips"] if clip["animation"] == "Idle")
-    DEST.mkdir(parents=True, exist_ok=True)
-    sources = sorted((ASSETS / "Source/UnrealWalking").glob("*.fbx"))
-    if len(sources) != 10:
+    args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    if args not in ([], ["shove"]):
+        raise ValueError("낙상만 변환하려면 -- shove 를 지정하세요.")
+    falling = args == ["shove"]
+    destination = ASSETS / ("Converted/ShoveFalls" if falling else "Converted/WalkingLoops")
+    source_dir = ASSETS / ("Source/UnrealShove" if falling else "Source/UnrealWalking")
+    sources = sorted(source_dir.glob("*.fbx"))
+    if falling and {file.name.split(".")[0] for file in sources} != SHOVE_FALLS.keys():
+        raise ValueError("UnrealShove의 앞뒤좌우 원본 4개가 필요합니다.")
+    if not falling and len(sources) != 10:
         raise ValueError("UnrealWalking 원본 10개가 필요합니다.")
+    destination.mkdir(parents=True, exist_ok=True)
     entries = []
     for file in sources:
         name = file.name.split(".")[0]
@@ -225,19 +249,27 @@ def main():
         start, end = map(int, rig.animation_data.action.frame_range)
         fps = scene.render.fps / scene.render.fps_base
         scene.frame_set(start)
-        retarget = Retarget(template, rig)
+        retarget = Retarget(template, rig, falling)
+        first_frame = start
+        if falling:
+            name, first_frame = SHOVE_FALLS[name]
+            if not start <= first_frame < end:
+                raise ValueError(f"{file.name}의 낙상 시작 프레임이 범위를 벗어났습니다.")
         samples = []
-        for frame in range(start, end + 1):
+        for frame in range(first_frame, end + 1):
             scene.frame_set(frame)
             samples.append(retarget.sample())
-        path = save_clip(template, name, samples, fps)
+        path = save_clip(template, destination, name, samples, fps)
         entries.append(dict(animation=name, path=path.relative_to(ASSETS).as_posix(), source=file.relative_to(ASSETS).as_posix(),
                             source_sha256=hashlib.sha256(file.read_bytes()).hexdigest(), gltf_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                             blender_version=bpy.app.version_string, source_frames=[start, end], frames_per_second=fps,
-                            sample_counts=[len(samples)], durations_seconds=[round((end-start)/fps, 6)], channels=len(samples[0]),
+                            sample_counts=[len(samples)], durations_seconds=[round((end-first_frame)/fps, 6)], channels=len(samples[0]),
                             meshes=1, skins=1, joints=idle["joints"], source_rig="Unreal", source_bone_count=len(rig.data.bones),
                             target_skeleton=idle["path"], textures=idle["textures"]))
-    manifest["clips"] = [clip for clip in manifest["clips"] if not clip["path"].startswith("Converted/WalkingLoops/")] + entries
+        if falling:
+            entries[-1]["exported_source_frames"] = [first_frame, end]
+    prefix = destination.relative_to(ASSETS).as_posix() + "/"
+    manifest["clips"] = [clip for clip in manifest["clips"] if not clip["path"].startswith(prefix)] + entries
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 

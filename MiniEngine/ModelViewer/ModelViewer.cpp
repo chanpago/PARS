@@ -97,6 +97,47 @@ namespace
         return model;
     }
 
+#if defined(_M_X64)
+    bool RegisterFallAnimations(PARS::SkeletalMeshComponent& mesh, const std::wstring& directory, bool forceRebuild,
+        SkeletalMeshViewer::AnimationModels& models, std::string& error)
+    {
+        PARS::AnimInstance& animation = mesh.GetAnimInstance();
+        const uint32_t fallback = static_cast<uint32_t>(animation.GetAnimationCount());
+        if (!animation.AddAnimation("Falling Down", LoadAnimationModel(directory + L"FallingDown/FallingDown.gltf", forceRebuild, models)) ||
+            !mesh.SetFallingAnimation(fallback))
+        {
+            error = u8"기본 낙상 클립 Falling Down을 등록하지 못했습니다.";
+            return false;
+        }
+        const uint32_t standing = static_cast<uint32_t>(animation.GetAnimationCount());
+        if (!animation.AddAnimation("Standing Up", LoadAnimationModel(directory + L"StandingUp/StandingUp.gltf", forceRebuild, models)) ||
+            !mesh.SetStandingUpAnimation(standing, 0))
+        {
+            error = u8"기상 클립 Standing Up을 등록하지 못했습니다.";
+            return false;
+        }
+        const std::pair<PARS::FallDirection, const char*> clips[] =
+        {
+            {PARS::FallDirection::Forward, "ShoveFallForward"},
+            {PARS::FallDirection::Backward, "ShoveFallBackward"},
+            {PARS::FallDirection::Left, "ShoveFallLeft"},
+            {PARS::FallDirection::Right, "ShoveFallRight"}
+        };
+        for (const std::pair<PARS::FallDirection, const char*>& clip : clips)
+        {
+            const std::wstring path = directory + L"ShoveFalls/" + Utility::UTF8ToWideString(clip.second) + L".gltf";
+            const uint32_t index = static_cast<uint32_t>(animation.GetAnimationCount());
+            if (!animation.AddAnimation(clip.second, LoadAnimationModel(path, forceRebuild, models)) ||
+                !mesh.SetDirectionalFallingAnimation(clip.first, index))
+            {
+                error = std::string(u8"방향별 낙상 클립을 등록하지 못했습니다. ") + clip.second;
+                return false;
+            }
+        }
+        return true;
+    }
+#endif
+
     void LoadViewerAnimations(const std::wstring& directory, bool forceRebuild, SkeletalMeshViewer::AnimationModels& models)
     {
         WIN32_FIND_DATAW entry{};
@@ -931,6 +972,13 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         character->Destroy();
         return;
     }
+#if defined(_M_X64)
+    if (m_PhysicsDemo && !RegisterFallAnimations(mesh, convertedDirectory, forceRebuild, animationModels, m_PreviewError))
+    {
+        character->Destroy();
+        return;
+    }
+#endif
 
     // [캐릭터 배치] Actor 원점은 캡슐 중심이므로, 반높이만큼 올려 캡슐 아래쪽을 지면 높이에 맞춘다.
     const float halfHeight = character->GetCapsuleComponent().GetHalfHeight();
@@ -1034,11 +1082,13 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "CharacterImpact.settings.json");
         m_ImpactTest->LoadProjectileSettings(
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "Projectile.settings.json");
-        const std::shared_ptr<const Model> falling = LoadAnimationModel(convertedDirectory + L"FallingDown/FallingDown.gltf", forceRebuild, animationModels);
-        const std::shared_ptr<const Model> standingUp = LoadAnimationModel(convertedDirectory + L"StandingUp/StandingUp.gltf", forceRebuild, animationModels);
-        if (!m_ImpactTest->Initialize(models[0], falling, standingUp, *mesh.GetPhysicsAsset(), motionSource))
+        if (!m_ImpactTest->Initialize(models[0], *mesh.GetPhysicsAsset(), motionSource))
         {
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
+            m_ImpactTest.reset();
+        }
+        else if (!RegisterFallAnimations(m_ImpactTest->GetDummy()->GetMesh(), convertedDirectory, forceRebuild, animationModels, m_RagdollMessage))
+        {
             m_ImpactTest.reset();
         }
         else

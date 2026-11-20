@@ -6,6 +6,7 @@ namespace PARS
     SkeletalMeshComponent::SkeletalMeshComponent(Actor& owner, const std::string& name)
         : SkinnedMeshComponent(owner, name), m_AnimInstance(std::make_unique<AnimInstance>(*this))
     {
+        m_DirectionalFallingAnimations.fill(UINT32_MAX);
     }
 
     bool SkeletalMeshComponent::SetSkeletalMesh(std::shared_ptr<const Model> mesh)
@@ -23,6 +24,7 @@ namespace PARS
         m_ModelInstance = m_SkeletalMesh;
         m_AnimInstance->Initialize(m_SkeletalMesh);
         m_FallingAnimationIndex = UINT32_MAX;
+        m_DirectionalFallingAnimations.fill(UINT32_MAX);
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
         m_StandingUpStableTime = 0;
@@ -131,6 +133,7 @@ namespace PARS
         m_AnimInstance = std::move(instance);
         ResetFallArms();
         m_FallingAnimationIndex = UINT32_MAX;
+        m_DirectionalFallingAnimations.fill(UINT32_MAX);
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
         m_StandingUpStableTime = 0;
@@ -214,7 +217,8 @@ namespace PARS
         // 이버 스텝에서의 애니메이션 자세를 구한다.
         // 애니메이션 재생 시간을 진행시키고, 그 시간에 해당하는 본들의 자세를 계산
         // clip에서 키프레임 데이터와 시간 간격 정보를 읽어와서 두 프레임 사이의 비율을 계산하고 m_pose에 저장
-        m_AnimInstance->UpdateAnimation(deltaTime);
+        // 낙상·기상 중에는 해당 클립의 시간을 진행하고 일반 이동 클립 선택은 복귀 후 재개한다.
+        m_AnimInstance->UpdateAnimation(deltaTime, !IsFalling() && m_StandingUpState == StandingUpState::None);
 
         if (IsActiveRagdoll())
         {

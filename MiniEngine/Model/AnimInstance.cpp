@@ -216,7 +216,7 @@ namespace PARS
         return index < m_Clips.size() ? m_Clips[index].name : empty;
     }
 
-    void AnimInstance::UpdateAnimation(float deltaTime)
+    void AnimInstance::UpdateAnimation(float deltaTime, bool allowClipSelection)
     {
         if (!std::isfinite(deltaTime) || deltaTime < 0.0f)
         {
@@ -225,7 +225,7 @@ namespace PARS
 
         // 어떤 애니메이션을 재생할지 갱신
         // 캐릭터 이동 속도로 대기·걷기·달리기를 선택
-        if (m_Playing && !m_Clips.empty())
+        if (allowClipSelection && m_Playing && !m_Clips.empty())
         {
             NativeUpdateAnimation(deltaTime);
         }

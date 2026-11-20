@@ -30,6 +30,15 @@ namespace PARS
         Error
     };
 
+    enum class FallDirection : uint8_t
+    {
+        Forward,
+        Backward,
+        Left,
+        Right,
+        Count
+    };
+
     struct WalkingPlayback
     {
     public:
@@ -178,6 +187,7 @@ namespace PARS
             return m_RecoverySettings;
         }
         bool SetFallingAnimation(uint32_t animationIndex);
+        bool SetDirectionalFallingAnimation(FallDirection direction, uint32_t animationIndex);
         void SetFallingAnimationEnabled(bool enabled)
         {
             m_FallingAnimationEnabled = enabled;
@@ -287,6 +297,8 @@ namespace PARS
         }
 
     private:
+        bool IsFallingClip(uint32_t animationIndex) const;
+        uint32_t SelectFallingAnimation() const;
         const std::vector<GraphNode>& GetRagdollAnimationPose() const
         {
             return m_WalkingPose.empty() ? m_AnimInstance->GetPose() : m_WalkingPose;
@@ -334,6 +346,7 @@ namespace PARS
         float m_KinematicBlendTime = 0;
         float m_StandingUpStableTime = 0;
         uint32_t m_FallingAnimationIndex = UINT32_MAX;
+        std::array<uint32_t, static_cast<size_t>(FallDirection::Count)> m_DirectionalFallingAnimations;
         uint32_t m_StandingUpAnimationIndex = UINT32_MAX;
         uint32_t m_StandingIdleAnimationIndex = UINT32_MAX;
         bool m_HasRecoverySoles = false;
