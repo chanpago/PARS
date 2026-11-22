@@ -8,7 +8,7 @@
 
 namespace PARS
 {
-    constexpr float MinimumFootstepDuration = .1f;
+    constexpr float MinimumFootstepDuration = .2f;
     constexpr float MaximumFootstepDuration = .3f;
 
     struct FootstepSettings
@@ -22,7 +22,7 @@ namespace PARS
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
         float crossingOffset = .1f;
         float liftHeightScale = .35f;
-        float stepDuration = .15f;
+        float stepDuration = MinimumFootstepDuration;
         float minimumLiftHeight = .03f;
         float landingLockProgress = .90f;
         float landingLoweringSpeed = .05f;
@@ -269,7 +269,6 @@ namespace PARS
         FootstepReason reason = FootstepReason::Inactive;
         int requestedFoot = -1;
         int followupFoot = -1;
-        uint32_t remainingRecoverySteps = 0;
         bool hasPrediction = false;
         bool actualComOutsideBuffer = false;
         bool needsStep = false;

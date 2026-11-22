@@ -429,6 +429,53 @@ namespace
         return input;
     }
 
+    void TestFollowupAfterOneStepLanding()
+    {
+        FootstepSettings settings;
+        settings.recovery.maximumSteps = 1;
+        settings.recovery.oneStepCaptureScale = 1.0f;
+        FootstepInput input = PlannerInput();
+        input.requestedFoot = -1;
+        input.hasImpact = true;
+        input.impactPosition = input.feet[1].position;
+        input.com.z = 0;
+        input.velocity = PxVec3(0, 0, .6f);
+
+        FootstepPlanner planner;
+        planner.Update(input, settings);
+        const FootstepSnapshot& step = planner.GetSnapshot();
+        Check(step.feet[1].justStarted && step.feet[1].target.recovery.requiredSteps == 1,
+            "the impact selects the right foot with a one-step capture prediction");
+        input.feet[1].grounded = false;
+        ++input.completedStep;
+        planner.Update(input, settings);
+        input.feet[1].grounded = true;
+        input.feet[1].normalImpulse = 0;
+        ++input.completedStep;
+        planner.Update(input, settings);
+        Check(step.feet[1].justLanded && step.requestedFoot == 0 && step.startCount == 1,
+            "a real landing hands the next request to the left foot despite continued impact at the right");
+        ++input.completedStep;
+        planner.Update(input, settings);
+        Check(step.requestedFoot == 0 && step.feet[0].reason == FootstepReason::WaitingSupportLoad && step.startCount == 1,
+            "the left foot waits specifically for the landed right foot to bear weight");
+        input.feet[1].normalImpulse = input.bodyWeight * settings.supportLoadRatio * input.fixedDeltaTime;
+        ++input.completedStep;
+        planner.Update(input, settings);
+        Check(step.feet[0].justStarted && step.startCount == 2,
+            "continued imbalance starts the opposite foot as soon as support load is confirmed");
+
+        input.feet[0].grounded = false;
+        ++input.completedStep;
+        planner.Update(input, settings);
+        input.feet[0].grounded = true;
+        input.velocity = PxVec3(0);
+        ++input.completedStep;
+        planner.Update(input, settings);
+        Check(step.feet[0].justLanded && !step.needsStep && step.followupFoot == -1 && step.startCount == 2,
+            "regaining balance on landing ends the sequence without forcing another step");
+    }
+
     void TestNormalLandingWithoutIdleOffset()
     {
         FootstepSettings settings;
@@ -621,6 +668,7 @@ void TestFootstepRecovery()
     TestCaptureAndTiming();
     TestThreeStepReachForBothFeet();
     TestOneStepCaptureMargin();
+    TestFollowupAfterOneStepLanding();
     TestNormalLandingWithoutIdleOffset();
     TestStepModeLock();
     TestPlannerIntegration();

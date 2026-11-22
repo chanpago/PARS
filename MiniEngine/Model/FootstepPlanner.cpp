@@ -274,18 +274,36 @@ namespace
     void UpdateSupportDeadline(FootstepCommand& command, const FootstepInput& input, float remaining)
     {
         FootstepMotion& motion = command.motion;
-        if (!motion.hasSupportDeadline && !command.hasTakenOff)
+        const float elapsed = static_cast<float>(input.completedStep - command.trajectoryStartStep) * input.fixedDeltaTime;
+        if (command.UsesSwingTrajectory() && elapsed >= motion.duration)
         {
-            // 기본 들기 도중 처음 시한이 생기면 직전 구동 위치에서 이어 간다.
+            // 궤적이 끝난 뒤에는 착지 시한을 유지한 채 실제 접촉을 기다린다.
+            return;
+        }
+        if (!motion.hasSupportDeadline && remaining == 0.0f)
+        {
+            // 첫 유효 예측이 이미 만료됐으면 걸음 시작 기준 시한을 기록한다.
+            command.trajectoryStartStep = command.startedStep;
+            const float stepElapsed = static_cast<float>(input.completedStep - command.startedStep) * input.fixedDeltaTime;
+            motion.duration = (std::min)(stepElapsed, MaximumFootstepDuration);
+        }
+        else if (!command.UsesSwingTrajectory())
+        {
+            // 발을 드는 도중 처음 시한이 생기면 직전 구동 위치에서 이어 간다.
             command.takeoffPosition = motion.position;
-            command.trajectoryStartStep = remaining > 0 ? input.completedStep : command.startedStep;
-            motion.duration = remaining > 0 ? remaining : MaximumFootstepDuration;
+            command.trajectoryStartStep = input.completedStep;
+            motion.duration = remaining;
         }
         else
         {
-            const float elapsed = static_cast<float>(input.completedStep - command.trajectoryStartStep) * input.fixedDeltaTime;
-            // 이미 약속한 착지를 미루지 않는다. 지지 한계가 앞당겨지면 남은 구간을 줄인다.
-            motion.duration = (std::min)(motion.duration, (std::max)(elapsed + remaining, input.fixedDeltaTime));
+            const float revisedDuration = elapsed + remaining;
+            const float currentProgress = motion.progress + (elapsed - motion.elapsedTime) * motion.progressPerSecond;
+            // 하강 중에는 착지를 미루지 않는다. 상승 중에도 한 물리 틱 이상 늦어질 때만 연장한다.
+            if (!motion.hasSupportDeadline || revisedDuration < motion.duration ||
+                (currentProgress < .5f && revisedDuration - motion.duration >= input.fixedDeltaTime))
+            {
+                motion.duration = revisedDuration;
+            }
         }
         motion.hasSupportDeadline = true;
     }
@@ -415,14 +433,15 @@ namespace
         {
             return input.requestedFoot;
         }
+        // 착지 후 하중을 넘기는 동안에는 밀림이 다시 관측돼도 반대발을 먼저 검사한다.
+        if (state.followupFoot >= 0)
+        {
+            return state.followupFoot;
+        }
         // 새 충격이 없으면 이동 자체로 거리 순서가 바뀌어도 추가 명령을 만들지 않는다.
         if (state.IsInProgress() && !input.hasImpact)
         {
             return state.requestedFoot;
-        }
-        if (!input.hasImpact && state.followupFoot >= 0 && state.remainingRecoverySteps > 0)
-        {
-            return state.followupFoot;
         }
         if (state.hasImpact)
         {
@@ -658,7 +677,6 @@ void FootstepPlanner::Abort(FootstepReason reason)
     m_Snapshot.aborted = true;
     m_Snapshot.reason = reason;
     m_Snapshot.followupFoot = -1;
-    m_Snapshot.remainingRecoverySteps = 0;
     m_Snapshot.candidates = {};
     m_Snapshot.loadTransfer = {};
     for (FootstepCommand& command : m_Snapshot.feet)
@@ -774,11 +792,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.startCom = {};
     state.candidates = {};
     state.loadTransfer.ready = false;
-    if (!settings.recovery.enabled)
-    {
-        state.followupFoot = -1;
-        state.remainingRecoverySteps = 0;
-    }
     for (FootstepCommand& command : state.feet)
     {
         command.justStarted = false;
@@ -816,7 +829,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.hasGroundPlane = false;
         state.requestedFoot = -1;
         state.followupFoot = -1;
-        state.remainingRecoverySteps = 0;
         state.reason = !input.active ? FootstepReason::Inactive : !input.automaticSupport ?
             FootstepReason::AutomaticSupportRequired : FootstepReason::IdleRequired;
         if (!input.active && input.automaticSupport && input.idleAnimation && settings.recovery.enabled &&
@@ -868,8 +880,6 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     UpdateGroundPlane(input, state);
     if (input.hasImpact && input.impactPosition.isFinite())
     {
-        state.followupFoot = -1;
-        state.remainingRecoverySteps = 0;
         state.lastImpactPosition = input.impactPosition;
         state.hasImpact = true;
     }
@@ -942,17 +952,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 command.motion.hasLandingError = std::isfinite(command.motion.landingError);
                 command.motion.remainingDistance = command.motion.landingError;
                 ++state.landingCount;
-                if (command.target.recovery.hasTarget && command.target.recovery.modelFeasible &&
-                    command.target.recovery.requiredSteps > 1)
-                {
-                    state.followupFoot = static_cast<int>(1 - side);
-                    state.remainingRecoverySteps = command.target.recovery.requiredSteps - 1;
-                }
-                else
-                {
-                    state.followupFoot = -1;
-                    state.remainingRecoverySteps = 0;
-                }
+                state.followupFoot = static_cast<int>(1 - side);
             }
         }
         state.candidates[side] = MakeTarget(input, settings, state, side);
@@ -989,14 +989,15 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.predictedCom = state.startCom.clamped;
     state.hasPrediction = state.startCom.valid;
     const bool validArea = input.zone != FootSupportZone::Invalid && input.hull.size() >= 3;
-    state.needsStep = state.hasPrediction && validArea && !IsInsideFootSupportHull(input.hull, state.predictedCom);
+    const bool canCheckBalance = state.hasPrediction && validArea;
+    state.needsStep = canCheckBalance && !IsInsideFootSupportHull(input.hull, state.predictedCom);
     state.reason = !state.hasPrediction ? FootstepReason::InvalidCom : !validArea ? FootstepReason::NoSupportArea :
         state.needsStep ? FootstepReason::ValidTarget : FootstepReason::PredictedInside;
     if (state.requestedFoot >= 0 && state.requestedFoot < 2)
     {
         const size_t side = static_cast<size_t>(state.requestedFoot);
         // 시작 COM 보정 결과를 판단 계층의 입력으로 사용하지 않는다.
-        const bool rawNeedsStep = state.startCom.valid && validArea && !IsInsideFootSupportHull(input.hull, state.startCom.raw);
+        const bool rawNeedsStep = canCheckBalance && !IsInsideFootSupportHull(input.hull, state.startCom.raw);
         state.candidates[side] = MakeRecoveryTarget(input, settings, state, side,
             rawNeedsStep || state.needsStep, state.candidates[side]);
         const FootstepRecoverySnapshot& recovery = state.candidates[side].recovery;
@@ -1005,10 +1006,9 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             state.needsStep = true;
             state.reason = FootstepReason::ValidTarget;
         }
-        if (!rawNeedsStep && !state.IsInProgress())
+        if (canCheckBalance && !rawNeedsStep && !state.needsStep)
         {
             state.followupFoot = -1;
-            state.remainingRecoverySteps = 0;
         }
     }
     UpdateLoadTransfer(input, settings, consecutiveSample, state);
@@ -1072,6 +1072,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             command.motion.landingLoweringSpeed = settings.landingLoweringSpeed;
             command.motion.maximumLandingLowering = (std::min)(settings.maximumLandingLowering, foot.calfLength);
             ++state.startCount;
+            state.followupFoot = -1;
             state.loadTransfer.required = true;
             state.loadTransfer.ready = false;
             state.loadTransfer.confirmationTimes = {};

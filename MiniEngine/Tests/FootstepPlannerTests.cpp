@@ -981,10 +981,11 @@ namespace
     void TestLandingComHistoryAndLock()
     {
         FootstepSettings settings;
-        // 60Hz에서 이륙 후 9틱째가 진행률 90%가 되도록 한다.
-        settings.stepDuration = 10.0f / 60.0f;
+        settings.stepDuration = .25f;
         FootstepPlanner planner;
         FootstepInput input = Standing();
+        // 이륙 후 9틱째에 진행률이 정확히 90%가 되도록 한 걸음을 10틱으로 나눈다.
+        input.fixedDeltaTime = settings.stepDuration / 10.0f;
         input.velocity = PxVec3(-1, 0, 0);
         planner.Update(input, settings);
         Check(planner.GetSnapshot().feet[1].landingComDirection == FootstepLandingDirection::Front,
@@ -1119,28 +1120,67 @@ namespace
             Check(step.hasTakenOff && Near(GetFootstepRemainingTime(step), .25f - input.fixedDeltaTime),
                 "Physical takeoff does not grant a fresh flight duration");
             const PxVec3 expectedNext = SampleFootstepPosition(step, input.fixedDeltaTime);
+            const float shorterForecast = .15f;
             input.feet[1].grounded = true;
-            input.feet[0].timeToReachLimit = .08f;
+            input.feet[0].timeToReachLimit = shorterForecast;
             Advance(planner, input, settings);
-            Check(step.IsInProgress() && !step.justLanded && Near(GetFootstepRemainingTime(step), .08f),
+            Check(step.IsInProgress() && !step.justLanded && Near(GetFootstepRemainingTime(step), shorterForecast),
                 "A distant early contact keeps the target and an earlier support limit advances touchdown");
             Check((step.motion.position - expectedNext).magnitude() < 1e-5f,
                 "A changed deadline retimes the remaining arc without jumping the current drive target");
             input.feet[1].grounded = false;
+            const PxVec3 nextBeforeExtension = SampleFootstepPosition(step, input.fixedDeltaTime);
+            input.feet[0].timeToReachLimit = .5f;
+            Advance(planner, input, settings);
+            Check(Near(step.motion.duration, MaximumFootstepDuration) &&
+                (step.motion.position - nextBeforeExtension).magnitude() < 1e-5f &&
+                (SampleFootstepPosition(step, GetFootstepRemainingTime(step)) - step.target.position).magnitude() < 1e-5f,
+                "A longer support forecast extends the same swing from its current position up to the whole-step cap");
+            input.feet[0].timeToReachLimit = shorterForecast;
+            Advance(planner, input, settings);
+            Check(Near(GetFootstepRemainingTime(step), shorterForecast),
+                "The same swing can shorten again after an extension");
             input.feet[0].grounded = false;
             Advance(planner, input, settings);
-            const float remaining = .08f - input.fixedDeltaTime;
+            const float remaining = shorterForecast - input.fixedDeltaTime;
             Check(Near(GetFootstepRemainingTime(step), remaining) &&
                 (SampleFootstepPosition(step, remaining) - step.target.position).magnitude() < 1e-5f,
                 "Losing support preserves the promised time and the drive trajectory reaches the landing point");
-            Advance(planner, input, settings, rate / 10);
+            Advance(planner, input, settings, static_cast<unsigned>(std::ceil(shorterForecast / input.fixedDeltaTime)));
             Check(step.IsInProgress() && Near(step.motion.progress, 1) && !step.justLanded,
                 "The deadline alone cannot manufacture a ground contact");
+            const float expiredDuration = step.motion.duration;
+            input.feet[0].grounded = true;
+            input.feet[0].timeToReachLimit = .5f;
+            Advance(planner, input, settings);
+            Check(Near(step.motion.duration, expiredDuration) && Near(GetFootstepRemainingTime(step), 0) &&
+                step.motion.landingLowering > 0 && !step.justLanded,
+                "A later forecast preserves an expired deadline while the airborne foot lowers for contact");
             input.feet[1].position = step.target.position;
             input.feet[1].grounded = true;
             Advance(planner, input, settings);
             Check(step.justLanded && Near(step.motion.landingError, 0) && step.motion.landingTimeError > 0,
                 "A late physical touchdown completes the step and reports the missed deadline");
+
+            FootstepPlanner descentPlanner;
+            FootstepInput descent = Standing();
+            descent.fixedDeltaTime = input.fixedDeltaTime;
+            descent.feet[0].timeToReachLimit = MinimumFootstepDuration;
+            descentPlanner.Update(descent, settings);
+            const FootstepCommand& descendingStep = descentPlanner.GetSnapshot().feet[1];
+            descent.feet[1].grounded = false;
+            descent.feet[0].timeToReachLimit = MinimumFootstepDuration - .5f * descent.fixedDeltaTime;
+            Advance(descentPlanner, descent, settings);
+            Check(Near(descendingStep.motion.duration, MinimumFootstepDuration),
+                "A sub-tick increase keeps the current deadline during lift");
+            descent.feet[0].timeToReachLimit = 0;
+            const unsigned ticksToApex = static_cast<unsigned>(std::ceil(.5f * MinimumFootstepDuration / descent.fixedDeltaTime));
+            Advance(descentPlanner, descent, settings, ticksToApex);
+            descent.feet[0].timeToReachLimit = .5f;
+            Advance(descentPlanner, descent, settings);
+            Check(descendingStep.motion.progress > .5f && descendingStep.motion.progress < 1 &&
+                Near(descendingStep.motion.duration, MinimumFootstepDuration),
+                "A longer support forecast during descent keeps the committed touchdown");
         }
 
         FootstepPlanner planner;
