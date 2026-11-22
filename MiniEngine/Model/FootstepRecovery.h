@@ -52,6 +52,14 @@ namespace PARS
     struct FootstepRecoveryInput
     {
     public:
+        enum class ModeSelection : uint8_t
+        {
+            NewStep,
+            GroundedNormal,
+            KeepCurrent
+        };
+
+    public:
         std::function<bool(const physx::PxVec3&)> acceptsTarget;
         std::array<FootstepReachInput, 2> feet;
         size_t movingFoot = 0;
@@ -66,10 +74,10 @@ namespace PARS
         float firstStepTime = 0;
         float followingStepTime = 0;
         FootstepMode previousMode = FootstepMode::Normal;
+        ModeSelection modeSelection = ModeSelection::NewStep;
         bool stepping = false;
         bool locked = false;
         bool hasRejectedTarget = false;
-        bool modeLocked = false; // 진행 중인 걸음은 이전 모드 안에서만 착지점을 갱신한다.
     };
 
     struct FootstepNormalReach

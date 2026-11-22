@@ -20,7 +20,7 @@ namespace PARS
         float liftHeightScale = .35f;
         float stepDuration = .15f;
         float minimumLiftHeight = .03f;
-        float landingLockProgress = .75f;
+        float landingLockProgress = .90f;
         float landingLoweringSpeed = .05f;
         float maximumLandingLowering = .03f;
         float supportLoadRatio = .25f;

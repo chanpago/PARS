@@ -176,7 +176,7 @@ namespace
         Check(result.hasTarget && !result.modelFeasible && result.status == FootstepRecoveryStatus::BestEffort,
             "unreachable recovery is reported as best effort rather than feasible");
         const FootstepRecoverySettings threeSteps;
-        input.modeLocked = true;
+        input.modeSelection = FootstepRecoveryInput::ModeSelection::KeepCurrent;
         for (FootstepMode mode : {FootstepMode::Normal, FootstepMode::FrontCross, FootstepMode::BackCross})
         {
             input.previousMode = mode;
@@ -478,13 +478,22 @@ namespace
             return true;
         };
         input.feet[1].grounded = false;
-        for (uint32_t frame = 0; frame < 20; ++frame)
+        const uint32_t lockTick = static_cast<uint32_t>(std::ceil(
+            settings.stepDuration * settings.landingLockProgress / input.fixedDeltaTime));
+        for (uint32_t frame = 0; frame < lockTick; ++frame)
         {
             ++input.completedStep;
             planner.Update(input, settings);
         }
-        const PxVec3 locked = planner.GetSnapshot().feet[1].target.position;
-        Check(planner.GetSnapshot().feet[1].motion.landingTargetLocked, "integration keeps the existing 75 percent lock");
+        const FootstepCommand& command = planner.GetSnapshot().feet[1];
+        Check(!command.motion.landingTargetLocked, "the default swing stays editable until the lock tick");
+        const PxVec3 locked = command.target.position;
+        ++input.completedStep;
+        planner.Update(input, settings);
+        const FootstepRecoverySnapshot& search = planner.GetSnapshot().candidates[1].recovery;
+        Check(command.motion.landingTargetLocked && command.target.position == locked &&
+            search.status == FootstepRecoveryStatus::Locked && search.poseChecks == 0,
+            "the lock tick keeps the crossover landing target and skips further pose checks");
         planner.ReportRecoveryPath(1, locked, false);
         Check(planner.GetSnapshot().feet[1].target.recovery.pathRejected, "The locked path records the last rejection");
         settings.pathAvoidanceEnabled = false;

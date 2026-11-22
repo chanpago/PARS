@@ -186,6 +186,9 @@ namespace PARS
                 do
                 {
                     frames[swingFrame].swing.mode = mode;
+                    // 같은 이동발이 착지하기 전 마지막 프레임까지만 추종한다. 루프 경계를 넘는 구간도 포함한다.
+                    const float remaining = samples[i].time - samples[swingFrame].time;
+                    frames[swingFrame].remainingSwingTime = remaining < 0.0f ? remaining + samples.back().time : remaining;
                     swingFrame = swingFrame == 0 ? period - 1 : swingFrame - 1;
                 }
                 while (frames[swingFrame].swing.movingFoot == movingFoot);
@@ -198,6 +201,7 @@ namespace PARS
                 }
             }
             frames[period].swing = frames[0].swing;
+            frames[period].remainingSwingTime = frames[0].remainingSwingTime;
         }
 
         void AppendClipFrames(const MotionClipSelection& clip, const std::vector<MotionSample>& samples,
@@ -294,6 +298,7 @@ namespace PARS
         // 기준 포즈의 모델 전방(+Z)을 골반 본의 좌표로 옮겨 클립마다 동일한 전방 기준을 쓴다.
         bones.bindForwardInPelvis = Math::Transpose(PhysicsBoneFrame(bindPose[bones.hips]).Get3x3()) * Math::Vector3(Math::kZUnitVector);
         database->bindForwardInPelvis = bones.bindForwardInPelvis;
+        database->pelvisNode = static_cast<int>(bones.hips);
 
         std::vector<MotionSample> samples;
         for (size_t usageIndex = 0; usageIndex < database->groups.size(); ++usageIndex)
@@ -333,12 +338,13 @@ namespace PARS
     }
 
     MotionMatchResult AnimInstance::FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures,
-        const WalkingSwing& swing) const
+        const WalkingSwing& swing, float desiredSwingTime) const
     {
         const MotionFrameRange range = GetMotionFrameRange(usage);
         const std::vector<MotionFrame>& frames = GetMotionFrames();
         MotionMatchResult best;
         int bestAngleError = std::numeric_limits<int>::max();
+        float bestCoverage = -1.0f;
         const float requestedAngle = usage == MotionFrameUsage::Walking ? currentFeatures.walkingAngleDegrees :
             std::numeric_limits<float>::quiet_NaN();
         constexpr float velocityWeight = MotionFeatures::PredictionTimeSeconds * MotionFeatures::PredictionTimeSeconds;
@@ -350,7 +356,9 @@ namespace PARS
                 continue;
             }
             const int angleError = WalkingAngleError(requestedAngle, frame.features.walkingAngleDegrees);
-            if (angleError > bestAngleError)
+            // 새 교차 명령에서는 같은 방향 중 착지까지 재생할 구간이 충분한 후보들을 자세로 비교한다.
+            const float coverage = (std::min)(frame.remainingSwingTime, desiredSwingTime);
+            if (angleError > bestAngleError || (angleError == bestAngleError && coverage < bestCoverage))
             {
                 continue;
             }
@@ -363,16 +371,76 @@ namespace PARS
             // 양발 오차는 평균을 내고, 속도 차이는 예측 시간 동안의 거리로 환산한다.
             // 골반 변위에 두 배의 거리 가중치를 주어 회복할 방향을 반영한다.
             const float score = 0.5f * footError + 4.0f * SquaredDistance(currentFeatures.futureDisplacement, frame.features.futureDisplacement);
-            if (std::isfinite(score) && (angleError < bestAngleError || score < best.score))
+            if (std::isfinite(score) && (angleError < bestAngleError || coverage > bestCoverage || score < best.score))
             {
                 bestAngleError = angleError;
+                bestCoverage = coverage;
                 best.clipIndex = frame.clipIndex;
                 best.clipTimeSeconds = frame.clipTimeSeconds;
                 best.score = score;
                 best.requestedAngleDegrees = requestedAngle;
                 best.clipAngleDegrees = frame.features.walkingAngleDegrees;
+                best.remainingSwingTime = frame.remainingSwingTime;
             }
         }
         return best;
+    }
+
+    MotionMatchResult AnimInstance::FindCrossStepMatch(const WalkingSwing& swing, float duration) const
+    {
+        if (!m_MotionDatabase || swing.mode == FootstepMode::Normal || swing.movingFoot >= 2 ||
+            GetMotionFrameRange(MotionFrameUsage::Walking).frameCount == 0)
+        {
+            return {};
+        }
+        const Ragdoll& ragdoll = m_Owner.GetRagdoll();
+        const FootSupportSnapshot& support = m_Owner.GetFootSupport().GetSnapshot();
+        const std::vector<int>& nodes = ragdoll.GetBoneNodes();
+        const std::vector<int>::const_iterator pelvisBody = std::find(nodes.begin(), nodes.end(), m_MotionDatabase->pelvisNode);
+        if (pelvisBody == nodes.end())
+        {
+            return {};
+        }
+        const size_t pelvisIndex = static_cast<size_t>(pelvisBody - nodes.begin());
+        const Math::Matrix4 hips = ragdoll.GetBoneWorld(pelvisIndex);
+        Math::Matrix3 toHeading;
+        if (!GetMotionHeadingSpace(hips, toHeading))
+        {
+            return {};
+        }
+        const Math::Vector3 origin(hips.GetW());
+        const physx::PxVec3 pelvis(origin.GetX(), origin.GetY(), origin.GetZ());
+        const physx::PxVec3 velocity = ragdoll.GetBodyPointVelocity(pelvisIndex, pelvis);
+        const Math::Vector3 facing = PhysicsBoneFrame(hips).Get3x3() * m_MotionDatabase->bindForwardInPelvis;
+        const physx::PxVec3 forward(facing.GetX(), facing.GetY(), facing.GetZ());
+        const physx::PxVec3 right(forward.z, 0, -forward.x);
+        const float yawRate = (ragdoll.GetBodyPointVelocity(pelvisIndex, pelvis + forward) - velocity).dot(right) / right.magnitudeSquared();
+        MotionFeatures query;
+        for (size_t side = 0; side < support.feet.size(); ++side)
+        {
+            const FootSoleSample& foot = support.feet[side];
+            const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), foot.boneNode);
+            if (!foot.available || body == nodes.end())
+            {
+                return {};
+            }
+            const size_t index = static_cast<size_t>(body - nodes.begin());
+            const Math::Vector3 position(ragdoll.GetBoneWorld(index).GetW());
+            const physx::PxVec3 ankle(position.GetX(), position.GetY(), position.GetZ());
+            // DB의 발 속도와 같은 기준으로 골반의 이동과 수평 회전을 제거한다.
+            const physx::PxVec3 relative = ragdoll.GetBodyPointVelocity(index, ankle) - velocity -
+                physx::PxVec3(0, yawRate, 0).cross(ankle - pelvis);
+            DirectX::XMStoreFloat3(&query.footPositions[side], toHeading * (position - origin));
+            DirectX::XMStoreFloat3(&query.footVelocities[side], toHeading * Math::Vector3(relative.x, relative.y, relative.z));
+        }
+        DirectX::XMStoreFloat3(&query.futureDisplacement, toHeading * Math::Vector3(velocity.x, velocity.y, velocity.z) *
+            MotionFeatures::PredictionTimeSeconds);
+        if (support.hasCenterOfMassVelocity)
+        {
+            const Math::Vector3 characterForward(Math::Matrix4(m_Owner.GetComponentTransform()).GetZ());
+            query.walkingAngleDegrees = GetWalkingTravelAngleDegrees({characterForward.GetX(), characterForward.GetZ()},
+                {support.centerOfMassVelocity.x, support.centerOfMassVelocity.z});
+        }
+        return FindMotionMatch(MotionFrameUsage::Walking, query, swing, duration);
     }
 }

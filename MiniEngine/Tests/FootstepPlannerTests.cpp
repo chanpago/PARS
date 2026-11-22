@@ -161,7 +161,7 @@ namespace
         Advance(planner, input, settings);
         Check(Near(planner.GetSnapshot().feet[1].target.position.z, .45f),
             "An active foot retargets before the landing lock");
-        Advance(planner, input, settings, 4);
+        Advance(planner, input, settings, 7);
         const PxVec3 locked = planner.GetSnapshot().feet[1].target.position;
         Check(planner.GetSnapshot().feet[1].motion.landingTargetLocked,
             "Landing locks according to that foot's own clock");
@@ -915,7 +915,8 @@ namespace
     void TestLandingComHistoryAndLock()
     {
         FootstepSettings settings;
-        settings.stepDuration = .4f;
+        // 60Hz에서 이륙 후 27틱째가 정확히 진행률 90%가 되도록 한다.
+        settings.stepDuration = .5f;
         FootstepPlanner planner;
         FootstepInput input = Standing();
         input.velocity = PxVec3(-1, 0, 0);
@@ -948,16 +949,20 @@ namespace
         input.velocity = PxVec3(-1, 0, 0);
         input.feet[1].grounded = false;
         Advance(planner, input, settings);
-        Advance(planner, input, settings, 17);
-        Check(!planner.GetSnapshot().feet[1].motion.landingTargetLocked,
-            "The corrected landing target stays editable before 75 percent flight progress");
-        const FootstepTarget lastEditable = planner.GetSnapshot().feet[1].target;
+        Advance(planner, input, settings, 25);
+        const FootstepCommand& moving = planner.GetSnapshot().feet[1];
+        const PxVec3 previousTarget = moving.target.position;
+        input.com.z = .1f;
+        Advance(planner, input, settings);
+        Check(!moving.motion.landingTargetLocked && (moving.target.position - previousTarget).magnitude() > .001f,
+            "The corrected landing target still follows the COM on the last tick before 90 percent");
+        const FootstepTarget lastEditable = moving.target;
         input.velocity = PxVec3(1, 0, .4f);
         input.com.x = .1f;
         Advance(planner, input, settings);
-        Check(planner.GetSnapshot().feet[1].motion.landingTargetLocked &&
-                (planner.GetSnapshot().feet[1].target.position - lastEditable.position).magnitude() == 0,
-            "Crossing the 75 percent threshold locks the previously accepted horizontal landing point");
+        Check(Near(moving.motion.progress, .90f) && moving.motion.landingTargetLocked &&
+                moving.target.position == lastEditable.position,
+            "Reaching 90 percent locks the previously accepted horizontal landing point");
         input.com.z = .2f;
         input.supportRight = PxVec3(0, 0, -1);
         Advance(planner, input, settings, 7);

@@ -100,6 +100,7 @@ namespace PARS
             }
         }
         m_Ragdoll.Swap(candidate);
+        ResetCrossStepPlayback();
         ResetFallArms();
         m_FallArmsInitialized = false;
         m_PhysicsSkeleton = std::move(skeleton);
@@ -194,6 +195,7 @@ namespace PARS
         }
         if (!UpdateAutomaticRootSupport(m_PhysicsError))
         {
+            ResetCrossStepPlayback();
             return;
         }
 
@@ -250,6 +252,7 @@ namespace PARS
                 // 골반의 힘/토크 지지를 제거하면서 목표 갱신 오류 메시지는 보존한다.
                 m_FootstepIK.Reset();
                 m_FootstepCollision = {};
+                ResetCrossStepPlayback();
                 ResetFallArms();
                 m_Ragdoll.SetDrivesEnabled(false);
                 std::string supportError;

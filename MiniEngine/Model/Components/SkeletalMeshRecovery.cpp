@@ -595,6 +595,7 @@ namespace PARS
 
     void SkeletalMeshComponent::ResetRecovery()
     {
+        ResetCrossStepPlayback();
         m_FootstepAvoidance.Reset();
         m_FootstepCollision = {};
         m_Recovery.Reset();
@@ -621,7 +622,7 @@ namespace PARS
             bodies.push_back(m_Ragdoll.GetBoneWorld(body) * m_BoneStretch[body]);
         }
         // 직전 렌더 포즈가 아니라 마지막 물리 스텝의 실제 바디를 로컬 본 자세로 변환한다.
-        return OverridePhysicsPose(m_PhysicsSkeleton, m_AnimInstance->GetPose(), Matrix4(GetComponentTransform()),
+        return OverridePhysicsPose(m_PhysicsSkeleton, GetRagdollAnimationPose(), Matrix4(GetComponentTransform()),
             nodes, bodies, m_RecoveryBlendSource);
     }
 
@@ -770,6 +771,7 @@ namespace PARS
         // 지지가 해제되거나 발딛기가 중단됐다면 발 보정 정보를 정리
         if (input.fallen)
         {
+            ResetCrossStepPlayback();
             m_HasRecoverySoles = false;
             m_RecoveryBlendSource.clear();
             m_FootstepIK.Reset();
@@ -839,6 +841,7 @@ namespace PARS
                 return false;
             }
 
+            ApplyCrossStepDrivePose(sample, deltaTime, target);
             bool changedTargets = false;
             for (size_t side = 0; side < step.feet.size(); ++side)
             {
@@ -853,7 +856,11 @@ namespace PARS
                 else if (command.motion.valid)
                 {
                     PxTransform sole(PxIdentity);
-                    if (MakeFootSoleTarget(command.motion.position, command.target.normal, animatedSoles[side], sole))
+                    const FootSoleSample& foot = sample.feet[side];
+                    const PxTransform heading = !m_CrossStepPose.empty() && foot.boneNode >= 0 &&
+                        static_cast<size_t>(foot.boneNode) < target.size() ?
+                        ToRecoveryFrame(target[foot.boneNode]) * ToRecoveryFrame(foot.soleInBone) : animatedSoles[side];
+                    if (MakeFootSoleTarget(command.motion.position, command.target.normal, heading, sole))
                     {
                         m_RecoverySoles[side] = sole;
                     }
@@ -881,6 +888,7 @@ namespace PARS
             return true;
         }
 
+        ResetCrossStepPlayback();
         m_FootstepIK.Reset();
         m_HasRecoverySoles = false;
         return true;

@@ -38,6 +38,7 @@ namespace PARS
             Math::Vector3 bindForwardInPelvis{Math::kZUnitVector};
             std::vector<MotionFrame> frames;
             std::array<MotionFrameGroup, static_cast<std::size_t>(MotionFrameUsage::Count)> groups;
+            int pelvisNode = -1;
         };
 
     public:
@@ -56,7 +57,8 @@ namespace PARS
         // 같은 기준 메시를 쓰는 캐릭터가 동일한 클립 번호로 후보 배열을 공유한다.
         bool ShareMotionFramesFrom(const AnimInstance& source, std::string& error);
         MotionMatchResult FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures,
-            const WalkingSwing& swing = {}) const;
+            const WalkingSwing& swing = {}, float desiredSwingTime = 0.0f) const;
+        MotionMatchResult FindCrossStepMatch(const WalkingSwing& swing, float duration) const;
         bool PlayAnimation(uint32_t index, bool loop = true, float startTime = 0.0f);
         // 시작 시점을 지정해 발 디딤 위상을 맞출 수 있다. 일반 전환에서는 두 클립의 시간을 함께 진행한다.
         bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true, float startTime = 0.0f);

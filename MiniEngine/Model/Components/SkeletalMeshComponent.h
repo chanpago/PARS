@@ -39,6 +39,18 @@ namespace PARS
         Count
     };
 
+    struct CrossStepPlayback
+    {
+    public:
+        uint64_t startedStep = UINT64_MAX;
+        uint64_t revision = UINT64_MAX;
+        uint64_t blendStartedStep = UINT64_MAX;
+        MotionMatchResult match;
+        uint32_t movingFoot = UINT32_MAX;
+        float timeSeconds = 0.0f;
+        float weight = 0.0f;
+    };
+
     class SkeletalMeshComponent : public SkinnedMeshComponent
     {
     private:
@@ -84,12 +96,15 @@ namespace PARS
 
     private:
         bool CreatePhysicsState(const PhysicsAsset& asset, Ragdoll& candidate, PhysicsSkeleton& skeleton, std::string& error);
-        bool EvaluateAnimationPhysicsPose(const PhysicsSkeleton& skeleton, std::vector<Math::Matrix4>& worldPose, std::string& error) const;
+        bool EvaluateAnimationPhysicsPose(const PhysicsSkeleton& skeleton, std::vector<Math::Matrix4>& worldPose,
+            std::string& error, const std::vector<GraphNode>* poseOverride = nullptr) const;
         void DestroyPhysicsState();
         void UpdateKinematicPose(bool teleport);
         void UpdatePhysicsPose();
         void UpdateFootSupport();
         void UpdateHorizontalBalance(float deltaTime);
+        void ApplyCrossStepDrivePose(const FootSupportSnapshot& support, float deltaTime, std::vector<Math::Matrix4>& target);
+        void ResetCrossStepPlayback();
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
             const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
@@ -282,6 +297,10 @@ namespace PARS
     private:
         bool IsFallingClip(uint32_t animationIndex) const;
         uint32_t SelectFallingAnimation() const;
+        const std::vector<GraphNode>& GetRagdollAnimationPose() const
+        {
+            return m_CrossStepPose.empty() ? m_AnimInstance->GetPose() : m_CrossStepPose;
+        }
 
     private:
         ModelInstance m_ModelInstance;
@@ -299,6 +318,8 @@ namespace PARS
         FallArmBrace m_FallArmBrace;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
+        std::vector<GraphNode> m_CrossStepPose;
+        CrossStepPlayback m_CrossStepPlayback;
         std::vector<GraphNode> m_KinematicBlendSource;
         std::vector<GraphNode> m_KinematicBlendPose;
         PhysicsSkeleton m_PhysicsSkeleton;

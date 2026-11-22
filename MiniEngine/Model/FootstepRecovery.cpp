@@ -275,7 +275,7 @@ namespace
     }
 
     void SelectTarget(const FootstepRecoveryInput& input, const FootstepRecoverySettings& settings,
-        bool hasOverlap, FootstepPolygon& tested, FootstepRecoverySnapshot& result)
+        bool hasOverlap, bool allowGroundedSwitch, FootstepPolygon& tested, FootstepRecoverySnapshot& result)
     {
         struct Candidate
         {
@@ -299,7 +299,7 @@ namespace
         }
         for (size_t mode : order)
         {
-            if (input.modeLocked && mode != previous)
+            if (mode != previous && input.modeSelection != FootstepRecoveryInput::ModeSelection::NewStep && !allowGroundedSwitch)
             {
                 continue;
             }
@@ -695,6 +695,8 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     }
     bool hasOverlap = EvaluateIntersections(result);
     result.modelFeasible = hasOverlap;
+    const bool allowGroundedSwitch = input.modeSelection == FootstepRecoveryInput::ModeSelection::GroundedNormal &&
+        input.previousMode == FootstepMode::Normal && (result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0);
     const bool expand = settings.maximumSteps == 1 && settings.oneStepCaptureScale > 1.0f &&
         !result.capture.empty() && result.capture.front().size() >= 3;
     FootstepPolygon tested;
@@ -703,7 +705,7 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         // 원래 영역의 자세 후보를 먼저 검사한다. 확장 영역도 같은 틱의 검사 예산을 공유한다.
         if (input.stepping && !input.locked && hasOverlap)
         {
-            SelectTarget(input, settings, hasOverlap, tested, result);
+            SelectTarget(input, settings, hasOverlap, allowGroundedSwitch, tested, result);
         }
         ExpandOneStepCapture(result.capture.front(), settings.oneStepCaptureScale);
         hasOverlap = EvaluateIntersections(result);
@@ -722,7 +724,8 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     }
     else if (!result.hasTarget)
     {
-        SelectTarget(input, settings, hasOverlap, tested, result);
+        // 1보 확장 여유분이나 모델 밖의 최선 시도로는 진행 중인 일반 딛기를 바꾸지 않는다.
+        SelectTarget(input, settings, hasOverlap, allowGroundedSwitch && !expand, tested, result);
     }
     if (result.hasTarget && result.modelFeasible)
     {

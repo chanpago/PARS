@@ -63,9 +63,10 @@ namespace PARS
     }
 
     bool SkeletalMeshComponent::EvaluateAnimationPhysicsPose(const PhysicsSkeleton& skeleton,
-        std::vector<Matrix4>& worldPose, std::string& error) const
+        std::vector<Matrix4>& worldPose, std::string& error, const std::vector<GraphNode>* poseOverride) const
     {
-        const Matrix4 component(GetComponentTransform()), rigid = PhysicsBoneFrame(component);
+        const Matrix4 component(GetComponentTransform());
+        const Matrix4 rigid = PhysicsBoneFrame(component);
         const float differences[] = {float(Length(Vector3(component.GetX()) - Vector3(rigid.GetX()))),
             float(Length(Vector3(component.GetY()) - Vector3(rigid.GetY()))),
             float(Length(Vector3(component.GetZ()) - Vector3(rigid.GetZ())))};
@@ -86,7 +87,7 @@ namespace PARS
 
         // 본의 계층과 연결 정보, m_Pose: 애니메이션으로 계산한 로컬 자세, 메시 컴포넌트의 월드 변환, 결과: worldPose - 본별 월드 공간 목표 자세
         // 본의 로컬 자세에 부모 계층의 변환과 컴포넌트의 월드 변환을 반영해서, 각 본이 월드의 어디에 어떤 방향으로 있어야 하는지 계산
-        return EvaluatePhysicsPose(skeleton, m_AnimInstance->GetPose(), component, worldPose, error);
+        return EvaluatePhysicsPose(skeleton, poseOverride ? *poseOverride : m_AnimInstance->GetPose(), component, worldPose, error);
     }
 
     Vector3 SkeletalMeshComponent::ConstrainHorizontalMovement(Vector3 displacement) const
@@ -720,7 +721,8 @@ namespace PARS
         {
             return false;
         }
-        m_RagdollSourcePose = m_AnimInstance->GetPose();
+        m_RagdollSourcePose = GetRagdollAnimationPose();
+        ResetCrossStepPlayback();
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
@@ -774,11 +776,11 @@ namespace PARS
 
     void SkeletalMeshComponent::UpdatePhysicsPose()
     {
-        const std::vector<GraphNode>& source = IsActiveRagdoll() ? m_AnimInstance->GetPose() : m_RagdollSourcePose;
+        const std::vector<GraphNode>& source = IsActiveRagdoll() ? GetRagdollAnimationPose() : m_RagdollSourcePose;
         if (IsActiveRagdoll())
         {
             std::vector<Matrix4> animated;
-            if (EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, animated, m_PhysicsError))
+            if (EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, animated, m_PhysicsError, &source))
             {
                 for (size_t i = 0; i < m_Ragdoll.GetBodyCount(); ++i)
                 {

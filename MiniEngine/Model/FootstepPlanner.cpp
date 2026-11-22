@@ -247,6 +247,12 @@ namespace
         return result;
     }
 
+    bool CanReconsiderNormalStep(const FootstepCommand& command, const FootstepFootInput& foot)
+    {
+        return command.phase == FootstepPhase::AwaitingTakeoff && !command.hasTakenOff &&
+            command.target.recovery.mode == FootstepMode::Normal && foot.hasContactSample && foot.grounded;
+    }
+
     FootstepTarget MakeRecoveryTarget(const FootstepInput& input, const FootstepSettings& settings,
         const FootstepSnapshot& state, size_t side, bool needsStep, FootstepTarget normal)
     {
@@ -267,7 +273,11 @@ namespace
         request.preferred = PxVec3(input.com.x + input.velocity.x * settings.landingPredictionTime,
             request.groundHeight, input.com.z + input.velocity.z * settings.landingPredictionTime) +
             PxVec3(input.feet[side].stanceOffset.x, 0, input.feet[side].stanceOffset.z) * settings.stanceScale;
-        request.modeLocked = inProgress;
+        if (inProgress)
+        {
+            request.modeSelection = CanReconsiderNormalStep(command, input.feet[side]) ?
+                FootstepRecoveryInput::ModeSelection::GroundedNormal : FootstepRecoveryInput::ModeSelection::KeepCurrent;
+        }
         request.stepping = needsStep || inProgress;
         request.locked = inProgress && command.motion.landingTargetLocked;
         request.lockedTarget = command.target.position;
@@ -955,11 +965,17 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         {
             continue;
         }
-        // 이 발의 회복 탐색을 건너뛴 틱에는 기본 일반 목표가 교차 명령을 덮어쓸 수 없다.
-        if (!command.motion.landingTargetLocked && candidate.valid && candidate.recovery.mode == command.target.recovery.mode)
+        const bool sameMode = candidate.recovery.mode == command.target.recovery.mode;
+        const bool switchToCross = !sameMode && candidate.recovery.status == FootstepRecoveryStatus::Feasible &&
+            CanReconsiderNormalStep(command, foot);
+        if (!command.motion.landingTargetLocked && candidate.valid && (sameMode || switchToCross))
         {
             AssignTarget(command, candidate);
-            if (candidate.landingCom.enabled && candidate.landingCom.direction != FootstepLandingDirection::None)
+            if (switchToCross)
+            {
+                command.landingComDirection = FootstepLandingDirection::None;
+            }
+            else if (candidate.landingCom.enabled && candidate.landingCom.direction != FootstepLandingDirection::None)
             {
                 command.landingComDirection = candidate.landingCom.direction;
             }

@@ -68,6 +68,7 @@ namespace PARS
         std::uint32_t clipIndex = UINT32_MAX;
         float clipTimeSeconds = 0.0f;
         WalkingSwing swing;
+        float remainingSwingTime = 0.0f;
         MotionFrameUsage usage = MotionFrameUsage::Idle;
     };
 
@@ -79,5 +80,6 @@ namespace PARS
         float score = std::numeric_limits<float>::infinity();
         float requestedAngleDegrees = std::numeric_limits<float>::quiet_NaN();
         float clipAngleDegrees = std::numeric_limits<float>::quiet_NaN();
+        float remainingSwingTime = 0.0f;
     };
 }
