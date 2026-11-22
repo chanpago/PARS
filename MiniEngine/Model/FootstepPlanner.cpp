@@ -606,6 +606,10 @@ void FootstepPlanner::Abort(FootstepReason reason)
 
 float PARS::GetFootstepRemainingTime(const FootstepCommand& command)
 {
+    if (command.phase == FootstepPhase::Landed)
+    {
+        return 0.0f;
+    }
     if (command.hasTakenOff)
     {
         return (std::max)(0.0f, command.motion.duration - command.motion.elapsedTime);
@@ -822,7 +826,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 command.motion.landingTargetLocked = command.motion.landingTargetLocked ||
                     command.motion.progress >= command.motion.landingLockProgress;
             }
-            if (command.hasTakenOff && foot.grounded && command.motion.elapsedTime + 1e-6f >= command.motion.duration)
+            if (command.hasTakenOff && foot.grounded)
             {
                 command.phase = FootstepPhase::Landed;
                 command.reason = FootstepReason::Landed;

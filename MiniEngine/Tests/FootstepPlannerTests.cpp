@@ -518,20 +518,23 @@ namespace
         const size_t side = static_cast<size_t>(planner.GetSnapshot().requestedFoot);
         input.feet[side].grounded = false;
         Advance(planner, input, settings);
-        const unsigned flightSamples = static_cast<unsigned>(std::ceil(settings.stepDuration / input.fixedDeltaTime));
+        const unsigned flightSamples = static_cast<unsigned>(std::ceil(.5f * settings.stepDuration / input.fixedDeltaTime));
         Advance(planner, input, settings, flightSamples);
         input.feet[side].grounded = true;
         input.feet[side].position = planner.GetSnapshot().feet[side].target.position;
         Advance(planner, input, settings);
-        Check(planner.GetSnapshot().feet[side].justLanded && planner.GetSnapshot().landingCount == 1,
-            "Prepare a completed physical contact sequence before testing the next command");
+        const FootstepCommand& landed = planner.GetSnapshot().feet[side];
+        Check(landed.justLanded && landed.motion.elapsedTime < landed.motion.duration &&
+                Near(GetFootstepRemainingTime(landed), 0) && planner.GetSnapshot().landingCount == 1,
+            "Ground contact after takeoff completes the step before the planned swing duration expires");
         input.com.z += .1f;
     }
 
     void TestLoadTransferAtRates()
     {
-        const FootstepSettings settings = TestSettings();
         const FootstepSettings defaults;
+        FootstepSettings settings = TestSettings();
+        settings.stepDuration = defaults.stepDuration;
         Check(Near(defaults.supportLoadRatio, .25f) && Near(defaults.supportConfirmationTime, .01f),
             "Default next-command confirmation is one quarter body weight sustained for 0.01 seconds");
         const std::array<unsigned, 4> rates{{30, 60, 120, 240}};
