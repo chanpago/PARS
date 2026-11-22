@@ -2,6 +2,7 @@
 #include "foundation/PxMat33.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 using namespace physx;
@@ -9,6 +10,11 @@ using namespace PARS;
 
 namespace
 {
+    float ReachMargin(float upper, float lower)
+    {
+        return PxMin((upper + lower) * 1e-4f, PxMin(upper, lower) * .1f);
+    }
+
     bool Unit(PxVec3& value)
     {
         const float length = value.magnitude();
@@ -87,6 +93,34 @@ bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
     const PxVec3 right = up.cross(forward).getNormalized();
     target = PxTransform(position, PxQuat(PxMat33(right, up, right.cross(up))).getNormalized());
     return target.isSane();
+}
+
+float PARS::PredictSupportReachTime(const PxVec3& hipFromAnkle, const PxVec3& hipVelocity,
+    float thighLength, float calfLength)
+{
+    if (!hipFromAnkle.isFinite() || !hipVelocity.isFinite() || !std::isfinite(thighLength) ||
+        !std::isfinite(calfLength) || thighLength <= 1e-5f || calfLength <= 1e-5f)
+    {
+        return std::numeric_limits<float>::infinity();
+    }
+    const double length = thighLength + calfLength - ReachMargin(thighLength, calfLength);
+    const PxVec3d offset(hipFromAnkle.x, hipFromAnkle.y, hipFromAnkle.z);
+    const PxVec3d velocity(hipVelocity.x, hipVelocity.y, hipVelocity.z);
+    const double slack = length * length - offset.magnitudeSquared();
+    const double radial = offset.dot(velocity);
+    if (slack < 0 || (slack == 0 && radial >= 0))
+    {
+        return 0.0f;
+    }
+    const double speedSquared = velocity.magnitudeSquared();
+    if (speedSquared <= 1e-12)
+    {
+        return std::numeric_limits<float>::infinity();
+    }
+    // 고정 발목을 중심으로 한 구에서 고관절이 빠져나가는 근을 구한다. 경계 근처의 뺄셈 오차를 피한다.
+    const double root = std::sqrt(radial * radial + speedSquared * slack);
+    const double time = radial >= 0 ? slack / (root + radial) : (root - radial) / speedSquared;
+    return static_cast<float>(time);
 }
 
 LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
@@ -177,7 +211,7 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     }
 
     // 뼈 길이는 유지한다. 완전히 펴지거나 접히는 특이점에만 작은 계산 여유를 둔다.
-    const float margin = PxMin((upper + lower) * 1e-4f, PxMin(upper, lower) * .1f);
+    const float margin = ReachMargin(upper, lower);
     const float minimumReach = PxAbs(upper - lower) + margin;
     const float maximumReach = PxMax(minimumReach, (upper + lower) * input.maximumReachRatio - margin);
     const float distance = PxClamp(requestedDistance, minimumReach, maximumReach);

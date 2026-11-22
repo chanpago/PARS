@@ -861,14 +861,21 @@ namespace PARS
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             const float strength = GetJointDriveStrength(data);
             float ankleDriveScale = 1.0f;
+            float inverseLandingTime = 0.0f;
             if (m_FootDrivenSupport)
             {
                 const int childBody = m_Asset.FindBody(data.childBone);
                 for (size_t side = 0; side < m_SupportContacts.size(); ++side)
                 {
-                    if (m_SupportContacts[side].grounded && m_SupportContacts[side].body == childBody)
+                    const RagdollSupportContact& foot = m_SupportContacts[side];
+                    if (foot.grounded && foot.body == childBody)
                     {
                         ankleDriveScale = m_SupportLoads.ankleDriveScales[side];
+                    }
+                    if (foot.inverseLandingTime > 0 && childBody >= 0 &&
+                        std::find(foot.swingNodes.begin(), foot.swingNodes.end(), m_BoneNodes[childBody]) != foot.swingNodes.end())
+                    {
+                        inverseLandingTime = foot.inverseLandingTime;
                     }
                 }
             }
@@ -907,9 +914,17 @@ namespace PARS
                 // 관성으로 Kp=I*omegaN^2, Kd=2*zeta*I*omegaN을 만들고 암시적 토크 드라이브에 전달한다.
                 const float inertia = enabled && drive.useAcceleration ? inertias[6 + dof] : 1.0f;
                 // 발목은 지지 하중에 맞춰 강성과 감쇠에 같은 배율을 적용해 회전 추종과 제동을 함께 높인다.
-                const PxArticulationDrive motor(enabled ? inertia * drive.GetStiffness() * ankleDriveScale * strength : 0,
-                    enabled ? inertia * drive.GetDamping() * ankleDriveScale * std::sqrt(strength) : 0,
-                    remainingTorque, PxArticulationDriveType::eFORCE);
+                float stiffness = enabled ? inertia * drive.GetStiffness() * ankleDriveScale * strength : 0.0f;
+                float damping = enabled ? inertia * drive.GetDamping() * ankleDriveScale * std::sqrt(strength) : 0.0f;
+                if (inverseLandingTime > 0 && stiffness > 0)
+                {
+                    // 남은 시간에 위치·속도 오차를 함께 0으로 보내는 3차 궤적의 피드백 계수다.
+                    const float inverseTime = inverseLandingTime * std::sqrt(strength);
+                    const float effectiveInertia = inertias[6 + dof];
+                    stiffness = PxMax(stiffness, 6.0f * effectiveInertia * inverseTime * inverseTime);
+                    damping = PxMax(damping, 4.0f * effectiveInertia * inverseTime);
+                }
+                const PxArticulationDrive motor(stiffness, damping, remainingTorque, PxArticulationDriveType::eFORCE);
 
                 // 앞서 계산한 관성과 각 축에 대한 pd 구동식으로 motor값에 저장하고 관절 PD모터가 목표(target)을 얼마나 강하게 따라갈지 설정하는 함수
                 m_ArticulationJoints[i]->setDriveParams(AngularAxes[axis], motor);

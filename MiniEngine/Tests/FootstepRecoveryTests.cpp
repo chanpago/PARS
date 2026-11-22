@@ -207,6 +207,51 @@ namespace
             "landing lock preserves the target and avoids a second pose search");
     }
 
+    void TestNearestNormalLanding()
+    {
+        FootstepRecoverySettings settings;
+        settings.maximumSteps = 1;
+        settings.oneStepCaptureScale = 1.0f;
+        FootstepRecoveryInput input = Input();
+        input.feet[1].maximumDistance = .4f;
+        for (float direction : {-1.0f, 1.0f})
+        {
+            input.velocity.z = direction * 4.0f;
+            const FootstepRecoverySnapshot step = SelectFootstepRecovery(input, settings);
+            const PxVec3 expected = input.feet[1].position + PxVec3(0, 0, direction * .4f);
+            Check(step.hasTarget && step.mode == FootstepMode::Normal && step.status == FootstepRecoveryStatus::BestEffort &&
+                (step.target - expected).magnitude() < 1e-5f,
+                "a distant forward or backward capture chooses the closest normal landing within the stride limit");
+        }
+
+        // 회복 사각형의 가까운 꼭짓점을 일반 도달 다각형의 사선 변 중점 바깥에 둔다.
+        input.velocity = PxVec3(0);
+        const FootstepRecoverySnapshot initial = SelectFootstepRecovery(input, settings);
+        const PxVec3 corner = ClosestFootstepPoint(initial.capture.front(), PxVec3(-10, 0, -10));
+        const float offset = .5f * input.feet[1].maximumDistance * (.5f + std::sqrt(.75f));
+        const PxVec3 edgeMidpoint = input.feet[1].position + PxVec3(offset, 0, offset);
+        const float growth = std::exp(std::sqrt(9.81f / input.com.y) * input.firstStepTime);
+        input.com += (edgeMidpoint + PxVec3(.25f, 0, .25f) - corner) / growth;
+        FootstepPolygon checked;
+        input.acceptsTarget = [&checked](const PxVec3& point) -> bool
+        {
+            checked.push_back(point);
+            return checked.size() == 3;
+        };
+        const FootstepRecoverySnapshot step = SelectFootstepRecovery(input, settings);
+        Check(checked.size() == 3 && step.hasTarget && step.mode == FootstepMode::Normal &&
+            (checked.front() - edgeMidpoint).magnitude() < 1e-5f && step.target == checked.back(),
+            "a rejected nearest point on an edge is followed by another validated normal candidate");
+        float previousGap = 0;
+        for (const PxVec3& point : checked)
+        {
+            const float gap = (point - ClosestFootstepPoint(step.capture.front(), point)).magnitude();
+            Check(IsInsideFootSupportHull(step.reachable[0], point) && gap + 1e-6f >= previousGap,
+                "all normal candidates are tested in order of distance to capture");
+            previousGap = gap;
+        }
+    }
+
     void TestCaptureAndTiming()
     {
         FootstepRecoverySettings settings;
@@ -384,6 +429,56 @@ namespace
         return input;
     }
 
+    void TestNormalLandingWithoutIdleOffset()
+    {
+        FootstepSettings settings;
+        settings.recovery.maximumSteps = 1;
+        settings.recovery.oneStepCaptureScale = 1.0f;
+        FootstepInput input = PlannerInput();
+        input.com.z = 0;
+        input.velocity = PxVec3(0, 0, .6f);
+        FootstepPlanner planner;
+        planner.Update(input, settings);
+        const FootstepTarget first = planner.GetSnapshot().candidates[1];
+        Check(planner.GetSnapshot().feet[1].justStarted && first.recovery.mode == FootstepMode::Normal &&
+            InAny(first.recovery.intersections[0], first.position), "normal landing is inside both regions");
+
+        input.feet[0].timeToReachLimit = .3f;
+        planner.Reset();
+        planner.Update(input, settings);
+        Check(std::abs(planner.GetSnapshot().candidates[1].recovery.predictionTime - .3f) < 1e-5f &&
+            std::abs(GetFootstepRemainingTime(planner.GetSnapshot().feet[1]) - .3f) < 1e-5f,
+            "Capture region and swing use the same time from the step decision to touchdown");
+        input.feet[0].timeToReachLimit = 10.0f;
+        planner.Reset();
+        planner.Update(input, settings);
+        const FootstepTarget& capped = planner.GetSnapshot().candidates[1];
+        Check(planner.GetSnapshot().feet[1].justStarted && capped.recovery.hasTarget &&
+            std::abs(capped.recovery.predictionTime - .3f) < 1e-5f &&
+            std::abs(GetFootstepRemainingTime(planner.GetSnapshot().feet[1]) - .3f) < 1e-5f,
+            "A long support forecast selects a validated target using the 0.3 second landing deadline");
+        input.feet[0].timeToReachLimit = std::numeric_limits<float>::infinity();
+        input.feet[1].stanceOffset.z += .9f;
+        planner.Reset();
+        planner.Update(input, settings);
+        const FootstepTarget& second = planner.GetSnapshot().candidates[1];
+        Check(planner.GetSnapshot().feet[1].justStarted && (second.raw - first.raw).magnitude() > .5f &&
+            (second.position - first.position).magnitude() < 1e-5f,
+            "changing the idle reference leaves the geometric landing unchanged");
+
+        input.velocity.z = -4.0f;
+        input.acceptsLanding = [](size_t, const PxVec3&) -> bool
+        {
+            return false;
+        };
+        planner.Reset();
+        planner.Update(input, settings);
+        const FootstepSnapshot& rejected = planner.GetSnapshot();
+        Check(rejected.needsStep && rejected.candidates[1].recovery.status == FootstepRecoveryStatus::PoseRejected &&
+            !rejected.candidates[1].valid && rejected.startCount == 0,
+            "rejecting every region candidate cannot start a step at the idle reference");
+    }
+
     void TestStepModeLock()
     {
         FootstepInput input = PlannerInput();
@@ -406,9 +501,10 @@ namespace
         ++input.completedStep;
         planner.Update(input, settings);
         Check(command.phase == FootstepPhase::Airborne && !command.motion.landingTargetLocked &&
-            search.overlapAreas[0] == 0 && search.overlapAreas[1] > 0 && !search.hasTarget &&
-            command.target.recovery.mode == FootstepMode::Normal && command.target.position == normalTarget,
-            "an airborne normal step holds its landing when only a crossover overlaps");
+            search.overlapAreas[0] == 0 && search.overlapAreas[1] > 0 && search.hasTarget &&
+            search.status == FootstepRecoveryStatus::BestEffort && command.target.recovery.mode == FootstepMode::Normal &&
+            IsInsideFootSupportHull(search.reachable[0], command.target.position) && command.target.position == search.target,
+            "an airborne normal step uses its own closest reachable landing when only a crossover overlaps");
 
         input.com.z = 0;
         input.velocity = PxVec3(0, 0, 1.1f);
@@ -521,9 +617,11 @@ void TestFootstepRecovery()
     TestPolygonGeometry();
     TestNormalReachDisplay();
     TestModeChoice();
+    TestNearestNormalLanding();
     TestCaptureAndTiming();
     TestThreeStepReachForBothFeet();
     TestOneStepCaptureMargin();
+    TestNormalLandingWithoutIdleOffset();
     TestStepModeLock();
     TestPlannerIntegration();
     FootstepRecoveryInput input = Input();

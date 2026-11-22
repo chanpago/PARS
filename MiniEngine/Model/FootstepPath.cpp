@@ -99,7 +99,7 @@ bool PARS::IsFootstepPathWithinLimits(const FootstepPath& path, float maximumSpe
 
 float PARS::GetPredictedFootstepFlightTime(const FootstepCommand& command, float timeAhead)
 {
-    if (command.hasTakenOff)
+    if (command.UsesSwingTrajectory())
     {
         return command.motion.elapsedTime + timeAhead;
     }

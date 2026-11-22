@@ -187,7 +187,9 @@ namespace
             "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
-            "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state\n";
+            "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state,"
+            "actual_com_outside_b,outside_b_time_s,"
+            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -235,7 +237,10 @@ namespace
                 << ',' << decision.capturePieceCount << ',' << decision.steps << ',' << decision.pathRejected
                 << ',' << animation.GetAnimationName(animation.GetCurrentAnimationIndex()) << ',' << animation.GetAnimationTime()
                 << ',' << support.centerOfMassVelocity.x << ',' << support.centerOfMassVelocity.z
-                << ',' << decision.targetInCaptureMargin << ',' << PARS::CharacterBalanceStateLabel(mesh.GetBalanceState()) << '\n';
+                << ',' << decision.targetInCaptureMargin << ',' << PARS::CharacterBalanceStateLabel(mesh.GetBalanceState())
+                << ',' << support.footstep.actualComOutsideBuffer << ',' << support.footstep.outsideBufferTime
+                << ',' << command.motion.hasSupportDeadline << ',' << command.motion.duration << ',' << command.motion.elapsedTime
+                << ',' << command.motion.landingTimeError << '\n';
         }
     }
 
@@ -370,6 +375,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             }
             const float beforeTimer = mesh.GetKinematicStableTime();
             const bool beforeFalling = mesh.IsFollowingFallingAnimation();
+            const RootSupportRelease beforeRelease = mesh.GetRootSupportRelease();
             const Vector3 beforeRoot = test.GetDummy()->GetActorLocation();
             Vector3 expectedRootOffset(kZero);
             bool beforeBothGrounded = true;
@@ -398,6 +404,16 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             world.Tick(1.0f / 60.0f);
             test.Update();
             RecordLandingComFrame(landingCom, mesh, frame);
+            if (beforeRelease == RootSupportRelease::None && mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer)
+            {
+                const FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
+                check(support.footstep.actualComOutsideBuffer &&
+                        support.footstep.outsideBufferTime + 1e-9 >= FootstepPlanner::OutsideBufferDuration && support.footstep.aborted &&
+                        !mesh.GetRagdoll().UsesFootDrivenSupport() && !mesh.GetRagdoll().IsRootSupported() &&
+                        mesh.GetBalanceState() == CharacterBalanceState::GroundFall &&
+                        (!mesh.IsFallingAnimationEnabled() || mesh.IsFollowingFallingAnimation()),
+                    "Continuous actual COM exit from B stops stepping and starts the ground fall in the same tick");
+            }
             if (validateLandingRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
                 mesh.GetFootSupport().GetSnapshot().footstep.hasGroundPlane))
             {
@@ -1160,7 +1176,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 !ragdoll.IsRootAxisSupported(2) && ragdoll.IsRootAxisSupported(3),
             "Automatic Idle uses leg support, frees root translation and keeps rotation assistance");
 
-        // Deterministically exercise both release causes, and re-entry without rearming.
+        // 유효한 B 밖에서의 지지 유지와 지지면 자체가 사라졌을 때의 해제를 각각 확인한다.
         world.SetPhysicsPaused(true);
         const std::function<void()> singleStep = [&]() -> void
         {
@@ -1169,21 +1185,20 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         };
         const PARS::FootSoleSettings originalLeft = support.GetSoleSettings(0);
         const PARS::FootSoleSettings originalRight = support.GetSoleSettings(1);
+        const float previousWeight = ragdoll.GetRootSupportWeight();
         support.GetSoleSettings(0).offset.x += 2;
         support.GetSoleSettings(1).offset.x += 2;
         singleStep();
         check(support.GetSnapshot().balance.zone == FootSupportZone::Outside &&
-                dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::OutsideBuffer && !ragdoll.IsRootSupported(),
-            "Reaching B releases support in the same fixed step");
+                dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::None &&
+                ragdoll.UsesFootDrivenSupport() && ragdoll.GetRootSupportWeight() == previousWeight,
+            "Leaving B preserves the previous assistance and the foot controller");
         support.GetSoleSettings(0) = originalLeft;
         support.GetSoleSettings(1) = originalRight;
         singleStep();
-        check(support.GetSnapshot().balance.weight > 0 && ragdoll.GetRootSupportWeight() == 0 &&
-                !ragdoll.IsRootSupported() && ragdoll.AreDrivesEnabled(),
-            "COM re-entry cannot re-enable pelvis support; ordinary joint PD remains enabled");
-        std::string supportError;
-        check(dummy->GetMesh().SetAutomaticRootSupport(true, supportError) && !ragdoll.IsRootSupported(),
-            "Repeating automatic mode enable does not clear the release latch");
+        check(support.GetSnapshot().balance.weight > 0 && ragdoll.GetRootSupportWeight() == support.GetSnapshot().balance.weight &&
+                dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::None && ragdoll.AreDrivesEnabled(),
+            "Re-entering B applies the current support weight");
         check(resetActive() && ragdoll.GetRootSupportWeight() == 1 &&
                 dummy->GetMesh().GetRootSupportRelease() == RootSupportRelease::None,
             "Dummy reset rearms support from its newly sampled grounded pose");
@@ -1194,6 +1209,10 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             "Invalid foot support fully releases Y/rotation support");
         support.GetSoleSettings(0) = originalLeft;
         support.GetSoleSettings(1) = originalRight;
+        singleStep();
+        std::string supportError;
+        check(dummy->GetMesh().SetAutomaticRootSupport(true, supportError) && !ragdoll.IsRootSupported(),
+            "Restoring a valid support area does not clear a genuine loss-of-support latch");
         check(resetActive(), "Restore the automatic impact fixture");
         world.SetPhysicsPaused(false);
 
@@ -1202,6 +1221,13 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         for (int frame = 0; frame < 600; ++frame)
         {
             tick();
+            if (idleMinimumWeight > 0.0f && !ragdoll.IsRootSupported())
+            {
+                const FootSupportSnapshot& feet = support.GetSnapshot();
+                report << "idle_release_frame=" << frame << " reason=" << static_cast<int>(dummy->GetMesh().GetRootSupportRelease())
+                    << " zone=" << static_cast<int>(feet.balance.zone)
+                    << " outside_b_time_s=" << feet.footstep.outsideBufferTime << std::endl;
+            }
             idleMinimumWeight = PxMin(idleMinimumWeight, ragdoll.GetRootSupportWeight());
             if (frame >= 480)
             {
@@ -1229,19 +1255,24 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             }
             const float initialHeight = float(ragdoll.GetPosition().GetY());
             check(test.FireFrom(player), "Shoot the automatic support dummy");
-            float minimumWeight = 1, minimumHeight = initialHeight;
-            int bandFrames = 0, releaseFrame = -1;
-            bool matched = true, stayedReleased = true, finiteAndDriven = true;
+            float minimumWeight = 1;
+            float minimumHeight = initialHeight;
+            int bandFrames = 0;
+            int releaseFrame = -1;
+            bool matched = true;
+            bool stayedReleased = true;
+            bool finiteAndDriven = true;
             for (int frame = 0; frame < 300; ++frame)
             {
                 tick();
-                const float raw = support.GetSnapshot().balance.weight, applied = ragdoll.GetRootSupportWeight();
+                const FootSupportBalance& balance = support.GetSnapshot().balance;
+                const float applied = ragdoll.GetRootSupportWeight();
                 minimumWeight = PxMin(minimumWeight, applied);
                 minimumHeight = PxMin(minimumHeight, float(ragdoll.GetPosition().GetY()));
-                if (applied > 0 && applied < 1)
+                if (balance.zone == FootSupportZone::Buffer && ragdoll.IsRootSupported())
                 {
                     ++bandFrames;
-                    matched &= std::abs(raw - applied) < 1e-6f;
+                    matched &= std::abs(balance.weight - applied) < 1e-6f;
                 }
                 if (!ragdoll.IsRootSupported() && releaseFrame < 0)
                 {
@@ -1251,13 +1282,13 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 {
                     stayedReleased &= applied == 0;
                 }
-                finiteAndDriven &= ragdoll.IsFinite() && ragdoll.AreDrivesEnabled();
+                finiteAndDriven &= ragdoll.IsFinite() && (ragdoll.AreDrivesEnabled() == dummy->GetMesh().IsActiveRagdoll());
             }
             report << "automatic_impact mass=" << masses[trial] << " speed=" << speeds[trial]
                 << " min_weight=" << minimumWeight << " band_frames=" << bandFrames << " release_frame=" << releaseFrame
                 << " min_hips_y=" << minimumHeight << " max_displacement=" << test.GetMaxHipsDisplacement() << std::endl;
             check(matched && stayedReleased && finiteAndDriven,
-                "Impact follows the weight, preserves the release latch and keeps finite driven bodies");
+                "Impact preserves the support weight, release latch and drives for the current physics mode");
             if (trial == 0)
             {
                 check(releaseFrame < 0 && minimumWeight > .99f,

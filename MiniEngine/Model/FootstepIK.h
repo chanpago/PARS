@@ -53,6 +53,8 @@ namespace PARS
     bool MakeFootSoleTarget(const physx::PxVec3& position, const physx::PxVec3& normal,
         const physx::PxTransform& animatedSole, physx::PxTransform& target);
     LegIKResult SolveTwoBoneIK(const TwoBoneIKInput& input);
+    float PredictSupportReachTime(const physx::PxVec3& hipFromAnkle,
+        const physx::PxVec3& hipVelocity, float thighLength, float calfLength);
 
     struct FootIKLegInput
     {

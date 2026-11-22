@@ -46,6 +46,23 @@ namespace
         return input;
     }
 
+    void TestSupportReachTime()
+    {
+        const float reach = 1.0f - 1e-4f;
+        const PxVec3 offset(0, .8f * reach, 0);
+        const PxVec3 velocity(0, 0, 2.0f * reach);
+        Check(PxAbs(PredictSupportReachTime(offset, velocity, .5f, .5f) - .3f) < 1e-5f &&
+            PxAbs(PredictSupportReachTime(offset, -velocity, .5f, .5f) - .3f) < 1e-5f,
+            "A sideways or backwards hip trajectory exits the planted ankle's IK sphere at 0.3 seconds");
+        Check(PxAbs(PredictSupportReachTime(offset, PxVec3(0, reach, 0), .5f, .5f) - .2f) < 1e-5f &&
+            PxAbs(PredictSupportReachTime(offset, PxVec3(0, -reach, 0), .5f, .5f) - 1.8f) < 1e-5f,
+            "Hip height and inward velocity select the future outward crossing");
+        Check(!std::isfinite(PredictSupportReachTime(offset, PxVec3(0), .5f, .5f)) &&
+            !std::isfinite(PredictSupportReachTime(offset, velocity, 0, .5f)) &&
+            PredictSupportReachTime(PxVec3(0, 1, 0), velocity, .5f, .5f) == 0,
+            "Stationary and invalid samples have no deadline while an exceeded reach is already due");
+    }
+
     void CheckSegments(const TwoBoneIKInput& input, const LegIKResult& result)
     {
         Check(result.valid, "The leg solution is finite");
@@ -335,6 +352,7 @@ namespace
 
 void TestFootstepIK()
 {
+    TestSupportReachTime();
     TestGeometryAndOffsets();
     TestReachAndHints();
     TestSoleOrientation();

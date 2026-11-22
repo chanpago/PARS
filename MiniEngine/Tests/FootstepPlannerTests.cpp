@@ -77,6 +77,7 @@ namespace
         input.velocity = PxVec3(0, 0, 1);
         input.hull = BuildFootSupportHull({{-.25f, .4f, -.15f}, {.25f, .4f, -.15f},
             {.25f, .4f, .15f}, {-.25f, .4f, .15f}});
+        input.bufferHull = EvaluateFootSupportBalance(input.hull, input.com).bufferHull;
         input.zone = FootSupportZone::Inside;
         input.projectionHeight = .4f;
         input.fixedDeltaTime = 1.0f / 60;
@@ -445,6 +446,56 @@ namespace
         }
     }
 
+    void TestActualComBufferTimeout()
+    {
+        FootstepPlanner planner;
+        const FootstepSettings settings = TestSettings();
+        FootstepInput input = Standing();
+        input.velocity.z = 2.0f;
+        planner.Update(input, settings);
+        const FootstepSnapshot& state = planner.GetSnapshot();
+        Advance(planner, input, settings, 20);
+        Check(!state.actualComOutsideBuffer && state.outsideBufferTime == 0.0 && !state.aborted,
+            "A prediction outside B does not start the timer while the actual COM is inside");
+        input.com.z = .45f;
+        input.velocity.z = -.9f;
+        input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+        Advance(planner, input, settings);
+        Check(state.actualComOutsideBuffer && state.outsideBufferTime == 0.0 && !state.aborted,
+            "Actual COM outside B starts the timer even when the prediction is inside");
+        Advance(planner, input, settings, 17);
+        const double beforeReentry = state.outsideBufferTime;
+        planner.Update(input, settings);
+        Check(!state.aborted && state.IsInProgress() && std::abs(beforeReentry - 17.0 / 60.0) < 1e-6 &&
+                state.outsideBufferTime == beforeReentry, "Seventeen elapsed ticks and repeated samples keep stepping");
+        input.com.z = .3f;
+        input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+        Advance(planner, input, settings);
+        Check(!state.actualComOutsideBuffer && state.outsideBufferTime == 0.0 && !state.aborted,
+            "Returning to the B boundary resets the actual COM timer");
+        input.com.z = .45f;
+        input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+        Advance(planner, input, settings, 5);
+        input.hasCom = false;
+        Advance(planner, input, settings);
+        Check(!state.actualComOutsideBuffer && state.outsideBufferTime == 0.0, "A missing actual COM breaks the outside interval");
+        input.hasCom = true;
+        input.hasVelocity = false;
+        Advance(planner, input, settings, 5);
+        input.completedStep += 2;
+        planner.Update(input, settings);
+        Check(state.actualComOutsideBuffer && state.outsideBufferTime == 0.0, "A missing physics tick restarts the outside interval");
+        Advance(planner, input, settings, 17);
+        Check(!state.aborted, "A new interval under 0.30 seconds keeps stepping");
+        Advance(planner, input, settings);
+        Check(state.aborted && state.reason == FootstepReason::OutsideBuffer && !state.IsInProgress() &&
+                std::abs(state.outsideBufferTime - 0.3) < 1e-8, "Eighteen elapsed ticks at 60 Hz abort at 0.30 seconds");
+        input.com.z = 0.0f;
+        input.zone = FootSupportZone::Inside;
+        Advance(planner, input, settings);
+        Check(state.aborted && state.abortCount == 1, "Re-entry after timeout keeps the fall latched");
+    }
+
     void TestClockAndAbort()
     {
         FootstepPlanner planner;
@@ -454,12 +505,24 @@ namespace
         planner.Update(input, settings);
         Check(planner.GetSnapshot().startCount == 1 && Near(planner.GetSnapshot().feet[1].motion.progress, 0),
             "Reading the same physics step cannot advance a command twice");
-        input.outsideBufferReleased = true;
+        input.com.z = .45f;
+        input.velocity.z = -.9f;
+        input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+        input.feet[1].grounded = false;
+        Advance(planner, input, settings, 12);
+        Check(input.zone == FootSupportZone::Outside && planner.GetSnapshot().feet[1].phase == FootstepPhase::Airborne &&
+                planner.GetSnapshot().feet[1].motion.valid && planner.GetSnapshot().abortCount == 0,
+            "A brief actual COM exit keeps a recovery step active before the timeout");
+        input.feet[1].grounded = true;
+        Advance(planner, input, settings);
+        Check(planner.GetSnapshot().feet[1].justLanded && planner.GetSnapshot().landingCount == 1,
+            "Ground contact completes the same step outside B");
+        input.rootReleased = true;
         Advance(planner, input, settings);
         Check(planner.GetSnapshot().aborted && planner.GetSnapshot().abortCount == 1 &&
                 !planner.GetSnapshot().IsInProgress() && !planner.GetSnapshot().feet[1].motion.valid,
-            "Buffer expiry cancels both foot commands");
-        input.outsideBufferReleased = false;
+            "Loss of root support cancels both foot commands");
+        input.rootReleased = false;
         Advance(planner, input, settings, 4);
         Check(planner.GetSnapshot().aborted && planner.GetSnapshot().startCount == 1,
             "An abort remains latched until reset");
@@ -493,17 +556,17 @@ namespace
         {
             FootstepPlanner planner;
             FootstepSettings settings = TestSettings();
-            settings.stepDuration = .4f;
+            settings.stepDuration = .2f;
             FootstepInput input = Standing();
             input.fixedDeltaTime = 1.0f / static_cast<float>(rate);
             planner.Update(input, settings);
             input.feet[1].grounded = false;
             Advance(planner, input, settings);
-            Advance(planner, input, settings, rate / 5);
+            Advance(planner, input, settings, rate / 10);
             const FootstepMotion motion = planner.GetSnapshot().feet[1].motion;
             Check(Near(motion.progress, .5f) && Near(motion.position.z, .15f) && Near(motion.height, .045f),
                 "Separate command timing is consistent across fixed physics rates");
-            Advance(planner, input, settings, rate / 5);
+            Advance(planner, input, settings, rate / 10);
             Check(planner.GetSnapshot().feet[1].IsInProgress() &&
                     Near(planner.GetSnapshot().feet[1].motion.progress, 1),
                 "Elapsed time alone never fabricates a grounded sample");
@@ -918,8 +981,8 @@ namespace
     void TestLandingComHistoryAndLock()
     {
         FootstepSettings settings;
-        // 60Hz에서 이륙 후 27틱째가 정확히 진행률 90%가 되도록 한다.
-        settings.stepDuration = .5f;
+        // 60Hz에서 이륙 후 9틱째가 진행률 90%가 되도록 한다.
+        settings.stepDuration = 10.0f / 60.0f;
         FootstepPlanner planner;
         FootstepInput input = Standing();
         input.velocity = PxVec3(-1, 0, 0);
@@ -952,7 +1015,7 @@ namespace
         input.velocity = PxVec3(-1, 0, 0);
         input.feet[1].grounded = false;
         Advance(planner, input, settings);
-        Advance(planner, input, settings, 25);
+        Advance(planner, input, settings, 7);
         const FootstepCommand& moving = planner.GetSnapshot().feet[1];
         const PxVec3 previousTarget = moving.target.position;
         input.com.z = .1f;
@@ -1002,7 +1065,7 @@ namespace
             input.velocity.z = 0;
             if (interruption == 0)
             {
-                input.outsideBufferReleased = true;
+                input.rootReleased = true;
             }
             else if (interruption == 1)
             {
@@ -1030,6 +1093,77 @@ namespace
                 "Abort, contact revision, inactive mode, disabling, reset and clock rewind cannot retain an old direction choice");
             settings.landingComClampEnabled = true;
         }
+    }
+
+    void TestSupportLandingDeadline()
+    {
+        FootstepSettings settings = TestSettings();
+        settings.stepDuration = .15f;
+        for (const unsigned rate : {60u, 120u})
+        {
+            FootstepPlanner planner;
+            FootstepInput input = Standing();
+            input.fixedDeltaTime = 1.0f / static_cast<float>(rate);
+            input.feet[0].timeToReachLimit = 2.0f;
+            input.feet[1].timeToReachLimit = 0;
+            planner.Update(input, settings);
+            const FootstepCommand& step = planner.GetSnapshot().feet[1];
+            Check(step.justStarted && step.motion.hasSupportDeadline && Near(GetFootstepRemainingTime(step), .3f),
+                "A long support forecast caps the whole step at 0.3 seconds");
+            Advance(planner, input, settings, rate / 20);
+            Check(step.phase == FootstepPhase::AwaitingTakeoff && Near(GetFootstepRemainingTime(step), .25f) &&
+                step.motion.position.y > step.startPosition.y && step.motion.position.z > step.startPosition.z,
+                "Lifting and moving toward the target spend the same budget before contact breaks");
+            input.feet[1].grounded = false;
+            Advance(planner, input, settings);
+            Check(step.hasTakenOff && Near(GetFootstepRemainingTime(step), .25f - input.fixedDeltaTime),
+                "Physical takeoff does not grant a fresh flight duration");
+            const PxVec3 expectedNext = SampleFootstepPosition(step, input.fixedDeltaTime);
+            input.feet[1].grounded = true;
+            input.feet[0].timeToReachLimit = .08f;
+            Advance(planner, input, settings);
+            Check(step.IsInProgress() && !step.justLanded && Near(GetFootstepRemainingTime(step), .08f),
+                "A distant early contact keeps the target and an earlier support limit advances touchdown");
+            Check((step.motion.position - expectedNext).magnitude() < 1e-5f,
+                "A changed deadline retimes the remaining arc without jumping the current drive target");
+            input.feet[1].grounded = false;
+            input.feet[0].grounded = false;
+            Advance(planner, input, settings);
+            const float remaining = .08f - input.fixedDeltaTime;
+            Check(Near(GetFootstepRemainingTime(step), remaining) &&
+                (SampleFootstepPosition(step, remaining) - step.target.position).magnitude() < 1e-5f,
+                "Losing support preserves the promised time and the drive trajectory reaches the landing point");
+            Advance(planner, input, settings, rate / 10);
+            Check(step.IsInProgress() && Near(step.motion.progress, 1) && !step.justLanded,
+                "The deadline alone cannot manufacture a ground contact");
+            input.feet[1].position = step.target.position;
+            input.feet[1].grounded = true;
+            Advance(planner, input, settings);
+            Check(step.justLanded && Near(step.motion.landingError, 0) && step.motion.landingTimeError > 0,
+                "A late physical touchdown completes the step and reports the missed deadline");
+        }
+
+        FootstepPlanner planner;
+        FootstepInput input = Standing();
+        planner.Update(input, settings);
+        Advance(planner, input, settings, 2);
+        const FootstepCommand& step = planner.GetSnapshot().feet[1];
+        const PxVec3 lastLift = step.motion.position;
+        input.feet[0].timeToReachLimit = .3f;
+        Advance(planner, input, settings);
+        const float remainingBudget = .3f - 3.0f * input.fixedDeltaTime;
+        Check(step.motion.hasSupportDeadline && Near(GetFootstepRemainingTime(step), remainingBudget) &&
+            (step.motion.position - lastLift).magnitude() < 1e-6f,
+            "A first usable support measurement during lift preserves the current foot pose");
+        input.feet[1].grounded = false;
+        Advance(planner, input, settings);
+        input.feet[0].timeToReachLimit = 2.0f;
+        input.feet[1].grounded = true;
+        input.feet[1].position = step.target.position;
+        input.feet[1].corners = SoleRectangle(input.feet[1].position, .04f, .1f);
+        Advance(planner, input, settings);
+        Check(step.justLanded && Near(step.motion.duration, remainingBudget) && step.motion.progress < 1 && step.motion.landingTimeError < 0,
+            "Reaching the target on real contact finishes early without postponing the promised touchdown");
     }
 
     void TestTakeoffConfirmation()
@@ -1082,9 +1216,11 @@ void TestFootstepPlanner()
     TestIndependentCommands();
     TestGeometry();
     TestGatesAndInvalidData();
+    TestActualComBufferTimeout();
     TestClockAndAbort();
     TestFixedStepRates();
     TestTakeoffConfirmation();
+    TestSupportLandingDeadline();
     TestLoadTransferAtRates();
     TestLoadTransferInterruptions();
     TestLandingComGeometry();

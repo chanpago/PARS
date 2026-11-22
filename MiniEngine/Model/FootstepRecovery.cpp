@@ -1,5 +1,6 @@
 ﻿#include "FootstepRecovery.h"
 #include "FramePerformance.h"
+#include <algorithm>
 #include <chrono>
 #include <limits>
 #include <utility>
@@ -240,16 +241,21 @@ namespace
         return delta.x * delta.x + delta.z * delta.z;
     }
 
-    void ExpandOneStepCapture(FootstepPolygon& polygon, float scale)
+    PxVec3 PolygonCenter(const FootstepPolygon& polygon)
     {
-        // 볼록 다각형의 꼭짓점 평균을 기준으로 수평 치수만 늘린다.
         const PxVec3 origin = polygon.front();
         PxVec3 offset(0);
         for (const PxVec3& point : polygon)
         {
             offset += point - origin;
         }
-        const PxVec3 center = origin + offset / static_cast<float>(polygon.size());
+        return origin + offset / static_cast<float>(polygon.size());
+    }
+
+    void ExpandOneStepCapture(FootstepPolygon& polygon, float scale)
+    {
+        // 볼록 다각형의 꼭짓점 평균을 기준으로 수평 치수만 늘린다.
+        const PxVec3 center = PolygonCenter(polygon);
         for (PxVec3& point : polygon)
         {
             point += (point - center) * (scale - 1.0f);
@@ -274,17 +280,83 @@ namespace
         return result.overlapAreas[0] > 0 || result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0;
     }
 
+    bool CaptureReachesNormalSide(const FootstepRecoverySnapshot& result)
+    {
+        for (const FootstepPolygon& piece : result.capture)
+        {
+            for (const PxVec3& point : piece)
+            {
+                if (point.dot(result.normalReach.outward) >= result.normalReach.minimumProjection)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    struct LandingCandidate
+    {
+    public:
+        bool operator<(const LandingCandidate& other) const
+        {
+            return score < other.score;
+        }
+
+    public:
+        size_t mode = 0;
+        PxVec3 position{0};
+        float score = 0;
+    };
+
+    void AddBestEffortCandidates(const FootstepPolygon& reach, const std::vector<FootstepPolygon>& capture,
+        size_t mode, std::vector<LandingCandidate>& candidates)
+    {
+        if (reach.size() < 3 || capture.empty())
+        {
+            return;
+        }
+        // 분리된 두 볼록 조각의 최단점은 한쪽 꼭짓점과 반대쪽 변 사이에 있다.
+        FootstepPolygon points = reach;
+        points.push_back(PolygonCenter(reach));
+        for (const FootstepPolygon& piece : capture)
+        {
+            for (const PxVec3& vertex : piece)
+            {
+                const PxVec3 projected = ClosestFootstepPoint(reach, vertex);
+                if (std::find(points.begin(), points.end(), projected) == points.end())
+                {
+                    points.push_back(projected);
+                }
+            }
+        }
+        for (const PxVec3& point : points)
+        {
+            float gapSquared = std::numeric_limits<float>::max();
+            for (const FootstepPolygon& piece : capture)
+            {
+                const PxVec3 closest = ClosestFootstepPoint(piece, point);
+                gapSquared = (std::min)(gapSquared, DistanceSquared(point, closest));
+            }
+            candidates.push_back({mode, point, gapSquared});
+        }
+    }
+
+    void AddCrossPoseCandidates(const FootstepPolygon& piece, size_t mode, const PxVec3& preferred,
+        std::vector<LandingCandidate>& candidates)
+    {
+        const PxVec3 center = PolygonCenter(piece);
+        candidates.push_back({mode, center, DistanceSquared(center, preferred)});
+        for (const PxVec3& vertex : piece)
+        {
+            candidates.push_back({mode, vertex, DistanceSquared(vertex, preferred)});
+        }
+    }
+
     void SelectTarget(const FootstepRecoveryInput& input, const FootstepRecoverySettings& settings,
         bool hasOverlap, bool allowGroundedSwitch, FootstepPolygon& tested, FootstepRecoverySnapshot& result)
     {
-        struct Candidate
-        {
-        public:
-            size_t mode = 0;
-            PxVec3 position{0};
-            float distance = 0;
-        };
-        std::vector<Candidate> candidates;
+        std::vector<LandingCandidate> candidates;
         std::array<size_t, 3> order{{0, 1, 2}};
         if (result.overlapAreas[2] > result.overlapAreas[1])
         {
@@ -297,89 +369,63 @@ namespace
             order[1] = previous;
             order[2] = 3 - previous;
         }
+        // 일반 방향의 회복 영역이 보폭 밖에 있으면 일반 도달 영역 안에서 최선점을 찾는다.
+        const bool normalOutOfRange = !hasOverlap && input.previousMode == FootstepMode::Normal &&
+            !result.reachable[0].empty() && CaptureReachesNormalSide(result);
+        const bool checkAlternatives = input.acceptsTarget || input.hasRejectedTarget;
         for (size_t mode : order)
         {
-            if (mode != previous && input.modeSelection != FootstepRecoveryInput::ModeSelection::NewStep && !allowGroundedSwitch)
+            if ((normalOutOfRange && mode != 0) ||
+                (mode != previous && input.modeSelection != FootstepRecoveryInput::ModeSelection::NewStep && !allowGroundedSwitch))
             {
                 continue;
             }
-            const std::vector<FootstepPolygon> pieces = hasOverlap ? result.intersections[mode] :
-                std::vector<FootstepPolygon>{result.reachable[mode]};
-            const PxVec3 preferred = mode == 0 ? input.normalTarget : input.preferred;
-            std::vector<Candidate> local;
-            for (const FootstepPolygon& piece : pieces)
+            const size_t first = candidates.size();
+            if (!hasOverlap)
             {
-                if (piece.size() < 3)
+                AddBestEffortCandidates(result.reachable[mode], result.capture, mode, candidates);
+                if (mode != 0 && candidates.size() > first)
                 {
+                    // 이미 교차가 필요한 방향에서는 기존 교차 목표와 대체 자세의 순서를 유지한다.
+                    const LandingCandidate nearest = *std::min_element(candidates.begin() + first, candidates.end());
+                    candidates.resize(first);
+                    candidates.push_back(nearest);
+                    if (checkAlternatives)
+                    {
+                        AddCrossPoseCandidates(result.reachable[mode], mode, input.preferred, candidates);
+                    }
+                }
+                continue;
+            }
+            for (const FootstepPolygon& piece : result.intersections[mode])
+            {
+                if (mode != 0)
+                {
+                    const PxVec3 point = ClosestFootstepPoint(piece, input.preferred);
+                    candidates.push_back({mode, point, DistanceSquared(point, input.preferred)});
+                    if (checkAlternatives)
+                    {
+                        AddCrossPoseCandidates(piece, mode, input.preferred, candidates);
+                    }
                     continue;
                 }
-                Candidate candidate;
-                candidate.mode = mode;
-                candidate.position = ClosestFootstepPoint(piece, preferred);
-                candidate.distance = DistanceSquared(candidate.position, preferred);
-                if (!hasOverlap)
+                // 교집합 안에서는 회복 영역까지의 거리가 모두 0이다. 넓은 조각의 내부부터 검사한다.
+                candidates.push_back({mode, PolygonCenter(piece), -FootstepPolygonArea(piece)});
+                if (checkAlternatives)
                 {
-                    candidate.distance = std::numeric_limits<float>::max();
-                    for (const FootstepPolygon& capture : result.capture)
-                    {
-                        // 분리된 볼록 다각형의 최단 거리는 어느 한쪽 꼭짓점과 반대쪽 변에서 나온다.
-                        for (const PxVec3& point : capture)
-                        {
-                            const PxVec3 closest = ClosestFootstepPoint(piece, point);
-                            const float distance = DistanceSquared(closest, point);
-                            if (distance < candidate.distance)
-                            {
-                                candidate.distance = distance;
-                                candidate.position = closest;
-                            }
-                        }
-                        for (const PxVec3& point : piece)
-                        {
-                            const float distance = DistanceSquared(point, ClosestFootstepPoint(capture, point));
-                            if (distance < candidate.distance)
-                            {
-                                candidate.distance = distance;
-                                candidate.position = point;
-                            }
-                        }
-                    }
-                }
-                local.push_back(candidate);
-                if (input.acceptsTarget || input.hasRejectedTarget)
-                {
-                    // 이전 경로가 거절됐으면 같은 영역 안의 다른 지점도 제한된 예산으로 검토한다.
-                    PxVec3 center(0);
                     for (const PxVec3& point : piece)
                     {
-                        center += point;
-                    }
-                    center /= static_cast<float>(piece.size());
-                    Candidate alternative = candidate;
-                    alternative.position = center;
-                    alternative.distance = DistanceSquared(center, preferred);
-                    local.push_back(alternative);
-                    for (const PxVec3& point : piece)
-                    {
-                        alternative.position = point;
-                        alternative.distance = DistanceSquared(point, preferred);
-                        local.push_back(alternative);
+                        candidates.push_back({mode, point, 0.0f});
                     }
                 }
             }
-            std::stable_sort(local.begin(), local.end(), [](const Candidate& a, const Candidate& b) -> bool
-            {
-                return a.distance < b.distance;
-            });
-            candidates.insert(candidates.end(), local.begin(), local.end());
+            std::stable_sort(candidates.begin() + first, candidates.end());
         }
         if (!hasOverlap)
         {
-            std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) -> bool
-            {
-                return a.distance < b.distance;
-            });
+            std::stable_sort(candidates.begin(), candidates.end());
         }
-        for (const Candidate& candidate : candidates)
+        for (const LandingCandidate& candidate : candidates)
         {
             if (input.hasRejectedTarget && DistanceSquared(candidate.position, input.rejectedTarget) < .0001f)
             {
@@ -609,7 +655,7 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         !std::isfinite(settings.switchAreaRatio) || settings.switchAreaRatio < 0 ||
         (settings.maximumSteps == 1 && (!std::isfinite(settings.oneStepCaptureScale) || settings.oneStepCaptureScale < 1.0f)) ||
         !input.forward.isFinite() || std::abs(input.forward.magnitudeSquared() - 1) > .01f ||
-        !input.normalTarget.isFinite() || !input.preferred.isFinite() || !input.lockedTarget.isFinite() ||
+        !input.preferred.isFinite() || !input.lockedTarget.isFinite() ||
         static_cast<size_t>(input.previousMode) > 2)
     {
         return result;
@@ -725,7 +771,11 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     else if (!result.hasTarget)
     {
         // 1보 확장 여유분이나 모델 밖의 최선 시도로는 진행 중인 일반 딛기를 바꾸지 않는다.
-        SelectTarget(input, settings, hasOverlap, allowGroundedSwitch && !expand, tested, result);
+        const bool allowSwitch = allowGroundedSwitch && !expand;
+        const bool keepNormal = input.previousMode == FootstepMode::Normal &&
+            input.modeSelection != FootstepRecoveryInput::ModeSelection::NewStep && !allowSwitch;
+        const bool usableOverlap = keepNormal ? !result.intersections[0].empty() : hasOverlap;
+        SelectTarget(input, settings, usableOverlap, allowSwitch, tested, result);
     }
     if (result.hasTarget && result.modelFeasible)
     {

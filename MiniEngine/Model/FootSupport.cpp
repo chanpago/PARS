@@ -4,6 +4,7 @@
 #include "PhysicsWorld.h"
 #include "PhysicsPose.h"
 #include "FootstepLandingQuery.h"
+#include "FootstepIK.h"
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -31,6 +32,18 @@ namespace
             std::memcmp(&a.offset, &b.offset, sizeof(a.offset)) == 0 &&
             std::memcmp(&a.rotation, &b.rotation, sizeof(a.rotation)) == 0 &&
             std::memcmp(&a.halfExtents, &b.halfExtents, sizeof(a.halfExtents)) == 0;
+    }
+
+    int FindFootBody(const PARS::PhysicsAsset& asset, const char* name)
+    {
+        for (size_t index = 0; index < asset.bodies.size(); ++index)
+        {
+            if (Matches(asset.bodies[index].bone, name))
+            {
+                return static_cast<int>(index);
+            }
+        }
+        return -1;
     }
 
     int FindAncestor(const PARS::PhysicsSkeleton& skeleton, int node, const char* name)
@@ -88,19 +101,6 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         return true;
     }
 
-    // 좌우 발 본에 연결된 PA 바디를 찾는다. 바디 인덱스와 스켈레톤의 본 인덱스는 서로 다르다.
-    // idices배열에 왼발,오른발의 물리바디 인덱스를 저장하기 위해 선언한다
-    std::array<int, 2> indices{-1, -1};
-    for (size_t side = 0; side < m_Feet.size(); ++side)
-    {
-        for (size_t body = 0; body < asset->bodies.size(); ++body)
-        {
-            if (Matches(asset->bodies[body].bone, FootNames[side]))
-            {
-                indices[side] = static_cast<int>(body);
-            }
-        }
-    }
     // 본 계층과 모델에 저장된 기준 자세를 사용한다. 현재 애니메이션 프레임이나 물리 자세는 사용하지 않는다.
     // 컴포넌트 변환을 단위행렬로 두어 캐릭터의 월드 위치·방향을 제외한 기준 본 변환을 구한다.
     PARS::PhysicsSkeleton skeleton;
@@ -124,7 +124,7 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
     bool found = false;
     for (size_t side = 0; side < m_Feet.size(); ++side)
     {
-        const int index = indices[side];
+        const int index = FindFootBody(*asset, FootNames[side]);
         if (index < 0 || size_t(index) >= ragdoll.GetBodyCount() || size_t(index) >= ragdoll.GetBoneNodes().size())
         {
             continue;
@@ -145,6 +145,12 @@ bool PARS::FootSupport::Prepare(PARS::SkeletalMeshComponent& mesh)
         leg.ankleNode = node;
         leg.kneeNode = FindAncestor(skeleton, node, KneeNames[side]);
         leg.hipNode = FindAncestor(skeleton, leg.kneeNode, HipNames[side]);
+        const std::vector<int>& bodyNodes = ragdoll.GetBoneNodes();
+        const std::vector<int>::const_iterator hipBody = std::find(bodyNodes.begin(), bodyNodes.end(), leg.hipNode);
+        if (leg.hipNode >= 0 && hipBody != bodyNodes.end())
+        {
+            sole.hipBodyIndex = static_cast<int>(hipBody - bodyNodes.begin());
+        }
         if (leg.hipNode >= 0 && leg.kneeNode >= 0 &&
             size_t(leg.hipNode) < referenceWorld.size() && size_t(leg.kneeNode) < referenceWorld.size())
         {
@@ -254,7 +260,6 @@ void PARS::FootSupport::Reset()
 void PARS::FootSupport::ResetFootstep()
 {
     m_FootstepPlanner.Reset();
-    m_BufferGrace.Reset();
     m_HasIdleReference = false;
     m_HasPendingImpact = false;
     m_Snapshot.footstep = {};
@@ -267,12 +272,6 @@ void PARS::FootSupport::RecordImpact(const PxVec3& position)
         m_PendingImpactPosition = position;
         m_HasPendingImpact = true;
     }
-}
-
-void PARS::FootSupport::UpdateBufferGrace(bool enabled)
-{
-    m_BufferGrace.Update(enabled, m_Snapshot.contactRevision, m_Snapshot.completedPhysicsStep,
-        PhysicsWorld::FixedDeltaTime, m_Snapshot.balance);
 }
 
 void PARS::FootSupport::ReportRecoveryPath(size_t side, const PxVec3& target, bool accepted)
@@ -424,12 +423,12 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.automaticSupport = mesh.UsesAutomaticRootSupport();
     input.idleAnimation = idle;
     input.rootReleased = mesh.GetRootSupportRelease() != RootSupportRelease::None;
-    input.outsideBufferReleased = mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer || m_BufferGrace.HasExpired();
     input.hasCom = m_Snapshot.hasCenterOfMass;
     input.hasVelocity = m_Snapshot.hasCenterOfMassVelocity;
     input.com = m_Snapshot.centerOfMass;
     input.velocity = m_Snapshot.centerOfMassVelocity;
     input.hull = m_Snapshot.hull;
+    input.bufferHull = m_Snapshot.balance.bufferHull;
     input.zone = m_Snapshot.balance.zone;
     input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
     input.fixedDeltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
@@ -514,6 +513,16 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.normalImpulse = foot.contact.normalImpulse;
         target.corners = foot.corners;
         target.hasSoleRectangle = foot.available;
+        const Sole& sole = m_Feet[side];
+        if (input.active && input.automaticSupport && idle && foot.available && foot.leg.available &&
+            foot.contact.hasSample && foot.contact.grounded && sole.hipBodyIndex >= 0)
+        {
+            const PxVec3 hip = ToPx(Vector3(ragdoll.GetBoneWorld(sole.hipBodyIndex).GetW()));
+            const PxVec3 ankle = ToPx(Vector3(ragdoll.GetBoneWorld(sole.bodyIndex).GetW()));
+            const PxVec3 hipVelocity = ragdoll.GetBodyPointVelocity(sole.hipBodyIndex, hip);
+            target.timeToReachLimit = PredictSupportReachTime(hip - ankle, hipVelocity,
+                foot.leg.thighLength, foot.leg.calfLength);
+        }
 
         // idle기준 발배치 오프셋을 현재 캐릭터 방향으로 돌림
         const PxVec3 offset = referenceFeet[side] - midpoint;
@@ -569,7 +578,6 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     // 다리 IK에 필요한 본 연결과 다리길이 파악
     if (!Prepare(mesh))
     {
-        m_BufferGrace.Reset();
         m_ContactWorld = nullptr;
         m_Contacts = {};
         m_FootstepPlanner.Reset();
@@ -652,7 +660,6 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
 
     // 현재 COM이 어디에 있는지 기록한다.
     m_Snapshot.balance = EvaluateFootSupportBalance(m_Snapshot.hull, m_Snapshot.hasComProjection ? m_Snapshot.projectedCenterOfMass : PxVec3(std::numeric_limits<float>::quiet_NaN()), m_BufferScale);
-    UpdateBufferGrace(mesh.IsActiveRagdoll() && mesh.UsesAutomaticRootSupport());
 
     // COM 예측과 발 접촉 정보를 바탕으로 발딛기 필요 여부, 움직일 발과 착지 목표를 판단한다.
     // 실제 발의 이동·접촉에 따라 진행 상태와 발 이동 목표를 갱신하고 m_Snapshot.footstep에 저장한다.

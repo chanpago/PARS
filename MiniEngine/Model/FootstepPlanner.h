@@ -4,9 +4,13 @@
 #include "FootstepRecovery.h"
 #include <array>
 #include <cstdint>
+#include <limits>
 
 namespace PARS
 {
+    constexpr float MinimumFootstepDuration = .1f;
+    constexpr float MaximumFootstepDuration = .3f;
+
     struct FootstepSettings
     {
     public:
@@ -77,6 +81,7 @@ namespace PARS
         std::array<physx::PxVec3, 4> corners{physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0)};
         float calfLength = 0;
         float normalImpulse = 0;
+        float timeToReachLimit = std::numeric_limits<float>::infinity();
         bool available = false;
         bool hasContactSample = false;
         bool grounded = false;
@@ -88,6 +93,7 @@ namespace PARS
     public:
         std::function<bool(size_t, const physx::PxVec3&)> acceptsLanding;
         std::vector<physx::PxVec3> hull;
+        std::vector<physx::PxVec3> bufferHull;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
         std::array<FootstepFootInput, 2> feet;
@@ -104,7 +110,6 @@ namespace PARS
         bool automaticSupport = false;
         bool idleAnimation = false;
         bool rootReleased = false;
-        bool outsideBufferReleased = false;
         bool hasCom = false;
         bool hasVelocity = false;
         bool hasReference = false;
@@ -180,8 +185,10 @@ namespace PARS
         float duration = 0;
         float measuredProgress = 0;
         float progress = 0;
+        float progressPerSecond = 0;
         float remainingDistance = 0;
         float landingError = 0;
+        float landingTimeError = 0;
         float landingLockProgress = 0;
         float landingLoweringSpeed = 0;
         float maximumLandingLowering = 0;
@@ -189,6 +196,7 @@ namespace PARS
         bool valid = false;
         bool hasLandingError = false;
         bool landingTargetLocked = false;
+        bool hasSupportDeadline = false;
     };
 
     // 명령과 실제 접촉은 독립적이며 이륙 이력으로 공중 이동과 착지를 확인한다.
@@ -200,9 +208,15 @@ namespace PARS
             return phase == FootstepPhase::AwaitingTakeoff || phase == FootstepPhase::Airborne;
         }
 
+        bool UsesSwingTrajectory() const
+        {
+            return hasTakenOff || motion.hasSupportDeadline;
+        }
+
     public:
         uint64_t startedStep = 0;
         uint64_t takeoffStep = 0;
+        uint64_t trajectoryStartStep = 0;
         FootstepTarget target;
         physx::PxVec3 startPosition{0};
         physx::PxVec3 initialTarget{0};
@@ -218,7 +232,7 @@ namespace PARS
         bool justLanded = false;
     };
 
-    // 현재 목표를 고정한 궤적 예측이다. 이륙 전에는 남은 들기 동작 후 이륙한다고 가정한다.
+    // 지지 시한이 있으면 발을 드는 구간도 같은 궤적에 포함한다.
     float GetFootstepRemainingTime(const FootstepCommand& command);
     physx::PxVec3 SampleFootstepPosition(const FootstepCommand& command, float timeAhead);
 
@@ -243,6 +257,7 @@ namespace PARS
         uint64_t startCount = 0;
         uint64_t landingCount = 0;
         uint64_t abortCount = 0;
+        double outsideBufferTime = 0.0;
         std::array<FootstepCommand, 2> feet;
         std::array<FootstepTarget, 2> candidates;
         FootstepComPrediction startCom;
@@ -256,6 +271,7 @@ namespace PARS
         int followupFoot = -1;
         uint32_t remainingRecoverySteps = 0;
         bool hasPrediction = false;
+        bool actualComOutsideBuffer = false;
         bool needsStep = false;
         bool hasGroundPlane = false;
         bool hasImpact = false;
@@ -278,6 +294,9 @@ namespace PARS
         {
             return m_Snapshot;
         }
+
+    public:
+        static constexpr double OutsideBufferDuration = 0.3;
 
     private:
         FootstepSnapshot m_Snapshot;

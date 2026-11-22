@@ -55,7 +55,7 @@ namespace
         Vector takeoff(command.takeoffPosition);
         Vector lift;
         bool includesLift = false;
-        if (!command.hasTakenOff)
+        if (!command.UsesSwingTrajectory())
         {
             const float remaining = PxMax(0.0f, .5f * motion.duration - motion.takeoffElapsedTime);
             elapsed = time - Range(remaining);
@@ -69,7 +69,9 @@ namespace
             includesLift = time.lower <= remaining;
             takeoff = Vector(command.startPosition) + Vector(PxVec3(0, motion.initialHeight, 0));
         }
-        const Range progress = Clamp(elapsed / Range(motion.duration), 0, 1);
+        const Range progress = motion.hasSupportDeadline ?
+            Clamp(Range(motion.progress) + time * Range(motion.progressPerSecond), 0, 1) :
+            Clamp(elapsed / Range(motion.duration), 0, 1);
         Vector position = takeoff + (Vector(command.target.position) - takeoff) * Blend(progress);
         position.y = position.y + Range(.5f * motion.initialHeight) * (Range(1) - Cos(Range(PxTwoPi) * progress));
         position.y = Minimum(position.y, PxMax(command.startPosition.y, command.target.position.y) + motion.initialHeight);

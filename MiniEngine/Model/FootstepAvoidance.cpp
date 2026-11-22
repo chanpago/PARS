@@ -86,7 +86,9 @@ void FootstepAvoidance::Update(FootstepCollisionInput input, const PxVec3& chara
     for (size_t side = 0; side < 2; ++side)
     {
         const FootstepCommand& command = input.legs[side].command;
-        if (!command.IsInProgress() || command.startedStep != m_Snapshot.startedSteps[side])
+        const FootstepPath& path = m_Snapshot.paths[side];
+        if (!command.IsInProgress() || command.startedStep != m_Snapshot.startedSteps[side] ||
+            (command.motion.hasSupportDeadline && path.enabled && path.startTime + path.duration > command.motion.duration + 1e-6f))
         {
             m_Snapshot.paths[side] = {};
             m_Snapshot.directions[side] = 0;
@@ -131,7 +133,7 @@ void FootstepAvoidance::Update(FootstepCollisionInput input, const PxVec3& chara
         {
             continue;
         }
-        const float flight = leg.command.hasTakenOff ? leg.command.motion.elapsedTime : 0;
+        const float flight = leg.command.motion.elapsedTime;
         const float remaining = leg.command.motion.duration - flight;
         if (remaining <= input.fixedDeltaTime)
         {

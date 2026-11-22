@@ -464,8 +464,8 @@ namespace PARS
             }
             return m_Ragdoll.SetRootSupported(!releaseRoot, m_PhysicsError);
         }
-        // 낙상은 전용 기상 경로에서 처리하므로 기존 서기 복귀 타이머에서 제외한다.
-        if (!IsActiveRagdoll() || IsFalling() || IsGroundFallActive())
+        // 이번 틱에 발딛기를 포기한 경우도 낙상 경로에 맡겨, 서기 복귀가 먼저 시작되지 않게 한다.
+        if (!IsActiveRagdoll() || IsFalling() || IsGroundFallActive() || sample.footstep.aborted)
         {
             m_KinematicRecoveryTimer.Reset();
             return true;
@@ -877,7 +877,10 @@ namespace PARS
                     const PxTransform heading = !m_CrossStepPose.empty() && foot.boneNode >= 0 &&
                         static_cast<size_t>(foot.boneNode) < target.size() ?
                         ToRecoveryFrame(target[foot.boneNode]) * ToRecoveryFrame(foot.soleInBone) : animatedSoles[side];
-                    if (MakeFootSoleTarget(command.motion.position, command.target.normal, heading, sole))
+                    // 다음 물리 틱 끝에 도달할 자세를 관절 PD에 전달한다.
+                    const PxVec3 drivePosition = command.motion.hasSupportDeadline ?
+                        SampleFootstepPosition(command, deltaTime) : command.motion.position;
+                    if (MakeFootSoleTarget(drivePosition, command.target.normal, heading, sole))
                     {
                         m_RecoverySoles[side] = sole;
                     }

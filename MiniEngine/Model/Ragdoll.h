@@ -41,6 +41,8 @@ namespace PARS
         float loadWeight = 1.0f; // 실제 접촉 여부와 별개로 이 발에 배정할 목표 하중의 가중치
         float ankleDriveBoost = 0;
         float ankleDriveBlendTime = .08f;
+        std::array<int, 3> swingNodes{{-1, -1, -1}};
+        float inverseLandingTime = 0;
         bool grounded = false;
     };
 

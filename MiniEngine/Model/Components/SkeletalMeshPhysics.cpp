@@ -305,6 +305,13 @@ namespace PARS
             contacts[side].normal = foot.contact.support.GetNormal();
             contacts[side].ankleDriveBoost = m_StandingSupportSettings.ankleDriveBoost;
             contacts[side].ankleDriveBlendTime = m_StandingSupportSettings.ankleDriveBlendTime;
+            const FootstepCommand& command = step.feet[side];
+            if (support.hasMotionTarget && command.motion.hasSupportDeadline && deltaTime > 0)
+            {
+                contacts[side].swingNodes = {{setup.hipNode, setup.kneeNode, setup.ankleNode}};
+                // 위치와 속도를 함께 제어할 수 있는 두 물리 틱을 게인 계산의 최소 시간으로 둔다.
+                contacts[side].inverseLandingTime = 1.0f / (std::max)(GetFootstepRemainingTime(command), 2.0f * deltaTime);
+            }
         }
 
         // 실제 접촉만 전달한다. 이동 명령과 접촉 유예로 하중을 만들어 내지 않는다.
@@ -429,8 +436,10 @@ namespace PARS
         {
             if (step.feet[side].IsInProgress())
             {
+                const FootstepCommand& command = step.feet[side];
+                const float driveTimeAhead = command.motion.hasSupportDeadline ? deltaTime : 0.0f;
                 input.legs[side].targetSole.p += SampleFootstepPath(avoidance.paths[side],
-                    GetPredictedFootstepFlightTime(step.feet[side], 0));
+                    GetPredictedFootstepFlightTime(command, driveTimeAhead));
             }
         }
         m_FootstepCollision.elapsedMilliseconds = std::chrono::duration<double, std::milli>(
@@ -502,10 +511,10 @@ namespace PARS
         {
             return true;
         }
-        const FootSupportBalance& balance = m_FootSupport.GetSnapshot().balance;
-        // 모드 전환 직후에도 현재 샘플로 유예를 준비한다. 같은 샘플은 중복 누적되지 않는다.
-        m_FootSupport.UpdateBufferGrace(IsActiveRagdoll());
-        const FootSupportGrace& grace = m_FootSupport.GetBufferGrace();
+        const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
+        const FootSupportBalance& balance = sample.balance;
+        const bool idle = !m_AnimInstance->IsBlending() &&
+            m_AnimInstance->GetAnimationName(m_AnimInstance->GetCurrentAnimationIndex()) == "Idle";
         if (IsFalling())
         {
             m_RootSupportRelease = RootSupportRelease::NoSupport;
@@ -520,14 +529,21 @@ namespace PARS
             {
                 m_RootSupportRelease = RootSupportRelease::NoSupport;
             }
-            else if (grace.HasExpired())
+            else if (sample.footstep.reason == FootstepReason::OutsideBuffer)
             {
                 m_RootSupportRelease = RootSupportRelease::OutsideBuffer;
             }
         }
-        const float weight = m_RootSupportRelease == RootSupportRelease::None ? grace.GetSupportWeight(balance) : 0;
-        const bool idle = !m_AnimInstance->IsBlending() &&
-            m_AnimInstance->GetAnimationName(m_AnimInstance->GetCurrentAnimationIndex()) == "Idle";
+        float weight = 0;
+        if (m_RootSupportRelease == RootSupportRelease::None)
+        {
+            weight = balance.weight;
+            if (balance.zone == FootSupportZone::Outside)
+            {
+                // B 밖에서도 직전 보조 강도로 회복 스텝을 이어간다. 첫 관측부터 밖이면 기본 강도로 시작한다.
+                weight = m_Ragdoll.IsRootSupported() ? m_Ragdoll.GetRootSupportWeight() : 1.0f;
+            }
+        }
         m_Ragdoll.SetFootDrivenSupport(IsActiveRagdoll() && idle && m_RootSupportRelease == RootSupportRelease::None);
         if (m_Ragdoll.SetRootSupport(weight, false, error))
         {

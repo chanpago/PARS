@@ -50,6 +50,8 @@ namespace
             command.target.position.isFinite() && command.target.normal.isFinite() &&
             command.target.normal.magnitudeSquared() > 1e-8f &&
             std::isfinite(motion.duration) && motion.duration > 0 &&
+            (!motion.hasSupportDeadline || (std::isfinite(motion.progress) && motion.progress >= 0 && motion.progress <= 1 &&
+                std::isfinite(motion.progressPerSecond) && motion.progressPerSecond >= 0)) &&
             std::isfinite(motion.initialHeight) && motion.initialHeight >= 0 &&
             std::isfinite(motion.elapsedTime) && motion.elapsedTime >= 0 &&
             std::isfinite(motion.takeoffElapsedTime) && motion.takeoffElapsedTime >= 0 &&

@@ -926,13 +926,24 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
     if (mesh.UsesAutomaticRootSupport())
     {
         const PARS::RootSupportRelease released = mesh.GetRootSupportRelease();
-        const char* state = released == PARS::RootSupportRelease::None ? u8"지지 중" :
-            released == PARS::RootSupportRelease::OutsideBuffer ? u8"B 이탈 유예 만료로 해제" :
-            released == PARS::RootSupportRelease::NoSupport ? u8"발 지지 없음으로 해제" : u8"지지 해제";
+        const char* state = u8"지지 해제";
+        switch (released)
+        {
+        case PARS::RootSupportRelease::None:
+            state = u8"지지 중";
+            break;
+        case PARS::RootSupportRelease::NoSupport:
+            state = u8"발 지지 없음으로 해제";
+            break;
+        case PARS::RootSupportRelease::OutsideBuffer:
+            state = u8"실제 COM의 B 연속 이탈로 해제";
+            break;
+        default:
+            break;
+        }
         ImGui::Text(u8"적용 w = %.3f / %s", mesh.GetRagdoll().GetRootSupportWeight(), state);
-        const PARS::FootSupportGrace& grace = support.GetBufferGrace();
-        ImGui::Text(u8"B 연속 이탈: %.2f / %.2f초%s", grace.GetOutsideTime(), PARS::FootSupportGrace::Duration,
-            grace.IsActive() && released == PARS::RootSupportRelease::None ? u8" · 회복 유예 중" : "");
+        ImGui::Text(u8"실제 COM의 B 연속 이탈 %.2f / %.2f초", sample.footstep.outsideBufferTime,
+            PARS::FootstepPlanner::OutsideBufferDuration);
         if (released != PARS::RootSupportRelease::None)
         {
             ImGui::TextUnformatted(u8"더미 초기화 전까지 해제 상태를 유지합니다.");
@@ -1190,7 +1201,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         ImGui::SliderFloat(u8"부채꼴 경계 선택 유지 반각 (도)", &settings.landingComClampHysteresisDegrees,
             0.0f, 30.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
         ImGui::TextWrapped(u8"기존 일반 딛기 후보에 적용하는 COM 보정입니다. 회복 영역 판단과 교차 후보는 보정 전 실제 COM·속도를 사용합니다. 회복 영역 선택을 끄면 기존 청록색 보정점으로 시작을 판단합니다.");
-        ImGui::DragFloat(u8"이륙 후 발 이동 시간 (초)", &settings.stepDuration, .01f, .05f, 1.0f, "%.2f");
+        ImGui::DragFloat(u8"지지 다리 시한이 없을 때의 이동 시간 (초)", &settings.stepDuration, .01f,
+            PARS::MinimumFootstepDuration, PARS::MaximumFootstepDuration, "%.2f");
         ImGui::DragFloat(u8"최소 들기 높이 (m)", &settings.minimumLiftHeight, .005f, .01f, .3f, "%.3f");
         ImGui::DragFloat(u8"착지 수평 목표 고정 진행률", &settings.landingLockProgress, .01f, .5f, 1.0f, "%.2f");
         ImGui::DragFloat(u8"착지 추가 하강 속도 (m/s)", &settings.landingLoweringSpeed, .005f, 0.0f, .3f, "%.3f");
@@ -1249,6 +1261,15 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             }
             ImGui::Text(u8"시작 시 이동 거리 %.2fm / 목표 출력 %s", command.initialDistance, command.hasTarget ? "ON" : "OFF");
             const PARS::FootstepMotion& motion = command.motion;
+            if (motion.hasSupportDeadline)
+            {
+                ImGui::Text(u8"지지 다리 IK 한계까지 계획한 착지 시간 %.3f초 / 남은 시간 %.3f초",
+                    motion.duration, PARS::GetFootstepRemainingTime(command));
+                if (command.phase == PARS::FootstepPhase::Landed)
+                {
+                    ImGui::Text(u8"실제 착지 시각과 시한의 차이 %+.3f초", motion.landingTimeError);
+                }
+            }
             ImGui::Text(u8"실제 이륙 확인 %s / 이륙 대기 %.3f초", command.hasTakenOff ? "ON" : "OFF", motion.takeoffElapsedTime);
             ImGui::Text(u8"계획 최고 높이 %.1fcm / 시작 시 종아리 상한 %.1fcm",
                 motion.initialHeight * 100, motion.heightLimit * 100);
