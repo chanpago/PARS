@@ -152,7 +152,10 @@ namespace
                 return false;
             }
         }
-        if (!mesh.SetAirborneFallAnimations(flailIndices))
+        // 공중 낙하 자동 전환은 잠시 절벽 검증에서만 사용한다.
+        std::wstring airborneFallReport;
+        if (CommandLineArgs::GetString(L"airbornefalltest", airborneFallReport) &&
+            !mesh.SetAirborneFallAnimations(flailIndices))
         {
             error = u8"공중 낙하 클립 세 개를 등록하지 못했습니다.";
             return false;
