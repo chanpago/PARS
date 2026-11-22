@@ -13,7 +13,7 @@ namespace PARS
 {
     bool SkeletalMeshComponent::SetFallingAnimation(uint32_t animationIndex)
     {
-        if (animationIndex >= m_AnimInstance->GetAnimationCount() ||
+        if (animationIndex >= m_AnimInstance->GetAnimationCount() || IsAirborneFallClip(animationIndex) ||
             animationIndex == m_StandingUpAnimationIndex || animationIndex == m_StandingIdleAnimationIndex)
         {
             return false;
@@ -26,6 +26,7 @@ namespace PARS
     {
         const size_t slot = static_cast<size_t>(direction);
         if (slot >= m_DirectionalFallingAnimations.size() || animationIndex >= m_AnimInstance->GetAnimationCount() ||
+            IsAirborneFallClip(animationIndex) ||
             animationIndex == m_StandingUpAnimationIndex || animationIndex == m_StandingIdleAnimationIndex)
         {
             return false;
@@ -43,7 +44,8 @@ namespace PARS
 
     bool SkeletalMeshComponent::IsFollowingFallingAnimation() const
     {
-        return IsFallingClip(m_AnimInstance->GetCurrentAnimationIndex());
+        const uint32_t current = m_AnimInstance->GetCurrentAnimationIndex();
+        return IsFallingClip(current) || (IsFalling() && IsAirborneFallClip(current));
     }
 
     uint32_t SkeletalMeshComponent::SelectFallingAnimation() const
@@ -90,6 +92,7 @@ namespace PARS
         if (animationIndex >= m_AnimInstance->GetAnimationCount() ||
             idleAnimationIndex >= m_AnimInstance->GetAnimationCount() || animationIndex == idleAnimationIndex ||
             IsFallingClip(animationIndex) || IsFallingClip(idleAnimationIndex) ||
+            IsAirborneFallClip(animationIndex) || IsAirborneFallClip(idleAnimationIndex) ||
             m_AnimInstance->GetAnimationName(idleAnimationIndex) != "Idle")
         {
             return false;
@@ -109,12 +112,17 @@ namespace PARS
 
     bool SkeletalMeshComponent::UpdateFallingAnimation(float deltaTime)
     {
+        if (IsFalling())
+        {
+            // 공중에서 선택한 루프는 실제 지면 접촉까지 같은 재생 시계로 진행한다.
+            return true;
+        }
         // 기상과 Idle 보간은 물리 시뮬레이션을 꺼 둔 상태에서도 계속 진행한다.
         if (m_StandingUpState == StandingUpState::Kinematic || m_StandingUpState == StandingUpState::IdleBlend)
         {
             return UpdateStandingUpAnimation(deltaTime);
         }
-        if (!IsFalling())
+        if (!IsGroundFallActive())
         {
             m_StandingUpStableTime = 0;
             m_StandingUpState = StandingUpState::None;
@@ -129,7 +137,8 @@ namespace PARS
         if (fallClip >= m_AnimInstance->GetAnimationCount())
         {
             // 낙상 클립을 꺼도 물리 낙상과 착지 후 기상은 계속 처리한다.
-            if (IsFollowingFallingAnimation() || IsFollowingStandingUpAnimation())
+            if (IsFollowingFallingAnimation() || IsFollowingStandingUpAnimation() ||
+                IsAirborneFallClip(m_AnimInstance->GetCurrentAnimationIndex()))
             {
                 // 재생 도중 끄거나 기상 중 다시 넘어지면 기본 Idle 목표로 돌아간다.
                 if (m_StandingIdleAnimationIndex < m_AnimInstance->GetAnimationCount())
@@ -399,7 +408,15 @@ namespace PARS
         if (!IsRagdoll())
         {
             const bool approaching = m_Ragdoll.HasApproachingImpact(m_RecoverySettings.impactVelocity);
-            if (!impact && !approaching)
+            Character* character = dynamic_cast<Character*>(&GetOwner());
+            const bool movingCapsule = character && character->GetCharacterMovement().IsTickEnabled() &&
+                character->GetCapsuleComponent().HasPhysicsCollision();
+            // 이동 캡슐이 없는 대기 더미는 받침이 사라져도 키네마틱인 동안에는 하강 속도가 생기지 않는다.
+            const bool lostFloor = !movingCapsule && m_AutomaticRootSupport && !IsBlendingToKinematic() &&
+                m_StandingUpState == StandingUpState::None && m_AirborneFallAnimations.front() != UINT32_MAX &&
+                sample.projectedPointCount == 0 && sample.feet[0].contact.hasSample && sample.feet[1].contact.hasSample &&
+                !sample.feet[0].contact.grounded && !sample.feet[1].contact.grounded;
+            if (!impact && !approaching && !lostFloor)
             {
                 return true;
             }
@@ -421,7 +438,6 @@ namespace PARS
                     impactWeight += weight;
                 }
             }
-            Character* character = dynamic_cast<Character*>(&GetOwner());
             const bool activated = character ? character->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_PhysicsError) :
                 SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, Vector3(kZero), m_PhysicsError);
             if (!activated)
@@ -435,20 +451,21 @@ namespace PARS
                 m_StandingUpStableTime = 0;
             }
             // 일어나는 도중에는 골반을 서기 목표에 붙잡지 않고 낙상 경로로 돌아간다.
-            m_RootSupportRelease = interruptedStandingUp ? RootSupportRelease::NoSupport : RootSupportRelease::None;
+            const bool releaseRoot = interruptedStandingUp || lostFloor;
+            m_RootSupportRelease = releaseRoot ? RootSupportRelease::NoSupport : RootSupportRelease::None;
             m_FootSupport.ResetFootstep();
             ResetRecovery();
             m_KinematicRecoveryTimer.Reset();
-            m_PendingRecoveryImpact = !interruptedStandingUp;
+            m_PendingRecoveryImpact = !interruptedStandingUp && (impact || approaching);
             m_Ragdoll.ApplyExternalImpacts(impacts);
             if (impactWeight > 0)
             {
                 m_FootSupport.RecordImpact(impactPosition / impactWeight);
             }
-            return m_Ragdoll.SetRootSupported(!interruptedStandingUp, m_PhysicsError);
+            return m_Ragdoll.SetRootSupported(!releaseRoot, m_PhysicsError);
         }
         // 낙상은 전용 기상 경로에서 처리하므로 기존 서기 복귀 타이머에서 제외한다.
-        if (!IsActiveRagdoll() || IsFalling())
+        if (!IsActiveRagdoll() || IsFalling() || IsGroundFallActive())
         {
             m_KinematicRecoveryTimer.Reset();
             return true;

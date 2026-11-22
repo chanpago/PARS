@@ -197,6 +197,7 @@
     <ClCompile Include="Components\SkeletalMeshComponent.cpp" />
     <ClCompile Include="Components\SkeletalMeshPhysics.cpp" />
     <ClCompile Include="Components\SkeletalMeshRecovery.cpp" />
+    <ClCompile Include="Components\SkeletalMeshAirborneFall.cpp" />
     <ClCompile Include="Components\SkeletalMeshCrossStep.cpp" />
     <ClCompile Include="PhysicsPose.cpp" />
     <ClInclude Include="PhysicsPose.h" />

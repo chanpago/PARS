@@ -15,6 +15,156 @@
 
 using namespace Math;
 
+bool RunAirborneFallValidation(PARS::World& world, PARS::Character& character, PARS::Character& dummy,
+    const std::wstring& reportPath)
+{
+    using namespace PARS;
+    std::ofstream report(reportPath);
+    const std::function<void(bool, const char*)> check = [&](bool condition, const char* message) -> void
+    {
+        if (!condition)
+        {
+            throw std::runtime_error(message);
+        }
+        report << "PASS: " << message << std::endl;
+    };
+    SkeletalMeshComponent& mesh = character.GetMesh();
+    AnimInstance& animation = mesh.GetAnimInstance();
+    try
+    {
+        std::vector<uint32_t> flails;
+        for (uint32_t clip = 0; clip < animation.GetAnimationCount(); ++clip)
+        {
+            const std::string& name = animation.GetAnimationName(clip);
+            if (name.find("M_ragdoll_flail_") == 0)
+            {
+                std::vector<GraphNode> pose;
+                const float duration = animation.GetAnimationDuration(clip);
+                check(duration > 0 && animation.SampleAnimationPose(clip, duration * .5f, pose) &&
+                    pose.size() == animation.GetPose().size(), "Sample imported flail on the player skeleton");
+                flails.push_back(clip);
+                report << name << " duration_s=" << duration << std::endl;
+            }
+        }
+        check(flails.size() == 3, "All three airborne loops are registered");
+        constexpr float dt = 1.0f / 60.0f;
+        world.SetPhysicsPaused(false);
+        world.SetPhysicsTimeScale(1);
+        for (int frame = 0; frame < 45; ++frame)
+        {
+            world.Tick(dt);
+        }
+        check(!mesh.IsFalling() && character.GetCharacterMovement().IsMovingOnGround(),
+            "Player stands on the 6 m cliff platform");
+        int entered = -1;
+        int landed = -1;
+        int lastSupport = -1;
+        int lastReachableGround = -1;
+        bool recovered = false;
+        uint32_t selected = UINT32_MAX;
+        float lastClipTime = 0;
+        float firstHeight = 0;
+        for (int frame = 0; frame < 1000; ++frame)
+        {
+            if (entered < 0)
+            {
+                character.AddMovementInput(Vector3(1, 0, 0));
+            }
+            world.Tick(dt);
+            const FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
+            if (entered < 0 && (character.GetCharacterMovement().IsMovingOnGround() ||
+                sample.feet[0].contact.grounded || sample.feet[1].contact.grounded))
+            {
+                lastSupport = frame;
+            }
+            if (entered < 0 && sample.projectedPointCount != 0)
+            {
+                lastReachableGround = frame;
+            }
+            if (mesh.IsFalling())
+            {
+                const uint32_t current = animation.GetCurrentAnimationIndex();
+                if (entered < 0)
+                {
+                    entered = frame;
+                    selected = current;
+                    firstHeight = float(mesh.GetRagdoll().GetPosition().GetY());
+                    report << "last_support_tick=" << lastSupport << " last_reachable_tick=" << lastReachableGround << " entry_tick=" << entered
+                        << " entry_height_m=" << firstHeight << " clip=" << animation.GetAnimationName(selected) << std::endl;
+                    check(entered - lastSupport == 9 && firstHeight > -1.0f,
+                        "Enter exactly 0.15 s after losing real support, even above the edge");
+                    check(std::find(flails.begin(), flails.end(), selected) != flails.end(), "Drives follow a flail loop");
+                }
+                if (current != selected || animation.GetAnimationTime() <= lastClipTime || !mesh.IsActiveRagdoll() ||
+                    mesh.GetRagdoll().IsRootSupported() || !mesh.GetRagdoll().AreDrivesEnabled() ||
+                    mesh.GetFootstepIKSnapshot().status == FootstepIKStatus::Applied || !mesh.GetRagdoll().IsFinite())
+                {
+                    throw std::runtime_error("Airborne clip, free pelvis, drives or IK changed before ground contact");
+                }
+                lastClipTime = animation.GetAnimationTime();
+            }
+            else if (entered >= 0 && landed < 0)
+            {
+                landed = frame;
+                report << "landing_tick=" << landed << " landing_height_m=" << float(mesh.GetRagdoll().GetPosition().GetY())
+                    << " landing_com_vy=" << sample.centerOfMassVelocity.y << " tracked_clip_s=" << lastClipTime << std::endl;
+                check(mesh.GetBalanceState() == CharacterBalanceState::Landed && landed - entered > 20 &&
+                    firstHeight - float(mesh.GetRagdoll().GetPosition().GetY()) > 4,
+                    "Actual contact on lower ground ends the same airborne clip");
+            }
+            else if (landed >= 0 && !mesh.IsRagdoll() && !mesh.IsFollowingStandingUpAnimation() &&
+                !animation.IsBlending() && animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle")
+            {
+                check(character.GetCharacterMovement().IsMovingOnGround() && float(character.GetActorLocation().GetY()) < -4,
+                    "Standing-up returns control to the player on the lower floor");
+                recovered = true;
+                break;
+            }
+        }
+        check(recovered, "Cliff walk, airborne loop, landing and recovery complete");
+
+        // 같은 캐릭터를 세 원본 자세로 공중에 놓고 동적인 몸에서 선택한 클립을 검사한다.
+        PreviewAnimInstance& preview = static_cast<PreviewAnimInstance&>(animation);
+        preview.SetLocomotionEnabled(false);
+        preview.SetAutoCycleEnabled(false);
+        std::string error;
+        for (uint32_t clip : flails)
+        {
+            check(character.StopRagdoll(error), "Reset the player for an oriented drop");
+            character.GetCharacterMovement().StopMovementImmediately();
+            character.SetActorTransform(AffineTransform(Matrix3(kIdentity), Vector3(10, 2, 0)));
+            check(animation.PlayAnimation(clip), "Set imported entry pose");
+            animation.SetPlaying(false);
+            check(character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
+                mesh.GetRagdoll().SetRootSupported(false, error), "Drop the articulated body with a free pelvis");
+            for (int tick = 0; tick < 30 && !mesh.IsFalling(); ++tick)
+            {
+                world.Tick(dt);
+            }
+            world.Tick(dt);
+            report << "entry_pose=" << animation.GetAnimationName(clip) << " selected="
+                << animation.GetAnimationName(animation.GetCurrentAnimationIndex()) << std::endl;
+            check(mesh.IsFalling() && animation.GetCurrentAnimationIndex() == clip && animation.IsPlaying() &&
+                animation.GetAnimationTime() > 0, "Current physical pose selects and advances its matching flail");
+        }
+        SkeletalMeshComponent& dummyMesh = dummy.GetMesh();
+        check(!dummy.IsRagdoll() && dummyMesh.UsesAutomaticRagdoll(), "Unhit dummy still waits on the upper platform");
+        dummy.SetActorLocation(dummy.GetActorLocation() + Vector3(0, 0, -3));
+        for (int tick = 0; tick < 45 && !dummyMesh.IsFalling(); ++tick)
+        {
+            world.Tick(dt);
+        }
+        check(dummyMesh.IsActiveRagdoll() && dummyMesh.IsFalling() && !dummyMesh.GetRagdoll().IsRootSupported(),
+            "A stationary automatic dummy loses support and falls without an external hit");
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        report << "FAIL: " << exception.what() << " | " << mesh.GetPhysicsError() << std::endl;
+        return false;
+    }
+}
+
 bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath)
 {
     using namespace PARS;

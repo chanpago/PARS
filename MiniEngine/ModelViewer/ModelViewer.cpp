@@ -59,6 +59,8 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
 bool RunRagdollValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
 bool RunPATransitionValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
 bool RunCharacterWallValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath);
+bool RunAirborneFallValidation(PARS::World& world, PARS::Character& character, PARS::Character& dummy,
+    const std::wstring& reportPath);
 bool RunPelvisDriveValidation(PARS::World& world, PARS::Character& character, const std::wstring& reportPath,
     uint32_t profile, uint32_t clip);
 bool RunRagdollComparisonValidation(RagdollComparisonRunner& runner, const PARS::PhysicsAsset& asset,
@@ -133,6 +135,27 @@ namespace
                 error = std::string(u8"방향별 낙상 클립을 등록하지 못했습니다. ") + clip.second;
                 return false;
             }
+        }
+        const std::array<std::string, 3> flailNames =
+        {
+            "M_ragdoll_flail_legsFirst", "M_ragdoll_flail_armsFirst", "M_ragdoll_flail_armsDown"
+        };
+        std::array<uint32_t, 3> flailIndices;
+        for (size_t slot = 0; slot < flailNames.size(); ++slot)
+        {
+            const std::string& name = flailNames[slot];
+            const std::wstring path = directory + L"AirborneFlails/" + Utility::UTF8ToWideString(name) + L".gltf";
+            flailIndices[slot] = static_cast<uint32_t>(animation.GetAnimationCount());
+            if (!animation.AddAnimation(name, LoadAnimationModel(path, forceRebuild, models)))
+            {
+                error = std::string(u8"공중 낙하 클립을 불러오지 못했습니다. ") + name;
+                return false;
+            }
+        }
+        if (!mesh.SetAirborneFallAnimations(flailIndices))
+        {
+            error = u8"공중 낙하 클립 세 개를 등록하지 못했습니다.";
+            return false;
         }
         return true;
     }
@@ -217,7 +240,7 @@ namespace
         const wchar_t* const reportOptions[] =
         {
             L"horizontalbalancetest", L"bodyimpacttest", L"impacttest", L"pelvistest", L"patransitiontest", L"pawalltest",
-            L"ragdolltest", L"comparisontest", L"comparisonreturncapture", L"comparisoncapture", L"impactcapture"
+            L"ragdolltest", L"airbornefalltest", L"comparisontest", L"comparisonreturncapture", L"comparisoncapture", L"impactcapture"
         };
         std::wstring path;
         for (const wchar_t* option : reportOptions)
@@ -520,9 +543,22 @@ void ModelViewer::Startup(void)
             // [Startup의 캐릭터 초기화 진입점]
             // 이 함수 안에서 모델·애니메이션·PA를 설정한 뒤 m_World.InitializePendingActors()를 호출한다.
             // 새 Actor와 컴포넌트의 BeginPlay로 물리 객체를 생성하고, 첫 포즈의 렌더 데이터까지 준비한다.
-            LoadAnimationPreview(forceRebuild);
             std::wstring ragdollReport;
-            if (CommandLineArgs::GetString(L"bodyimpacttest", ragdollReport))
+            const bool checkAirborneFall = CommandLineArgs::GetString(L"airbornefalltest", ragdollReport);
+            if (checkAirborneFall)
+            {
+                m_PhysicsDemo->LoadMap(PhysicsDemo::MapId::Cliff);
+            }
+            LoadAnimationPreview(forceRebuild);
+            if (checkAirborneFall)
+            {
+                if (GetPreviewCharacter() && m_ImpactTest && m_ImpactTest->GetDummy())
+                {
+                    RunAirborneFallValidation(m_World, *GetPreviewCharacter(), *m_ImpactTest->GetDummy(), ragdollReport);
+                }
+                m_RagdollTestDone = true;
+            }
+            else if (CommandLineArgs::GetString(L"bodyimpacttest", ragdollReport))
             {
                 if (m_MeshViewer)
                 {
@@ -2022,8 +2058,8 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 if (PARS::Character* character = GetPreviewCharacter())
                 {
                     const PARS::CharacterMovementComponent& movement = character->GetCharacterMovement();
-                    ImGui::Text(u8"속도: %.2f m/s | %s", movement.GetGroundSpeed(),
-                        movement.IsMovingOnGround() ? u8"지면 접촉" : u8"공중");
+                    ImGui::Text(u8"이동 속도 %.2f m/s | 균형 상태 %s", movement.GetGroundSpeed(),
+                        PARS::CharacterBalanceStateLabel(character->GetMesh().GetBalanceState()));
                     ImGui::Text(u8"블렌딩: %.0f%%", animation->GetBlendAlpha() * 100.0f);
                     ImGui::TextUnformatted(character->GetMesh().IsActiveRagdoll()
                             ? (character->GetMesh().GetRagdoll().UsesCharacterImpact()

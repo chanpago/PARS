@@ -4,6 +4,27 @@
 
 using namespace PARS;
 
+bool AirborneFallTimer::Update(uint64_t revision, uint64_t step, float deltaTime, bool supported, bool descending)
+{
+    if (m_Revision == revision && m_Step == step)
+    {
+        return false;
+    }
+    if (m_Revision != revision || step - m_Step != 1)
+    {
+        m_UnsupportedTime = 0;
+    }
+    m_Revision = revision;
+    m_Step = step;
+    if (supported || !std::isfinite(deltaTime) || deltaTime <= 0)
+    {
+        m_UnsupportedTime = 0;
+        return false;
+    }
+    m_UnsupportedTime += deltaTime;
+    return m_UnsupportedTime >= EntryDelay && descending;
+}
+
 void KinematicRecoveryTimer::Reset()
 {
     m_Revision = 0;

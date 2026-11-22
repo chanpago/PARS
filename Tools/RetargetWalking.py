@@ -2,6 +2,7 @@
 
 Source/UnrealWalking의 루프를 기존 Idle 메시와 바인드 포즈에 맞춰 변환한다.
 낙상 클립은 blender -b -P Tools/RetargetWalking.py -- shove 로 변환한다.
+공중 낙하 루프는 blender -b -P Tools/RetargetWalking.py -- flail 로 변환한다.
 """
 import hashlib
 import json
@@ -23,6 +24,7 @@ SHOVE_FALLS = {
     "M_relaxed_ragdoll_shove_stand_L_V": ("ShoveFallRight", 20),
     "M_relaxed_ragdoll_shove_stand_R_V": ("ShoveFallLeft", 15),
 }
+AIRBORNE_FLAILS = {f"M_ragdoll_flail_{pose}" for pose in ("legsFirst", "armsFirst", "armsDown")}
 AXES = Matrix.Rotation(-math.pi / 2, 4, "X")
 MAPPING = dict(Hips="pelvis", Spine="spine_01", Spine1="spine_03", Spine2="spine_05",
                Neck="neck_01", Head="head")
@@ -228,15 +230,23 @@ def main():
     manifest = json.loads(manifest_path.read_bytes())
     idle = next(clip for clip in manifest["clips"] if clip["animation"] == "Idle")
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-    if args not in ([], ["shove"]):
-        raise ValueError("낙상만 변환하려면 -- shove 를 지정하세요.")
-    falling = args == ["shove"]
-    destination = ASSETS / ("Converted/ShoveFalls" if falling else "Converted/WalkingLoops")
-    source_dir = ASSETS / ("Source/UnrealShove" if falling else "Source/UnrealWalking")
+    if args not in ([], ["shove"], ["flail"]):
+        raise ValueError("보행은 인자 없이, 지상 낙상은 -- shove, 공중 낙하는 -- flail 로 변환하세요.")
+    kind = args[0] if args else "walk"
+    source_folder, output_folder = {
+        "walk": ("UnrealWalking", "WalkingLoops"),
+        "shove": ("UnrealShove", "ShoveFalls"),
+        "flail": ("UnrealFlail", "AirborneFlails"),
+    }[kind]
+    destination = ASSETS / "Converted" / output_folder
+    source_dir = ASSETS / "Source" / source_folder
     sources = sorted(source_dir.glob("*.fbx"))
-    if falling and {file.name.split(".")[0] for file in sources} != SHOVE_FALLS.keys():
+    names = {file.name.split(".")[0] for file in sources}
+    if kind == "shove" and names != SHOVE_FALLS.keys():
         raise ValueError("UnrealShove의 앞뒤좌우 원본 4개가 필요합니다.")
-    if not falling and len(sources) != 10:
+    if kind == "flail" and names != AIRBORNE_FLAILS:
+        raise ValueError("UnrealFlail의 legsFirst, armsFirst, armsDown 원본 3개가 필요합니다.")
+    if kind == "walk" and len(sources) != 10:
         raise ValueError("UnrealWalking 원본 10개가 필요합니다.")
     destination.mkdir(parents=True, exist_ok=True)
     entries = []
@@ -249,9 +259,9 @@ def main():
         start, end = map(int, rig.animation_data.action.frame_range)
         fps = scene.render.fps / scene.render.fps_base
         scene.frame_set(start)
-        retarget = Retarget(template, rig, falling)
+        retarget = Retarget(template, rig, falling=kind != "walk")
         first_frame = start
-        if falling:
+        if kind == "shove":
             name, first_frame = SHOVE_FALLS[name]
             if not start <= first_frame < end:
                 raise ValueError(f"{file.name}의 낙상 시작 프레임이 범위를 벗어났습니다.")
@@ -266,7 +276,7 @@ def main():
                             sample_counts=[len(samples)], durations_seconds=[round((end-first_frame)/fps, 6)], channels=len(samples[0]),
                             meshes=1, skins=1, joints=idle["joints"], source_rig="Unreal", source_bone_count=len(rig.data.bones),
                             target_skeleton=idle["path"], textures=idle["textures"]))
-        if falling:
+        if kind != "walk":
             entries[-1]["exported_source_frames"] = [first_frame, end]
     prefix = destination.relative_to(ASSETS).as_posix() + "/"
     manifest["clips"] = [clip for clip in manifest["clips"] if not clip["path"].startswith(prefix)] + entries

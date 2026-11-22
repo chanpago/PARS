@@ -39,6 +39,17 @@ namespace PARS
         Count
     };
 
+    enum class CharacterBalanceState : uint8_t
+    {
+        Grounded,
+        Unbalanced,
+        GroundFall,
+        Falling,
+        Landed
+    };
+
+    const char* CharacterBalanceStateLabel(CharacterBalanceState state);
+
     struct CrossStepPlayback
     {
     public:
@@ -114,6 +125,9 @@ namespace PARS
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
         bool UpdateAutomaticRagdoll(float deltaTime);
+        bool UpdateBalanceState(float deltaTime);
+        bool BeginAirborneFall();
+        void ResetAirborneFall();
         bool UpdateFallingAnimation(float deltaTime);
         bool UpdateStandingUpAnimation(float deltaTime);
         bool BeginKinematicStandingUp(float groundHeight);
@@ -186,6 +200,7 @@ namespace PARS
         }
         bool SetFallingAnimation(uint32_t animationIndex);
         bool SetDirectionalFallingAnimation(FallDirection direction, uint32_t animationIndex);
+        bool SetAirborneFallAnimations(const std::array<uint32_t, 3>& clips);
         void SetFallingAnimationEnabled(bool enabled)
         {
             m_FallingAnimationEnabled = enabled;
@@ -196,8 +211,11 @@ namespace PARS
         }
         bool IsFalling() const
         {
-            return IsActiveRagdoll() && m_AutomaticRootSupport &&
-                m_StandingUpState == StandingUpState::None && m_RootSupportRelease != RootSupportRelease::None;
+            return m_BalanceState == CharacterBalanceState::Falling;
+        }
+        CharacterBalanceState GetBalanceState() const
+        {
+            return m_BalanceState;
         }
         bool IsFollowingFallingAnimation() const;
         bool SetStandingUpAnimation(uint32_t animationIndex, uint32_t idleAnimationIndex);
@@ -295,7 +313,12 @@ namespace PARS
         }
 
     private:
+        bool IsGroundFallActive() const
+        {
+            return m_BalanceState == CharacterBalanceState::GroundFall || m_BalanceState == CharacterBalanceState::Landed;
+        }
         bool IsFallingClip(uint32_t animationIndex) const;
+        bool IsAirborneFallClip(uint32_t animationIndex) const;
         uint32_t SelectFallingAnimation() const;
         const std::vector<GraphNode>& GetRagdollAnimationPose() const
         {
@@ -313,6 +336,7 @@ namespace PARS
         FootstepAvoidance m_FootstepAvoidance;
         RagdollRecovery m_Recovery;
         KinematicRecoveryTimer m_KinematicRecoveryTimer;
+        AirborneFallTimer m_AirborneFallTimer;
         StandingSupport m_StandingSupport;
         HorizontalBalance m_HorizontalBalance;
         FallArmBrace m_FallArmBrace;
@@ -343,6 +367,7 @@ namespace PARS
         float m_StandingUpStableTime = 0;
         uint32_t m_FallingAnimationIndex = UINT32_MAX;
         std::array<uint32_t, static_cast<size_t>(FallDirection::Count)> m_DirectionalFallingAnimations;
+        std::array<uint32_t, 3> m_AirborneFallAnimations{UINT32_MAX, UINT32_MAX, UINT32_MAX};
         uint32_t m_StandingUpAnimationIndex = UINT32_MAX;
         uint32_t m_StandingIdleAnimationIndex = UINT32_MAX;
         bool m_HasRecoverySoles = false;
@@ -353,5 +378,6 @@ namespace PARS
         bool m_FallArmsInitialized = false;
         bool m_FallingAnimationEnabled = true;
         StandingUpState m_StandingUpState = StandingUpState::None;
+        CharacterBalanceState m_BalanceState = CharacterBalanceState::Grounded;
     };
 }

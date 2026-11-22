@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PARS · 캐릭터 애니메이션 구조</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --paper: #f5f7f6;
+            --ink: #172f34;
+            --secondary: #475d60;
+            --rule: #ccd8d5;
+            --line: #637c76;
+            --green: #14594d;
+            --green-wash: #e8f4ef;
+            --blue: #254f7c;
+            --blue-wash: #edf3fa;
+            --amber: #76501d;
+            --amber-wash: #faf2e4;
+            --mono: "IBM Plex Mono", Consolas, "Malgun Gothic", monospace;
+        }
+        * { box-sizing: border-box; }
+        html { scroll-padding-top: 22px; }
+        body {
+            margin: 0;
+            background: var(--paper);
+            color: var(--ink);
+            font-family: "Inter", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+            line-height: 1.6;
+            word-break: keep-all;
+            overflow-wrap: anywhere;
+        }
+        h1, h2, h3, h4, p, figure, dl, dd { margin: 0; }
+        a { color: var(--green); text-underline-offset: 3px; }
+        a:focus-visible, summary:focus-visible { outline: 3px solid #176f99; outline-offset: 4px; }
+        code, .symbol { font-family: var(--mono); }
+        code { font-size: .94em; }
+        .wrap { width: min(1120px, calc(100% - 72px)); margin-inline: auto; }
+        .topbar { border-bottom: 1px solid var(--rule); background: #fff; }
+        .topbar .wrap { display: flex; align-items: center; justify-content: space-between; min-height: 56px; gap: 16px; }
+        .brand { display: flex; align-items: baseline; gap: 10px; }
+        .brand strong { font-size: 19px; color: var(--green); letter-spacing: .035em; }
+        .brand span { color: var(--secondary); font-family: var(--mono); font-size: 13px; }
+        nav { display: flex; gap: 24px; }
+        nav a { text-decoration: none; font-weight: 600; font-size: 14px; }
+        nav a:hover, summary:hover { text-decoration: underline; }
+        main { padding-bottom: 52px; }
+        .intro { padding: 38px 0 23px; }
+        h1 { font-size: clamp(30px, 4vw, 46px); letter-spacing: -.055em; line-height: 1.24; }
+        .intro p { margin-top: 9px; font-size: 16px; color: var(--secondary); }
+        .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 16px 0 12px; }
+        h2 { font-size: clamp(22px, 3vw, 28px); letter-spacing: -.045em; line-height: 1.4; }
+        .section-head .ref { font: 13px var(--mono); color: var(--secondary); }
+        section + section { margin-top: 44px; }
+        .board {
+            padding: 24px;
+            background: #fff;
+            border: 1px solid var(--rule);
+            border-radius: 12px;
+        }
+        .node { border: 1px solid var(--rule); border-radius: 7px; padding: 12px 15px; background: #fff; min-width: 0; }
+        .title { display: block; font-weight: 750; font-size: 17px; line-height: 1.36; letter-spacing: -.025em; }
+        .desc { display: block; font-size: 14px; color: var(--secondary); margin-top: 3px; }
+        .symbol { display: block; font-size: 12px; font-weight: 500; line-height: 1.55; color: var(--secondary); }
+        .symbol + .title { margin-top: 2px; }
+        .base { border-color: #a9ccc0; background: var(--green-wash); }
+        .base .symbol { color: var(--green); }
+        .motion { border-color: #b7cbe2; background: var(--blue-wash); }
+        .motion .symbol { color: var(--blue); }
+        .physics { border-color: #ddcba9; background: var(--amber-wash); }
+        .physics .symbol { color: var(--amber); }
+        .selection { display: grid; grid-template-columns: 1fr 38px 1fr 38px 1fr; align-items: stretch; }
+        .right, .down { position: relative; display: block; color: var(--line); }
+        .right::before { content: ""; position: absolute; top: 50%; left: 0; right: 4px; border-top: 1.5px solid; }
+        .right::after, .down::after, .feedback-top::after {
+            content: ""; position: absolute; width: 6px; height: 6px; border: solid currentColor; border-width: 1.5px 1.5px 0 0;
+        }
+        .right::after { top: calc(50% - 2.5px); right: 2px; transform: rotate(45deg); }
+        .down { width: 16px; height: 24px; margin-inline: auto; }
+        .down::before { content: ""; position: absolute; top: 0; bottom: 4px; left: 50%; border-left: 1.5px solid; }
+        .down::after { left: calc(50% - 2.5px); bottom: 2px; transform: rotate(135deg); }
+        .mode-heading { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 4px 10px; margin: 22px 0 0; }
+        .mode-heading strong { font-size: 16px; }
+        .mode-heading code { color: var(--secondary); font-size: 12px; }
+        .junction { display: block; width: 100%; height: 27px; overflow: visible; color: var(--line); }
+        .junction path { fill: none; stroke: currentColor; stroke-width: 1.45; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+        .branches { display: grid; }
+        .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .branch {
+            min-width: 0;
+            margin: 0 6px;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--rule);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #fff;
+        }
+        .branch header { padding: 10px 14px 8px; border-bottom: 1px solid var(--rule); background: #f2f5f4; }
+        .branch header h3, .branch header h4 { font-size: 17px; line-height: 1.3; letter-spacing: -.025em; }
+        .branch header .symbol { margin-top: 2px; }
+        .branch.anim header { background: var(--green-wash); color: var(--green); }
+        .branch.active header { background: var(--amber-wash); color: var(--amber); }
+        .branch.cross header { background: var(--blue-wash); color: var(--blue); }
+        .branch-body { padding: 11px 14px 13px; flex: 1; }
+        .branch-body p { color: var(--secondary); font-size: 14px; }
+        .branch-body .result { color: var(--ink); font-size: 14px; font-weight: 700; margin-top: 8px; }
+        .branch-body a { font-size: 13px; }
+        .output {
+            background: #1f423e; color: #fff; border-radius: 7px; padding: 11px 16px;
+            display: flex; justify-content: center; align-items: baseline; flex-wrap: wrap; gap: 3px 14px; text-align: center;
+        }
+        .output .symbol { color: #cbe3d9; }
+        .actors { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 30px; margin: 14px 2px 0; }
+        .actors dt { font-weight: 700; font-size: 14px; }
+        .actors dd { color: var(--secondary); font-size: 14px; }
+        .refs { border-bottom: 1px solid var(--rule); margin-top: 12px; padding: 0 2px 9px; }
+        summary { color: var(--green); font-size: 14px; font-weight: 700; cursor: pointer; width: fit-content; }
+        .refs ul { display: flex; flex-wrap: wrap; gap: 5px 22px; list-style: none; margin: 8px 0 2px; padding: 0; font-size: 13px; }
+        .context { margin: -4px 0 12px; color: var(--secondary); font-size: 14px; }
+        .loop { display: grid; grid-template-columns: minmax(0, 1fr) 44px; }
+        .loop > * { min-width: 0; }
+        .endpoint { display: flex; align-items: center; gap: 18px; }
+        .endpoint > :first-child { min-width: 145px; }
+        .endpoint .desc { margin: 0; }
+        .hub { max-width: 730px; margin-inline: auto; text-align: center; }
+        .hub .desc { margin-top: 4px; }
+        .loop .branches { margin: 0; }
+        .loop .branch { margin-inline: 8px; }
+        .loop .branch-body .stage + .stage { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--rule); }
+        .stage strong { display: block; font-size: 15px; margin-bottom: 2px; }
+        .feedback-top, .feedback-middle, .feedback-bottom { position: relative; color: var(--green); }
+        .feedback-top::before, .feedback-bottom::before {
+            content: ""; position: absolute; left: 0; right: 9px; border: 1.5px dashed currentColor; border-left: 0;
+        }
+        .feedback-top::before { top: 50%; bottom: 0; border-bottom: 0; border-top-right-radius: 7px; }
+        .feedback-top::after { top: calc(50% - 2.5px); left: 2px; transform: rotate(-135deg); }
+        .feedback-bottom::before { top: 0; bottom: 50%; border-top: 0; border-bottom-right-radius: 7px; }
+        .feedback-middle { margin-right: 9px; border-right: 1.5px dashed currentColor; }
+        .feedback-middle span {
+            position: absolute; right: 0; top: 50%; transform: translate(50%, -50%) rotate(-90deg);
+            background: #fff; padding: 0 9px; white-space: nowrap; font-size: 12px; font-weight: 700;
+        }
+        .note { font-size: 14px; color: var(--secondary); margin: 13px 2px 0; }
+        .note strong { color: var(--ink); }
+        @media (max-width: 760px) {
+            .wrap { width: calc(100% - 32px); }
+            .topbar .wrap { min-height: 48px; }
+            nav { gap: 16px; }
+            .intro { padding: 26px 0 14px; }
+            .board { padding: 15px; }
+            .selection { grid-template-columns: 1fr 24px 1fr 24px 1fr; }
+            .node { padding: 10px; }
+            .branch { margin: 0 4px; }
+            .branch header, .branch-body { padding-left: 10px; padding-right: 10px; }
+            .section-head .ref { display: none; }
+        }
+        @media (max-width: 620px) {
+            .brand { gap: 6px; }
+            nav { gap: 12px; }
+            .intro p { font-size: 15px; }
+            .selection { grid-template-columns: minmax(0, 1fr); }
+            .selection .right { width: 16px; height: 20px; margin: 0 auto; }
+            .selection .right::before { top: 0; bottom: 4px; left: 50%; right: auto; border-top: 0; border-left: 1.5px solid; }
+            .selection .right::after { top: auto; left: calc(50% - 2.5px); bottom: 2px; right: auto; transform: rotate(135deg); }
+            .mode-heading { justify-content: flex-start; margin: 20px 0 8px; }
+            .junction { display: none; }
+            .branches { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 4px 0 4px 14px; border-left: 1.5px solid var(--line); }
+            .branch, .loop .branch { position: relative; margin: 0; overflow: visible; }
+            .branch::before { content: ""; position: absolute; left: -16px; top: 22px; width: 15px; border-top: 1.5px solid var(--line); }
+            .branch header { border-radius: 7px 7px 0 0; }
+            .output { margin-top: 10px; }
+            .actors { grid-template-columns: 1fr; gap: 8px; }
+            .loop { grid-template-columns: minmax(0, 1fr) 25px; }
+            .loop .branches { margin: 10px 0; }
+            .endpoint { display: block; }
+            .endpoint .desc { margin-top: 4px; }
+            .hub { text-align: left; }
+            .feedback-top::before, .feedback-bottom::before { right: 5px; }
+            .feedback-middle { margin-right: 5px; }
+        }
+        @media print {
+            @page { size: A4 portrait; margin: 11mm; }
+            * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+            body, .board { background: #fff; }
+            .topbar, .refs, .branch-body a { display: none; }
+            .wrap { width: 100%; }
+            .intro { padding: 0 0 4mm; }
+            h1 { font-size: 24pt; }
+            h2 { font-size: 17pt; }
+            .board { padding: 12px; }
+            .section-head { margin-top: 0; }
+            section + section { break-before: page; margin-top: 0; }
+            figure { break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <div class="wrap">
+            <div class="brand"><strong>PARS</strong><span>MiniEngine</span></div>
+            <nav aria-label="도식 바로가기"><a href="#overview">전체 구조</a><a href="#airborne">공중 낙하</a></nav>
+        </div>
+    </header>
+    <main class="wrap">
+        <header class="intro">
+            <h1>캐릭터 애니메이션 구조</h1>
+            <p><code>Character</code>가 소유한 <code>SkeletalMeshComponent</code>에서 클립 재생, 물리 제어, 최종 포즈 출력이 연결된다.</p>
+        </header>
+
+        <section id="overview" aria-labelledby="overview-title">
+            <div class="section-head">
+                <h2 id="overview-title">기본 포즈에서 화면까지</h2>
+                <span class="ref">SkeletalMeshComponent</span>
+            </div>
+            <figure class="board" aria-labelledby="overview-title">
+                <div class="selection" aria-label="기본 포즈 생성 순서">
+                    <div class="node"><strong class="title">클립 선택</strong><span class="desc">이동 속도로 대기·걷기·달리기를 선택한다. 낙상·기상 상태도 클립 전환을 요청한다.</span></div>
+                    <span class="right" aria-hidden="true"></span>
+                    <div class="node base"><code class="symbol">AnimInstance</code><strong class="title">샘플링과 블렌딩</strong><span class="desc">기준 스켈레톤에서 키프레임을 읽고, 전환 중인 두 자세를 섞는다.</span></div>
+                    <span class="right" aria-hidden="true"></span>
+                    <div class="node"><code class="symbol">GetPose()</code><strong class="title">기본 로컬 포즈</strong><span class="desc">부모 본을 기준으로 각 본의 위치·회전·크기를 담는다.</span></div>
+                </div>
+                <div class="mode-heading"><strong>물리 모드별 포즈 경로</strong><code>PhysicsAnimationMode</code></div>
+                <svg class="junction" viewBox="0 0 600 27" preserveAspectRatio="none" aria-hidden="true"><path d="M300 0 V24 M100 24 V10 H500 V24 M97 21 L100 25 L103 21 M297 21 L300 25 L303 21 M497 21 L500 25 L503 21"/></svg>
+                <div class="branches three">
+                    <article class="branch anim">
+                        <header><h3>애니메이션</h3><code class="symbol">Animation</code></header>
+                        <div class="branch-body"><p>평상시에는 기본 로컬 포즈를 사용한다. 물리에서 복귀하는 동안에는 저장한 자세에서 애니메이션 자세로 보간한다.</p><p class="result">출력 · 클립 또는 복귀 보간 포즈</p></div>
+                    </article>
+                    <article class="branch active">
+                        <header><h3>액티브 래그돌</h3><code class="symbol">ActiveRagdoll</code></header>
+                        <div class="branch-body"><p>지상에서는 발 IK와 팔 보정으로 균형을 회복한다. 공중 낙하 중에는 전신 관절이 낙하 클립을 추종한다.</p><p class="result">출력 · PhysX 결과를 반영한 포즈</p></div>
+                    </article>
+                    <article class="branch">
+                        <header><h3>패시브 래그돌</h3><code class="symbol">PassiveRagdoll</code></header>
+                        <div class="branch-body"><p>관절 드라이브를 해제한다. PhysX가 중력·접촉·관절 제약으로 계산한 바디 자세를 해당 본에 반영한다.</p><p class="result">출력 · PhysX 결과를 반영한 포즈</p></div>
+                    </article>
+                </div>
+                <svg class="junction" viewBox="0 0 600 27" preserveAspectRatio="none" aria-hidden="true"><path d="M100 0 V13 H500 V0 M300 0 V24 M297 21 L300 25 L303 21"/></svg>
+                <div class="output"><code class="symbol">ModelInstance::UpdatePose</code><strong>최종 로컬 포즈 → 본 행렬 계산 → GPU 스키닝</strong></div>
+            </figure>
+            <dl class="actors">
+                <div><dt>뷰어 플레이어</dt><dd><code>PreviewAnimInstance</code>가 <code>LocomotionAnimInstance</code>를 상속한다. 이동 속도에 따른 클립 선택과 미리보기 재생을 담당한다.</dd></div>
+                <div><dt>충격 테스트 더미</dt><dd>자체 <code>AnimInstance</code>에서 <code>Idle</code>을 재생한다. 모션매칭에 쓰는 프레임 데이터는 플레이어와 공유한다.</dd></div>
+            </dl>
+            <details class="refs">
+                <summary>관련 소스</summary>
+                <ul>
+                    <li><a href="../MiniEngine/Model/AnimInstance.cpp">클립 재생과 포즈 평가</a></li>
+                    <li><a href="../MiniEngine/Model/Components/SkeletalMeshComponent.cpp">물리 틱과 렌더 포즈</a></li>
+                    <li><a href="../MiniEngine/Model/Components/SkeletalMeshPhysics.cpp">물리 바디에서 본 자세 복원</a></li>
+                    <li><a href="../MiniEngine/Model/Model.cpp">렌더링용 본 행렬</a></li>
+                    <li><a href="../MiniEngine/ModelViewer/ModelViewer.cpp">플레이어 초기화</a></li>
+                    <li><a href="../MiniEngine/ModelViewer/RagdollImpactTest.cpp">더미 초기화</a></li>
+                </ul>
+            </details>
+        </section>
+
+        <section id="airborne" aria-labelledby="airborne-title">
+            <div class="section-head">
+                <h2 id="airborne-title">절벽을 벗어나 착지할 때까지</h2>
+                <span class="ref">CharacterBalanceState</span>
+            </div>
+            <p class="context">발을 딛고 균형을 회복하는 동안은 <code>Unbalanced</code>, 지상에서 몸이 무너지는 동안은 <code>GroundFall</code>이다.</p>
+            <figure class="board" aria-labelledby="airborne-title">
+                <div class="selection" aria-label="공중 낙하 상태 전환 순서">
+                    <div class="node"><strong class="title">마지막 지지에서 0.15초</strong><span class="desc">양발이 뜬 시간을 센다. 한 발이 닿거나 손·무릎이 바닥을 받치면 처음부터 다시 센다. 몸이 하강 중이고 60 Hz에서 9틱이 지나면 공중 낙하에 진입한다.</span></div>
+                    <span class="right" aria-hidden="true"></span>
+                    <div class="node base"><code class="symbol">Falling</code><strong class="title">전신 낙하 클립 추종</strong><span class="desc">골반 기준 각 본의 높이를 비교해 legsFirst, armsFirst, armsDown 중 현재 몸 자세와 가장 가까운 클립을 고른다. 모서리를 스쳐도 하강이 이어지면 같은 클립을 재생한다.</span></div>
+                    <span class="right" aria-hidden="true"></span>
+                    <div class="node"><code class="symbol">Landed</code><strong class="title">착지와 기상</strong><span class="desc">몸이 실제 지면에 닿아 무게중심의 하강이 멎으면 낙하 루프를 끝낸다. 몸이 안정되면 기상 동작을 거쳐 조작이 돌아온다.</span></div>
+                </div>
+            </figure>
+            <details class="refs">
+                <summary>관련 소스</summary>
+                <ul>
+                    <li><a href="../MiniEngine/Model/RagdollRecovery.cpp">연속 무지지 시간 판정</a></li>
+                    <li><a href="../MiniEngine/Model/Components/SkeletalMeshAirborneFall.cpp">상태 전환과 낙하 클립 선택</a></li>
+                    <li><a href="../MiniEngine/ModelViewer/RagdollValidation.cpp">6m 절벽 보행·낙하·착지 검증</a></li>
+                </ul>
+            </details>
+        </section>
+    </main>
+</body>
+</html>

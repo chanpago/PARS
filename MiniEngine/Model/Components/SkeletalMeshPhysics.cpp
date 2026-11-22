@@ -506,7 +506,11 @@ namespace PARS
         // 모드 전환 직후에도 현재 샘플로 유예를 준비한다. 같은 샘플은 중복 누적되지 않는다.
         m_FootSupport.UpdateBufferGrace(IsActiveRagdoll());
         const FootSupportGrace& grace = m_FootSupport.GetBufferGrace();
-        if (m_RootSupportRelease == RootSupportRelease::None)
+        if (IsFalling())
+        {
+            m_RootSupportRelease = RootSupportRelease::NoSupport;
+        }
+        else if (m_RootSupportRelease == RootSupportRelease::None)
         {
             if (!IsActiveRagdoll())
             {
@@ -537,6 +541,7 @@ namespace PARS
 
     void SkeletalMeshComponent::DestroyPhysicsState()
     {
+        ResetAirborneFall();
         ResetFallArms();
         m_FallArmsInitialized = false;
         m_FallArmSetups = {};
@@ -726,6 +731,10 @@ namespace PARS
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
+        if (!active)
+        {
+            ResetAirborneFall();
+        }
         ResetFallArms();
         m_Ragdoll.SetDrivesEnabled(active);
         UpdatePhysicsPose();
@@ -814,6 +823,7 @@ namespace PARS
             return;
         }
         m_Ragdoll.SetSimulating(false, Vector3(kZero), m_PhysicsError);
+        ResetAirborneFall();
         m_PhysicsMode = PhysicsAnimationMode::Animation;
         m_PhysicsPose.clear();
         m_RagdollSourcePose.clear();

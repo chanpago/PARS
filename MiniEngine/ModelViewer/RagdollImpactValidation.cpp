@@ -187,7 +187,7 @@ namespace
             "start_raw_x,start_raw_z,start_limited,start_region_valid,start_support_foot,start_inside_forbidden,needs_step,"
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
-            "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin\n";
+            "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -235,7 +235,7 @@ namespace
                 << ',' << decision.capturePieceCount << ',' << decision.steps << ',' << decision.pathRejected
                 << ',' << animation.GetAnimationName(animation.GetCurrentAnimationIndex()) << ',' << animation.GetAnimationTime()
                 << ',' << support.centerOfMassVelocity.x << ',' << support.centerOfMassVelocity.z
-                << ',' << decision.targetInCaptureMargin << '\n';
+                << ',' << decision.targetInCaptureMargin << ',' << PARS::CharacterBalanceStateLabel(mesh.GetBalanceState()) << '\n';
         }
     }
 

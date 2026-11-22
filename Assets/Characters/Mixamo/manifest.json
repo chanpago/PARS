@@ -1410,6 +1410,168 @@
         15,
         42
       ]
+    },
+    {
+      "animation": "M_ragdoll_flail_armsDown",
+      "path": "Converted/AirborneFlails/M_ragdoll_flail_armsDown.gltf",
+      "source": "Source/UnrealFlail/M_ragdoll_flail_armsDown.FBX.fbx",
+      "source_sha256": "074c4c01173fd29f5c3fa5d55b5bf4938c83fbc3487df03a1969141414a17ea7",
+      "gltf_sha256": "be1465c6fcab2798c478dba23a4e39f046095cc1d31bc9000f6e19e8d8257ddf",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        177
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        177
+      ],
+      "durations_seconds": [
+        5.866667
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ],
+      "exported_source_frames": [
+        1,
+        177
+      ]
+    },
+    {
+      "animation": "M_ragdoll_flail_armsFirst",
+      "path": "Converted/AirborneFlails/M_ragdoll_flail_armsFirst.gltf",
+      "source": "Source/UnrealFlail/M_ragdoll_flail_armsFirst.FBX.fbx",
+      "source_sha256": "aa367b8123000fe6c03281497aa93be9b277c4eb6f6d4ffdf23ace40553d1132",
+      "gltf_sha256": "06a0a9aa12554f7b537120f89c0a732ea6ef55e54c58f8e97e750c2de5766c07",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        142
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        142
+      ],
+      "durations_seconds": [
+        4.7
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ],
+      "exported_source_frames": [
+        1,
+        142
+      ]
+    },
+    {
+      "animation": "M_ragdoll_flail_legsFirst",
+      "path": "Converted/AirborneFlails/M_ragdoll_flail_legsFirst.gltf",
+      "source": "Source/UnrealFlail/M_ragdoll_flail_legsFirst.FBX.fbx",
+      "source_sha256": "2aa69afd9ea1df3ca0eb7da0cd91e54b38de89adcd49274f73b92a49fe6a8c9b",
+      "gltf_sha256": "b78781d0a593ca65a485b1678ba971a433f61b3ebde337121a52c50efafa7364",
+      "blender_version": "4.4.3",
+      "source_frames": [
+        1,
+        250
+      ],
+      "frames_per_second": 30.0,
+      "sample_counts": [
+        250
+      ],
+      "durations_seconds": [
+        8.3
+      ],
+      "channels": 53,
+      "meshes": 1,
+      "skins": 1,
+      "joints": [
+        65
+      ],
+      "source_rig": "Unreal",
+      "source_bone_count": 90,
+      "target_skeleton": "Converted/Idle/Idle.gltf",
+      "textures": [
+        {
+          "uri": "../Textures/Ch36_1001_Specular.png",
+          "sha256": "aa1e15b7bcc2c37168f785a5550a5ce46fe927359056e9c4ee27125f81f57347",
+          "bytes": 58789
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Normal.png",
+          "sha256": "d4dd3bbf4750642d272fc38744d397124dc38d8221c56101fcf18e24c338c9ab",
+          "bytes": 18176270
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Diffuse.png",
+          "sha256": "fd9072c125f6e01bd50c82f4bc6b14009ce05e1f643587e3156679f0e4fff8d2",
+          "bytes": 9771290
+        },
+        {
+          "uri": "../Textures/Ch36_1001_Glossiness.png",
+          "sha256": "11265ffaf4fc5205b913960c1659895c9b36ffe22538f7efc97554e7f3dbda22",
+          "bytes": 9555040
+        }
+      ],
+      "exported_source_frames": [
+        1,
+        250
+      ]
     }
   ]
 }

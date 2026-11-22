@@ -47,6 +47,27 @@ namespace
         return input;
     }
 
+    void TestAirborneFallDelay()
+    {
+        AirborneFallTimer timer;
+        constexpr float dt = 1.0f / 60.0f;
+        for (uint64_t step = 1; step <= 8; ++step)
+        {
+            Check(!timer.Update(1, step, dt, false, true), "Eight unsupported ticks cannot start a fall");
+            Check(!timer.Update(1, step, dt, false, true), "Repeated contact samples add no airborne time");
+        }
+        Check(!timer.Update(1, 9, dt, true, true), "One supporting foot or body resets the delay");
+        for (uint64_t step = 10; step <= 17; ++step)
+        {
+            Check(!timer.Update(1, step, dt, false, true), "Support requires a new uninterrupted interval");
+        }
+        Check(timer.Update(1, 18, dt, false, true), "Nine consecutive unsupported ticks qualify");
+        Check(!timer.Update(1, 19, dt, false, false), "Lack of descent excludes airborne falling");
+        Check(timer.Update(1, 20, dt, false, true), "Descent uses the uninterrupted unsupported interval");
+        Check(!timer.Update(2, 21, dt, false, true), "A new contact revision resets the airborne interval");
+        Check(!timer.Update(2, 50, dt, false, true), "Missing physics samples do not count as unsupported time");
+    }
+
     void TestTransitions()
     {
         RagdollRecovery control;
@@ -274,6 +295,7 @@ namespace
 
 void RunRagdollRecoveryTests()
 {
+    TestAirborneFallDelay();
     TestTransitions();
     TestKinematicRecoveryTimer();
     TestInterruptsAndReset();

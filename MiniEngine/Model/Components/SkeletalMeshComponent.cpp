@@ -25,6 +25,7 @@ namespace PARS
         m_AnimInstance->Initialize(m_SkeletalMesh);
         m_FallingAnimationIndex = UINT32_MAX;
         m_DirectionalFallingAnimations.fill(UINT32_MAX);
+        m_AirborneFallAnimations.fill(UINT32_MAX);
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
         m_StandingUpStableTime = 0;
@@ -132,8 +133,10 @@ namespace PARS
         instance->Initialize(m_SkeletalMesh);
         m_AnimInstance = std::move(instance);
         ResetFallArms();
+        ResetAirborneFall();
         m_FallingAnimationIndex = UINT32_MAX;
         m_DirectionalFallingAnimations.fill(UINT32_MAX);
+        m_AirborneFallAnimations.fill(UINT32_MAX);
         m_StandingUpAnimationIndex = UINT32_MAX;
         m_StandingIdleAnimationIndex = UINT32_MAX;
         m_StandingUpStableTime = 0;
@@ -206,7 +209,7 @@ namespace PARS
         }
 
         // 지지 해제 판정이 끝난 같은 물리 스텝에서 낙상 클립을 선택한다.
-        const bool fallingTargetReady = UpdateFallingAnimation(deltaTime);
+        const bool fallingTargetReady = UpdateBalanceState(deltaTime) && UpdateFallingAnimation(deltaTime);
         if (!fallingTargetReady && !IsActiveRagdoll())
         {
             return;
@@ -218,7 +221,8 @@ namespace PARS
         // 애니메이션 재생 시간을 진행시키고, 그 시간에 해당하는 본들의 자세를 계산
         // clip에서 키프레임 데이터와 시간 간격 정보를 읽어와서 두 프레임 사이의 비율을 계산하고 m_pose에 저장
         // 낙상·기상 중에는 해당 클립의 시간을 진행하고 일반 이동 클립 선택은 복귀 후 재개한다.
-        m_AnimInstance->UpdateAnimation(deltaTime, !IsFalling() && m_StandingUpState == StandingUpState::None);
+        m_AnimInstance->UpdateAnimation(deltaTime, !IsFalling() && !IsGroundFallActive() &&
+            m_StandingUpState == StandingUpState::None);
 
         if (IsActiveRagdoll())
         {
@@ -237,7 +241,7 @@ namespace PARS
             //      - 타겟을 목표로 유효관성을 계산하고 중력보상, 코리올리-원심력 보상을 토크값에 더함
             //      - 각 관절의 각 축에 얼마만큼의 PD를 적용시킬지 계산
             bool evaluated = fallingTargetReady && EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError);
-            if (evaluated)
+            if (evaluated && !IsFalling())
             {
                 evaluated = ApplyRecoveryTargets(target, deltaTime);
                 if (evaluated)
@@ -258,6 +262,7 @@ namespace PARS
                 std::string supportError;
                 m_Ragdoll.SetRootSupported(false, supportError);
                 m_PhysicsMode = PhysicsAnimationMode::PassiveRagdoll;
+                ResetAirborneFall();
             }
         }
         else

@@ -7,6 +7,20 @@ struct GraphNode;
 
 namespace PARS
 {
+    class AirborneFallTimer
+    {
+    public:
+        bool Update(uint64_t revision, uint64_t step, float deltaTime, bool supported, bool descending);
+
+    public:
+        static constexpr double EntryDelay = 0.15;
+
+    private:
+        uint64_t m_Revision = UINT64_MAX;
+        uint64_t m_Step = UINT64_MAX;
+        double m_UnsupportedTime = 0;
+    };
+
     // A영역 연속 유지 시간을 누적하고, 양발이 실제 접지한 스텝에서 복귀를 허용한다.
     class KinematicRecoveryTimer
     {
