@@ -44,6 +44,7 @@ namespace PARS
                 impact.body = index;
                 impact.position = contact.position;
                 impact.impulse = contact.impulse;
+                impact.fromProjectile = contact.fromProjectile;
                 impacts.push_back(impact);
             }
         }

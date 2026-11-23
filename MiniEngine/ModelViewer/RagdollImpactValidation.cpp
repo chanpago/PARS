@@ -1146,6 +1146,37 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 std::abs(aimedShot->getLinearVelocity().magnitude() - 7.5f) < 1e-4f,
             "Aimed shot starts in front of the player at the configured speed");
         test.ClearProjectiles();
+        PxRaycastHit wallSight;
+        check(physics->Raycast(toPx(camera), toPx(aim) * 100, wallSight, &player) && wallSight.actor == aimTarget.get(),
+            "Crosshair sees the front surface of the wall fixture");
+        bool wallAccurate = true;
+        bool gravityRestored = true;
+        for (const float speed : {7.5f, 100.0f})
+        {
+            check(test.SetProjectileSettings(.5f, speed) && test.FireAimed(player, camera, aim), "Fire at the visible wall surface");
+            const PxRigidDynamic* ball = test.GetProjectiles().back();
+            float error = std::numeric_limits<float>::infinity();
+            for (int frame = 0; frame < 120 && !std::isfinite(error); ++frame)
+            {
+                physics->Step();
+                std::vector<PhysicsContactImpulse> contacts;
+                physics->GetExternalImpactImpulse(*aimTarget, nullptr, &contacts);
+                for (const PhysicsContactImpulse& contact : contacts)
+                {
+                    if (contact.fromProjectile && contact.impulse.magnitudeSquared() > 0)
+                    {
+                        error = (contact.position - wallSight.position).magnitude();
+                        report << "wall_sight=(" << wallSight.position.x << ',' << wallSight.position.y << ',' << wallSight.position.z
+                            << ") contact=(" << contact.position.x << ',' << contact.position.y << ',' << contact.position.z << ')' << std::endl;
+                        break;
+                    }
+                }
+            }
+            report << "wall_first_contact_error_m=" << error << " speed_mps=" << speed << std::endl;
+            wallAccurate = wallAccurate && error < .025f;
+            gravityRestored = gravityRestored && !ball->getActorFlags().isSet(PxActorFlag::eDISABLE_GRAVITY);
+            test.ClearProjectiles();
+        }
         ownBody.reset();
         aimTarget.reset();
 
@@ -1181,6 +1212,49 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         Ragdoll& ragdoll = dummy->GetMesh().GetRagdoll();
         check(!dummy->GetMesh().IsRagdoll() && dummy->GetMesh().UsesAutomaticRagdoll(),
             "Automatic dummy now waits in kinematic mode before an impact");
+        const std::vector<PhysicsBody>& targetBodies = dummy->GetMesh().GetPhysicsAsset()->bodies;
+        const std::vector<PhysicsBody>::const_iterator head = std::find_if(targetBodies.begin(), targetBodies.end(),
+            [](const PhysicsBody& body) -> bool
+            {
+                return body.bone.find("Head") != std::string::npos;
+            });
+        PxGeometryHolder headGeometry;
+        PxTransform inBone;
+        PxTransform headPose;
+        const size_t headIndex = static_cast<size_t>(head - targetBodies.begin());
+        check(ragdoll.GetBodyCollisionShape(headIndex, headGeometry, inBone, headPose), "Locate the idle head collider");
+        const PxVec3 towardsHead = (headPose.p - toPx(shotOrigin)).getNormalized();
+        const PxVec3 shoulder = toPx(shotOrigin) - towardsHead * 1.65f +
+            towardsHead.cross(PxVec3(0, 1, 0)).getNormalized() * .55f + PxVec3(0, .56f, 0);
+        const PxVec3 headAim = (headPose.p - shoulder).getNormalized();
+        PxGeomRaycastHit headSight;
+        check(PxGeometryQuery::raycast(shoulder, headAim, headGeometry.any(), headPose, 100, PxHitFlag::eDEFAULT, 1, &headSight) == 1,
+            "The shoulder camera crosshair points at the idle head surface");
+        check(test.SetProjectileSettings(.5f, 100.0f) &&
+                test.FireAimed(player, Vector3(shoulder.x, shoulder.y, shoulder.z), Vector3(headAim.x, headAim.y, headAim.z)),
+            "Fire from the player's muzzle at the idle head");
+        float headError = std::numeric_limits<float>::infinity();
+        size_t hitBody = targetBodies.size();
+        std::vector<RagdollBodyImpulse> headContacts;
+        for (int frame = 0; frame < 30 && hitBody == targetBodies.size(); ++frame)
+        {
+            physics->Step();
+            ragdoll.CaptureExternalImpacts(headContacts);
+            for (const RagdollBodyImpulse& contact : headContacts)
+            {
+                if (contact.fromProjectile && contact.impulse.magnitudeSquared() > 0)
+                {
+                    hitBody = contact.body;
+                    headError = (contact.position - headSight.position).magnitude();
+                    break;
+                }
+            }
+        }
+        report << "head_first_contact_error_m=" << headError << " body=" << hitBody << " expected=" << headIndex << std::endl;
+        check(wallAccurate, "First physical wall contact lands within 2.5 cm of the crosshair at both speeds");
+        check(gravityRestored, "Gravity acts on the ball after impact at both speeds");
+        check(hitBody == headIndex && headError < .025f, "First physical dummy contact hits the sighted head surface within 2.5 cm");
+        check(test.SetProjectileSettings(.5f, 7.5f), "Restore the support-controller projectile fixture");
         // 아래 기존 검증은 항상 동적인 다리 지지 제어의 계약을 같은 입력으로 검사한다.
         // 새 자동 모드의 기본 동작과 복귀는 별도의 실제 캐릭터 전환 검증에서 확인한다.
         const std::function<bool()> resetActive = [&]() -> bool

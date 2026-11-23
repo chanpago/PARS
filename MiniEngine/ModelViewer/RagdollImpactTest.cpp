@@ -349,17 +349,44 @@ bool RagdollImpactTest::FireAimed(const Character& player, Vector3 cameraPositio
     {
         return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ()));
     };
+    const PxVec3 eye = toPx(cameraPosition);
     PxVec3 ray = toPx(cameraDirection);
-    if (!toPx(cameraPosition).isFinite() || !ray.isFinite() || ray.magnitudeSquared() < 1e-8f)
+    if (!eye.isFinite() || !ray.isFinite() || ray.magnitudeSquared() < 1e-8f)
     {
         m_Message = u8"조준 방향을 확인하세요.";
         return false;
     }
     ray.normalize();
-    // 화면 중앙의 가장 가까운 표면을 조준한다. 자기 몸은 제외하고, 빈 공간은 1km 앞을 사용한다.
-    PxRaycastHit hit;
-    const PxVec3 target = physics->Raycast(toPx(cameraPosition), ray * 1000.0f, hit, &player)
-        ? hit.position : toPx(cameraPosition) + ray * 1000.0f;
+    PxGeomRaycastHit closest;
+    closest.distance = 1000.0f;
+    closest.position = eye + ray * closest.distance;
+    closest.normal = PxVec3(0);
+    PxRaycastHit sceneHit;
+    if (physics->Raycast(eye, ray * closest.distance, sceneHit, &player))
+    {
+        closest = sceneHit;
+    }
+    // 서 있는 더미의 본은 이동 쿼리에서 빠지므로 조준할 때만 실제 충돌 형상을 검사한다.
+    const Character* dummy = GetDummy();
+    if (dummy && !dummy->GetMesh().GetRagdoll().IsSimulating())
+    {
+        const Ragdoll& ragdoll = dummy->GetMesh().GetRagdoll();
+        for (size_t index = 0; index < ragdoll.GetBodyCount(); ++index)
+        {
+            PxGeometryHolder geometry;
+            PxTransform inBone;
+            PxTransform pose;
+            PxGeomRaycastHit bodyHit;
+            if (ragdoll.GetBodyCollisionShape(index, geometry, inBone, pose) &&
+                PxGeometryQuery::raycast(eye, ray, geometry.any(), pose, closest.distance, PxHitFlag::eDEFAULT, 1, &bodyHit) &&
+                bodyHit.distance < closest.distance)
+            {
+                closest = bodyHit;
+            }
+        }
+    }
+    // 공 표면이 조준점에 닿는 순간의 중심은 피격 표면에서 반지름만큼 떨어져 있다.
+    const PxVec3 target = closest.position + closest.normal * SphereRadius;
     const PxVec3 origin = toPx(player.GetActorLocation()) + PxVec3(0, .15f, 0);
     if ((target - origin).dot(ray) <= 0)
     {
@@ -369,7 +396,7 @@ bool RagdollImpactTest::FireAimed(const Character& player, Vector3 cameraPositio
     return FireAt(player, Vector3(target.x, target.y, target.z), true);
 }
 
-bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool checkMuzzle)
+bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool aimed)
 {
     PARS::Character* dummy = GetDummy();
     PhysicsWorld* physics = m_World.GetPhysicsWorld();
@@ -392,7 +419,7 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool che
         return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ()));
     };
     // 카메라에서 보이는 표적이라도 발사 위치 앞이 막혀 있으면 장애물 너머에 구를 생성하지 않는다.
-    if (checkMuzzle && physics->SweepSphereDistance(toPx(origin), toPx(muzzle - origin), SphereRadius, &player) < clearance - .001f)
+    if (aimed && physics->SweepSphereDistance(toPx(origin), toPx(muzzle - origin), SphereRadius, &player) < clearance - .001f)
     {
         m_Message = u8"발사 위치가 막혀 있습니다. 장애물에서 떨어져 발사하세요.";
         return false;
@@ -404,8 +431,24 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool che
         m_Message = u8"발사 구를 생성하지 못했습니다.";
         return false;
     }
-    // 생성할 때만 속도를 지정한다. 이후 궤적과 충격 전달은 PhysX 충돌로 처리한다.
-    sphere->setRigidBodyFlag(PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
+    // 바닥 하중이나 캐릭터의 지속 밀기와 구별해 실제 발사 구의 접촉만 피격 반응에 사용한다.
+    physx::PxShape* shape = nullptr;
+    if (sphere->getShapes(&shape, 1) != 1)
+    {
+        sphere->release();
+        return false;
+    }
+    PxFilterData filter = shape->getSimulationFilterData();
+    filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
+    if (aimed)
+    {
+        filter.word3 |= PhysicsWorld::AimedProjectileFilterFlag;
+        sphere->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+        sphere->setMinCCDAdvanceCoefficient(0.0f);
+    }
+    shape->setSimulationFilterData(filter);
+    // 조준 공은 이번 스텝에 실제로 지나가는 구간에서 최초 충돌 시점을 구한다.
+    sphere->setRigidBodyFlag(aimed ? PxRigidBodyFlag::eENABLE_CCD : PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
     sphere->setLinearVelocity(toPx(direction * m_Speed));
     if (m_Shots.size() >= 12)
     {

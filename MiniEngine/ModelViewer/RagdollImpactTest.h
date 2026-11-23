@@ -52,7 +52,7 @@ private:
     void DrawBodyImpactUI(PARS::Character* player);
     void DrawDummySupportSettingsUI();
     void BuildBodyImpactLines(std::vector<physx::PxDebugLine>& lines);
-    bool FireAt(const PARS::Character& player, Math::Vector3 target, bool checkMuzzle = false);
+    bool FireAt(const PARS::Character& player, Math::Vector3 target, bool aimed = false);
 
 public:
     void SetContactCheckEnabled(bool enabled);

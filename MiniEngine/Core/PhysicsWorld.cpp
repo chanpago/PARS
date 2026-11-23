@@ -54,6 +54,10 @@ namespace
         {
             pairFlags |= PxPairFlag::eNOTIFY_CONTACT_POINTS | PxPairFlag::eNOTIFY_TOUCH_FOUND |
                 PxPairFlag::eNOTIFY_TOUCH_PERSISTS | PxPairFlag::eNOTIFY_TOUCH_LOST;
+            if ((data0.word3 | data1.word3) & PhysicsWorld::AimedProjectileFilterFlag)
+            {
+                pairFlags |= PxPairFlag::eDETECT_CCD_CONTACT;
+            }
         }
         return flags;
     }
@@ -177,6 +181,22 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         cached->points.resize(extracted);
         cached->completedStep = m_StepCount + 1;
         cached->clockRevision = m_ClockRevision;
+        for (int side = 0; side < 2; ++side)
+        {
+            if (!(pair.shapes[side]->getSimulationFilterData().word3 & AimedProjectileFilterFlag))
+            {
+                continue;
+            }
+            PxRigidDynamic* ball = header.actors[side]->is<PxRigidDynamic>();
+            if (ball && ball->getActorFlags().isSet(PxActorFlag::eDISABLE_GRAVITY) &&
+                std::any_of(cached->points.begin(), cached->points.end(), [](const PxContactPairPoint& point) -> bool
+                {
+                    return point.separation <= 0 || point.impulse.magnitudeSquared() > 0;
+                }))
+            {
+                m_ImpactedAimedProjectiles.push_back(ball);
+            }
+        }
     }
     // 잠든 바디에는 PERSISTS가 오지 않으므로 LOST 또는 명시적인 무효화 전까지 보존한다.
 }
@@ -348,10 +368,11 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
         {
             continue;
         }
+        const bool projectile = (pair.shapes[1 - side]->getSimulationFilterData().word3 & ProjectileFilterFlag) != 0;
         for (const physx::PxContactPairPoint& point : pair.points)
         {
             const PxVec3 normal = side == 0 ? point.normal : -point.normal;
-            if (normal.isFinite() && normal.y < .70710678f && point.impulse.isFinite())
+            if (normal.isFinite() && (projectile || normal.y < .70710678f) && point.impulse.isFinite())
             {
                 impulse += point.impulse.magnitude();
                 if (contacts && point.position.isFinite())
@@ -359,6 +380,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
                     PhysicsContactImpulse contact;
                     contact.position = point.position;
                     contact.impulse = side == 0 ? point.impulse : -point.impulse;
+                    contact.fromProjectile = projectile;
                     contacts->push_back(contact);
                 }
             }
@@ -553,6 +575,9 @@ bool PhysicsWorld::CreateScene()
     desc.solverType = PxSolverType::eTGS;
     // 중력/관절 보상력을 각 TGS 반복에 나눠 적용해 드라이브의 정상 상태 속도 편향을 줄인다.
     desc.flags |= PxSceneFlag::eENABLE_EXTERNAL_FORCES_EVERY_ITERATION_TGS;
+    // 조준 공은 두꺼운 표적에서도 1cm 이상 진행하면 쓸어 지나간 구간을 검사한다.
+    desc.flags |= PxSceneFlag::eENABLE_CCD;
+    desc.ccdThreshold = .01f;
     desc.gravity = PxVec3(0.0f, -9.81f, 0.0f);
     desc.cpuDispatcher = m_Dispatcher;
     desc.filterShader = ContactFilter;
@@ -683,6 +708,12 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
         // PhysX는 시뮬레이션이 끝나면 fetchResults()를 호출해야 한다. fetchResults()가 끝나야 Actor의 pose를 읽을 수 있다. true파라미터는 simulate의 결과를 다 받고 진행하겠다는 뜻.
         m_Scene->fetchResults(true);
     }
+    // 접촉 콜백에서는 PhysX 바디를 수정할 수 없으므로 다음 고정 스텝 전에 적용한다.
+    for (PxRigidDynamic* ball : m_ImpactedAimedProjectiles)
+    {
+        ball->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, false);
+    }
+    m_ImpactedAimedProjectiles.clear();
     ++m_StepCount;
     m_LastSubsteps = 1;
 }

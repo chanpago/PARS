@@ -58,6 +58,7 @@ struct PhysicsContactImpulse
 public:
     physx::PxVec3 position{0};
     physx::PxVec3 impulse{0};
+    bool fromProjectile = false;
 };
 
 // 미터, 킬로그램, 초 단위의 CPU 물리이며 +Y가 위쪽이다. 게임 스레드에서 사용한다.
@@ -224,11 +225,16 @@ public:
     static constexpr uint32_t CharacterCapsuleFilterFlag = 1u << 29;
     // 이 PA의 소유자가 활성 몸통 캡슐을 가지고 있을 때만 설정한다.
     static constexpr uint32_t CharacterCapsuleOwnerFilterFlag = 1u << 28;
+    // 발사체와 실제로 접촉한 본을 자세 구동기에서 식별한다.
+    static constexpr uint32_t ProjectileFilterFlag = 1u << 27;
+    // 조준 발사한 공은 첫 충돌 스텝부터 다시 중력을 받는다.
+    static constexpr uint32_t AimedProjectileFilterFlag = 1u << 26;
     static constexpr double FixedDeltaTime = 1.0 / 60.0;
     static constexpr uint32_t MaxSubsteps = 8;
 
 private:
     std::vector<ContactPair> m_Contacts;
+    std::vector<physx::PxRigidDynamic*> m_ImpactedAimedProjectiles;
     uint64_t m_ClockRevision = 0;
     PhysicsWorld* m_ServiceOwner = nullptr;
     physx::PxDefaultAllocator m_Allocator;

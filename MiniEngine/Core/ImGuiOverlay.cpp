@@ -175,6 +175,10 @@ void ImGuiOverlay::Render()
     {
         return;
     }
+    // 창의 논리 좌표를 실제 합성 버퍼에 맞춰 조준점과 장면의 중심을 일치시킨다.
+    drawData->FramebufferScale = ImVec2(
+        static_cast<float>(Graphics::g_OverlayBuffer.GetWidth()) / drawData->DisplaySize.x,
+        static_cast<float>(Graphics::g_OverlayBuffer.GetHeight()) / drawData->DisplaySize.y);
 
     // Protect the backend's upload buffers even when VSync is disabled.
     if (s_FrameFences[s_FrameSlot] != 0)
