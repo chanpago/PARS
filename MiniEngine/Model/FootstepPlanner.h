@@ -8,8 +8,8 @@
 
 namespace PARS
 {
-    constexpr float MinimumFootstepDuration = .15f;
-    constexpr float MaximumFootstepDuration = .3f;
+    constexpr float MinimumFootstepDuration = .13f;
+    constexpr float MaximumFootstepDuration = .27f;
 
     struct FootstepSettings
     {
