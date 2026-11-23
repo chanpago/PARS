@@ -73,6 +73,7 @@ namespace PARS
         float groundHeight = 0;
         float firstStepTime = 0;
         float followingStepTime = 0;
+        float idleLateralOffset = 0;
         FootstepMode previousMode = FootstepMode::Normal;
         ModeSelection modeSelection = ModeSelection::NewStep;
         bool stepping = false;

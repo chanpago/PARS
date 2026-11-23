@@ -340,6 +340,7 @@ namespace
         request.groundHeight = state.groundPosition.y;
         request.forward = PxVec3(-input.supportRight.z, 0, input.supportRight.x).getNormalized();
         request.normalTarget = normal.position;
+        request.idleLateralOffset = std::abs(input.feet[side].stanceOffset.dot(input.supportRight));
         request.preferred = normal.landingCom.raw +
             PxVec3(input.feet[side].stanceOffset.x, 0, input.feet[side].stanceOffset.z) * settings.stanceScale;
         if (inProgress)
