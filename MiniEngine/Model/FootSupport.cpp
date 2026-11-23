@@ -505,6 +505,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     // 양발의 중점을 계산
     // 발 배치를 표현하기 위한 중점을 사용. 이 정보가 있어야 중앙에서 왼쪽으로 얼마, 오른쪽으로 얼마와 같은 기준을 정할 수 있음
     const PxVec3 midpoint = (referenceFeet[0] + referenceFeet[1]) * .5f;
+    const bool singleSupport = m_Snapshot.feet[0].contact.grounded != m_Snapshot.feet[1].contact.grounded;
 
     // 각 발에서 중점을 빼면 원래 그 발이 중앙에서 얼마나 옆이나 앞뒤로 떨어져 있었는지 알 수 있음
     for (size_t side = 0; side < m_Feet.size(); ++side)
@@ -526,6 +527,10 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.corners = foot.corners;
         target.hasSoleRectangle = foot.available;
         const Sole& sole = m_Feet[side];
+        if (singleSupport && input.active && input.automaticSupport && planningSteps && foot.available)
+        {
+            target.soleVelocity = ragdoll.GetBodyPointVelocity(sole.bodyIndex, target.position);
+        }
         if (input.active && input.automaticSupport && planningSteps && foot.available && foot.leg.available &&
             foot.contact.hasSample && foot.contact.grounded && sole.hipBodyIndex >= 0)
         {

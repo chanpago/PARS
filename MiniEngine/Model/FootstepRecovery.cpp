@@ -160,16 +160,6 @@ namespace
         return result;
     }
 
-    float HalfExtent(const FootstepReachInput& foot, const PxVec3& axis)
-    {
-        float result = 0;
-        for (const PxVec3& corner : foot.sole)
-        {
-            result = (std::max)(result, PxAbs((corner - foot.position).dot(axis)));
-        }
-        return result;
-    }
-
     FootstepNormalReach MakeNormalReach(const FootstepRecoveryInput& input,
         const FootstepRecoverySettings& settings, size_t side)
     {
@@ -191,11 +181,15 @@ namespace
         {
             return result;
         }
-        const float physicalWidth = HalfExtent(foot, foot.outward) + HalfExtent(support, foot.outward) + settings.clearance;
+        const float physicalWidth = FootstepSoleHalfExtent(foot.sole, foot.position, foot.outward) +
+            FootstepSoleHalfExtent(support.sole, support.position, foot.outward) + settings.clearance;
         result.center = PxVec3(foot.hip.x - foot.ankleOffset.x, input.groundHeight, foot.hip.z - foot.ankleOffset.z);
         result.radius = std::sqrt(radiusSquared);
         result.outward = foot.outward;
-        result.minimumProjection = support.position.dot(foot.outward) + (std::max)(foot.minimumWidth, physicalWidth);
+        result.minimumWidth = (std::max)(foot.minimumWidth, physicalWidth);
+        result.minimumProjection = support.position.dot(foot.outward) + result.minimumWidth;
+        result.combinedHalfLength = FootstepSoleHalfExtent(foot.sole, foot.position, input.forward) +
+            FootstepSoleHalfExtent(support.sole, support.position, input.forward);
         return result;
     }
 
@@ -212,7 +206,7 @@ namespace
         const FootstepPolygon reachable = IntersectFootstepPolygons(Circle(normal.center, normal.radius),
             Circle(PxVec3(foot.stepOrigin.x, input.groundHeight, foot.stepOrigin.z), foot.maximumDistance));
         Clip(reachable, normal.outward, normal.minimumProjection, result[0]);
-        const float lengthClearance = HalfExtent(foot, input.forward) + HalfExtent(support, input.forward) + settings.clearance;
+        const float lengthClearance = normal.combinedHalfLength + settings.clearance;
         const float angles[] = {settings.frontAngleDegrees, settings.backAngleDegrees};
         for (size_t cross = 0; cross < 2; ++cross)
         {

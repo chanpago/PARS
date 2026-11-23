@@ -596,11 +596,13 @@ namespace
         const PxVec3 crossTarget = command.target.position;
 
         input.feet[1].grounded = false;
+        input.feet[1].soleVelocity.x = -10.0f;
         input.requestedFoot = 0;
         ++input.completedStep;
         planner.Update(input, settings);
         Check(command.phase == FootstepPhase::Airborne && command.target.recovery.mode == FootstepMode::BackCross &&
-            command.target.position == crossTarget, "selecting the other foot preserves the ongoing crossover");
+            command.target.position == crossTarget && command.motion.swingOutwardOffset.isZero(),
+            "an airborne crossover keeps its path even when the soles converge");
     }
 
     void TestPlannerIntegration()

@@ -9,6 +9,18 @@ namespace PARS
 {
     using FootstepPolygon = std::vector<physx::PxVec3>;
 
+    // 실제 발바닥 사각형과 회복 영역의 발바닥 다각형에 같은 투영 폭을 사용한다.
+    template <typename Corners>
+    float FootstepSoleHalfExtent(const Corners& corners, const physx::PxVec3& center, const physx::PxVec3& axis)
+    {
+        float extent = 0;
+        for (const physx::PxVec3& corner : corners)
+        {
+            extent = (std::max)(extent, std::abs((corner - center).dot(axis)));
+        }
+        return extent;
+    }
+
     enum class FootstepRecoveryStatus
     {
         Unavailable,
@@ -92,6 +104,8 @@ namespace PARS
         float radius = 0;
         physx::PxVec3 outward{0};
         float minimumProjection = 0;
+        float minimumWidth = 0;
+        float combinedHalfLength = 0;
     };
 
     struct FootstepRecoverySnapshot

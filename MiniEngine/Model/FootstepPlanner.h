@@ -76,6 +76,7 @@ namespace PARS
     public:
         FootstepReachInput reach;
         physx::PxVec3 position{0};
+        physx::PxVec3 soleVelocity{0};
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
@@ -182,6 +183,7 @@ namespace PARS
     {
     public:
         physx::PxVec3 position{0};
+        physx::PxVec3 swingOutwardOffset{0};
         float initialHeight = 0;
         float liftTimeRatio = 1.0f;
         float heightLimit = 0;

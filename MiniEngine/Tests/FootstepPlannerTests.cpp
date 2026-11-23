@@ -686,6 +686,61 @@ namespace
         }
     }
 
+    void TestSwingSoleSeparation()
+    {
+        FootstepSettings settings = TestSettings();
+        settings.minimumStanceWidthRatio = 0;
+        settings.preventCrossing = false;
+        for (size_t side = 0; side < 2; ++side)
+        {
+            FootstepInput input = Standing();
+            input.requestedFoot = static_cast<int>(side);
+            input.velocity.z = -1;
+            FootstepFootInput& moving = input.feet[side];
+            FootstepFootInput& support = input.feet[1 - side];
+            const float sign = side == 0 ? -1.0f : 1.0f;
+            moving.corners = SoleRectangle(moving.position, .085f, .1f);
+            support.corners = SoleRectangle(support.position, .09f, .1f);
+            moving.soleVelocity.x = -sign * 2.4f;
+            support.soleVelocity.x = sign * 2.4f;
+            support.timeToReachLimit = MaximumFootstepDuration;
+
+            FootstepPlanner planner;
+            planner.Update(input, settings);
+            const FootstepCommand& step = planner.GetSnapshot().feet[side];
+            const PxVec3 landing = step.target.position;
+            Check(step.justStarted && step.motion.swingOutwardOffset.isZero(), "A planted foot stays on its takeoff path");
+            moving.grounded = false;
+            Advance(planner, input, settings, 9);
+            // 현재 24cm에서 다음 틱에 16cm로 좁아지므로, 두 반폭과 여유의 합 18cm까지 2cm를 보정한다.
+            Check(Near(step.motion.progress, .5f) && Near((step.motion.position.x - moving.position.x) * sign, .02f) &&
+                Near(step.motion.position.z, (moving.position.z + landing.z) * .5f) &&
+                Near(step.motion.position.y, moving.position.y + step.motion.height),
+                "Relative sole motion offsets only the outward axis at mid-swing on either foot");
+            Check(step.target.position == landing &&
+                (SampleFootstepPosition(step, GetFootstepRemainingTime(step)) - landing).magnitude() < 1e-5f,
+                "The corrected swing still reaches the selected landing point");
+
+            support.soleVelocity = moving.soleVelocity;
+            Advance(planner, input, settings);
+            Check(step.motion.swingOutwardOffset.isZero(), "Feet translating together retain their lateral spacing");
+            support.soleVelocity.x = -moving.soleVelocity.x;
+            moving.position.z += .25f;
+            moving.corners = SoleRectangle(moving.position, .085f, .1f);
+            Advance(planner, input, settings);
+            Check(step.motion.swingOutwardOffset.isZero(), "Fore-aft separation leaves the normal swing unchanged");
+            moving.soleVelocity.z = -.1f / input.fixedDeltaTime;
+            Advance(planner, input, settings);
+            Check(Near(step.motion.swingOutwardOffset.x * sign, .02f), "A fore-aft overlap on the next tick triggers clearance");
+            moving.soleVelocity.z = 0;
+            moving.position.z -= .25f;
+            moving.corners = SoleRectangle(moving.position, .085f, .1f);
+            support.grounded = false;
+            Advance(planner, input, settings);
+            Check(step.motion.swingOutwardOffset.isZero(), "An airborne opposite foot does not supply a stance boundary");
+        }
+    }
+
     void TestLoadedTouchdown()
     {
         FootstepPlanner planner;
@@ -1423,6 +1478,7 @@ void TestFootstepPlanner()
     TestBackwardFallInterruptions();
     TestClockAndAbort();
     TestBackwardSwing();
+    TestSwingSoleSeparation();
     TestLoadedTouchdown();
     TestFixedStepRates();
     TestTakeoffConfirmation();

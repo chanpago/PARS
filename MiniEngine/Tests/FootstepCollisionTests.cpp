@@ -255,6 +255,7 @@ namespace
         {
             FootstepCollisionLeg leg = MakeLeg(.12f);
             leg.command.motion.liftTimeRatio = fixture % 2 == 0 ? 1.5f : 1.0f;
+            leg.command.motion.swingOutwardOffset.x = fixture % 3 == 0 ? .06f : 0.0f;
             leg.command.target.position.z = .12f * std::sin(float(fixture));
             leg.command.target.position.x += .08f * std::cos(float(fixture));
             leg.path = MakeFootstepPath(PxVec3(0), PxVec3(0),

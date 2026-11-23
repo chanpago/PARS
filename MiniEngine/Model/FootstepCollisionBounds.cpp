@@ -73,6 +73,11 @@ namespace
             Clamp(Range(motion.progress) + time * Range(motion.progressPerSecond), 0, 1) :
             Clamp(elapsed / Range(motion.duration), 0, 1);
         Vector position = takeoff + (Vector(command.target.position) - takeoff) * Blend(progress);
+        if (!motion.swingOutwardOffset.isZero())
+        {
+            const Range arc = Minimum(Range(8) * progress * (Range(1) - progress), 1);
+            position = position + Vector(motion.swingOutwardOffset) * Blend(arc);
+        }
         const Range heightProgress = Clamp(progress /
             (Range(1) + Range(motion.liftTimeRatio - 1.0f) * (Range(1) - progress)), 0, 1);
         position.y = position.y + Range(.5f * motion.initialHeight) * (Range(1) - Cos(Range(PxTwoPi) * heightProgress));

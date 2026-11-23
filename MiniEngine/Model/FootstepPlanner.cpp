@@ -19,11 +19,15 @@ namespace
         command.target.recovery.intersections = {};
     }
 
+    float SmoothStep(float t)
+    {
+        return t * t * (3.0f - 2.0f * t);
+    }
+
     float LiftHeight(const FootstepMotion& motion, float elapsed)
     {
         const float t = PxClamp(elapsed / (.5f * motion.duration), 0.0f, 1.0f);
-        const float blend = t * t * (3.0f - 2.0f * t);
-        return motion.initialHeight * blend;
+        return motion.initialHeight * SmoothStep(t);
     }
 
     float SwingHeight(const FootstepMotion& motion, float progress)
@@ -33,10 +37,72 @@ namespace
         return motion.initialHeight * .5f * (1.0f - std::cos(PxTwoPi * heightProgress));
     }
 
+    float MinimumStanceWidth(float idleWidth, const FootstepSettings& settings)
+    {
+        return (std::max)(idleWidth * settings.minimumStanceWidthRatio,
+            settings.preventCrossing ? settings.crossingOffset : 0.0f);
+    }
+
+    PxVec3 PredictSwingOutwardOffset(const FootstepInput& input, const FootstepSettings& settings,
+        const FootstepSnapshot& state, size_t side)
+    {
+        const FootstepFootInput& moving = input.feet[side];
+        const FootstepFootInput& support = input.feet[1 - side];
+        if (moving.grounded || !support.grounded || !support.hasContactSample || !support.available ||
+            !moving.hasSoleRectangle || !support.hasSoleRectangle || state.feet[1 - side].IsInProgress() ||
+            state.feet[side].target.recovery.mode != FootstepMode::Normal)
+        {
+            return PxVec3(0);
+        }
+
+        const PxVec3 right(input.supportRight.x, 0, input.supportRight.z);
+        const float signedIdleWidth = (moving.stanceOffset - support.stanceOffset).dot(right);
+        const PxVec3 nextSeparation = (moving.position - support.position) +
+            (moving.soleVelocity - support.soleVelocity) * input.fixedDeltaTime;
+        if (!nextSeparation.isFinite() || !std::isfinite(signedIdleWidth) || std::abs(signedIdleWidth) <= 1e-6f ||
+            std::abs(right.magnitudeSquared() - 1.0f) > .01f || !std::isfinite(settings.recovery.clearance) ||
+            settings.recovery.clearance < 0)
+        {
+            return PxVec3(0);
+        }
+
+        const PxVec3 outward = signedIdleWidth > 0 ? right : -right;
+        const PxVec3 forward(-right.z, 0, right.x);
+        const FootstepNormalReach& reach = state.candidates[side].recovery.normalReach;
+        float minimumWidth;
+        float combinedHalfLength;
+        if (reach.radius > 0)
+        {
+            // 이번 틱에 검은 영역의 안쪽 경계를 만들 때 구한 양발 간격을 그대로 사용한다.
+            minimumWidth = reach.minimumWidth;
+            combinedHalfLength = reach.combinedHalfLength;
+        }
+        else
+        {
+            // 회복 영역 탐색을 생략한 일반 스텝에도 현재 양발 사각형으로 같은 기준을 적용한다.
+            const float physicalWidth = FootstepSoleHalfExtent(moving.corners, moving.position, outward) +
+                FootstepSoleHalfExtent(support.corners, support.position, outward) + settings.recovery.clearance;
+            minimumWidth = (std::max)(physicalWidth, MinimumStanceWidth(std::abs(signedIdleWidth), settings));
+            combinedHalfLength = FootstepSoleHalfExtent(moving.corners, moving.position, forward) +
+                FootstepSoleHalfExtent(support.corners, support.position, forward);
+        }
+        const float missingWidth = minimumWidth - nextSeparation.dot(outward);
+        if (missingWidth <= 0)
+        {
+            return PxVec3(0);
+        }
+
+        // 앞뒤로 스치기 시작하거나 빠져나오는 구간에서는 겹치는 깊이만큼만 보정한다.
+        const float foreOverlap = combinedHalfLength - std::abs(nextSeparation.dot(forward));
+        return outward * PxClamp(foreOverlap, 0.0f, (std::min)(missingWidth, minimumWidth));
+    }
+
     PxVec3 SwingPosition(const FootstepCommand& command, const PxVec3& takeoff, float progress)
     {
-        const float blend = progress * progress * (3.0f - 2.0f * progress);
-        PxVec3 position = takeoff + (command.target.position - takeoff) * blend +
+        // 스윙 중간에는 부족한 폭을 전부 쓰고 이륙점과 착지점에서는 부드럽게 0으로 줄인다.
+        const float arc = (std::min)(1.0f, 8.0f * progress * (1.0f - progress));
+        PxVec3 position = takeoff + (command.target.position - takeoff) * SmoothStep(progress) +
+            command.motion.swingOutwardOffset * SmoothStep(arc) +
             PxVec3(0, SwingHeight(command.motion, progress), 0);
         // 이륙 때 이미 확보한 높이를 중복으로 더하지 않도록 구동과 예측에 같은 상한을 쓴다.
         const float maximumHeight = (std::max)(command.startPosition.y, command.target.position.y) +
@@ -394,8 +460,7 @@ namespace
             const float sign = (input.feet[foot].stanceOffset - input.feet[1 - foot].stanceOffset).dot(input.supportRight);
             reach.outward = input.supportRight * (sign >= 0 ? 1.0f : -1.0f);
             const float idleWidth = std::abs(sign);
-            reach.minimumWidth = (std::max)(idleWidth * settings.minimumStanceWidthRatio,
-                settings.preventCrossing ? settings.crossingOffset : 0.0f);
+            reach.minimumWidth = MinimumStanceWidth(idleWidth, settings);
         }
         request.acceptsTarget = [&input, side](const PxVec3& position) -> bool
         {
@@ -878,6 +943,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         command.justLanded = false;
         command.hasTarget = false;
         command.motion.valid = false;
+        command.motion.swingOutwardOffset = PxVec3(0);
         if (!settings.pathAvoidanceEnabled)
         {
             command.target.recovery.pathRejected = false;
@@ -1217,6 +1283,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
         command.hasTarget = true;
         command.reason = command.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;
+        command.motion.swingOutwardOffset = PredictSwingOutwardOffset(input, settings, state, side);
         UpdateMotion(command, foot, input);
     }
     if (state.needsStep && !state.IsInProgress())
