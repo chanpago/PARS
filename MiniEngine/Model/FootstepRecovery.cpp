@@ -13,7 +13,6 @@ namespace
     constexpr uint32_t CircleVertices = 12;
     constexpr float Epsilon = 1e-6f;
     constexpr uint32_t MaximumCapturePieces = 13;
-    constexpr float NormalIdleOffsetScale = 1.0f;
 
     float Cross(const PxVec3& a, const PxVec3& b)
     {
@@ -301,10 +300,6 @@ namespace
     public:
         bool operator<(const LandingCandidate& other) const
         {
-            if (usesIdleOffset != other.usesIdleOffset)
-            {
-                return usesIdleOffset;
-            }
             return score < other.score;
         }
 
@@ -312,63 +307,7 @@ namespace
         size_t mode = 0;
         PxVec3 position{0};
         float score = 0;
-        bool usesIdleOffset = false;
     };
-
-    PxVec3 NormalOffsetDirection(const FootstepRecoveryInput& input)
-    {
-        // 현재 COM에서 착지 예측 COM으로 향하는 수평선의 법선을 이동발 쪽으로 맞춘다.
-        PxVec3 lateral(input.velocity.z, 0, -input.velocity.x);
-        if (lateral.normalize() < Epsilon)
-        {
-            return PxVec3(0);
-        }
-        const float side = lateral.dot(input.feet[input.movingFoot].outward);
-        if (std::abs(side) < Epsilon)
-        {
-            return PxVec3(0);
-        }
-        return side > 0 ? lateral : -lateral;
-    }
-
-    void AddNormalOffsetCandidates(const FootstepPolygon& piece, const PxVec3& center, const PxVec3& com,
-        const PxVec3& lateral, float width, float score, bool checkAlternatives, std::vector<LandingCandidate>& candidates)
-    {
-        const PxVec3 along(-lateral.z, 0, lateral.x);
-        const PxVec3 alignedCenter = center + lateral * (width - (center - com).dot(lateral));
-        float first = std::numeric_limits<float>::infinity();
-        float last = -std::numeric_limits<float>::infinity();
-        // 오프셋 선과 볼록 조각의 경계가 만나는 양 끝 사이에서만 후보를 고른다.
-        for (size_t index = 0; index < piece.size(); ++index)
-        {
-            const PxVec3& a = piece[index];
-            const PxVec3& b = piece[(index + 1) % piece.size()];
-            const float from = (a - com).dot(lateral) - width;
-            const float to = (b - com).dot(lateral) - width;
-            PxVec3 point = a;
-            if (std::abs(from) > Epsilon)
-            {
-                if ((from < 0) == (to < 0))
-                {
-                    continue;
-                }
-                point = a + (b - a) * (from / (from - to));
-            }
-            const float distance = (point - center).dot(along);
-            first = (std::min)(first, distance);
-            last = (std::max)(last, distance);
-        }
-        if (first > last)
-        {
-            return;
-        }
-        candidates.push_back({0, alignedCenter + along * PxClamp(0.0f, first, last), score, true});
-        if (checkAlternatives)
-        {
-            candidates.push_back({0, alignedCenter + along * first, 0.0f, true});
-            candidates.push_back({0, alignedCenter + along * last, 0.0f, true});
-        }
-    }
 
     void AddBestEffortCandidates(const FootstepPolygon& reach, const std::vector<FootstepPolygon>& capture,
         size_t mode, std::vector<LandingCandidate>& candidates)
@@ -434,9 +373,6 @@ namespace
         const bool normalOutOfRange = !hasOverlap && input.previousMode == FootstepMode::Normal &&
             !result.reachable[0].empty() && CaptureReachesNormalSide(result);
         const bool checkAlternatives = input.acceptsTarget || input.hasRejectedTarget;
-        const float width = NormalIdleOffsetScale * input.idleLateralOffset;
-        const PxVec3 lateral = hasOverlap && std::isfinite(width) && width > Epsilon ?
-            NormalOffsetDirection(input) : PxVec3(0);
         for (size_t mode : order)
         {
             if ((normalOutOfRange && mode != 0) ||
@@ -473,13 +409,8 @@ namespace
                     }
                     continue;
                 }
-                const PxVec3 center = PolygonCenter(piece);
-                const float score = -FootstepPolygonArea(piece);
-                if (!lateral.isZero())
-                {
-                    AddNormalOffsetCandidates(piece, center, input.com, lateral, width, score, checkAlternatives, candidates);
-                }
-                candidates.push_back({mode, center, score});
+                // 교집합 안에서는 회복 영역까지의 거리가 모두 0이다. 넓은 조각의 내부부터 검사한다.
+                candidates.push_back({mode, PolygonCenter(piece), -FootstepPolygonArea(piece)});
                 if (checkAlternatives)
                 {
                     for (const PxVec3& point : piece)
@@ -496,10 +427,6 @@ namespace
         }
         for (const LandingCandidate& candidate : candidates)
         {
-            if (candidate.usesIdleOffset && !Contains(result.intersections[0], candidate.position))
-            {
-                continue;
-            }
             if (input.hasRejectedTarget && DistanceSquared(candidate.position, input.rejectedTarget) < .0001f)
             {
                 continue;
@@ -517,11 +444,6 @@ namespace
             {
                 result.budgetExhausted = true;
                 break;
-            }
-            // 오프셋 후보들이 자세 검사에 실패해도 기존 후보를 시도할 검사를 하나 남긴다.
-            if (candidate.usesIdleOffset && settings.maximumPoseChecks > 1 && result.poseChecks + 1 == settings.maximumPoseChecks)
-            {
-                continue;
             }
             tested.push_back(candidate.position);
             ++result.poseChecks;
