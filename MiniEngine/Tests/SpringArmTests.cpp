@@ -106,6 +106,55 @@ namespace
         std::puts("PASS: spring arm attachment, world control rotation, post-physics timing and input validation");
     }
 
+    void TestShoulderAim()
+    {
+        Fixture f;
+        SpringArmComponent& arm = *f.rig->arm;
+        SpringArmComponent::Settings settings = arm.GetSettings();
+        settings.targetArmLength = 3.8f;
+        settings.collisionTest = false;
+        Check(arm.SetSettings(settings) && arm.SetControlRotation(DirectX::XM_PI, 0), "Configure the player follow camera");
+        arm.ResetLagState();
+        arm.UpdateArm(0);
+        const Vector3 pivot = f.rig->GetActorLocation();
+        const Vector3 follow = arm.GetCameraLocation();
+        const float dt = 1.0f / 60.0f;
+        arm.UpdateArm(dt, true);
+        const Vector3 first = arm.GetCameraLocation() - pivot;
+        Check(first.GetX() > 0.0f && first.GetX() < .55f && first.GetZ() < 3.8f && first.GetZ() > 1.65f,
+            "Right mouse begins moving closer and to the right on the first frame");
+        for (unsigned frame = 0; frame < 60; ++frame)
+        {
+            arm.UpdateArm(dt, true);
+        }
+        Check(Near(arm.GetCameraLocation() - pivot, Vector3(.55f, .16f, 1.65f)) &&
+            Near(arm.GetViewDirection(), Vector3(0, 0, -1)), "Shoulder framing keeps the center ray parallel to the look direction");
+        f.rig->SetActorLocation(pivot + Vector3(.4f, 0, 0));
+        arm.UpdateArm(dt, true);
+        Check(Near(arm.GetCameraLocation() - f.rig->GetActorLocation(), Vector3(.55f, .16f, 1.65f)),
+            "A lateral move cannot drag the shoulder into the crosshair");
+        f.rig->SetActorLocation(pivot);
+        Check(arm.SetControlRotation(DirectX::XM_PIDIV2, -.4f), "Rotate the aim camera");
+        arm.UpdateArm(dt, true);
+        const Vector3 view = arm.GetViewDirection();
+        const Vector3 right = Normalize(Cross(view, Vector3(kYUnitVector)));
+        const Vector3 up = Cross(right, view);
+        Check(Near(arm.GetCameraLocation() - pivot, right * .55f + up * .16f - view * 1.65f),
+            "The player stays left of the reticle after changing yaw and pitch");
+        arm.SetControlRotation(DirectX::XM_PI, 0);
+        PxRigidStatic* corner = f.physics->CreateStaticBox(PxTransform(PxVec3(.45f, 2.12f, 1.20f)), PxVec3(.04f, .4f, .12f), "Shoulder wall");
+        arm.UpdateArm(dt, true);
+        Check(arm.IsCollisionFixApplied() && arm.GetCameraLocation().GetZ() < 1.2f,
+            "An obstacle on the shoulder side retracts the camera even when the center line is clear");
+        corner->release();
+        for (unsigned frame = 0; frame < 90; ++frame)
+        {
+            arm.UpdateArm(dt);
+        }
+        Check(Near(arm.GetCameraLocation(), follow), "Releasing aim restores the configured follow camera");
+        std::puts("PASS: shoulder aim framing, transition, rotated center ray, wall clearance and release");
+    }
+
     void TestCollisionFiltering()
     {
         Fixture f;
@@ -227,6 +276,7 @@ namespace
 void RunSpringArmTests()
 {
     TestAttachmentAndInput();
+    TestShoulderAim();
     TestCollisionFiltering();
     TestRecoveryAndOverlap();
     TestLagAndGrazing();

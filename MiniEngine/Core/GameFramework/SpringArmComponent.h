@@ -26,7 +26,7 @@ namespace PARS
     public:
         void ResetLagState();
         // 기본 Tick 또는 호출자가 물리 갱신 후 한 번 실행한다. 수동 호출 시 Tick은 꺼둔다.
-        void UpdateArm(float deltaTime);
+        void UpdateArm(float deltaTime, bool aiming = false);
 
     protected:
         void TickComponent(float deltaTime) override
@@ -70,6 +70,7 @@ namespace PARS
         Math::Vector3 m_ViewDirection{Math::kZUnitVector};
         Settings m_Settings;
         float m_CurrentArmLength = 0;
+        float m_ShoulderBlend = 0;
         bool m_Initialized = false;
         bool m_CollisionFixed = false;
     };

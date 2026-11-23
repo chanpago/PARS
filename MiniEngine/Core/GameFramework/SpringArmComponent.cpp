@@ -50,7 +50,7 @@ namespace PARS
         m_CollisionFixed = false;
     }
 
-    void SpringArmComponent::UpdateArm(float deltaTime)
+    void SpringArmComponent::UpdateArm(float deltaTime, bool aiming)
     {
         const Math::Vector3 pivot = GetComponentTransform().GetTranslation();
         if (!std::isfinite(deltaTime) || deltaTime < 0 || !std::isfinite(float(pivot.GetX())) ||
@@ -71,7 +71,27 @@ namespace PARS
         {
             m_LaggedPivot = pivot + lag * (m_Settings.maxCameraLagDistance / lagDistance);
         }
-        const Math::Vector3 desiredOffset = m_LaggedPivot - m_ViewDirection * m_Settings.targetArmLength - pivot;
+        // 시선은 그대로 두고 카메라를 오른쪽 어깨 뒤로 옮겨 캐릭터가 조준점 왼쪽에 보이게 한다.
+        const float aimTarget = aiming ? 1.0f : 0.0f;
+        m_ShoulderBlend = reset ? aimTarget : m_ShoulderBlend + (aimTarget - m_ShoulderBlend) * blend(16.0f);
+        if (std::abs(aimTarget - m_ShoulderBlend) < .001f)
+        {
+            m_ShoulderBlend = aimTarget;
+        }
+        // 옆으로 이동할 때도 어깨가 조준점을 가리지 않도록 조준 비율만큼 추적 지연을 줄인다.
+        Math::Vector3 desiredOffset = (m_LaggedPivot - pivot) * (1.0f - m_ShoulderBlend);
+        float armLength = m_Settings.targetArmLength;
+        if (m_ShoulderBlend > 0)
+        {
+            constexpr float aimDistance = 1.65f;
+            constexpr float shoulderOffset = .55f;
+            constexpr float eyeOffset = .16f;
+            const Math::Vector3 right = Normalize(Cross(m_ViewDirection, Vector3(kYUnitVector)));
+            const Math::Vector3 up = Cross(right, m_ViewDirection);
+            desiredOffset += (right * shoulderOffset + up * eyeOffset) * m_ShoulderBlend;
+            armLength += (std::min(armLength, aimDistance) - armLength) * m_ShoulderBlend;
+        }
+        desiredOffset -= m_ViewDirection * armLength;
         const float desiredLength = Length(desiredOffset);
         if (!std::isfinite(desiredLength))
         {
@@ -82,7 +102,7 @@ namespace PARS
 #if defined(_M_X64)
         const PARS::World* world = GetOwner().GetWorld();
         const PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
-        if (m_Settings.collisionTest && physics && desiredLength > 1e-6f)
+        if ((m_Settings.collisionTest || m_ShoulderBlend > 0) && physics && desiredLength > 1e-6f)
         {
             // 지연된 목표가 벽 반대편에 있어도 현재 피벗부터 검사해 벽을 뚫지 않는다.
             allowed = physics->SweepSphereDistance(

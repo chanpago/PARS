@@ -394,6 +394,7 @@ private:
     uint32_t m_ComparisonCaptureFrames = 0;
 #endif
     bool m_FreeCamera = false;
+    bool m_IsAiming = false;
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
     bool m_ActiveSupport = true;
@@ -402,7 +403,6 @@ private:
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
     bool m_ContactOverlayVisible = false;
-    bool m_IsAiming = false;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
     bool m_MapSelectionVisible = false;
@@ -1218,6 +1218,7 @@ void ModelViewer::RenderModels(Renderer::MeshSorter& sorter)
 
 void ModelViewer::ResetPreviewCamera()
 {
+    m_IsAiming = false;
     if (m_SpringArm)
     {
         m_SpringArm->ResetLagState();
@@ -1255,6 +1256,7 @@ void ModelViewer::ResetPreviewCamera()
 
 void ModelViewer::SetFreeCamera(bool freeCamera)
 {
+    m_IsAiming = false;
     m_FreeCamera = freeCamera;
     if (PARS::PlayerController* player = GetPlayerController())
     {
@@ -1310,7 +1312,7 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
     }
     m_ControlYaw -= GetAnalogInput(kAnalogRightStickX) * deltaTime * 2.0f;
     m_ControlPitch -= GetAnalogInput(kAnalogRightStickY) * deltaTime * 2.0f;
-    if (IsPressed(kMouse1))
+    if (IsPressed(kMouse1) && (m_IsAiming || !ImGui::GetIO().WantCaptureMouse))
     {
         m_ControlYaw -= GetAnalogInput(kAnalogMouseX);
         m_ControlPitch -= GetAnalogInput(kAnalogMouseY);
@@ -1337,7 +1339,7 @@ void ModelViewer::UpdateFollowCamera(float deltaTime)
         : character->GetActorLocation() + Vector3(0, .55f, 0);
     m_SpringArm->SetWorldTransform(AffineTransform(Matrix3(kIdentity), target));
     m_SpringArm->SetControlRotation(m_ControlYaw, m_ControlPitch);
-    m_SpringArm->UpdateArm(deltaTime);
+    m_SpringArm->UpdateArm(deltaTime, m_IsAiming);
     m_Camera.SetPosition(m_SpringArm->GetCameraLocation());
     m_Camera.SetLookDirection(m_SpringArm->GetViewDirection(), Vector3(kYUnitVector));
     m_Camera.Update();
@@ -1521,6 +1523,19 @@ void ModelViewer::Update(float deltaT)
     // 조작 가능 여부, 카메라 조준 방향, 이동/달리기 입력을 설정한다. 실제 이동은 아래 World::Tick에서 처리한다.
     UpdateCharacterInput(deltaT);
 
+#if defined(_M_X64)
+    const PARS::PlayerController* player = GetPlayerController();
+    PARS::Character* character = GetPreviewCharacter();
+    const bool controlsPlayer = player && player->IsInputEnabled() && character && !m_FreeCamera;
+    const ImGuiIO& io = ImGui::GetIO();
+    const bool beginAim = GameInput::IsFirstPressed(GameInput::kMouse1) && !io.WantCaptureMouse;
+    m_IsAiming = controlsPlayer && GameInput::IsPressed(GameInput::kMouse1) && (m_IsAiming || beginAim);
+    if (character)
+    {
+        character->GetCharacterMovement().SetAimFacing(m_IsAiming, m_ControlYaw);
+    }
+#endif
+
     // 플레이어 추적 카메라를 사용하지 않고, 메시 에디터가 입력을 점유하지 않을 때 카메라를 직접 조작한다.
     if ((!GetPlayerController() || m_FreeCamera) && !(m_MeshViewer && m_MeshViewer->WantsInput()))
     {
@@ -1547,6 +1562,10 @@ void ModelViewer::Update(float deltaT)
             m_ImpactTest->Update();
         }
     }
+    // 물리 틱에서 플레이어가 넘어졌다면 이 프레임부터 조준 자세와 발사를 해제한다.
+    character = GetPreviewCharacter();
+    const bool canAimNow = controlsPlayer && character && character->CanControlMovement();
+    m_IsAiming = m_IsAiming && canAimNow;
 #endif
     if (GetPlayerController() && !m_FreeCamera)
     {
@@ -1555,16 +1574,9 @@ void ModelViewer::Update(float deltaT)
     }
 #if defined(_M_X64)
     // 이번 프레임의 이동과 카메라 회전을 반영한 뒤, 화면 중앙과 같은 시선으로 발사한다.
-    const PARS::PlayerController* player = GetPlayerController();
-    PARS::Character* character = GetPreviewCharacter();
-    const bool canFire = m_ImpactTest && player && player->IsInputEnabled() && character &&
-        character->CanControlMovement() && !m_FreeCamera &&
-        !(m_MeshViewer && m_MeshViewer->WantsInput()) && !(m_Comparison && m_Comparison->IsShowingScene());
-    const ImGuiIO& io = ImGui::GetIO();
-    m_IsAiming = canFire && !io.WantCaptureMouse && GameInput::IsPressed(GameInput::kMouse1);
     const bool fireKey = !io.WantCaptureKeyboard && GameInput::IsFirstPressed(GameInput::kKey_r);
     const bool fireMouse = m_IsAiming && GameInput::IsFirstPressed(GameInput::kMouse0);
-    if (canFire && (fireKey || fireMouse))
+    if (m_ImpactTest && canAimNow && (fireKey || fireMouse))
     {
         if (m_IsAiming)
         {
@@ -1892,12 +1904,9 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         DrawMapSelection();
         return;
     }
-    if (m_ContactOverlayVisible && m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
-    {
-        m_ImpactTest->DrawContactOverlay(m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
-    }
     if (m_IsAiming)
     {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_None);
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         const ImVec2 center(viewport->Pos.x + viewport->Size.x * .5f, viewport->Pos.y + viewport->Size.y * .5f);
         ImDrawList* draw = ImGui::GetForegroundDrawList();
@@ -1914,6 +1923,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         draw->AddCircleFilled(center, 1.5f * scale, IM_COL32(255, 255, 255, 255));
         // 조준 중에는 표적을 가리는 디버그 패널을 잠시 숨긴다.
         return;
+    }
+    if (m_ContactOverlayVisible && m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
+    {
+        m_ImpactTest->DrawContactOverlay(m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
     }
     if (m_PhysicsDemo)
     {
@@ -2136,7 +2149,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                     {
                         m_SpringArm->SetSettings(settings);
                     }
-                    ImGui::TextWrapped(u8"속도 0: 즉시 반영. 카메라는 충돌체에 막히지 않습니다.");
+                    ImGui::TextWrapped(u8"속도를 0으로 설정하면 즉시 반영합니다. 어깨 조준 시 벽이 가까우면 카메라가 앞으로 당겨집니다.");
                     ImGui::Text(u8"현재 거리: %.2f m", m_SpringArm->GetCurrentArmLength());
                 }
 #if defined(_M_X64)

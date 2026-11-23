@@ -16,11 +16,21 @@ namespace PARS
         return float(Length(m_LocomotionVelocity));
     }
 
+    void CharacterMovementComponent::SetAimFacing(bool aiming, float yaw)
+    {
+        m_Aiming = aiming && std::isfinite(yaw);
+        if (m_Aiming)
+        {
+            m_AimYaw = yaw;
+        }
+    }
+
     void CharacterMovementComponent::StopMovementImmediately()
     {
         m_Input = m_Velocity = m_LocomotionVelocity = Vector3(kZero);
         m_VerticalSpeed = 0;
         m_Grounded = false;
+        m_Aiming = false;
         if (PARS::Pawn* pawn = GetPawnOwner())
         {
             pawn->ConsumeMovementInput();
@@ -78,12 +88,13 @@ namespace PARS
         }
         m_Velocity = (capsule->GetComponentTransform().GetTranslation() - before) / dt;
         m_Velocity.SetY(m_VerticalSpeed);
-        if (GetLocomotionSpeed() > 0.05f)
+        if (m_Aiming || GetLocomotionSpeed() > 0.05f)
         {
             Math::AffineTransform transform = capsule->GetComponentTransform();
             const Vector3 forward = transform.GetZ();
             const float yaw = std::atan2(float(forward.GetX()), float(forward.GetZ()));
-            const float target = std::atan2(float(m_LocomotionVelocity.GetX()), float(m_LocomotionVelocity.GetZ()));
+            // 조준 중에는 제자리에서도 시선을 따라 돌고, 옆이나 뒤로 걸어도 표적을 향한다.
+            const float target = m_Aiming ? m_AimYaw : std::atan2(float(m_LocomotionVelocity.GetX()), float(m_LocomotionVelocity.GetZ()));
             const float differenceYaw = std::atan2(std::sin(target - yaw), std::cos(target - yaw));
             transform.SetBasis(Matrix3::MakeYRotation(yaw + Clamp(differenceYaw, -12.56637f * dt, 12.56637f * dt)));
             capsule->SetWorldTransform(transform);

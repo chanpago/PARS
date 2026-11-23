@@ -138,6 +138,25 @@ namespace
         std::puts("PASS: gravity, walk/run, facing, FPS independence, diagonal speed, pause/step/slow motion");
     }
 
+    void TestAimFacing()
+    {
+        Fixture f;
+        const Vector3 start = f.character->GetActorLocation();
+        f.player->SetControlYaw(DirectX::XM_PI);
+        f.character->movement->SetAimFacing(true, DirectX::XM_PI);
+        f.Frames(30);
+        Check(f.character->GetActorTransform().GetZ().GetZ() < -.99f && float(Length(f.character->GetActorLocation() - start)) < .01f,
+            "Aiming turns an idle character toward the center ray without moving the capsule");
+        f.player->SetMoveInput(0, 1, false);
+        f.Frames(60);
+        Check(f.character->GetActorTransform().GetZ().GetZ() < -.99f && f.character->GetActorLocation().GetX() > .9f,
+            "Strafing keeps the character facing the target");
+        f.character->movement->SetAimFacing(false, 0);
+        f.Frames(30);
+        Check(f.character->GetActorTransform().GetZ().GetX() > .99f, "Releasing aim restores movement-facing yaw");
+        std::puts("PASS: idle aim turn, strafe facing and release");
+    }
+
     void TestCollisionAndLifetime()
     {
         Fixture f;
@@ -409,6 +428,7 @@ namespace
 void RunCharacterMovementTests()
 {
     TestMovement();
+    TestAimFacing();
     TestCollisionAndLifetime();
     TestQueryCapsules();
     TestMovementQueryOwners();
