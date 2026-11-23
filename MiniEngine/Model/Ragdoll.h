@@ -30,7 +30,9 @@ namespace PARS
         size_t body = 0;
         physx::PxVec3 position{0};
         physx::PxVec3 impulse{0};
+        physx::PxVec3 outwardNormal{0};
         bool fromProjectile = false;
+        bool newProjectileHit = false;
     };
 
     struct RagdollSupportContact

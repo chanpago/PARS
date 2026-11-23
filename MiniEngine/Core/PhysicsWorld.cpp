@@ -179,11 +179,25 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         cached->points.resize(pair.contactCount);
         const PxU32 extracted = pair.extractContacts(cached->points.data(), pair.contactCount);
         cached->points.resize(extracted);
+        if (cached->clockRevision != m_ClockRevision)
+        {
+            cached->firstImpulseStep = 0;
+        }
         cached->completedStep = m_StepCount + 1;
         cached->clockRevision = m_ClockRevision;
         for (int side = 0; side < 2; ++side)
         {
-            if (!(pair.shapes[side]->getSimulationFilterData().word3 & AimedProjectileFilterFlag))
+            const uint32_t flags = pair.shapes[side]->getSimulationFilterData().word3;
+            // 공이 몸에 계속 닿아 있을 때 처음 충격량이 생긴 스텝만 새 피격으로 기록한다.
+            if ((flags & ProjectileFilterFlag) && cached->firstImpulseStep == 0 &&
+                std::any_of(cached->points.begin(), cached->points.end(), [](const PxContactPairPoint& point) -> bool
+                {
+                    return point.impulse.magnitudeSquared() > 1e-8f;
+                }))
+            {
+                cached->firstImpulseStep = cached->completedStep;
+            }
+            if (!(flags & AimedProjectileFilterFlag))
             {
                 continue;
             }
@@ -380,7 +394,9 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
                     PhysicsContactImpulse contact;
                     contact.position = point.position;
                     contact.impulse = side == 0 ? point.impulse : -point.impulse;
+                    contact.outwardNormal = -normal;
                     contact.fromProjectile = projectile;
+                    contact.newProjectileHit = projectile && pair.firstImpulseStep == m_StepCount;
                     contacts->push_back(contact);
                 }
             }

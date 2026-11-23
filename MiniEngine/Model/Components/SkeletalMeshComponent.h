@@ -73,6 +73,17 @@ namespace PARS
             IdleBlend
         };
 
+        struct ImpactHandReach
+        {
+        public:
+            uint64_t step = 0;
+            uint64_t clock = 0;
+            physx::PxVec3 pointInBone{0};
+            physx::PxVec3 normalInBone{0};
+            int body = -1;
+            int hand = -1;
+        };
+
     public:
         SkeletalMeshComponent(Actor& owner, const std::string& name);
 
@@ -125,7 +136,7 @@ namespace PARS
         bool CaptureRecoveryBlendSource();
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
-        bool UpdateAutomaticRagdoll(float deltaTime);
+        bool UpdateAutomaticRagdoll(float deltaTime, bool projectileHit);
         bool UpdateBalanceState(float deltaTime);
         bool BeginAirborneFall();
         void ResetAirborneFall();
@@ -135,7 +146,10 @@ namespace PARS
         bool BeginKinematicRecovery();
         bool UpdateKinematicRecoveryPose(float deltaTime);
         void InitializeFallArms();
-        void ApplyFallArmTargets(std::vector<Math::Matrix4>& target, float deltaTime);
+        ImpactHandReach FindImpactHandReach(const std::vector<RagdollBodyImpulse>& impacts) const;
+        void ApplyImpactHandReach(const PhysicsWorld& physics, const std::array<FallArmSample, 2>& arms,
+            std::vector<physx::PxTransform>& frames, FallArmSnapshot& corrected);
+        void ApplyArmTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void ResetFallArms();
 
     public:
@@ -342,6 +356,7 @@ namespace PARS
         StandingSupport m_StandingSupport;
         HorizontalBalance m_HorizontalBalance;
         FallArmBrace m_FallArmBrace;
+        ImpactHandReach m_ImpactHandReach;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
         std::vector<GraphNode> m_CrossStepPose;

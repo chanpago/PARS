@@ -1,4 +1,5 @@
 ﻿#include "PhysicsWorld.h"
+#include "../Model/FallArmBrace.h"
 #include "../Model/FootSupportHull.h"
 
 #include <array>
@@ -84,20 +85,98 @@ namespace
         Check(!world.HasApproachingImpact(*target, 73, .05f, nullptr), "Non-colliding shapes cannot trigger recovery");
         Check(world.GetStepCount() == 0 && world.GetErrorCount() == 0, "Prediction does not simulate or introduce PhysX errors");
         shape->setFlag(PxShapeFlag::eSIMULATION_SHAPE, true);
+        PxFilterData filter = shape->getSimulationFilterData();
+        filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
+        shape->setSimulationFilterData(filter);
         std::vector<PhysicsContactImpulse> contacts;
-        for (int step = 0; step < 6 && contacts.empty(); ++step)
+        float strength = 0;
+        for (int step = 0; step < 6 && strength <= 1e-4f; ++step)
         {
             world.Step();
-            world.GetExternalImpactImpulse(*target, nullptr, &contacts);
+            strength = world.GetExternalImpactImpulse(*target, nullptr, &contacts);
         }
         Check(!contacts.empty(), "Fallback captures a real kinematic contact");
         PxVec3 impulse(0);
         for (const PhysicsContactImpulse& contact : contacts)
         {
             impulse += contact.impulse;
+            Check(contact.newProjectileHit && contact.outwardNormal.x < -.9f,
+                "First ball impulse supplies the outward normal on the struck surface");
         }
         Check(impulse.x > 0 && impulse.isFinite(), "Captured fallback impulse points into the receiver");
+        source->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+        bool sustained = false;
+        for (int step = 0; step < 4; ++step)
+        {
+            const PxVec3 towardTarget = (target->getGlobalPose().p - source->getGlobalPose().p).getNormalized();
+            source->setLinearVelocity(towardTarget * 2.0f);
+            world.Step();
+            sustained |= world.GetExternalImpactImpulse(*target, nullptr, &contacts) > 1e-4f;
+            for (const PhysicsContactImpulse& contact : contacts)
+            {
+                Check(!contact.newProjectileHit, "A ball held against the body does not restart the gesture");
+            }
+        }
+        Check(sustained, "The pressed ball continues transferring impulse");
         std::puts("PASS: approaching collision, threshold, departing/missing source, ownership and collision policy");
+    }
+
+    void TestImpactPalm()
+    {
+        const std::vector<int32_t> parents{-1, 0, 1, 2, 0, 4, 5};
+        const std::vector<PxTransform> rest{PxTransform(PxIdentity),
+            PxTransform(PxVec3(-.18f, 0, 0)), PxTransform(PxVec3(-.18f, -.30f, 0)), PxTransform(PxVec3(-.18f, -.58f, 0)),
+            PxTransform(PxVec3(.18f, 0, 0)), PxTransform(PxVec3(.18f, -.30f, 0)), PxTransform(PxVec3(.18f, -.58f, 0))};
+        std::array<PARS::FallArmSample, 2> arms;
+        for (int side = 0; side < 2; ++side)
+        {
+            PARS::FallArmSetup& setup = arms[side].setup;
+            setup.available = true;
+            setup.anchorNode = 0;
+            setup.shoulderNode = 1 + 3 * side;
+            setup.elbowNode = setup.shoulderNode + 1;
+            setup.handNode = setup.elbowNode + 1;
+            setup.upperLength = .30f;
+            setup.lowerLength = .28f;
+            setup.palmInHand = PxTransform(PxVec3(0, 0, .02f));
+        }
+        PARS::ImpactPalmGoal goal;
+        goal.weight = 1;
+        goal.approach = 1;
+        for (int side = 0; side < 2; ++side)
+        {
+            goal.hand = -1;
+            goal.hitNode = arms[side].setup.shoulderNode;
+            const PxVec3 hit(rest[goal.hitNode].p.x, -.13f, .07f);
+            for (const PxTransform& body : {PxTransform(PxIdentity), PxTransform(PxVec3(-2, 3, 1), PxQuat(.9f, PxVec3(0, 1, 0)))})
+            {
+                for (PARS::FallArmSample& arm : arms)
+                {
+                    arm.actualAnchor = body;
+                    arm.actualHand = body * rest[arm.setup.handNode];
+                }
+                goal.point = body.transform(hit);
+                goal.normal = body.q.rotate(PxVec3(0, 0, 1));
+                std::vector<PxTransform> pose = rest;
+                PARS::FallArmSnapshot result;
+                Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && goal.hand == 1 - side,
+                    "The opposite hand reaches a struck arm");
+                const PxTransform palm = body * pose[arms[goal.hand].setup.handNode] * arms[goal.hand].setup.palmInHand;
+                Check((palm.p - (goal.point + goal.normal * .006f)).magnitude() < 1e-4f &&
+                    palm.q.rotate(PxVec3(0, 1, 0)).dot(goal.normal) > .999f && !result.arms[side].applied,
+                    "Only the reaching arm turns its palm to the same surface after the body moves");
+            }
+        }
+        std::vector<PxTransform> pose = rest;
+        goal.hand = -1;
+        goal.hitNode = 0;
+        goal.point = arms[1].actualHand.transform(PxVec3(0, -.8f, .05f));
+        PARS::FallArmSnapshot result;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && goal.hand == 1 &&
+            result.arms[goal.hand].reachLimited &&
+            std::abs((pose[6].p - pose[5].p).magnitude() - arms[1].setup.lowerLength) < 1e-4f,
+            "An unreachable body hit selects the closer hand and preserves arm length");
+        std::puts("PASS: struck arm, moving surface, palm orientation, hand choice and reach limit");
     }
 
     void TestBodyPairContacts()
@@ -309,6 +388,12 @@ void TestFramePerformance();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--impact-hand-only") == 0)
+    {
+        TestApproachingImpact();
+        TestImpactPalm();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--horizontal-balance-only") == 0)
     {
         TestHorizontalBalance();
@@ -339,6 +424,7 @@ int main(int argc, char** argv)
     }
     TestFootProjectionRaycast();
     TestApproachingImpact();
+    TestImpactPalm();
     TestBodyPairContacts();
     TestFootSupportHull();
     TestFootSupportBalance();

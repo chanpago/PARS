@@ -58,7 +58,9 @@ struct PhysicsContactImpulse
 public:
     physx::PxVec3 position{0};
     physx::PxVec3 impulse{0};
+    physx::PxVec3 outwardNormal{0};
     bool fromProjectile = false;
+    bool newProjectileHit = false;
 };
 
 // 미터, 킬로그램, 초 단위의 CPU 물리이며 +Y가 위쪽이다. 게임 스레드에서 사용한다.
@@ -85,6 +87,7 @@ private:
         std::vector<physx::PxContactPairPoint> points;
         uint64_t completedStep = 0;
         uint64_t clockRevision = 0;
+        uint64_t firstImpulseStep = 0;
     };
     class ErrorCallback : public physx::PxDefaultErrorCallback
     {

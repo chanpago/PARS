@@ -401,7 +401,7 @@ namespace PARS
         }
     }
 
-    bool SkeletalMeshComponent::UpdateAutomaticRagdoll(float deltaTime)
+    bool SkeletalMeshComponent::UpdateAutomaticRagdoll(float deltaTime, bool projectileHit)
     {
         if (!m_AutomaticRagdoll)
         {
@@ -421,7 +421,7 @@ namespace PARS
                 m_StandingUpState == StandingUpState::None && m_AirborneFallAnimations.front() != UINT32_MAX &&
                 sample.projectedPointCount == 0 && sample.feet[0].contact.hasSample && sample.feet[1].contact.hasSample &&
                 !sample.feet[0].contact.grounded && !sample.feet[1].contact.grounded;
-            if (!impact && !approaching && !lostFloor)
+            if (!impact && !approaching && !lostFloor && !projectileHit)
             {
                 return true;
             }
@@ -484,7 +484,7 @@ namespace PARS
             sample.feet[1].contact.hasSample && sample.feet[1].contact.grounded;
         // A영역 유지 시간은 그대로 누적하되, 실제 양발 접지가 확인될 때만 전환한다.
         if (m_KinematicRecoveryTimer.Update(sample.contactRevision, sample.completedPhysicsStep,
-            deltaTime, insideA, bothGrounded, impact, m_KinematicStableDuration))
+            deltaTime, insideA, bothGrounded, impact, m_KinematicStableDuration) && !projectileHit && m_ImpactHandReach.body < 0)
         {
             return BeginKinematicRecovery();
         }

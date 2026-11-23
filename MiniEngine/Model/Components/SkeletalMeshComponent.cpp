@@ -190,15 +190,28 @@ namespace PARS
         // 여기서 발 움직임을 계산하고 지지영역을 조사해 가중치를 구한다
         m_Ragdoll.SetHorizontalSupportForce(physx::PxVec3(0));
         UpdateFootSupport();
-        if (IsActiveRagdoll())
+        ImpactHandReach hit;
+        if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()))
         {
-            m_Ragdoll.UpdateProjectileReaction(m_Ragdoll.GetExternalImpacts(), deltaTime);
+            const std::vector<RagdollBodyImpulse>& impacts = m_Ragdoll.GetExternalImpacts();
+            // 모드 전환이 바디와 접촉 캐시를 교체하기 전에 피격점을 본 로컬 좌표로 보관한다.
+            if (!IsFalling() && !IsGroundFallActive() && m_StandingUpState == StandingUpState::None)
+            {
+                hit = FindImpactHandReach(impacts);
+            }
+            if (IsActiveRagdoll())
+            {
+                m_Ragdoll.UpdateProjectileReaction(impacts, deltaTime);
+            }
         }
 
-        //
-        if (!UpdateAutomaticRagdoll(deltaTime))
+        if (!UpdateAutomaticRagdoll(deltaTime, hit.body >= 0))
         {
             return;
+        }
+        if (hit.body >= 0 && IsActiveRagdoll())
+        {
+            m_ImpactHandReach = hit;
         }
         if (!UpdateAutomaticRootSupport(m_PhysicsError))
         {
@@ -251,7 +264,7 @@ namespace PARS
                 if (evaluated)
                 {
                     UpdateHorizontalBalance(deltaTime);
-                    ApplyFallArmTargets(target, deltaTime);
+                    ApplyArmTargets(target, deltaTime);
                 }
             }
             if (!evaluated || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))

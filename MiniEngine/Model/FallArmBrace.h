@@ -42,6 +42,7 @@ namespace PARS
         float upperLength = 0;
         float lowerLength = 0;
         int anchorNode = -1;
+        int clavicleNode = -1;
         int shoulderNode = -1;
         int elbowNode = -1;
         int handNode = -1;
@@ -111,6 +112,21 @@ namespace PARS
     // 후보 위에서 아래로 탐색한다. 표면 탐색과 실제 손의 접촉은 서로 다른 입력이다.
     using FallArmGroundQuery = std::function<bool(const physx::PxVec3& origin, float distance,
         physx::PxVec3& position, physx::PxVec3& normal)>;
+
+    struct ImpactPalmGoal
+    {
+    public:
+        physx::PxVec3 point{0};
+        physx::PxVec3 normal{0};
+        float approach = 0;
+        float weight = 0;
+        int hitNode = -1;
+        int hand = -1;
+    };
+
+    // 닿을 손을 처음 한 번 고르고, 이후에는 같은 손으로 움직이는 피격 표면을 따라간다.
+    bool ApplyImpactPalmTarget(ImpactPalmGoal& goal, const std::array<FallArmSample, 2>& arms,
+        const std::vector<int32_t>& parents, std::vector<physx::PxTransform>& pose, FallArmSnapshot& targets);
 
     class FallArmBrace
     {
