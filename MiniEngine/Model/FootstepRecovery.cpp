@@ -13,7 +13,7 @@ namespace
     constexpr uint32_t CircleVertices = 12;
     constexpr float Epsilon = 1e-6f;
     constexpr uint32_t MaximumCapturePieces = 13;
-    constexpr float NormalIdleOffsetScale = .8f;
+    constexpr float NormalIdleOffsetScale = 1.0f;
 
     float Cross(const PxVec3& a, const PxVec3& b)
     {
