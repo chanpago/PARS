@@ -171,6 +171,7 @@
     <ClCompile Include="RagdollRecovery.cpp" />
     <ClCompile Include="RagdollRecoveryPose.cpp" />
     <ClCompile Include="Components\SkeletalMeshRecovery.cpp" />
+    <ClCompile Include="Components\SkeletalMeshImpactWarmup.cpp" />
     <ClCompile Include="Components\SkeletalMeshAirborneFall.cpp" />
     <ClCompile Include="Components\SkeletalMeshCrossStep.cpp" />
     <ClCompile Include="Ragdoll.cpp" />

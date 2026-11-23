@@ -9,7 +9,7 @@ using namespace physx;
 
 namespace PARS
 {
-    bool Ragdoll::HasApproachingImpact(float minimumDeltaVelocity) const
+    bool Ragdoll::HasApproachingImpact(float minimumDeltaVelocity, float deferCapsuleDeltaVelocity) const
     {
         Math::Vector3 center(Math::kZero);
         float mass = 0;
@@ -19,7 +19,7 @@ namespace PARS
         }
         for (const PxRigidBody* body : m_Bodies)
         {
-            if (m_World->HasApproachingImpact(*body, mass, minimumDeltaVelocity, m_QueryOwner))
+            if (m_World->HasApproachingImpact(*body, mass, minimumDeltaVelocity, m_QueryOwner, deferCapsuleDeltaVelocity))
             {
                 return true;
             }
@@ -57,6 +57,10 @@ namespace PARS
                 impact.outwardNormal = contact.outwardNormal;
                 impact.fromProjectile = contact.fromProjectile;
                 impact.newProjectileHit = contact.newProjectileHit;
+                impact.fromCharacterCapsule = contact.fromCharacterCapsule;
+                impact.fromAnimatedCapsule = contact.fromAnimatedCapsule;
+                impact.capsuleVelocity = contact.capsuleVelocity;
+                impact.capsuleGroup = contact.capsuleGroup;
                 m_ExternalImpacts.push_back(impact);
             }
         }
@@ -438,24 +442,31 @@ namespace PARS
         return pose.isValid() && targetOffset.isFinite();
     }
 
-    void Ragdoll::SetCharacterImpactEnabled(bool enabled, uint32_t ownerGroup)
+    void Ragdoll::SetCharacterImpactEnabled(bool enabled, uint32_t ownerGroup, bool sweepKinematicTorso)
     {
         enabled = enabled && IsActive() && m_CollisionEnabled;
         if (!enabled)
         {
             RemoveCharacterCapsule();
         }
-        if (m_CharacterImpactEnabled == enabled && m_CharacterImpactGroup == ownerGroup)
+        sweepKinematicTorso = enabled && !IsSimulating() && sweepKinematicTorso;
+        const bool policyChanged = m_CharacterImpactEnabled != enabled || m_CharacterImpactGroup != ownerGroup;
+        if (!policyChanged && m_SweepKinematicTorso == sweepKinematicTorso)
         {
             return;
         }
-        InvalidateContactState();
+        // 이동 스윕만 켜는 예열 첫 틱에도 이미 성립한 실제 접촉은 유지한다.
+        if (policyChanged)
+        {
+            InvalidateContactState();
+        }
         m_CharacterImpactEnabled = enabled;
+        m_SweepKinematicTorso = sweepKinematicTorso;
         m_CharacterImpactGroup = ownerGroup;
-        RefreshCharacterImpactFilters();
+        RefreshCharacterImpactFilters(policyChanged);
     }
 
-    void Ragdoll::RefreshCharacterImpactFilters()
+    void Ragdoll::RefreshCharacterImpactFilters(bool updateSimulationFilters)
     {
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
@@ -480,18 +491,27 @@ namespace PARS
                         data.word3 |= PhysicsWorld::CharacterCapsuleOwnerFilterFlag;
                     }
                 }
-                shape->setSimulationFilterData(data);
+                if (updateSimulationFilters)
+                {
+                    shape->setSimulationFilterData(data);
+                }
+                shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, IsSimulating() ||
+                    (m_SweepKinematicTorso && (data.word3 & PhysicsWorld::CharacterImpactTargetFilterFlag) != 0));
             }
-            if (body->getScene())
+            if (updateSimulationFilters && body->getScene())
             {
                 body->getScene()->resetFiltering(*body);
             }
         }
-        if (m_CharacterCapsuleShape)
+        if (updateSimulationFilters && m_CharacterCapsuleShape)
         {
             PxFilterData capsuleData;
             capsuleData.word2 = m_CharacterImpactGroup;
             capsuleData.word3 = PhysicsWorld::CharacterCapsuleFilterFlag;
+            if (!IsSimulating())
+            {
+                capsuleData.word3 |= PhysicsWorld::AnimatedCapsuleFilterFlag;
+            }
             m_CharacterCapsuleShape->setSimulationFilterData(capsuleData);
             if (m_CharacterCapsuleBody->getScene())
             {
@@ -575,7 +595,7 @@ namespace PARS
         return true;
     }
 
-    void Ragdoll::SyncCharacterCapsule()
+    void Ragdoll::SyncCharacterCapsule(const PxVec3& pushVelocity)
     {
         const int root = GetImpactRootBody();
         if (!m_CharacterCapsuleBody || !IsActive() || root < 0)
@@ -610,6 +630,10 @@ namespace PARS
                 angular = axis * (angle / deltaTime);
             }
         }
+        // 관통 방지로 이동 목표에서 잘린 법선 속도만 보충한다. 충돌량은 캡슐 질량으로 솔버가 계산한다.
+        PxVec3 pushDirection = pushVelocity;
+        const float pushSpeed = pushDirection.normalize();
+        linear += pushDirection * PxMax(0.0f, pushSpeed - linear.dot(pushDirection));
         if (!pose.isValid() || !linear.isFinite() || !angular.isFinite())
         {
             return;

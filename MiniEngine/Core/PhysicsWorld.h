@@ -59,8 +59,12 @@ public:
     physx::PxVec3 position{0};
     physx::PxVec3 impulse{0};
     physx::PxVec3 outwardNormal{0};
+    physx::PxVec3 capsuleVelocity{0};
+    uint32_t capsuleGroup = 0;
     bool fromProjectile = false;
     bool newProjectileHit = false;
+    bool fromCharacterCapsule = false;
+    bool fromAnimatedCapsule = false;
 };
 
 // 미터, 킬로그램, 초 단위의 CPU 물리이며 +Y가 위쪽이다. 게임 스레드에서 사용한다.
@@ -88,6 +92,7 @@ private:
         uint64_t completedStep = 0;
         uint64_t clockRevision = 0;
         uint64_t firstImpulseStep = 0;
+        physx::PxVec3 capsuleVelocity{0};
     };
     class ErrorCallback : public physx::PxDefaultErrorCallback
     {
@@ -175,7 +180,7 @@ public:
         std::vector<PhysicsContactImpulse>* contacts = nullptr) const;
     // 다음 고정 스텝에 접근 충돌이 예상되면 솔버 실행 전에 동적으로 전환할 수 있다.
     bool HasApproachingImpact(const physx::PxRigidBody& body, float totalMass, float minimumDeltaVelocity,
-        const void* ignoredOwner) const;
+        const void* ignoredOwner, float deferCapsuleDeltaVelocity = PX_MAX_F32) const;
     uint64_t GetClockRevision() const
     {
         return m_ClockRevision;
@@ -232,6 +237,8 @@ public:
     static constexpr uint32_t ProjectileFilterFlag = 1u << 27;
     // 조준 발사한 공은 첫 충돌 스텝부터 다시 중력을 받는다.
     static constexpr uint32_t AimedProjectileFilterFlag = 1u << 26;
+    // 독립 캡슐의 운동을 애니메이션 플레이어가 구동하는지 접촉에 기록한다.
+    static constexpr uint32_t AnimatedCapsuleFilterFlag = 1u << 25;
     static constexpr double FixedDeltaTime = 1.0 / 60.0;
     static constexpr uint32_t MaxSubsteps = 8;
 

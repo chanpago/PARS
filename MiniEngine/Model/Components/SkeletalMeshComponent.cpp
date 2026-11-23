@@ -101,6 +101,7 @@ namespace PARS
             }
         }
         m_Ragdoll.Swap(candidate);
+        m_ImpactWarmup = {};
         m_ImpactFlail = {};
         ResetCrossStepPlayback();
         ResetFallArms();
@@ -132,6 +133,7 @@ namespace PARS
             return false;
         }
         instance->Initialize(m_SkeletalMesh);
+        m_ImpactWarmup = {};
         m_AnimInstance = std::move(instance);
         ResetFallArms();
         ResetAirborneFall();
@@ -191,6 +193,10 @@ namespace PARS
         // 여기서 발 움직임을 계산하고 지지영역을 조사해 가중치를 구한다
         m_Ragdoll.SetHorizontalSupportForce(physx::PxVec3(0));
         UpdateFootSupport();
+        if (UpdateImpactWarmup(deltaTime))
+        {
+            return;
+        }
         ImpactHandReach hit;
         bool longitudinalImpact = false;
         if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()))
@@ -314,7 +320,7 @@ namespace PARS
         }
         UpdateFootCandidateDebugColors();
         m_ModelInstance.SetTransform(GetComponentTransform());
-        return m_ModelInstance.UpdatePose(context, IsRagdoll() || IsBlendingToKinematic() ? GetFinalPose() :
+        return m_ModelInstance.UpdatePose(context, IsRagdoll() || IsImpactWarmupActive() || IsBlendingToKinematic() ? GetFinalPose() :
             poseOverride ? *poseOverride : m_AnimInstance->GetPose());
     }
 

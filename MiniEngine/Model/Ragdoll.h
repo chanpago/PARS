@@ -31,8 +31,12 @@ namespace PARS
         physx::PxVec3 position{0};
         physx::PxVec3 impulse{0};
         physx::PxVec3 outwardNormal{0};
+        physx::PxVec3 capsuleVelocity{0};
+        uint32_t capsuleGroup = 0;
         bool fromProjectile = false;
         bool newProjectileHit = false;
+        bool fromCharacterCapsule = false;
+        bool fromAnimatedCapsule = false;
     };
 
     struct RagdollSupportContact
@@ -95,7 +99,7 @@ namespace PARS
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
             float heightScale = 1.0f);
         // simulate() 직전에 몸통에서 캡슐로 자세·속도를 복사한다. 반작용은 몸통에 되돌리지 않는다.
-        void SyncCharacterCapsule();
+        void SyncCharacterCapsule(const physx::PxVec3& pushVelocity = physx::PxVec3(0));
         void RemoveCharacterCapsule();
         // 비교용 키네마틱 기준 더미는 접촉을 만들지 않고 원본 포즈만 따른다.
         void SetCollisionEnabled(bool enabled);
@@ -124,7 +128,7 @@ namespace PARS
         void YieldImpactJoints(size_t body, bool isRoot, float amount);
         std::vector<float> ComputeSupportGeneralizedForce();
         void InvalidateContactState();
-        void RefreshCharacterImpactFilters();
+        void RefreshCharacterImpactFilters(bool updateSimulationFilters = true);
 
     public:
         Ragdoll& operator=(const Ragdoll&) = delete;
@@ -235,7 +239,7 @@ namespace PARS
         const std::vector<RagdollBodyImpulse>& GetExternalImpacts() const;
         void CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const;
         bool IsTopplingFromProjectile() const;
-        bool HasApproachingImpact(float minimumDeltaVelocity) const;
+        bool HasApproachingImpact(float minimumDeltaVelocity, float deferCapsuleDeltaVelocity = PX_MAX_F32) const;
         int GetImpactRootBody() const;
         bool IsCharacterImpactBody(size_t body) const;
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;
@@ -249,7 +253,7 @@ namespace PARS
         }
         bool GetCharacterImpactCapsule(float radiusScale, physx::PxTransform& pose, float& radius,
             float& halfLength, physx::PxVec3& targetOffset, float heightScale = 1.0f) const;
-        void SetCharacterImpactEnabled(bool enabled, uint32_t ownerGroup);
+        void SetCharacterImpactEnabled(bool enabled, uint32_t ownerGroup, bool sweepKinematicTorso = false);
         bool UsesCharacterImpact() const
         {
             return m_CharacterImpactEnabled;
@@ -324,6 +328,7 @@ namespace PARS
         uint32_t m_CharacterImpactGroup = 0;
         bool m_CollisionEnabled = true;
         bool m_CharacterImpactEnabled = false;
+        bool m_SweepKinematicTorso = false;
         bool m_Simulating = false;
         bool m_DrivesEnabled = false;
         bool m_HasDriveTargets = false;

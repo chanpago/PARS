@@ -490,9 +490,12 @@ namespace PARS
         return FindMotionMatch(usage, query, {}, 0.0f, requiredClip);
     }
 
-    bool AnimInstance::SampleUpperBodyPose(uint32_t clip, float time, float weight, std::vector<GraphNode>& pose) const
+    bool AnimInstance::SampleUpperBodyPose(uint32_t clip, float time, float weight, std::vector<GraphNode>& pose,
+        const std::vector<GraphNode>* basePose) const
     {
-        if (!m_MotionDatabase || m_MotionDatabase->upperBodyMask.size() != m_Pose.size() || !SampleAnimationPose(clip, time, pose))
+        const std::vector<GraphNode>& base = basePose ? *basePose : m_Pose;
+        if (!m_MotionDatabase || base.size() != m_Pose.size() || m_MotionDatabase->upperBodyMask.size() != base.size() ||
+            !SampleAnimationPose(clip, time, pose))
         {
             return false;
         }
@@ -500,11 +503,11 @@ namespace PARS
         {
             if (m_MotionDatabase->upperBodyMask[node])
             {
-                BlendAnimationPoses(&m_Pose[node], &pose[node], 1, weight);
+                BlendAnimationPoses(&base[node], &pose[node], 1, weight);
             }
             else
             {
-                pose[node] = m_Pose[node];
+                pose[node] = base[node];
             }
         }
         return true;

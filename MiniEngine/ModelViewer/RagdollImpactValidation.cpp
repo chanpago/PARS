@@ -757,7 +757,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     try
     {
         Character* dummy = test.GetDummy();
-        check(report.good() && samples.good() && events.good() && landingCom.good() && dummy && scenario <= 8 && frames > 0 && frames <= 720,
+        check(report.good() && samples.good() && events.good() && landingCom.good() && dummy && scenario <= 10 && frames > 0 && frames <= 720,
             "Open actual-character body impact validation");
         std::string error;
         check(test.Reset(), "Reset grounded Idle dummy with original automatic support");
@@ -788,7 +788,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         controller->SetMoveInput(0, 0, false);
         check(player.StopRagdoll(error), "Reset player simulation");
         player.GetCharacterMovement().StopMovementImmediately();
-        const bool continuousFrontPush = scenario == 7 || scenario == 8;
+        const bool checkWarmup = scenario == 9;
+        const bool releaseOnContact = scenario == 10;
+        const bool continuousFrontPush = scenario == 7 || scenario == 8 || checkWarmup || releaseOnContact;
         float yaw = scenario == 3 || scenario == 5 ? DirectX::XM_PIDIV2 :
             scenario == 4 ? -DirectX::XM_PIDIV2 : scenario == 6 ? DirectX::XM_PIDIV4 : 0.0f;
         float lateralOffset = 0.0f;
@@ -809,6 +811,13 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         animation.SetAutoCycleEnabled(false);
         animation.SetLocomotionEnabled(true);
         animation.PlayAnimation(0);
+        if (checkWarmup)
+        {
+            AnimInstance& standing = dummy->GetMesh().GetAnimInstance();
+            const uint32_t clip = static_cast<uint32_t>(standing.GetAnimationCount());
+            check(standing.AddAnimation("QuietStanding", dummy->GetMesh().GetSkeletalMesh()) && standing.PlayAnimation(clip),
+                "Start the receiver in a stationary pose with a different clip name");
+        }
         world.Tick(0);
         if (!kinematicPlayer)
         {
@@ -838,7 +847,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         world.SetPhysicsTimeScale(1);
         samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
         events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
-        states << "frame,mode,blending,zone,stable_time,step_count,impact,physics_step,requested_foot,load_left,load_right,confirm_left,confirm_right,impulse_left,impulse_right,normal_y_left,normal_y_right,grounded_left,grounded_right,started_left,started_right,landed_left,landed_right,avoidance,prediction,candidates,intervals,queries,prediction_ms,tracking_error,reach_limited,joint_limited,fixed_pose_blocked\n";
+        states << "frame,mode,blending,zone,stable_time,step_count,impact,physics_step,requested_foot,load_left,load_right,confirm_left,confirm_right,impulse_left,impulse_right,normal_y_left,normal_y_right,grounded_left,grounded_right,started_left,started_right,landed_left,landed_right,avoidance,prediction,candidates,intervals,queries,prediction_ms,tracking_error,reach_limited,joint_limited,fixed_pose_blocked,warmup,warmup_landings,com_vx,com_vz\n";
         capsules << "frame,time,mode,root_x,root_y,root_z,present,mass,radius,half_length,x,y,z,cyan_lines\n";
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
@@ -851,6 +860,34 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         report << "capsule_radius_scale=" << impactSettings.capsuleRadiusScale
             << " capsule_height_scale=" << impactSettings.capsuleHeightScale << std::endl;
         uint64_t eventCount = 0;
+        uint32_t warmupTicks = 0;
+        uint32_t warmupLandings = 0;
+        uint32_t impactFrame = UINT32_MAX;
+        Vector3 impactOrigin(kZero);
+        std::array<ImpactWarmupStep, 2> initialSteps;
+        ImpactWarmupStep secondStep;
+        uint32_t firstLandingTicks = 0;
+        const int handBody = dummy->GetMesh().GetPhysicsAsset()->FindBody("mixamorig1:LeftHand");
+        if (checkWarmup)
+        {
+            check(handBody >= 0, "Locate the hand for the upper-body response measurement");
+        }
+        Vector3 firstHandOffset(kZero);
+        float earlyPushDistance = 0;
+        float halfSecondPushDistance = 0;
+        float firstStepHandTravel = 0;
+        float startPelvisY = 0;
+        std::array<float, 2> startSoleY{};
+        std::array<int, 2> swingFeet{-1, -1};
+        Vector3 lastRoot(kZero);
+        PxVec3 slideVelocity(0);
+        bool handedOff = false;
+        bool physicalStep = false;
+        bool expectSecondStepContact = kinematicPlayer != 0;
+        bool contactDuringSecondStep = false;
+        bool contactAfterHandoff = false;
+        bool pushedLastStep = false;
+        uint32_t coastingTicks = 0;
         for (uint32_t frame = 0; frame < frames; ++frame)
         {
             if (modeCycles && frame % 60 == 0)
@@ -878,7 +915,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 frame < 300 ? 1.0f : frame < 420 ? -1.0f : 1.0f;
             if (continuousFrontPush)
             {
-                input = frame >= 120 && frame < 540 ? 1.0f : 0.0f;
+                input = frame >= 120 && frame < 540 && !(releaseOnContact && eventCount > 0) ? 1.0f : 0.0f;
             }
             controller->SetMoveInput(input, 0, scenario != 1 && scenario != 7);
             if (scenario == 5 && frame == 120)
@@ -976,6 +1013,139 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const float time = (frame + 1) / 60.0f;
             const SkeletalMeshComponent& dummyMesh = dummy->GetMesh();
             const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
+            const bool swingingSecondFoot = dummyMesh.IsImpactWarmupActive() && warmupLandings == 1;
+            if ((checkWarmup || releaseOnContact) && dummyMesh.IsImpactWarmupActive())
+            {
+                const std::array<ImpactWarmupStep, 2>& steps = dummyMesh.GetImpactWarmupSteps();
+                if (warmupTicks == 0)
+                {
+                    initialSteps = steps;
+                    check(steps[0].duration > 0 && steps[1].duration > 0, "Both warmup landings are planned at impact");
+                }
+                check(steps[0].duration == initialSteps[0].duration && steps[0].stride == initialSteps[0].stride,
+                    "The launched first step retains its landing and cadence");
+                if (warmupLandings == 0)
+                {
+                    check(steps[1].duration == initialSteps[1].duration && steps[1].stride == initialSteps[1].stride,
+                        "The second landing forecast is held until the first foot lands");
+                    if (dummyMesh.GetImpactWarmupLandings() == 1)
+                    {
+                        firstLandingTicks = warmupTicks + 1;
+                    }
+                }
+                else if (secondStep.duration == 0)
+                {
+                    secondStep = steps[1];
+                }
+                else
+                {
+                    check(steps[1].duration == secondStep.duration && steps[1].stride == secondStep.stride,
+                        "The second target is fixed during its swing");
+                }
+            }
+            if (checkWarmup && (dummyMesh.IsImpactWarmupActive() || (warmupTicks > 0 && !physicalStep)))
+            {
+                // 관통한 캡슐도 입구에서 한 번은 충격을 기록하므로 두 몸통의 순서까지 확인한다.
+                const Ragdoll& receiver = dummyMesh.GetRagdoll();
+                const Vector3 receiverPelvis(receiver.GetBoneWorld(receiver.GetImpactRootBody()).GetW());
+                const Vector3 playerPelvis(playerRagdoll.GetBoneWorld(playerRagdoll.GetImpactRootBody()).GetW());
+                check(float(Dot(receiverPelvis - playerPelvis, direction)) > radius * .5f,
+                    "The running player stays on the approach side of the dummy through the handoff");
+            }
+            if (checkWarmup && dummyMesh.IsImpactWarmupActive())
+            {
+                const Ragdoll& body = dummyMesh.GetRagdoll();
+                const Vector3 pelvis(body.GetBoneWorld(body.GetImpactRootBody()).GetW());
+                const float pelvisY = pelvis.GetY();
+                const Vector3 root = dummy->GetActorLocation();
+                const Vector3 handOffset = Vector3(body.GetBoneWorld(handBody).GetW()) - pelvis;
+                if (warmupTicks == 0)
+                {
+                    startPelvisY = pelvisY;
+                    firstHandOffset = handOffset;
+                    for (size_t side = 0; side < startSoleY.size(); ++side)
+                    {
+                        startSoleY[side] = dummySupport.feet[side].soleWorld.GetW().GetY();
+                    }
+                }
+                else
+                {
+                    const Vector3 speed = (root - lastRoot) * 60.0f;
+                    slideVelocity = PxVec3(speed.GetX(), 0, speed.GetZ());
+                }
+                const uint32_t landings = dummyMesh.GetImpactWarmupLandings();
+                // 물리 플레이어가 튕겨 나간 동안은 짧은 두 번째 스윙 전체가 재접촉 전에 끝날 수 있다.
+                if (swingingSecondFoot && !expectSecondStepContact)
+                {
+                    const PxCapsuleGeometry capsule(radius, halfLength);
+                    for (size_t index = 0; index < body.GetBodyCount(); ++index)
+                    {
+                        if (!body.IsCharacterImpactBody(index))
+                        {
+                            continue;
+                        }
+                        PxGeometryHolder geometry;
+                        PxTransform inBone(PxIdentity);
+                        PxTransform actualPose(PxIdentity);
+                        check(body.GetBodyCollisionShape(index, geometry, inBone, actualPose), "Read the simulated torso collider");
+                        if (PxGeometryQuery::overlap(capsule, capsulePose, geometry.any(), actualPose))
+                        {
+                            expectSecondStepContact = true;
+                            break;
+                        }
+                    }
+                }
+                if (landings == 0)
+                {
+                    firstStepHandTravel = Max(firstStepHandTravel, float(Length(handOffset - firstHandOffset)));
+                }
+                check(!dummyMesh.IsRagdoll() && dummySupport.footstep.startCount == 0 && std::abs(pelvisY - startPelvisY) < .002f,
+                    "Pelvis stays level while only the visual steps run");
+                for (size_t side = 0; side < startSoleY.size() && landings < swingFeet.size(); ++side)
+                {
+                    if (float(dummySupport.feet[side].soleWorld.GetW().GetY()) > startSoleY[side] + .035f)
+                    {
+                        swingFeet[landings] = static_cast<int>(side);
+                    }
+                }
+                warmupLandings = landings;
+                lastRoot = root;
+                ++warmupTicks;
+            }
+            else if (checkWarmup && warmupTicks > 0 && !physicalStep)
+            {
+                if (!handedOff)
+                {
+                    const PxVec3 velocity(dummySupport.centerOfMassVelocity.x, 0, dummySupport.centerOfMassVelocity.z);
+                    check(dummyMesh.IsActiveRagdoll() && warmupLandings == 2 && swingFeet[0] >= 0 &&
+                        swingFeet[1] == 1 - swingFeet[0], "Two opposite feet swing and land before the physical handoff");
+                    check(slideVelocity.magnitude() > .25f && (velocity - slideVelocity).magnitude() < .025f,
+                        "The active body inherits the last horizontal slide velocity");
+                    handedOff = true;
+                }
+                if (dummySupport.footstep.startCount > 0)
+                {
+                    check(dummySupport.footstep.feet[swingFeet[0]].justStarted,
+                        "The first physical step uses the foot opposite the last warmup landing");
+                    physicalStep = true;
+                }
+            }
+            if (releaseOnContact && dummyMesh.IsImpactWarmupActive())
+            {
+                const Vector3 root = dummy->GetActorLocation();
+                const Vector3 speed = (root - lastRoot) * 60.0f;
+                const PxVec3 planar(speed.GetX(), 0, speed.GetZ());
+                if (warmupTicks >= 2 && !pushedLastStep && slideVelocity.magnitude() > .05f)
+                {
+                    check(planar.magnitude() <= slideVelocity.magnitude() + .003f,
+                        "A separated dummy coasts without gaining speed from the original impact again");
+                    ++coastingTicks;
+                }
+                lastRoot = root;
+                slideVelocity = planar;
+                warmupLandings = dummyMesh.GetImpactWarmupLandings();
+                ++warmupTicks;
+            }
             const FootstepAvoidanceSnapshot& avoidance = dummyMesh.GetFootstepAvoidanceSnapshot();
             const FootstepCollisionSnapshot& prediction = dummyMesh.GetFootstepCollisionSnapshot();
             states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()
@@ -992,9 +1162,22 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 << ',' << static_cast<int>(avoidance.status) << ',' << static_cast<int>(prediction.status)
                 << ',' << avoidance.candidatesChecked << ',' << avoidance.totalIntervals << ',' << avoidance.totalQueries
                 << ',' << prediction.elapsedMilliseconds << ',' << prediction.maximumTrackingError
-                << ',' << prediction.reachLimited << ',' << prediction.jointLimited << ',' << prediction.fixedPoseBlocked << '\n';
+                << ',' << prediction.reachLimited << ',' << prediction.jointLimited << ',' << prediction.fixedPoseBlocked
+                << ',' << dummyMesh.IsImpactWarmupActive() << ',' << dummyMesh.GetImpactWarmupLandings()
+                << ',' << dummySupport.centerOfMassVelocity.x << ',' << dummySupport.centerOfMassVelocity.z << '\n';
+            pushedLastStep = false;
             for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
             {
+                if (impact.target == dummy->GetHandle() && impact.normalImpulse > 0)
+                {
+                    if (impactFrame == UINT32_MAX)
+                    {
+                        impactFrame = frame;
+                    }
+                    pushedLastStep = true;
+                    contactDuringSecondStep = contactDuringSecondStep || swingingSecondFoot;
+                    contactAfterHandoff = contactAfterHandoff || handedOff;
+                }
                 ++eventCount;
                 for (const BodyImpactShare& share : impact.shares)
                 {
@@ -1002,6 +1185,24 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                         << ',' << 0 << ',' << impact.normalImpulse << ',' << impact.closingSpeed
                         << ',' << impact.point.x << ',' << impact.point.y << ',' << impact.point.z
                         << ',' << share.impulse.x << ',' << share.impulse.y << ',' << share.impulse.z << ',' << 0 << '\n';
+                }
+            }
+            if (checkWarmup)
+            {
+                // 보폭에 따라 예열이 먼저 끝날 수 있으므로 실제 접촉 틱과 골반으로 같은 0.1초·0.5초를 잰다.
+                const Ragdoll& receiver = dummyMesh.GetRagdoll();
+                const Vector3 pelvis(receiver.GetBoneWorld(receiver.GetImpactRootBody()).GetW());
+                if (impactFrame == UINT32_MAX)
+                {
+                    impactOrigin = pelvis;
+                }
+                else if (frame - impactFrame == 5)
+                {
+                    earlyPushDistance = Dot(pelvis - impactOrigin, direction);
+                }
+                else if (frame - impactFrame == 29)
+                {
+                    halfSecondPushDistance = Dot(pelvis - impactOrigin, direction);
                 }
             }
             for (Character* character : {&player, dummy})
@@ -1040,6 +1241,47 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             check(false, "Expected an actual leg contact before the frame limit");
         }
         report << "events=" << eventCount << std::endl;
+        if (checkWarmup || releaseOnContact)
+        {
+            const float dt = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+            check(firstLandingTicks > 0 && secondStep.duration > 0 &&
+                std::abs(dt * firstLandingTicks - initialSteps[0].duration) < .001f &&
+                std::abs(dt * (warmupTicks - firstLandingTicks) - secondStep.duration) < .001f,
+                "Each foot lands on its planned physics tick");
+            if (lateralOffset == 0 && std::abs(impactSettings.collisionMass - 20.0f) < .001f)
+            {
+                check((secondStep.stride - initialSteps[1].stride).magnitude() > .005f ||
+                    std::abs(secondStep.duration - initialSteps[1].duration) >= .9f * dt,
+                    "The real motion at the first landing changes the second step from the impact-time forecast");
+            }
+            report << "first_step_s=" << initialSteps[0].duration << " first_stride_m=" << initialSteps[0].stride.magnitude()
+                << " second_forecast_s=" << initialSteps[1].duration << " second_forecast_stride_m=" << initialSteps[1].stride.magnitude()
+                << " second_step_s=" << secondStep.duration << " second_stride_m=" << secondStep.stride.magnitude()
+                << " second_swing_travel_m=" << (initialSteps[0].stride + secondStep.stride).magnitude() << std::endl;
+        }
+        if (checkWarmup)
+        {
+            report << "push_0.1s_m=" << earlyPushDistance << " push_0.5s_m=" << halfSecondPushDistance
+                << " first_step_hand_travel_m=" << firstStepHandTravel << std::endl;
+            check(firstStepHandTravel > .05f, "The upper body reacts relative to the pelvis during the first step");
+            if (kinematicPlayer && lateralOffset == 0 && std::abs(impactSettings.collisionMass - 20.0f) < .001f)
+            {
+                // 기본 20 kg 플레이어로 측정한 예열 전 골반 변위는 각각 0.20 m, 1.65 m다.
+                check(earlyPushDistance >= .15f && earlyPushDistance <= .27f &&
+                    halfSecondPushDistance >= 1.40f && halfSecondPushDistance <= 1.90f,
+                    "The animated player's running shove preserves the original onset and half-second travel");
+            }
+            check(handedOff && physicalStep, "A running player produces two warmup steps followed by a physical step");
+            check(!expectSecondStepContact || contactDuringSecondStep,
+                "The animated shove or a simulated capsule overlapping the torso produces contact during the second step");
+            check(contactAfterHandoff, "Continued input produces physical capsule contact after the handoff");
+        }
+        if (releaseOnContact)
+        {
+            check(eventCount > 0 && player.GetCharacterMovement().GetLocomotionSpeed() < .01f &&
+                warmupLandings == 2 && coastingTicks > 0,
+                "Releasing input after contact lets the dummy finish two warmup steps under the remaining momentum");
+        }
         check(world.GetPhysicsWorld()->GetErrorCount() == 0, "No PhysX errors");
         report << "PASS: actual-character body impact recording" << std::endl;
         return true;

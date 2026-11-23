@@ -226,6 +226,7 @@ namespace PARS
         m_QueryOwner = nullptr;
         m_CollisionEnabled = true;
         m_CharacterImpactEnabled = false;
+        m_SweepKinematicTorso = false;
         m_CharacterImpactGroup = 0;
         m_Joints.clear();
         m_Bodies.clear();
@@ -270,6 +271,7 @@ namespace PARS
         std::swap(m_QueryOwner, other.m_QueryOwner);
         std::swap(m_CollisionEnabled, other.m_CollisionEnabled);
         std::swap(m_CharacterImpactEnabled, other.m_CharacterImpactEnabled);
+        std::swap(m_SweepKinematicTorso, other.m_SweepKinematicTorso);
         std::swap(m_CharacterImpactGroup, other.m_CharacterImpactGroup);
         std::swap(m_CharacterCapsuleBody, other.m_CharacterCapsuleBody);
         std::swap(m_CharacterCapsuleShape, other.m_CharacterCapsuleShape);
@@ -499,13 +501,13 @@ namespace PARS
         {
             physx::PxRigidDynamic* body = m_Bodies[i]->is<PxRigidDynamic>();
             body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, !simulate);
-            // 이동 스윕이 캐릭터 자신의 애니메이션 본 형상에 충돌하지 않도록 한다.
-            // 시뮬레이션 형상은 계속 활성화하며, 두 모드 모두 PVD에 표시한다.
+            // 키네마틱 몸통도 다른 캐릭터의 충돌 캡슐 스윕이 찾을 수 있어야 한다.
             PxShape* shape = nullptr;
             body->getShapes(&shape, 1);
             if (shape)
             {
-                shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, simulate);
+                const bool impactTarget = (shape->getSimulationFilterData().word3 & PhysicsWorld::CharacterImpactTargetFilterFlag) != 0;
+                shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, simulate || (m_SweepKinematicTorso && impactTarget));
             }
             if (simulate)
             {

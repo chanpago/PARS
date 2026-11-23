@@ -14,6 +14,7 @@ namespace PARS
         void BeginFixedStep(float deltaTime);
         Math::Vector3 ConstrainMovement(Math::Vector3 displacement, float deltaTime);
         void RefreshCollisionPolicy();
+        void SyncCapsule();
 
     protected:
         void EndPlay() override;
@@ -44,5 +45,7 @@ namespace PARS
         uint64_t m_RecordedStep = UINT64_MAX;
         uint64_t m_SourceRevision = 0;
         CharacterImpactSettings m_Settings;
+        physx::PxVec3 m_PushVelocity{0};
+        physx::PxVec3 m_PreviousPushDirection{0};
     };
 }

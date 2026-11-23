@@ -1,5 +1,6 @@
 ﻿#include "../Model/FootstepPlanner.h"
 #include <foundation/PxQuat.h>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -1464,10 +1465,45 @@ namespace
 
 void TestFootstepRecovery();
 
+void TestImpactWarmupPlanning()
+{
+    const FootstepInput standing = Standing();
+    const float dt = standing.fixedDeltaTime;
+    const PxVec3 shove(1, 0, 0);
+    const float reach = .18f;
+    const ImpactWarmupStep centered = PlanImpactWarmupStep(standing.hull, standing.com, shove, reach, dt);
+    const ImpactWarmupStep nearEdge = PlanImpactWarmupStep(standing.hull, PxVec3(.23f, 1, 0), shove, reach, dt);
+    Check(nearEdge.duration < centered.duration && nearEdge.stride.x > centered.stride.x,
+        "The same shove from near the support edge needs a sooner, longer warmup placement");
+    const ImpactWarmupStep held = PlanImpactWarmupStep(standing.hull, standing.com, shove * 4, reach, dt);
+    Check(held.duration < centered.duration && held.stride.x > centered.stride.x && held.stride.magnitude() <= reach,
+        "Greater remaining momentum increases the step rate and stride within reach");
+    const ImpactWarmupStep leaning = PlanImpactWarmupStep(standing.hull, PxVec3(0, 1, .22f), shove, reach, dt);
+    const ImpactWarmupStep opposite = PlanImpactWarmupStep(standing.hull, PxVec3(0, 1, -.22f), shove, reach, dt);
+    Check(leaning.stride.x > 0 && leaning.stride.z > 0 && Near(leaning.stride.z, -opposite.stride.z),
+        "The predicted COM adds the missing support direction to the same incoming impulse");
+    const PxQuat rotation(.83f, PxVec3(0, 1, 0));
+    const PxVec3 shift(13, 3, -8);
+    FootstepPolygon transformed;
+    for (const PxVec3& corner : standing.hull)
+    {
+        transformed.push_back(shift + rotation.rotate(corner));
+    }
+    const ImpactWarmupStep rotated = PlanImpactWarmupStep(transformed, shift + rotation.rotate(standing.com),
+        rotation.rotate(shove), reach, dt);
+    Check(Near(rotated.duration, centered.duration) && (rotated.stride - rotation.rotate(centered.stride)).magnitude() < 1e-5f,
+        "Sliding and turning the entire stance preserves pelvis-relative planning");
+    const ImpactWarmupStep settled = PlanImpactWarmupStep(standing.hull, standing.com, PxVec3(0), reach, dt);
+    Check(settled.stride.isZero() && settled.duration >= centered.duration && Near(held.duration / dt, std::round(held.duration / dt)),
+        "A settled COM finishes in place and landing times use whole physics ticks");
+    std::puts("PASS: COM-based warmup cadence, direction, reach and moving reference frame");
+}
+
 void TestFootstepPlanner()
 {
     TestFootstepRecovery();
     checks = 0;
+    TestImpactWarmupPlanning();
     TestPredictionAndTrajectory();
     TestImpactSelection();
     TestIndependentCommands();

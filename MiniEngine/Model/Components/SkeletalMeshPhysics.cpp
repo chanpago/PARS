@@ -505,6 +505,7 @@ namespace PARS
         }
         if (enabled != m_AutomaticRootSupport)
         {
+            m_ImpactWarmup = {};
             m_RootSupportRelease = RootSupportRelease::None;
             m_FootSupport.ResetFootstep();
             ResetRecovery();
@@ -606,7 +607,7 @@ namespace PARS
             return;
         }
         std::vector<Matrix4> worldPose;
-        const bool evaluated = IsBlendingToKinematic() ?
+        const bool evaluated = IsBlendingToKinematic() || IsImpactWarmupActive() ?
             EvaluatePhysicsPose(m_PhysicsSkeleton, GetFinalPose(), Matrix4(GetComponentTransform()), worldPose, m_PhysicsError) :
             EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, worldPose, m_PhysicsError);
         if (evaluated)
@@ -769,6 +770,10 @@ namespace PARS
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
+        if (IsImpactWarmupActive())
+        {
+            m_ImpactWarmup = {};
+        }
         if (!active)
         {
             ResetAirborneFall();
@@ -855,6 +860,7 @@ namespace PARS
 
     void SkeletalMeshComponent::StopRagdoll()
     {
+        m_ImpactWarmup = {};
         ResetFallArms();
         if (!IsRagdoll())
         {

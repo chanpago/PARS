@@ -29,6 +29,10 @@ namespace PARS
 
     bool Character::CanControlMovement() const
     {
+        if (m_Mesh->IsImpactWarmupActive())
+        {
+            return false;
+        }
         if (!IsRagdoll())
         {
             return m_Movement->IsTickEnabled() && m_Capsule->IsPhysicsEnabled();
@@ -41,6 +45,12 @@ namespace PARS
     {
         m_Capsule->SetHorizontalBlockingEnabled(!m_Mesh->IsActiveRagdoll());
         m_Impact->RefreshCollisionPolicy();
+        if (m_Mesh->IsImpactWarmupActive())
+        {
+            // 예열 중에는 저장한 충격만 루트를 이동시킨다.
+            m_Movement->StopMovementImmediately();
+            return;
+        }
         if (!IsRagdoll())
         {
             return;
@@ -76,14 +86,18 @@ namespace PARS
     void Character::ApplyPhysicsInputs(float deltaTime)
     {
         Pawn::ApplyPhysicsInputs(deltaTime);
-        // 모든 캐릭터의 이동·PD 목표 갱신 뒤, 독립 캡슐에 몸통의 현재 자세와 속도만 복사한다.
-        m_Mesh->GetRagdoll().SyncCharacterCapsule();
+        // 모든 캐릭터의 목표를 갱신한 뒤 실제 몸통 운동과 계속 미는 입력을 충돌 캡슐에 전달한다.
+        m_Impact->SyncCapsule();
     }
 
     bool Character::StopRagdoll(std::string& error)
     {
         if (!IsRagdoll())
         {
+            if (m_Mesh->IsImpactWarmupActive())
+            {
+                m_Mesh->StopRagdoll();
+            }
             error.clear();
             return true;
         }
@@ -114,12 +128,9 @@ namespace PARS
         m_Impact = &CreateDefaultSubobject<CharacterImpactComponent>("CharacterImpactComponent");
         m_Movement->SetHorizontalMoveConstraint([this](Math::Vector3 displacement, float deltaTime) -> Math::Vector3
         {
-            if (!m_Mesh->IsActiveRagdoll())
-            {
-                return displacement;
-            }
-            // 환경 장애물을 먼저 반영하고, 캐릭터 판정은 실제 몸의 속도로 수행한다.
-            const Math::Vector3 environmentMove = m_Mesh->ConstrainHorizontalMovement(displacement);
+            // 몸통 캡슐이 막은 거리는 키네마틱 플레이어의 이동 목표에서도 제외한다.
+            const Math::Vector3 environmentMove = m_Mesh->IsActiveRagdoll() ?
+                m_Mesh->ConstrainHorizontalMovement(displacement) : displacement;
             return m_Impact->ConstrainMovement(environmentMove, deltaTime);
         });
         // Actor 원점은 캡슐 중심이며, 가져온 메시의 원점은 발 위치에 있다.

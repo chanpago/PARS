@@ -31,6 +31,10 @@ namespace PARS
         }
         float GetGroundSpeed() const;
         float GetLocomotionSpeed() const;
+        Math::Vector3 GetLocomotionVelocity() const
+        {
+            return m_LocomotionVelocity;
+        }
         void SetAimFacing(bool aiming, float yaw);
         void SetHorizontalMoveConstraint(std::function<Math::Vector3(Math::Vector3, float)> constraint)
         {

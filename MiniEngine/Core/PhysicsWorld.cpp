@@ -38,7 +38,7 @@ namespace
             {
                 return PxFilterFlag::eSUPPRESS;
             }
-            pairFlags = PxPairFlag::eCONTACT_DEFAULT | PxPairFlag::eNOTIFY_CONTACT_POINTS |
+            pairFlags = PxPairFlag::eCONTACT_DEFAULT | PxPairFlag::eNOTIFY_CONTACT_POINTS | PxPairFlag::ePRE_SOLVER_VELOCITY |
                 PxPairFlag::eNOTIFY_TOUCH_FOUND | PxPairFlag::eNOTIFY_TOUCH_PERSISTS | PxPairFlag::eNOTIFY_TOUCH_LOST;
             return PxFilterFlag::eDEFAULT;
         }
@@ -146,6 +146,15 @@ void PhysicsWorld::SweepCharacterCapsule(const PxTransform& pose, float radius, 
 
 void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactPair* pairs, PxU32 count)
 {
+    const PxContactPairVelocity* beforeContact = nullptr;
+    if (header.extraDataStream && header.extraDataStreamSize > 0)
+    {
+        PxContactPairExtraDataIterator extra(header.extraDataStream, header.extraDataStreamSize);
+        if (extra.nextItemSet())
+        {
+            beforeContact = extra.preSolverVelocity;
+        }
+    }
     for (PxU32 i = 0; i < count; ++i)
     {
         const physx::PxContactPair& pair = pairs[i];
@@ -185,9 +194,14 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         }
         cached->completedStep = m_StepCount + 1;
         cached->clockRevision = m_ClockRevision;
+        cached->capsuleVelocity = PxVec3(0);
         for (int side = 0; side < 2; ++side)
         {
             const uint32_t flags = pair.shapes[side]->getSimulationFilterData().word3;
+            if ((flags & CharacterCapsuleFilterFlag) && beforeContact)
+            {
+                cached->capsuleVelocity = beforeContact->linearVelocity[side];
+            }
             // 공이 몸에 계속 닿아 있을 때 처음 충격량이 생긴 스텝만 새 피격으로 기록한다.
             if ((flags & ProjectileFilterFlag) && cached->firstImpulseStep == 0 &&
                 std::any_of(cached->points.begin(), cached->points.end(), [](const PxContactPairPoint& point) -> bool
@@ -382,7 +396,9 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
         {
             continue;
         }
-        const bool projectile = (pair.shapes[1 - side]->getSimulationFilterData().word3 & ProjectileFilterFlag) != 0;
+        const PxFilterData sourceData = pair.shapes[1 - side]->getSimulationFilterData();
+        const PxU32 sourceFlags = sourceData.word3;
+        const bool projectile = (sourceFlags & ProjectileFilterFlag) != 0;
         for (const physx::PxContactPairPoint& point : pair.points)
         {
             const PxVec3 normal = side == 0 ? point.normal : -point.normal;
@@ -397,6 +413,10 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
                     contact.outwardNormal = -normal;
                     contact.fromProjectile = projectile;
                     contact.newProjectileHit = projectile && pair.firstImpulseStep == m_StepCount;
+                    contact.fromCharacterCapsule = (sourceFlags & CharacterCapsuleFilterFlag) != 0;
+                    contact.fromAnimatedCapsule = (sourceFlags & AnimatedCapsuleFilterFlag) != 0;
+                    contact.capsuleVelocity = pair.capsuleVelocity;
+                    contact.capsuleGroup = sourceData.word2;
                     contacts->push_back(contact);
                 }
             }
@@ -406,7 +426,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
 }
 
 bool PhysicsWorld::HasApproachingImpact(const PxRigidBody& body, float totalMass, float minimumDeltaVelocity,
-    const void* ignoredOwner) const
+    const void* ignoredOwner, float deferCapsuleDeltaVelocity) const
 {
     if (!m_Scene || body.getScene() != m_Scene || !std::isfinite(totalMass) || totalMass <= 0 ||
         !std::isfinite(minimumDeltaVelocity) || minimumDeltaVelocity <= 0)
@@ -459,7 +479,13 @@ bool PhysicsWorld::HasApproachingImpact(const PxRigidBody& body, float totalMass
                     sourceShape->getGeometry(), source->getGlobalPose() * sourceShape->getLocalPose(),
                     targetShape->getGeometry(), body.getGlobalPose() * targetShape->getLocalPose(), hit,
                     PxHitFlag::eDEFAULT, sourceShape->getContactOffset() + targetShape->getContactOffset());
-                if (collision && -velocity.dot(hit.normal) * massRatio >= minimumDeltaVelocity)
+                if (!collision)
+                {
+                    continue;
+                }
+                const float deltaVelocity = -velocity.dot(hit.normal) * massRatio;
+                const bool capsule = (sourceShape->getSimulationFilterData().word3 & CharacterCapsuleFilterFlag) != 0;
+                if (deltaVelocity >= minimumDeltaVelocity && !(capsule && deltaVelocity >= deferCapsuleDeltaVelocity))
                 {
                     return true;
                 }

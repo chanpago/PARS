@@ -260,9 +260,19 @@ void PARS::FootSupport::Reset()
 void PARS::FootSupport::ResetFootstep()
 {
     m_FootstepPlanner.Reset();
+    m_NextWarmupFoot = -1;
     m_HasIdleReference = false;
     m_HasPendingImpact = false;
     m_Snapshot.footstep = {};
+}
+
+void PARS::FootSupport::ResumeAfterWarmup(uint32_t supportFoot)
+{
+    ResetFootstep();
+    if (supportFoot < m_Feet.size())
+    {
+        m_NextWarmupFoot = 1 - static_cast<int>(supportFoot);
+    }
 }
 
 void PARS::FootSupport::RecordImpact(const PxVec3& position)
@@ -553,8 +563,16 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     3. 충격점에 가까운 발을 선택하고, 첫 발딛기 이후에는 실제 착지와 하중 인계를 확인해 새 명령을 허용
     4. 발마다 실제 이동·접촉을 확인하면서 각자의 목표와 이륙·공중·착지 상태를 갱신
     */
+    input.requestedFoot = m_NextWarmupFoot;
     m_FootstepPlanner.Update(input, m_FootstepSettings);
     m_Snapshot.footstep = m_FootstepPlanner.GetSnapshot();
+    if (m_NextWarmupFoot >= 0 && (!input.active || m_Snapshot.footstep.aborted ||
+        m_Snapshot.footstep.feet[m_NextWarmupFoot].justStarted ||
+        (input.feet[0].grounded && input.feet[1].grounded && !m_Snapshot.footstep.needsStep &&
+            m_Snapshot.footstep.hasPrediction && input.velocity.magnitude() <= mesh.GetRecoverySettings().maximumReturnSpeed)))
+    {
+        m_NextWarmupFoot = -1;
+    }
     if (m_Snapshot.footstep.hasImpact)
     {
         m_HasPendingImpact = false;

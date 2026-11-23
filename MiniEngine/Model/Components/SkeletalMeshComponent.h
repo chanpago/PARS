@@ -95,6 +95,38 @@ namespace PARS
             int hand = -1;
         };
 
+        struct ImpactWarmup
+        {
+        public:
+            bool ApplyCapsuleImpacts(const std::vector<RagdollBodyImpulse>& impacts);
+            ImpactWarmupStep PlanStep(const FootstepPolygon& hull, const physx::PxVec3& com, const physx::PxVec3& velocity) const;
+
+        public:
+            static constexpr float MinimumImpactSpeedChange = .25f;
+
+        public:
+            Math::AffineTransform actorAtStart{Math::kIdentity};
+            std::vector<GraphNode> sourcePose;
+            std::vector<GraphNode> pose;
+            std::vector<Math::Matrix4> sourceBones;
+            std::array<TwoBoneIKInput, 2> legs;
+            std::array<ImpactWarmupStep, 2> steps;
+            physx::PxQuat componentRotation{physx::PxIdentity};
+            physx::PxVec3 restVelocity{0};
+            physx::PxVec3 momentum{0};
+            physx::PxVec3 approachVelocity{0};
+            physx::PxVec3 sweepStart{0};
+            physx::PxVec3 sweepCenter{0};
+            float mass = 0;
+            float torsoMass = 0;
+            float slideDeceleration = 0;
+            float stepTime = 0;
+            uint32_t approachGroup = 0;
+            uint32_t firstFoot = 0;
+            uint32_t landings = 0;
+            bool wasResting = false;
+        };
+
     public:
         SkeletalMeshComponent(Actor& owner, const std::string& name);
 
@@ -139,7 +171,7 @@ namespace PARS
         void UpdateHorizontalBalance(float deltaTime);
         void ApplyCrossStepDrivePose(const FootSupportSnapshot& support, float deltaTime, std::vector<Math::Matrix4>& target);
         void ResetCrossStepPlayback();
-        void UpdateImpactFlail(bool longitudinalImpact, float deltaTime);
+        void UpdateImpactFlail(bool triggerReaction, float deltaTime);
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
             const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
@@ -149,6 +181,11 @@ namespace PARS
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
         bool UpdateAutomaticRagdoll(float deltaTime, bool projectileHit);
+        void ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
+        bool UpdateImpactWarmup(float deltaTime);
+        bool BeginImpactWarmup();
+        bool AdvanceImpactWarmup(float deltaTime);
+        bool FinishImpactWarmup(bool lostFloor);
         bool UpdateBalanceState(float deltaTime);
         bool BeginAirborneFall();
         void ResetAirborneFall();
@@ -180,6 +217,18 @@ namespace PARS
         bool IsActiveRagdoll() const
         {
             return m_PhysicsMode == PhysicsAnimationMode::ActiveRagdoll;
+        }
+        bool IsImpactWarmupActive() const
+        {
+            return !m_ImpactWarmup.pose.empty();
+        }
+        uint32_t GetImpactWarmupLandings() const
+        {
+            return m_ImpactWarmup.landings;
+        }
+        const std::array<ImpactWarmupStep, 2>& GetImpactWarmupSteps() const
+        {
+            return m_ImpactWarmup.steps;
         }
         bool HasPendingDriveSettings() const
         {
@@ -329,6 +378,10 @@ namespace PARS
         }
         const std::vector<GraphNode>& GetFinalPose() const
         {
+            if (IsImpactWarmupActive() && !IsRagdoll())
+            {
+                return m_ImpactWarmup.pose;
+            }
             return IsRagdoll() ? m_PhysicsPose : IsBlendingToKinematic() ? m_KinematicBlendPose : m_AnimInstance->GetPose();
         }
         const ModelInstance& GetModelInstance() const
@@ -356,6 +409,7 @@ namespace PARS
     private:
         ModelInstance m_ModelInstance;
         FootSupport m_FootSupport;
+        ImpactWarmup m_ImpactWarmup;
         std::unique_ptr<AnimInstance> m_AnimInstance;
         std::unique_ptr<const PhysicsAsset> m_PhysicsAsset;
         Ragdoll m_Ragdoll;

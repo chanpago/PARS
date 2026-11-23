@@ -1,6 +1,7 @@
 ﻿#include "FootstepPlanner.h"
 
 #include "FramePerformance.h"
+#include <cmath>
 #include <limits>
 
 using namespace physx;
@@ -641,6 +642,52 @@ namespace
                 transfer.confirmationTimes[receivingFoot] + 1e-6f >= settings.supportConfirmationTime;
         }
     }
+}
+
+ImpactWarmupStep PARS::PlanImpactWarmupStep(const FootstepPolygon& hull, const PxVec3& com,
+    const PxVec3& velocity, float maximumStride, float fixedDeltaTime)
+{
+    ImpactWarmupStep step;
+    if (!com.isFinite() || !velocity.isFinite() || !std::isfinite(maximumStride) || maximumStride <= 0 ||
+        !std::isfinite(fixedDeltaTime) || fixedDeltaTime <= 0)
+    {
+        return step;
+    }
+    const PxVec3 planarVelocity(velocity.x, 0, velocity.z);
+    // 현재 투영 COM에서 속도 방향으로 지지 다각형의 어느 변을 가장 먼저 넘는지 구한다.
+    constexpr float fastestSwing = .09f;
+    float timeToEdge = MaximumFootstepDuration - fastestSwing;
+    if (hull.size() >= 3)
+    {
+        for (size_t index = 0; index < hull.size(); ++index)
+        {
+            const PxVec3& corner = hull[index];
+            const PxVec3 edge = hull[(index + 1) % hull.size()] - corner;
+            const PxVec3 outward(edge.z, 0, -edge.x);
+            const float margin = (corner - com).dot(outward);
+            if (margin < -1e-5f * outward.magnitude())
+            {
+                timeToEdge = 0;
+                break;
+            }
+            const float outwardSpeed = planarVelocity.dot(outward);
+            if (outwardSpeed > 0)
+            {
+                timeToEdge = PxMin(timeToEdge, PxMax(margin, 0.0f) / outwardSpeed);
+            }
+        }
+    }
+    const float duration = fastestSwing + timeToEdge;
+    step.duration = PxMax(1.0f, std::round(duration / fixedDeltaTime)) * fixedDeltaTime;
+
+    const PxVec3 travel = planarVelocity * step.duration;
+    const PxVec3 prediction = com + travel;
+    const PxVec3 boundary = ClosestFootstepPoint(hull, prediction);
+    const PxVec3 overrun(prediction.x - boundary.x, 0, prediction.z - boundary.z);
+    // 영역 안에서는 이동 방향으로 짧게 디디고, 벗어나면 부족한 지지 쪽으로 보폭을 늘린다.
+    const PxVec3 correction = travel * .35f + overrun;
+    step.stride = correction * (maximumStride / (maximumStride + correction.magnitude()));
+    return step;
 }
 
 FootstepLandingRegion PARS::BuildFootstepLandingRegion(const PxVec3& origin,

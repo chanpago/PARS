@@ -194,6 +194,7 @@ namespace
         filter.word3 = PhysicsWorld::CharacterImpactFilterFlag | PhysicsWorld::CharacterImpactTargetFilterFlag;
         targetShape->setSimulationFilterData(filter);
         float measuredImpulse = 0;
+        bool sampledApproachSpeed = false;
         for (int step = 0; step < 12; ++step)
         {
             const Vector3 destination((step + 1) * .04f, 3, 0);
@@ -211,6 +212,18 @@ namespace
             }
             CheckImpact(float(Length(source.GetPosition() - destination)) < 1e-5f && source.GetKinematicBodyCount() == 1,
                 "Real solver contact never displaces the kinematic player from its animation target");
+            std::vector<PhysicsContactImpulse> received;
+            world.GetExternalImpactImpulse(*target, &targetOwner, &received);
+            for (const PhysicsContactImpulse& hit : received)
+            {
+                // 첫 접촉 직전에는 캡슐이 한 고정 스텝에 정확히 4cm 전진한다.
+                if (!sampledApproachSpeed && hit.fromCharacterCapsule && hit.impulse.x > .1f)
+                {
+                    CheckImpact(std::abs(hit.capsuleVelocity.x - .04f / float(PhysicsWorld::FixedDeltaTime)) < .03f,
+                        "Receiver reads the capsule approach speed before solver recoil");
+                    sampledApproachSpeed = true;
+                }
+            }
             std::vector<PhysicsCapsuleContact> contacts;
             source.GetCharacterCapsuleContacts(contacts);
             for (const PhysicsCapsuleContact& contact : contacts)
@@ -218,7 +231,7 @@ namespace
                 measuredImpulse += contact.normalImpulse;
             }
         }
-        CheckImpact(measuredImpulse > 1 && target->getLinearVelocity().x > .5f,
+        CheckImpact(sampledApproachSpeed && measuredImpulse > 1 && target->getLinearVelocity().x > .5f,
             "Current-step animation motion drives actual finite-mass capsule contacts");
         std::printf("kinematic capsule mass=30 receiver_vx=%.6f measured_J=%.6f player_target_error=%.9f\n",
             target->getLinearVelocity().x, measuredImpulse, float(Length(source.GetPosition() - Vector3(.48f, 3, 0))));

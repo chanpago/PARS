@@ -81,7 +81,7 @@ namespace PARS
         return left >= 0.0f ? FallDirection::Left : FallDirection::Right;
     }
 
-    void SkeletalMeshComponent::UpdateImpactFlail(bool longitudinalImpact, float deltaTime)
+    void SkeletalMeshComponent::UpdateImpactFlail(bool triggerReaction, float deltaTime)
     {
         if (IsFalling() || IsGroundFallActive() || m_StandingUpState != StandingUpState::None)
         {
@@ -90,19 +90,30 @@ namespace PARS
         }
         ImpactFlailPlayback& flail = m_ImpactFlail;
         // 동적 바디로 전환한 직후에는 실제 COM 속도가 다음 물리 샘플에 나타날 수 있다.
-        flail.impactTimeRemaining = longitudinalImpact ? MotionFeatures::PredictionTimeSeconds :
+        flail.impactTimeRemaining = triggerReaction ? MotionFeatures::PredictionTimeSeconds :
             (std::max)(0.0f, flail.impactTimeRemaining - deltaTime);
         const bool recovering = flail.impactTimeRemaining > 0 ||
             (flail.clip != UINT32_MAX && m_BalanceState == CharacterBalanceState::Unbalanced);
         const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
+        const bool warmingUp = IsImpactWarmupActive();
+        const PxVec3 velocity = warmingUp ? m_ImpactWarmup.momentum / m_ImpactWarmup.mass : support.centerOfMassVelocity;
         const Vector3 forward(GetComponentTransform().GetZ());
-        const float travel = float(forward.GetX()) * support.centerOfMassVelocity.x + float(forward.GetZ()) * support.centerOfMassVelocity.z;
-        if (recovering && support.hasCenterOfMassVelocity && std::abs(travel) >= .05f)
+        const float travel = float(forward.GetX()) * velocity.x + float(forward.GetZ()) * velocity.z;
+        const float lateral = float(forward.GetZ()) * velocity.x - float(forward.GetX()) * velocity.z;
+        uint32_t sideClip = UINT32_MAX;
+        if ((warmingUp || flail.usage == MotionFrameUsage::ShoveFall) && std::abs(lateral) > std::abs(travel) && std::abs(lateral) >= .05f)
         {
-            const MotionFrameUsage usage = travel > 0 ? MotionFrameUsage::FlailFront : MotionFrameUsage::FlailBack;
-            if (flail.usage != usage)
+            const FallDirection side = lateral > 0 ? FallDirection::Left : FallDirection::Right;
+            sideClip = m_DirectionalFallingAnimations[static_cast<size_t>(side)];
+        }
+        if (recovering && (warmingUp || support.hasCenterOfMassVelocity) && (sideClip != UINT32_MAX || std::abs(travel) >= .05f))
+        {
+            // 옆 충격은 해당 방향 밀침 클립의 척추 위쪽만 사용한다. 골반과 두 다리는 예열 자세를 유지한다.
+            const MotionFrameUsage usage = sideClip != UINT32_MAX ? MotionFrameUsage::ShoveFall :
+                (travel > 0 ? MotionFrameUsage::FlailFront : MotionFrameUsage::FlailBack);
+            if (flail.usage != usage || (sideClip != UINT32_MAX && flail.clip != sideClip))
             {
-                const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(usage);
+                const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(usage, sideClip);
                 if (match.clipIndex != UINT32_MAX)
                 {
                     flail.usage = usage;
@@ -117,7 +128,8 @@ namespace PARS
         }
         constexpr float blendDuration = .1f;
         flail.weight = Clamp(flail.weight + (recovering ? deltaTime : -deltaTime) / blendDuration, 0.0f, 1.0f);
-        if (flail.weight <= 0 || !m_AnimInstance->SampleUpperBodyPose(flail.clip, flail.time, flail.weight, flail.pose))
+        const std::vector<GraphNode>* basePose = warmingUp ? &m_ImpactWarmup.sourcePose : nullptr;
+        if (flail.weight <= 0 || !m_AnimInstance->SampleUpperBodyPose(flail.clip, flail.time, flail.weight, flail.pose, basePose))
         {
             flail = {};
             return;
@@ -428,6 +440,10 @@ namespace PARS
 
     void SkeletalMeshComponent::SetAutomaticRagdoll(bool enabled)
     {
+        if (!enabled)
+        {
+            m_ImpactWarmup = {};
+        }
         m_AutomaticRagdoll = enabled;
         m_KinematicRecoveryTimer.Reset();
         m_KinematicBlendSource.clear();
@@ -447,6 +463,13 @@ namespace PARS
         }
     }
 
+    void SkeletalMeshComponent::ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
+    {
+        m_Ragdoll.ApplyExternalImpacts(impacts);
+        // 모드 교체로 소멸한 접촉도 이번 틱의 관절 반응에는 그대로 넘긴다.
+        m_Ragdoll.UpdateProjectileReaction(impacts, deltaTime);
+    }
+
     bool SkeletalMeshComponent::UpdateAutomaticRagdoll(float deltaTime, bool projectileHit)
     {
         if (!m_AutomaticRagdoll)
@@ -458,7 +481,9 @@ namespace PARS
         const bool impact = impactVelocity >= m_RecoverySettings.impactVelocity;
         if (!IsRagdoll())
         {
-            const bool approaching = m_Ragdoll.HasApproachingImpact(m_RecoverySettings.impactVelocity);
+            // 큰 몸 충돌은 정지 상태에서 실제 수평 충격량을 받은 뒤 예열 여부를 결정한다.
+            const float deferCapsule = m_ImpactWarmup.wasResting ? ImpactWarmup::MinimumImpactSpeedChange : PX_MAX_F32;
+            const bool approaching = m_Ragdoll.HasApproachingImpact(m_RecoverySettings.impactVelocity, deferCapsule);
             Character* character = dynamic_cast<Character*>(&GetOwner());
             const bool movingCapsule = character && character->GetCharacterMovement().IsTickEnabled() &&
                 character->GetCapsuleComponent().HasPhysicsCollision();
@@ -508,9 +533,7 @@ namespace PARS
             ResetRecovery();
             m_KinematicRecoveryTimer.Reset();
             m_PendingRecoveryImpact = !interruptedStandingUp && (impact || approaching);
-            m_Ragdoll.ApplyExternalImpacts(impacts);
-            // 모드 교체로 소멸한 접촉도 이번 틱의 관절 반응에는 그대로 넘긴다.
-            m_Ragdoll.UpdateProjectileReaction(impacts, deltaTime);
+            ReplayKinematicImpacts(impacts, deltaTime);
             if (impactWeight > 0)
             {
                 m_FootSupport.RecordImpact(impactPosition / impactWeight);

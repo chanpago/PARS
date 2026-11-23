@@ -11,6 +11,17 @@ namespace PARS
     constexpr float MinimumFootstepDuration = .13f;
     constexpr float MaximumFootstepDuration = .27f;
 
+    struct ImpactWarmupStep
+    {
+    public:
+        // 루트의 이동을 제외한 발의 착지 편위이며 방향은 월드 수평축 기준이다.
+        physx::PxVec3 stride{0};
+        float duration = 0;
+    };
+
+    ImpactWarmupStep PlanImpactWarmupStep(const FootstepPolygon& hull, const physx::PxVec3& com,
+        const physx::PxVec3& velocity, float maximumStride, float fixedDeltaTime);
+
     struct FootstepSettings
     {
     public:

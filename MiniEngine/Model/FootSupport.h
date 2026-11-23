@@ -125,6 +125,7 @@ namespace PARS
         void Reset();
         // 명시적으로 자동 지지를 재설정할 때 기존 해제 래치와 발 판단을 함께 초기화한다.
         void ResetFootstep();
+        void ResumeAfterWarmup(uint32_t supportFoot);
         // 물리 모드 전환으로 접촉 캐시가 비워져도 최초 충격 위치를 전달한다.
         void RecordImpact(const physx::PxVec3& position);
         void ReportRecoveryPath(size_t side, const physx::PxVec3& target, bool accepted);
@@ -182,6 +183,7 @@ namespace PARS
         physx::PxVec3 m_PendingImpactPosition{0};
         std::array<FootSoleSettings, 2> m_Settings;
         FootstepSettings m_FootstepSettings; // 발 이동에 대한 세팅값
+        int m_NextWarmupFoot = -1;
         float m_BufferScale = 2.0f;          // 지지영역 A를 확장해 완충 영역 B를 만드는 배율. 2배면 반지름이 두배
         bool m_HasIdleReference = false;     // idle기준 자세를 저장했는지. 기준의 존재 여부
         bool m_Initialized = false;          // 발 지지 계산에 필요한 기본 정보를 준비했는지. prepare()에서 필요한 정보를 준비했는지 표현
