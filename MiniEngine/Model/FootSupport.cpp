@@ -514,6 +514,10 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.corners = foot.corners;
         target.hasSoleRectangle = foot.available;
         const Sole& sole = m_Feet[side];
+        if (foot.available)
+        {
+            target.velocity = ragdoll.GetBodyPointVelocity(sole.bodyIndex, target.position);
+        }
         if (input.active && input.automaticSupport && idle && foot.available && foot.leg.available &&
             foot.contact.hasSample && foot.contact.grounded && sole.hipBodyIndex >= 0)
         {

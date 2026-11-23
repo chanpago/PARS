@@ -45,12 +45,15 @@ namespace
         leg.command.hasTarget = true;
         leg.command.startPosition = leg.pose.targetSole.p;
         leg.command.takeoffPosition = leg.command.startPosition;
-        leg.command.target.position = PxVec3(x + .3f, .12f, 0);
+        leg.command.target.position = leg.command.startPosition + PxVec3(.3f, 0, 0);
         leg.command.target.normal = PxVec3(0, 1, 0);
         leg.command.target.valid = true;
-        leg.command.motion.position = leg.command.startPosition;
         leg.command.motion.duration = .3f;
-        leg.command.motion.initialHeight = .08f;
+        leg.command.motion.stepUpDistance = .08f;
+        leg.command.motion.airborneLiftScale = .3f;
+        leg.command.motion.measuredProgressPerSecond = 1.0f / leg.command.motion.duration;
+        leg.command.motion.predictedTakeoffDelay = .15f;
+        leg.command.motion.position = SampleFootstepPosition(leg.command, 0);
         leg.command.motion.valid = true;
 
         const std::array<PxTransform, 3> bones{leg.pose.hip, leg.pose.knee, leg.pose.ankle};
@@ -98,7 +101,7 @@ namespace
             "The snapshot identifies its source tick and includes the next tick and landing");
 
         // 현재 발은 떨어져 있지만 도착할 발의 충돌체 중심에는 반대 발이 있다.
-        input.legs[1].shapes[2].actualPose = PxTransform(PxVec3(.3f, .17f, .1f));
+        input.legs[1].shapes[2].actualPose = PxTransform(PxVec3(.3f, .1f, .1f));
         result = PredictFootstepCollisions(input);
         Check((result.overlapPairs & (1u << 8)) != 0 && result.samples[0].overlapPairs == 0 &&
             (result.samples[5].overlapPairs & (1u << 8)) != 0,
@@ -127,7 +130,7 @@ namespace
             {
                 FootstepCollisionInput input = MakeInput();
                 input.legs[0].command.target.position = input.legs[0].command.startPosition;
-                input.legs[0].command.motion.initialHeight = 0;
+                input.legs[0].command.motion.stepUpDistance = 0;
                 for (uint32_t part = 0; part < 3; ++part)
                 {
                     if (part != left)
@@ -164,8 +167,8 @@ namespace
         command.hasTakenOff = false;
         command.phase = FootstepPhase::AwaitingTakeoff;
         const PxVec3 lifted = SampleFootstepPosition(command, .075f);
-        Check(Near(lifted, command.startPosition + PxVec3(0, .04f, 0)),
-            "Before takeoff the trajectory raises the foot without horizontal dragging");
+        Check(Near(lifted, PxVec3(command.startPosition.x, command.target.position.y + .06f, command.startPosition.z)),
+            "Before assumed takeoff a sliding sole receives only the linear lifting term");
         const FootstepCollisionSnapshot result = PredictFootstepCollisions(input);
         Check(result.assumesTakeoff && std::abs(result.samples[5].timeAhead - .45f) < 1e-6f &&
             Near(result.samples[5].solePositions[0], command.target.position),
@@ -176,12 +179,13 @@ namespace
         command.motion.elapsedTime = command.motion.duration;
         command.motion.progress = 1;
         command.motion.landingTargetLocked = true;
-        command.motion.landingLowering = .01f;
-        command.motion.landingLoweringSpeed = .05f;
-        command.motion.maximumLandingLowering = .03f;
-        Check(Near(SampleFootstepPosition(command, .2f), command.target.position - PxVec3(0, .02f, 0)) &&
-            Near(SampleFootstepPosition(command, 1), command.target.position - PxVec3(0, .03f, 0)),
-            "After the nominal duration, prediction continues bounded landing lowering");
+        command.motion.measuredProgress = 1;
+        command.motion.stepElapsedTime = .3f;
+        command.motion.stepDownDistance = .01f;
+        command.motion.stepDownSpeed = .05f;
+        Check(Near(SampleFootstepPosition(command, .2f), command.target.position - PxVec3(0, .035f, 0)) &&
+            Near(SampleFootstepPosition(command, 1), command.target.position - PxVec3(0, .075f, 0)),
+            "After horizontal arrival the same distance and elapsed-time terms keep driving toward contact");
         const FootstepCollisionSnapshot lowering = PredictFootstepCollisions(input);
         Check(lowering.status == FootstepCollisionStatus::Clear && lowering.samples[5].timeAhead > 0,
             "An overdue landing still checks its next control target without dividing by zero");
@@ -254,6 +258,20 @@ namespace
         for (int fixture = 0; fixture < 24; ++fixture)
         {
             FootstepCollisionLeg leg = MakeLeg(.12f);
+            leg.command.motion.stepDownDistance = .05f;
+            leg.command.motion.stepDownSpeed = .03f;
+            leg.command.motion.stepElapsedTime = .04f;
+            if (fixture % 2 == 0)
+            {
+                leg.command.motion.measuredProgress = .75f;
+                leg.command.motion.measuredProgressPerSecond = -2.0f;
+            }
+            if (fixture % 3 == 0)
+            {
+                leg.command.hasTakenOff = false;
+                leg.command.phase = FootstepPhase::AwaitingTakeoff;
+                leg.command.motion.predictedTakeoffDelay = .151f;
+            }
             leg.command.target.position.z = .12f * std::sin(float(fixture));
             leg.command.target.position.x += .08f * std::cos(float(fixture));
             leg.path = MakeFootstepPath(PxVec3(0), PxVec3(0),

@@ -48,16 +48,19 @@ namespace
         return command.hasTarget && command.target.valid && motion.valid &&
             command.startPosition.isFinite() && command.takeoffPosition.isFinite() &&
             command.target.position.isFinite() && command.target.normal.isFinite() &&
-            command.target.normal.magnitudeSquared() > 1e-8f &&
+            command.target.normal.y > 1e-6f &&
             std::isfinite(motion.duration) && motion.duration > 0 &&
             (!motion.hasSupportDeadline || (std::isfinite(motion.progress) && motion.progress >= 0 && motion.progress <= 1 &&
                 std::isfinite(motion.progressPerSecond) && motion.progressPerSecond >= 0)) &&
-            std::isfinite(motion.initialHeight) && motion.initialHeight >= 0 &&
+            std::isfinite(motion.stepUpDistance) && motion.stepUpDistance >= 0 &&
+            std::isfinite(motion.stepDownDistance) && motion.stepDownDistance >= 0 &&
+            std::isfinite(motion.stepDownSpeed) && motion.stepDownSpeed >= 0 &&
+            std::isfinite(motion.airborneLiftScale) && motion.airborneLiftScale >= 0 && motion.airborneLiftScale <= 1 &&
+            std::isfinite(motion.measuredProgress) && std::isfinite(motion.measuredProgressPerSecond) &&
+            std::isfinite(motion.stepElapsedTime) && motion.stepElapsedTime >= 0 &&
             std::isfinite(motion.elapsedTime) && motion.elapsedTime >= 0 &&
             std::isfinite(motion.takeoffElapsedTime) && motion.takeoffElapsedTime >= 0 &&
-            std::isfinite(motion.landingLowering) && motion.landingLowering >= 0 &&
-            std::isfinite(motion.landingLoweringSpeed) && motion.landingLoweringSpeed >= 0 &&
-            std::isfinite(motion.maximumLandingLowering) && motion.maximumLandingLowering >= 0;
+            std::isfinite(motion.predictedTakeoffDelay) && motion.predictedTakeoffDelay >= 0;
     }
 
     bool Sample(const FootstepCollisionInput& input, float time, uint32_t pairs,

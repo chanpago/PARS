@@ -21,12 +21,11 @@ namespace PARS
         float minimumStanceWidthRatio = .0f;
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
         float crossingOffset = .1f;
-        float liftHeightScale = .35f;
         float stepDuration = MinimumFootstepDuration;
-        float minimumLiftHeight = .03f;
+        float stepUpDistance = .689264f;
+        float stepDownDistance = .719179f;
+        float stepDownSpeed = .095612f;
         float landingLockProgress = .90f;
-        float landingLoweringSpeed = .05f;
-        float maximumLandingLowering = .03f;
         float supportLoadRatio = .25f;
         float supportConfirmationTime = .01f;
         float landingComClampHysteresisDegrees = 5.0f;
@@ -75,6 +74,7 @@ namespace PARS
     public:
         FootstepReachInput reach;
         physx::PxVec3 position{0};
+        physx::PxVec3 velocity{0};
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
@@ -176,23 +176,29 @@ namespace PARS
     struct FootstepMotion
     {
     public:
+        float GetAimHeight(float measuredFraction, float stepTime, bool airborne) const;
+
+    public:
         physx::PxVec3 position{0};
-        float initialHeight = 0;
-        float heightLimit = 0;
+        float stepUpDistance = 0;
+        float stepDownDistance = 0;
+        float stepDownSpeed = 0;
+        float stepLength = 0;
+        float airborneLiftScale = 0;
         float height = 0;
+        float stepElapsedTime = 0;
         float takeoffElapsedTime = 0;
+        float predictedTakeoffDelay = 0;
         float elapsedTime = 0;
         float duration = 0;
         float measuredProgress = 0;
+        float measuredProgressPerSecond = 0;
         float progress = 0;
         float progressPerSecond = 0;
         float remainingDistance = 0;
         float landingError = 0;
         float landingTimeError = 0;
         float landingLockProgress = 0;
-        float landingLoweringSpeed = 0;
-        float maximumLandingLowering = 0;
-        float landingLowering = 0;
         bool valid = false;
         bool hasLandingError = false;
         bool landingTargetLocked = false;
@@ -221,6 +227,8 @@ namespace PARS
         physx::PxVec3 startPosition{0};
         physx::PxVec3 initialTarget{0};
         physx::PxVec3 takeoffPosition{0};
+        physx::PxVec3 progressOrigin{0};
+        physx::PxVec3 startOffsetFromOtherFoot{0};
         FootstepMotion motion;
         float initialDistance = 0;
         FootstepPhase phase = FootstepPhase::Idle;
@@ -228,12 +236,14 @@ namespace PARS
         FootstepLandingDirection landingComDirection = FootstepLandingDirection::None;
         bool hasTarget = false;
         bool hasTakenOff = false;
+        bool hasOtherFootReference = false;
         bool justStarted = false;
         bool justLanded = false;
     };
 
     // 지지 시한이 있으면 발을 드는 구간도 같은 궤적에 포함한다.
     float GetFootstepRemainingTime(const FootstepCommand& command);
+    float GetPredictedFootstepFlightTime(const FootstepCommand& command, float timeAhead);
     physx::PxVec3 SampleFootstepPosition(const FootstepCommand& command, float timeAhead);
 
     struct FootstepLoadTransfer
@@ -286,7 +296,7 @@ namespace PARS
 
     private:
         void Abort(FootstepReason reason);
-        void UpdateMotion(FootstepCommand& command, const FootstepFootInput& foot, const FootstepInput& input);
+        void UpdateMotion(FootstepCommand& command, const FootstepInput& input, size_t side);
 
     public:
         const FootstepSnapshot& GetSnapshot() const

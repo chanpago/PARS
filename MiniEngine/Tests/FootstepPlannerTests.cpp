@@ -32,7 +32,9 @@ namespace
         settings.startPredictionTime = .3f;
         settings.landingPredictionTime = .3f;
         settings.stepDuration = .3f;
-        settings.liftHeightScale = .15f;
+        settings.stepUpDistance = .3f;
+        settings.stepDownDistance = .2f;
+        settings.stepDownSpeed = .1f;
         // 기존 간격 보정의 회귀 검사는 새 COM 제한과 분리한다.
         settings.minimumStanceWidthRatio = .7f;
         settings.landingComClampEnabled = false;
@@ -145,9 +147,8 @@ namespace
         Check(started.feet[1].phase == FootstepPhase::AwaitingTakeoff &&
                 started.feet[1].motion.valid && started.landingCount == 0,
             "An initial grounded sample remains an active command");
-        Check((started.feet[1].motion.position - input.feet[1].position).magnitude() < 1e-6f &&
-                Near(started.feet[1].motion.initialHeight, .045f),
-            "Trajectory starts at the actual sole with distance-scaled lift");
+        Check((started.feet[1].motion.position - (input.feet[1].position + PxVec3(0, .3f, 0))).magnitude() < 1e-6f,
+            "A grounded step immediately aims above the sole at its starting horizontal position");
 
         input.feet[1].grounded = false;
         input.feet[1].position.z = .15f;
@@ -156,12 +157,13 @@ namespace
         const FootstepCommand halfway = planner.GetSnapshot().feet[1];
         Check(halfway.phase == FootstepPhase::Airborne && Near(halfway.motion.progress, .5f) &&
                 Near(halfway.motion.measuredProgress, .5f), "Time and measured progress are independent");
-        Check(Near(halfway.motion.position.z, .15f) && Near(halfway.motion.position.y, .445f),
-            "The smooth horizontal trajectory reaches its maximum lift halfway");
+        Check(Near(halfway.motion.position.z, .15f) && Near(halfway.motion.position.y, .425f),
+            "Half a measured stride applies quadratic descent and scales the remaining lift by stride length");
         input.velocity.z = 1.5f;
         Advance(planner, input, settings);
-        Check(Near(planner.GetSnapshot().feet[1].target.position.z, .45f),
-            "An active foot retargets before the landing lock");
+        Check(Near(planner.GetSnapshot().feet[1].target.position.z, .45f) &&
+                Near(planner.GetSnapshot().feet[1].motion.measuredProgress, .5f),
+            "Retargeting before the lock retains the original stride as the progress denominator");
         Advance(planner, input, settings, 7);
         const PxVec3 locked = planner.GetSnapshot().feet[1].target.position;
         Check(planner.GetSnapshot().feet[1].motion.landingTargetLocked,
@@ -172,8 +174,8 @@ namespace
                 planner.GetSnapshot().feet[1].IsInProgress(),
             "Time expiry preserves the locked goal and cannot fabricate a landing");
         Advance(planner, input, settings, 100);
-        Check(Near(planner.GetSnapshot().feet[1].motion.landingLowering, settings.maximumLandingLowering) &&
-                planner.GetSnapshot().feet[1].motion.valid, "Extra lowering stays bounded while awaiting contact");
+        Check(planner.GetSnapshot().feet[1].motion.height < 0 && planner.GetSnapshot().feet[1].motion.valid,
+            "Elapsed time brings a stalled airborne target below the floor while waiting for physical contact");
         input.feet[1].position = locked + PxVec3(.02f, 0, 0);
         input.feet[1].grounded = true;
         input.feet[0].grounded = false;
@@ -427,13 +429,12 @@ namespace
                 "Missing required observations and invalid inputs cannot emit a motion command");
         }
 
-        const std::array<float FootstepSettings::*, 14> fields{{
+        const std::array<float FootstepSettings::*, 13> fields{{
             &FootstepSettings::startPredictionTime, &FootstepSettings::landingPredictionTime,
             &FootstepSettings::stanceScale, &FootstepSettings::minimumStanceWidthRatio,
             &FootstepSettings::maximumStepLength, &FootstepSettings::crossingOffset,
-            &FootstepSettings::liftHeightScale, &FootstepSettings::stepDuration,
-            &FootstepSettings::minimumLiftHeight, &FootstepSettings::landingLockProgress,
-            &FootstepSettings::landingLoweringSpeed, &FootstepSettings::maximumLandingLowering,
+            &FootstepSettings::stepUpDistance, &FootstepSettings::stepDuration,
+            &FootstepSettings::stepDownDistance, &FootstepSettings::landingLockProgress, &FootstepSettings::stepDownSpeed,
             &FootstepSettings::supportLoadRatio, &FootstepSettings::supportConfirmationTime}};
         for (float FootstepSettings::* field : fields)
         {
@@ -549,6 +550,58 @@ namespace
             "Leaving active mode clears commands and cached observations");
     }
 
+    void TestMeasuredSwingHeight()
+    {
+        const FootstepSettings settings = TestSettings();
+        for (const float sign : {-1.0f, 1.0f})
+        {
+            for (const float fraction : {.2f, .8f})
+            {
+                FootstepInput input = Standing();
+                input.velocity.z = sign;
+                input.feet[0].timeToReachLimit = .3f;
+                FootstepPlanner planner;
+                planner.Update(input, settings);
+                const FootstepCommand& step = planner.GetSnapshot().feet[1];
+                input.feet[1].grounded = false;
+                input.feet[0].position.z += sign * .05f;
+                input.feet[1].position.z += sign * (.05f + fraction * .3f);
+                input.feet[0].velocity.z = sign * .6f;
+                input.feet[1].velocity.z = sign * 1.5f;
+                Advance(planner, input, settings);
+                const float raw = .3f * (1 - fraction) - .2f * fraction * fraction - .1f * input.fixedDeltaTime;
+                const float expected = raw > 0 ? raw * .3f : raw;
+                Check(Near(step.motion.measuredProgress, fraction) && Near(step.motion.height, expected) &&
+                    Near(step.motion.measuredProgressPerSecond, 3.0f),
+                    "Forward and backward steps use sole travel and velocity relative to the opposite foot");
+                Check(step.motion.progress < .1f && (step.motion.position.y < step.target.position.y) == (fraction == .8f),
+                    "At the same early tick only the farther travelled foot is already commanded below ground");
+                const PxVec3 forecast = SampleFootstepPosition(step, input.fixedDeltaTime);
+                input.feet[0].position += input.feet[0].velocity * input.fixedDeltaTime;
+                input.feet[1].position += input.feet[1].velocity * input.fixedDeltaTime;
+                Advance(planner, input, settings);
+                Check(Near(step.motion.position.y, forecast.y),
+                    "The next IK height matches the observed drive when both feet keep their measured velocities");
+            }
+        }
+
+        FootstepInput slope = Standing();
+        const PxVec3 normal = PxVec3(0, 1, .5f).getNormalized();
+        slope.feet[0].normal = normal;
+        slope.feet[1].normal = normal;
+        FootstepPlanner slopePlanner;
+        slopePlanner.Update(slope, settings);
+        const FootstepCommand& step = slopePlanner.GetSnapshot().feet[1];
+        Check(Near(normal.dot(step.motion.position - step.target.position), settings.stepUpDistance) &&
+            Near(step.motion.position.z, step.startPosition.z),
+            "On a slope the drive has the requested normal clearance at the planned horizontal position");
+        slope.feet[1].grounded = false;
+        slope.feet[1].position = step.startPosition + (step.target.position - step.startPosition) * .5f + normal * .1f;
+        Advance(slopePlanner, slope, settings);
+        Check(Near(step.motion.measuredProgress, .5f) && Near(normal.dot(step.motion.position - step.target.position), step.motion.height),
+            "Lifting along the floor normal adds no measured progress on a slope");
+    }
+
     void TestFixedStepRates()
     {
         const std::array<unsigned, 4> rates{{30, 60, 120, 240}};
@@ -564,8 +617,9 @@ namespace
             Advance(planner, input, settings);
             Advance(planner, input, settings, rate / 10);
             const FootstepMotion motion = planner.GetSnapshot().feet[1].motion;
-            Check(Near(motion.progress, .5f) && Near(motion.position.z, .15f) && Near(motion.height, .045f),
-                "Separate command timing is consistent across fixed physics rates");
+            const float expectedHeight = (.3f - .1f * (.1f + input.fixedDeltaTime)) * .3f;
+            Check(Near(motion.progress, .5f) && Near(motion.position.z, .15f) && Near(motion.height, expectedHeight),
+                "The horizontal clock and elapsed-time lowering are consistent across fixed physics rates");
             Advance(planner, input, settings, rate / 10);
             Check(planner.GetSnapshot().feet[1].IsInProgress() &&
                     Near(planner.GetSnapshot().feet[1].motion.progress, 1),
@@ -1132,10 +1186,11 @@ namespace
             const PxVec3 nextBeforeExtension = SampleFootstepPosition(step, input.fixedDeltaTime);
             input.feet[0].timeToReachLimit = .5f;
             Advance(planner, input, settings);
+            const PxVec3 extendedEnd = SampleFootstepPosition(step, GetFootstepRemainingTime(step));
             Check(Near(step.motion.duration, MaximumFootstepDuration) &&
                 (step.motion.position - nextBeforeExtension).magnitude() < 1e-5f &&
-                (SampleFootstepPosition(step, GetFootstepRemainingTime(step)) - step.target.position).magnitude() < 1e-5f,
-                "A longer support forecast extends the same swing from its current position up to the whole-step cap");
+                Near(extendedEnd.x, step.target.position.x) && Near(extendedEnd.z, step.target.position.z),
+                "An extension preserves the current drive and reaches the horizontal target by the whole-step cap");
             input.feet[0].timeToReachLimit = shorterForecast;
             Advance(planner, input, settings);
             Check(Near(GetFootstepRemainingTime(step), shorterForecast),
@@ -1143,18 +1198,21 @@ namespace
             input.feet[0].grounded = false;
             Advance(planner, input, settings);
             const float remaining = shorterForecast - input.fixedDeltaTime;
+            const PxVec3 promisedEnd = SampleFootstepPosition(step, remaining);
             Check(Near(GetFootstepRemainingTime(step), remaining) &&
-                (SampleFootstepPosition(step, remaining) - step.target.position).magnitude() < 1e-5f,
-                "Losing support preserves the promised time and the drive trajectory reaches the landing point");
+                Near(promisedEnd.x, step.target.position.x) && Near(promisedEnd.z, step.target.position.z) &&
+                promisedEnd.y > step.target.position.y,
+                "Losing support preserves the horizontal deadline while height follows the stalled foot");
             Advance(planner, input, settings, static_cast<unsigned>(std::ceil(shorterForecast / input.fixedDeltaTime)));
             Check(step.IsInProgress() && Near(step.motion.progress, 1) && !step.justLanded,
                 "The deadline alone cannot manufacture a ground contact");
             const float expiredDuration = step.motion.duration;
+            const float expiredHeight = step.motion.height;
             input.feet[0].grounded = true;
             input.feet[0].timeToReachLimit = .5f;
             Advance(planner, input, settings);
             Check(Near(step.motion.duration, expiredDuration) && Near(GetFootstepRemainingTime(step), 0) &&
-                step.motion.landingLowering > 0 && !step.justLanded,
+                step.motion.height < expiredHeight && !step.justLanded,
                 "A later forecast preserves an expired deadline while the airborne foot lowers for contact");
             input.feet[1].position = step.target.position;
             input.feet[1].grounded = true;
@@ -1173,6 +1231,12 @@ namespace
             Advance(descentPlanner, descent, settings);
             Check(Near(descendingStep.motion.duration, MinimumFootstepDuration),
                 "A sub-tick increase keeps the current deadline during lift");
+            descent.feet[1].velocity.y = -.2f;
+            descent.feet[0].timeToReachLimit = .5f;
+            Advance(descentPlanner, descent, settings);
+            Check(descendingStep.motion.progress < .5f && Near(descendingStep.motion.duration, MinimumFootstepDuration),
+                "Measured downward sole motion prevents a deadline extension even in the first half");
+            descent.feet[1].velocity.y = 0;
             descent.feet[0].timeToReachLimit = 0;
             const unsigned ticksToApex = static_cast<unsigned>(std::ceil(.5f * MinimumFootstepDuration / descent.fixedDeltaTime));
             Advance(descentPlanner, descent, settings, ticksToApex);
@@ -1218,7 +1282,7 @@ namespace
                 planner.GetSnapshot().landingCount == 0 && planner.GetSnapshot().startCount == 1,
             "A foot that never left the floor cannot complete or repeatedly restart a step");
         Check(waiting.motion.valid && Near(waiting.motion.progress, 0) &&
-                !waiting.motion.landingTargetLocked && Near(waiting.motion.height, waiting.motion.initialHeight),
+                !waiting.motion.landingTargetLocked && Near(waiting.motion.height, settings.stepUpDistance),
             "Lift stays active until actual takeoff instead of expiring on the nominal deadline");
         Check(Near(waiting.motion.position.x, waiting.startPosition.x) &&
                 Near(waiting.motion.position.z, waiting.startPosition.z),
@@ -1229,12 +1293,13 @@ namespace
         Check(airborne.hasTakenOff && airborne.phase == FootstepPhase::Airborne &&
                 Near(airborne.motion.elapsedTime, 0) && Near(airborne.motion.progress, 0),
             "A late physical takeoff starts its own flight clock at zero");
-        Check((airborne.motion.position - waiting.motion.position).magnitude() < 1e-6f,
-            "Takeoff carries the held lift goal into flight without a positional jump");
+        const float takeoffHeight = (.3f - .1f * 61.0f * input.fixedDeltaTime) * .3f;
+        Check(Near(airborne.motion.position.y, waiting.startPosition.y + takeoffHeight),
+            "Physical takeoff enables stride-scaled lift and counts the time already spent on the floor");
         Advance(planner, input, settings, 9);
         Check(Near(planner.GetSnapshot().feet[1].motion.progress, .5f) &&
-                planner.GetSnapshot().feet[1].motion.position.y <= waiting.startPosition.y + waiting.motion.initialHeight + 1e-5f,
-            "Flight progresses after takeoff and preserves the total lift-height bound");
+                planner.GetSnapshot().feet[1].motion.height < takeoffHeight,
+            "Flight progresses after takeoff and a stationary sole receives a lower aim over time");
         Advance(planner, input, settings, 20);
         Check(planner.GetSnapshot().feet[1].IsInProgress() && planner.GetSnapshot().landingCount == 0,
             "An expired airborne command still requires a real return contact");
@@ -1258,6 +1323,7 @@ void TestFootstepPlanner()
     TestGatesAndInvalidData();
     TestActualComBufferTimeout();
     TestClockAndAbort();
+    TestMeasuredSwingHeight();
     TestFixedStepRates();
     TestTakeoffConfirmation();
     TestSupportLandingDeadline();
