@@ -168,9 +168,6 @@ namespace
         CommandLineArgs::GetInteger(L"footsteprecoverysteps", recoverySteps);
         settings.recovery.maximumSteps = physx::PxClamp(recoverySteps, uint32_t(1), uint32_t(3));
         CommandLineArgs::GetFloat(L"footstepcapturescale", settings.recovery.oneStepCaptureScale);
-        CommandLineArgs::GetFloat(L"stepupdistance", settings.stepUpDistance);
-        CommandLineArgs::GetFloat(L"stepdowndistance", settings.stepDownDistance);
-        CommandLineArgs::GetFloat(L"stepdownspeed", settings.stepDownSpeed);
         CommandLineArgs::GetFloat(L"landingcomhysteresis", settings.landingComClampHysteresisDegrees);
         report << "landing_com_clamp=" << settings.landingComClampEnabled
             << " region=opposite_grounded_sole"
@@ -179,8 +176,6 @@ namespace
             << " prevent_crossing=" << settings.preventCrossing << std::endl;
         report << "footstep_recovery=" << settings.recovery.enabled << " maximum_steps=" << settings.recovery.maximumSteps
             << " one_step_capture_scale=" << settings.recovery.oneStepCaptureScale << std::endl;
-        report << "step_up_m=" << settings.stepUpDistance << " step_down_m=" << settings.stepDownDistance
-            << " step_down_mps=" << settings.stepDownSpeed << std::endl;
     }
 
     void WriteLandingComHeader(std::ostream& stream)
@@ -194,7 +189,7 @@ namespace
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state,"
             "actual_com_outside_b,outside_b_time_s,"
-            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,measured_step_fraction,aim_height_m\n";
+            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -245,16 +240,7 @@ namespace
                 << ',' << decision.targetInCaptureMargin << ',' << PARS::CharacterBalanceStateLabel(mesh.GetBalanceState())
                 << ',' << support.footstep.actualComOutsideBuffer << ',' << support.footstep.outsideBufferTime
                 << ',' << command.motion.hasSupportDeadline << ',' << command.motion.duration << ',' << command.motion.elapsedTime
-                << ',' << command.motion.landingTimeError << ',';
-            if (command.motion.valid)
-            {
-                stream << command.motion.measuredProgress << ',' << command.motion.height;
-            }
-            else
-            {
-                stream << ',';
-            }
-            stream << '\n';
+                << ',' << command.motion.landingTimeError << '\n';
         }
     }
 

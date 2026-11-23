@@ -47,34 +47,42 @@ namespace
         return offset;
     }
 
-    Range BoundHeight(const FootstepMotion& motion, const Range& fraction, const Range& stepTime, bool airborne)
-    {
-        // 두 입력 각각에 대해 목표 높이가 단조 감소한다. 서로 다른 시점의 극값을 조합해도 전체 구간을 포함한다.
-        return Rounded(motion.GetAimHeight(static_cast<float>(fraction.upper), static_cast<float>(stepTime.upper), airborne),
-            motion.GetAimHeight(static_cast<float>(fraction.lower), static_cast<float>(stepTime.lower), airborne));
-    }
-
     Vector BoundPosition(const FootstepCollisionLeg& leg, const Range& time)
     {
         const FootstepCommand& command = leg.command;
         const FootstepMotion& motion = command.motion;
-        const Range elapsed = Range(GetPredictedFootstepFlightTime(command, 0)) + time;
+        Range elapsed = Range(motion.elapsedTime) + time;
+        Vector takeoff(command.takeoffPosition);
+        Vector lift;
+        bool includesLift = false;
+        if (!command.UsesSwingTrajectory())
+        {
+            const float remaining = PxMax(0.0f, .5f * motion.duration - motion.takeoffElapsedTime);
+            elapsed = time - Range(remaining);
+            const Range liftTime = Clamp((Range(motion.takeoffElapsedTime) + time) /
+                Range(.5f * motion.duration), 0, 1);
+            lift = Vector(command.startPosition) + Vector(Range(0), Range(motion.initialHeight) * Blend(liftTime), Range(0));
+            if (time.upper <= remaining)
+            {
+                return lift + BoundOffset(leg.path, elapsed);
+            }
+            includesLift = time.lower <= remaining;
+            takeoff = Vector(command.startPosition) + Vector(PxVec3(0, motion.initialHeight, 0));
+        }
         const Range progress = motion.hasSupportDeadline ?
             Clamp(Range(motion.progress) + time * Range(motion.progressPerSecond), 0, 1) :
             Clamp(elapsed / Range(motion.duration), 0, 1);
-        const Range fraction = Range(motion.measuredProgress) + Range(motion.measuredProgressPerSecond) * time;
-        const Range stepTime = Range(motion.stepElapsedTime) + time;
-        const bool airborne = command.hasTakenOff || time.lower > motion.predictedTakeoffDelay;
-        Range height = BoundHeight(motion, fraction, stepTime, airborne);
-        if (!airborne && time.upper > motion.predictedTakeoffDelay)
+        Vector position = takeoff + (Vector(command.target.position) - takeoff) * Blend(progress);
+        position.y = position.y + Range(.5f * motion.initialHeight) * (Range(1) - Cos(Range(PxTwoPi) * progress));
+        position.y = Minimum(position.y, PxMax(command.startPosition.y, command.target.position.y) + motion.initialHeight);
+        const Range overtime = Maximum(elapsed - Range(motion.duration), 0);
+        const Range lowering = Minimum(Range(motion.landingLowering) + overtime * Range(motion.landingLoweringSpeed),
+            motion.maximumLandingLowering);
+        position.y = position.y - lowering;
+        if (includesLift)
         {
-            height = Join(height, BoundHeight(motion, fraction, stepTime, true));
+            position = Join(position, lift);
         }
-        const Vector takeoff(command.takeoffPosition);
-        const Vector target(command.target.position);
-        const Vector normal(command.target.normal);
-        Vector position = takeoff + (target - takeoff) * Blend(progress);
-        position.y = target.y + (height - normal.x * (position.x - target.x) - normal.z * (position.z - target.z)) / normal.y;
         return position + BoundOffset(leg.path, elapsed);
     }
 

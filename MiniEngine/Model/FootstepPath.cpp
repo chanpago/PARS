@@ -97,6 +97,16 @@ bool PARS::IsFootstepPathWithinLimits(const FootstepPath& path, float maximumSpe
     return true;
 }
 
+float PARS::GetPredictedFootstepFlightTime(const FootstepCommand& command, float timeAhead)
+{
+    if (command.UsesSwingTrajectory())
+    {
+        return command.motion.elapsedTime + timeAhead;
+    }
+    const float remainingLift = (std::max)(0.0f, .5f * command.motion.duration - command.motion.takeoffElapsedTime);
+    return timeAhead - remainingLift;
+}
+
 PxVec3 PARS::SampleFootstepPosition(const FootstepCommand& command, const FootstepPath& path, float timeAhead)
 {
     return SampleFootstepPosition(command, timeAhead) +

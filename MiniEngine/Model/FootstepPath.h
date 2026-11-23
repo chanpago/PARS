@@ -20,5 +20,6 @@ namespace PARS
     physx::PxVec3 SampleFootstepPath(const FootstepPath& path, float flightTime);
     physx::PxVec3 SampleFootstepPathVelocity(const FootstepPath& path, float flightTime);
     bool IsFootstepPathWithinLimits(const FootstepPath& path, float maximumSpeed, float maximumAcceleration);
+    float GetPredictedFootstepFlightTime(const FootstepCommand& command, float timeAhead);
     physx::PxVec3 SampleFootstepPosition(const FootstepCommand& command, const FootstepPath& path, float timeAhead);
 }

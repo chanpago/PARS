@@ -19,9 +19,28 @@ namespace
         command.target.recovery.intersections = {};
     }
 
-    PxVec3 GroundDirection(const PxVec3& delta, const PxVec3& normal)
+    float LiftHeight(const FootstepMotion& motion, float elapsed)
     {
-        return delta - normal * delta.dot(normal);
+        const float t = PxClamp(elapsed / (.5f * motion.duration), 0.0f, 1.0f);
+        const float blend = t * t * (3.0f - 2.0f * t);
+        return motion.initialHeight * blend;
+    }
+
+    float SwingHeight(const FootstepMotion& motion, float progress)
+    {
+        return motion.initialHeight * .5f * (1.0f - std::cos(PxTwoPi * progress));
+    }
+
+    PxVec3 SwingPosition(const FootstepCommand& command, const PxVec3& takeoff, float progress)
+    {
+        const float blend = progress * progress * (3.0f - 2.0f * progress);
+        PxVec3 position = takeoff + (command.target.position - takeoff) * blend +
+            PxVec3(0, SwingHeight(command.motion, progress), 0);
+        // 이륙 때 이미 확보한 높이를 중복으로 더하지 않도록 구동과 예측에 같은 상한을 쓴다.
+        const float maximumHeight = (std::max)(command.startPosition.y, command.target.position.y) +
+            command.motion.initialHeight;
+        position.y = (std::min)(position.y, maximumHeight);
+        return position;
     }
 
     bool ValidSettings(const FootstepSettings& s)
@@ -32,11 +51,12 @@ namespace
             std::isfinite(s.minimumStanceWidthRatio) && s.minimumStanceWidthRatio >= 0 && s.minimumStanceWidthRatio <= 1 &&
             std::isfinite(s.maximumStepLength) && s.maximumStepLength > 0 &&
             std::isfinite(s.crossingOffset) && s.crossingOffset >= 0 &&
+            std::isfinite(s.liftHeightScale) && s.liftHeightScale > 0 &&
             std::isfinite(s.stepDuration) && s.stepDuration > 0 &&
-            std::isfinite(s.stepUpDistance) && s.stepUpDistance > 0 &&
-            std::isfinite(s.stepDownDistance) && s.stepDownDistance >= 0 &&
-            std::isfinite(s.stepDownSpeed) && s.stepDownSpeed >= 0 &&
+            std::isfinite(s.minimumLiftHeight) && s.minimumLiftHeight > 0 &&
             std::isfinite(s.landingLockProgress) && s.landingLockProgress >= .5f && s.landingLockProgress <= 1 &&
+            std::isfinite(s.landingLoweringSpeed) && s.landingLoweringSpeed >= 0 &&
+            std::isfinite(s.maximumLandingLowering) && s.maximumLandingLowering >= 0 &&
             std::isfinite(s.supportLoadRatio) && s.supportLoadRatio > 0 && s.supportLoadRatio <= 1 &&
             std::isfinite(s.supportConfirmationTime) && s.supportConfirmationTime > 0 &&
             (!s.landingComClampEnabled ||
@@ -251,7 +271,7 @@ namespace
         return (std::min)(budget, (std::max)(minimumTime, support.timeToReachLimit));
     }
 
-    void UpdateSupportDeadline(FootstepCommand& command, const FootstepInput& input, size_t side, float remaining)
+    void UpdateSupportDeadline(FootstepCommand& command, const FootstepInput& input, float remaining)
     {
         FootstepMotion& motion = command.motion;
         const float elapsed = static_cast<float>(input.completedStep - command.trajectoryStartStep) * input.fixedDeltaTime;
@@ -278,12 +298,9 @@ namespace
         {
             const float revisedDuration = elapsed + remaining;
             const float currentProgress = motion.progress + (elapsed - motion.elapsedTime) * motion.progressPerSecond;
-            const FootstepFootInput& foot = input.feet[side];
-            const PxVec3 relativeVelocity = foot.velocity - input.feet[1 - side].velocity;
-            const bool descending = (command.hasTakenOff || !foot.grounded) && relativeVelocity.dot(command.target.normal) < 0;
-            // 궤적 전반이라도 실제 발이 내려가기 시작하면 착지를 미루지 않는다.
+            // 하강 중에는 착지를 미루지 않는다. 상승 중에도 한 물리 틱 이상 늦어질 때만 연장한다.
             if (!motion.hasSupportDeadline || revisedDuration < motion.duration ||
-                (!descending && currentProgress < .5f && revisedDuration - motion.duration >= input.fixedDeltaTime))
+                (currentProgress < .5f && revisedDuration - motion.duration >= input.fixedDeltaTime))
             {
                 motion.duration = revisedDuration;
             }
@@ -687,85 +704,71 @@ float PARS::GetFootstepRemainingTime(const FootstepCommand& command)
         command.motion.duration;
 }
 
-float PARS::GetPredictedFootstepFlightTime(const FootstepCommand& command, float timeAhead)
-{
-    if (command.UsesSwingTrajectory())
-    {
-        return command.motion.elapsedTime + timeAhead;
-    }
-    const float remainingLift = (std::max)(0.0f, .5f * command.motion.duration - command.motion.takeoffElapsedTime);
-    return timeAhead - remainingLift;
-}
-
-float FootstepMotion::GetAimHeight(float measuredFraction, float stepTime, bool airborne) const
-{
-    const float p = PxClamp(measuredFraction, 0.0f, 1.0f);
-    float aim = stepUpDistance * (1.0f - p);
-    if (airborne)
-    {
-        aim -= stepDownDistance * (p * p) + stepDownSpeed * stepTime;
-        if (aim > 0)
-        {
-            aim *= airborneLiftScale;
-        }
-    }
-    return aim;
-}
-
 PxVec3 PARS::SampleFootstepPosition(const FootstepCommand& command, float timeAhead)
 {
     const FootstepMotion& motion = command.motion;
-    const float elapsed = GetPredictedFootstepFlightTime(command, timeAhead);
+    PxVec3 takeoff = command.takeoffPosition;
+    float elapsed = motion.elapsedTime + timeAhead;
+    if (!command.UsesSwingTrajectory())
+    {
+        const float remainingLift = (std::max)(0.0f, .5f * motion.duration - motion.takeoffElapsedTime);
+        if (timeAhead <= remainingLift)
+        {
+            return command.startPosition + PxVec3(0, LiftHeight(motion, motion.takeoffElapsedTime + timeAhead), 0);
+        }
+        // 아직 확인되지 않은 실제 이륙 시점을 예언하지 않고, 들기 완료 후의 목표 경로를 검사한다.
+        takeoff = command.startPosition + PxVec3(0, motion.initialHeight, 0);
+        elapsed = timeAhead - remainingLift;
+    }
     const float progress = motion.hasSupportDeadline ?
         PxClamp(motion.progress + timeAhead * motion.progressPerSecond, 0.0f, 1.0f) :
         PxClamp(elapsed / motion.duration, 0.0f, 1.0f);
-    const float blend = progress * progress * (3.0f - 2.0f * progress);
-    const PxVec3& target = command.target.position;
-    const PxVec3& normal = command.target.normal;
-    PxVec3 position = command.takeoffPosition + (target - command.takeoffPosition) * blend;
-    const float fraction = motion.measuredProgress + motion.measuredProgressPerSecond * timeAhead;
-    const bool airborne = command.hasTakenOff || timeAhead > motion.predictedTakeoffDelay;
-    const float height = motion.GetAimHeight(fraction, motion.stepElapsedTime + timeAhead, airborne);
-    // 같은 수평 좌표에서 착지 평면까지의 부호 있는 법선 거리가 목표 높이가 되도록 Y만 구한다.
-    position.y = target.y + (height - normal.x * (position.x - target.x) - normal.z * (position.z - target.z)) / normal.y;
+    PxVec3 position = SwingPosition(command, takeoff, progress);
+    const float overtime = (std::max)(0.0f, elapsed - motion.duration);
+    position.y -= (std::min)(motion.maximumLandingLowering,
+        motion.landingLowering + overtime * motion.landingLoweringSpeed);
     return position;
 }
 
-void FootstepPlanner::UpdateMotion(FootstepCommand& command, const FootstepInput& input, size_t side)
+void FootstepPlanner::UpdateMotion(FootstepCommand& command, const FootstepFootInput& foot, const FootstepInput& input)
 {
     FramePerformance::Scope swingTiming(FramePerformance::Category::SwingTrajectory);
     FootstepMotion& motion = command.motion;
-    const FootstepFootInput& foot = input.feet[side];
-    const FootstepFootInput& other = input.feet[1 - side];
+    const PxVec3 horizontal = command.target.position - command.startPosition;
+    const float lengthSquared = horizontal.x * horizontal.x + horizontal.z * horizontal.z;
     motion.remainingDistance = HorizontalDistance(foot.position, command.target.position);
-    if (!foot.position.isFinite() || !foot.velocity.isFinite() || !std::isfinite(motion.remainingDistance))
+    if (!foot.position.isFinite() || !std::isfinite(motion.remainingDistance))
     {
         return;
     }
-    PxVec3 relativeVelocity = foot.velocity;
-    if (other.available && other.position.isFinite() && other.velocity.isFinite())
+    if (lengthSquared > MinimumStepDistance * MinimumStepDistance)
     {
-        if (!command.hasOtherFootReference)
-        {
-            command.startOffsetFromOtherFoot = command.progressOrigin - other.position;
-            command.hasOtherFootReference = true;
-        }
-        command.progressOrigin = other.position + command.startOffsetFromOtherFoot;
-        relativeVelocity -= other.velocity;
+        const PxVec3 actual = foot.position - command.startPosition;
+        motion.measuredProgress = PxClamp((actual.x * horizontal.x + actual.z * horizontal.z) / lengthSquared, 0.0f, 1.0f);
     }
-    const PxVec3& normal = command.target.normal;
-    PxVec3 direction = GroundDirection(command.target.position - command.progressOrigin, normal);
-    if (direction.normalize() <= MinimumStepDistance)
+    else
     {
-        direction = GroundDirection(command.initialTarget - command.startPosition, normal).getNormalized();
+        motion.measuredProgress = motion.remainingDistance <= MinimumStepDistance ? 1.0f : 0.0f;
     }
-    motion.measuredProgress = (foot.position - command.progressOrigin).dot(direction) / motion.stepLength;
-    motion.measuredProgressPerSecond = relativeVelocity.dot(direction) / motion.stepLength;
-    motion.stepElapsedTime = static_cast<float>(input.completedStep - command.startedStep) * input.fixedDeltaTime;
-    // 다음 구동 틱까지는 실제 접촉을 따르고, 그보다 먼 충돌 예측에서만 이륙을 가정한다.
-    motion.predictedTakeoffDelay = (std::max)(input.fixedDeltaTime, .5f * motion.duration - motion.takeoffElapsedTime);
-    motion.height = motion.GetAimHeight(motion.measuredProgress, motion.stepElapsedTime, command.hasTakenOff);
-    motion.position = SampleFootstepPosition(command, 0);
+    if (!command.UsesSwingTrajectory())
+    {
+        // 실제 이륙 전에는 수평으로 끌지 않고 위로 드는 목표를 유지한다.
+        motion.height = LiftHeight(motion, motion.takeoffElapsedTime);
+        motion.position = command.startPosition + PxVec3(0, motion.height, 0);
+        motion.valid = motion.position.isFinite();
+        return;
+    }
+    motion.height = SwingHeight(motion, motion.progress);
+    motion.position = SwingPosition(command, command.takeoffPosition, motion.progress);
+    if (motion.landingTargetLocked && !foot.grounded)
+    {
+        const double elapsed = static_cast<double>(input.completedStep - command.trajectoryStartStep) * input.fixedDeltaTime;
+        const double overtime = (std::max)(0.0, elapsed - static_cast<double>(motion.duration));
+        const float requested = static_cast<float>((std::min)(overtime * motion.landingLoweringSpeed,
+            static_cast<double>(motion.maximumLandingLowering)));
+        motion.landingLowering = (std::min)(requested, motion.landingLowering + motion.landingLoweringSpeed * input.fixedDeltaTime);
+        motion.position.y -= motion.landingLowering;
+    }
     motion.valid = motion.position.isFinite();
 }
 
@@ -890,7 +893,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             const float remaining = SupportLandingTime(input, state, side);
             if (std::isfinite(remaining))
             {
-                UpdateSupportDeadline(command, input, side, remaining);
+                UpdateSupportDeadline(command, input, remaining);
             }
             if (!command.hasTakenOff)
             {
@@ -1036,8 +1039,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 command.reason = FootstepReason::NoCalfLength;
                 continue;
             }
-            const float stepLength = GroundDirection(candidate.position - foot.position, candidate.normal).magnitude();
-            if (candidate.travelDistance <= MinimumStepDistance || !std::isfinite(stepLength) || stepLength <= MinimumStepDistance)
+            if (candidate.travelDistance <= MinimumStepDistance)
             {
                 command.reason = FootstepReason::NoStepDistance;
                 continue;
@@ -1053,24 +1055,23 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             command.trajectoryStartStep = input.completedStep;
             command.startPosition = foot.position;
             command.takeoffPosition = foot.position;
-            command.progressOrigin = foot.position;
             command.initialTarget = candidate.position;
             command.initialDistance = candidate.travelDistance;
             AssignTarget(command, candidate);
             command.phase = foot.grounded ? FootstepPhase::AwaitingTakeoff : FootstepPhase::Airborne;
             command.hasTakenOff = !foot.grounded;
             command.justStarted = true;
-            command.motion.stepLength = stepLength;
-            command.motion.airborneLiftScale = (std::min)(stepLength / settings.maximumStepLength, 1.0f);
-            command.motion.stepUpDistance = settings.stepUpDistance;
-            command.motion.stepDownDistance = settings.stepDownDistance;
-            command.motion.stepDownSpeed = settings.stepDownSpeed;
+            command.motion.heightLimit = foot.calfLength;
+            command.motion.initialHeight = (std::min)((std::max)(command.initialDistance * settings.liftHeightScale,
+                settings.minimumLiftHeight), foot.calfLength);
             const float remaining = SupportLandingTime(input, state, side);
             command.motion.hasSupportDeadline = std::isfinite(remaining);
             command.motion.duration = command.motion.hasSupportDeadline ? remaining :
                 PxClamp(settings.stepDuration, MinimumFootstepDuration, MaximumFootstepDuration);
             command.motion.progressPerSecond = 1.0f / command.motion.duration;
             command.motion.landingLockProgress = settings.landingLockProgress;
+            command.motion.landingLoweringSpeed = settings.landingLoweringSpeed;
+            command.motion.maximumLandingLowering = (std::min)(settings.maximumLandingLowering, foot.calfLength);
             ++state.startCount;
             state.followupFoot = -1;
             state.loadTransfer.required = true;
@@ -1110,7 +1111,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
         command.hasTarget = true;
         command.reason = command.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;
-        UpdateMotion(command, input, side);
+        UpdateMotion(command, foot, input);
     }
     if (state.needsStep && !state.IsInProgress())
     {
