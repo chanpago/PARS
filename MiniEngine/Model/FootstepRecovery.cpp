@@ -13,7 +13,6 @@ namespace
     constexpr uint32_t CircleVertices = 12;
     constexpr float Epsilon = 1e-6f;
     constexpr uint32_t MaximumCapturePieces = 13;
-    constexpr float NormalIdleOffsetScale = .8f;
 
     float Cross(const PxVec3& a, const PxVec3& b)
     {
@@ -348,35 +347,6 @@ namespace
         }
     }
 
-    bool TryLandingPose(const FootstepRecoveryInput& input, uint32_t maximumPoseChecks, const PxVec3& position,
-        FootstepPolygon& tested, FootstepRecoverySnapshot& result)
-    {
-        if (input.hasRejectedTarget && DistanceSquared(position, input.rejectedTarget) < .0001f)
-        {
-            return false;
-        }
-        for (const PxVec3& point : tested)
-        {
-            if (DistanceSquared(point, position) < 1e-8f)
-            {
-                return false;
-            }
-        }
-        if (result.poseChecks >= maximumPoseChecks)
-        {
-            result.budgetExhausted = true;
-            return false;
-        }
-        tested.push_back(position);
-        ++result.poseChecks;
-        if (input.acceptsTarget && !input.acceptsTarget(position))
-        {
-            result.poseRejected = true;
-            return false;
-        }
-        return true;
-    }
-
     void SelectTarget(const FootstepRecoveryInput& input, const FootstepRecoverySettings& settings,
         bool hasOverlap, bool allowGroundedSwitch, FootstepPolygon& tested, FootstepRecoverySnapshot& result)
     {
@@ -460,12 +430,29 @@ namespace
         }
         for (const LandingCandidate& candidate : candidates)
         {
-            if (!TryLandingPose(input, settings.maximumPoseChecks, candidate.position, tested, result))
+            if (input.hasRejectedTarget && DistanceSquared(candidate.position, input.rejectedTarget) < .0001f)
             {
-                if (result.budgetExhausted)
-                {
-                    break;
-                }
+                continue;
+            }
+            bool duplicate = false;
+            for (const PxVec3& point : tested)
+            {
+                duplicate = duplicate || DistanceSquared(point, candidate.position) < 1e-8f;
+            }
+            if (duplicate)
+            {
+                continue;
+            }
+            if (result.poseChecks >= settings.maximumPoseChecks)
+            {
+                result.budgetExhausted = true;
+                break;
+            }
+            tested.push_back(candidate.position);
+            ++result.poseChecks;
+            if (input.acceptsTarget && !input.acceptsTarget(candidate.position))
+            {
+                result.poseRejected = true;
                 continue;
             }
             result.target = candidate.position;
@@ -473,18 +460,6 @@ namespace
             result.hasTarget = true;
             result.modelFeasible = hasOverlap && (!input.backwardFall || Contains(result.intersections[candidate.mode], candidate.position));
             result.status = result.modelFeasible ? FootstepRecoveryStatus::Feasible : FootstepRecoveryStatus::BestEffort;
-            // 기존 착지점을 확보한 뒤에만 남은 검사 한 번으로 이동발 바깥쪽 보정을 시도한다.
-            if (result.modelFeasible && result.mode == FootstepMode::Normal && result.poseChecks < settings.maximumPoseChecks &&
-                std::isfinite(input.idleLateralOffset) && input.idleLateralOffset > 0)
-            {
-                const float outwardDistance = input.idleLateralOffset * NormalIdleOffsetScale;
-                const PxVec3 offsetTarget = candidate.position + result.normalReach.outward * outwardDistance;
-                if (Contains(result.intersections[0], offsetTarget) &&
-                    TryLandingPose(input, settings.maximumPoseChecks, offsetTarget, tested, result))
-                {
-                    result.target = offsetTarget;
-                }
-            }
             return;
         }
         result.status = result.poseRejected ? FootstepRecoveryStatus::PoseRejected : FootstepRecoveryStatus::NoReach;
