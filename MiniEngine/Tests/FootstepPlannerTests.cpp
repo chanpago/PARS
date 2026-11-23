@@ -427,11 +427,11 @@ namespace
                 "Missing required observations and invalid inputs cannot emit a motion command");
         }
 
-        const std::array<float FootstepSettings::*, 14> fields{{
+        const std::array<float FootstepSettings::*, 15> fields{{
             &FootstepSettings::startPredictionTime, &FootstepSettings::landingPredictionTime,
             &FootstepSettings::stanceScale, &FootstepSettings::minimumStanceWidthRatio,
             &FootstepSettings::maximumStepLength, &FootstepSettings::crossingOffset,
-            &FootstepSettings::liftHeightScale, &FootstepSettings::stepDuration,
+            &FootstepSettings::liftHeightScale, &FootstepSettings::backwardLiftTimeRatio, &FootstepSettings::stepDuration,
             &FootstepSettings::minimumLiftHeight, &FootstepSettings::landingLockProgress,
             &FootstepSettings::landingLoweringSpeed, &FootstepSettings::maximumLandingLowering,
             &FootstepSettings::supportLoadRatio, &FootstepSettings::supportConfirmationTime}};
@@ -547,6 +547,54 @@ namespace
         Advance(planner, input, settings);
         Check(!planner.GetSnapshot().hasGroundPlane && !planner.GetSnapshot().IsInProgress(),
             "Leaving active mode clears commands and cached observations");
+    }
+
+    void TestBackwardSwing()
+    {
+        FootstepSettings settings = TestSettings();
+        settings.backwardLiftTimeRatio = 1.5f;
+        for (const float direction : {-1.0f, 1.0f})
+        {
+            FootstepInput input = Standing();
+            input.velocity.z = direction;
+            input.feet[0].timeToReachLimit = .25f;
+            FootstepPlanner planner;
+            planner.Update(input, settings);
+            const FootstepCommand& command = planner.GetSnapshot().feet[1];
+            const float peak = direction < 0 ? .6f : .5f;
+            const float top = SampleFootstepPosition(command, peak * command.motion.duration).y;
+            Check(command.justStarted && Near(top, command.startPosition.y + command.motion.initialHeight) &&
+                    Near(SampleFootstepPosition(command, command.motion.duration).y, command.target.position.y),
+                "The backward swing shifts peak time while preserving its clearance and deadline");
+            Check(Near(SampleFootstepPosition(command, command.motion.duration * .5f).z,
+                    .5f * (command.startPosition.z + command.target.position.z)),
+                "Vertical swing timing preserves horizontal progress in both directions");
+        }
+    }
+
+    void TestLoadedTouchdown()
+    {
+        FootstepPlanner planner;
+        const FootstepSettings settings = TestSettings();
+        FootstepInput input = Standing();
+        input.velocity.z = -1.0f;
+        input.feet[0].timeToReachLimit = MaximumFootstepDuration;
+        planner.Update(input, settings);
+        FootstepFootInput& foot = input.feet[1];
+        const FootstepCommand& command = planner.GetSnapshot().feet[1];
+        foot.grounded = false;
+        Advance(planner, input, settings, 13);
+        foot.grounded = true;
+        foot.normalImpulse = input.bodyWeight * input.fixedDeltaTime;
+        Advance(planner, input, settings);
+        Check(command.IsInProgress(), "A single impact away from the landing target does not plant the foot");
+        foot.normalImpulse *= .1f;
+        Advance(planner, input, settings);
+        Check(command.IsInProgress(), "A light brush during descent does not stop the swing");
+        foot.normalImpulse = input.bodyWeight * input.fixedDeltaTime;
+        Advance(planner, input, settings);
+        Check(command.justLanded && command.motion.progress < 1 && command.motion.landingError > .1f,
+            "Continued ground contact bearing body weight ends a low descending swing at the actual foot");
     }
 
     void TestFixedStepRates()
@@ -1258,6 +1306,8 @@ void TestFootstepPlanner()
     TestGatesAndInvalidData();
     TestActualComBufferTimeout();
     TestClockAndAbort();
+    TestBackwardSwing();
+    TestLoadedTouchdown();
     TestFixedStepRates();
     TestTakeoffConfirmation();
     TestSupportLandingDeadline();

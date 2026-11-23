@@ -22,6 +22,7 @@ namespace PARS
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
         float crossingOffset = .1f;
         float liftHeightScale = .35f;
+        float backwardLiftTimeRatio = 1.25f; // 완전히 뒤로 디딜 때 상승 시간과 하강 시간의 비
         float stepDuration = MinimumFootstepDuration;
         float minimumLiftHeight = .03f;
         float landingLockProgress = .90f;
@@ -178,6 +179,7 @@ namespace PARS
     public:
         physx::PxVec3 position{0};
         float initialHeight = 0;
+        float liftTimeRatio = 1.0f;
         float heightLimit = 0;
         float height = 0;
         float takeoffElapsedTime = 0;

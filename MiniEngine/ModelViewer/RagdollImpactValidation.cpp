@@ -168,6 +168,7 @@ namespace
         CommandLineArgs::GetInteger(L"footsteprecoverysteps", recoverySteps);
         settings.recovery.maximumSteps = physx::PxClamp(recoverySteps, uint32_t(1), uint32_t(3));
         CommandLineArgs::GetFloat(L"footstepcapturescale", settings.recovery.oneStepCaptureScale);
+        CommandLineArgs::GetFloat(L"backwardliftratio", settings.backwardLiftTimeRatio);
         CommandLineArgs::GetFloat(L"landingcomhysteresis", settings.landingComClampHysteresisDegrees);
         report << "landing_com_clamp=" << settings.landingComClampEnabled
             << " region=opposite_grounded_sole"
@@ -175,7 +176,8 @@ namespace
             << " minimum_stance_ratio=" << settings.minimumStanceWidthRatio
             << " prevent_crossing=" << settings.preventCrossing << std::endl;
         report << "footstep_recovery=" << settings.recovery.enabled << " maximum_steps=" << settings.recovery.maximumSteps
-            << " one_step_capture_scale=" << settings.recovery.oneStepCaptureScale << std::endl;
+            << " one_step_capture_scale=" << settings.recovery.oneStepCaptureScale
+            << " backward_lift_time_ratio=" << settings.backwardLiftTimeRatio << std::endl;
     }
 
     void WriteLandingComHeader(std::ostream& stream)
@@ -189,7 +191,7 @@ namespace
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state,"
             "actual_com_outside_b,outside_b_time_s,"
-            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s\n";
+            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,swing_target_y\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -240,7 +242,13 @@ namespace
                 << ',' << decision.targetInCaptureMargin << ',' << PARS::CharacterBalanceStateLabel(mesh.GetBalanceState())
                 << ',' << support.footstep.actualComOutsideBuffer << ',' << support.footstep.outsideBufferTime
                 << ',' << command.motion.hasSupportDeadline << ',' << command.motion.duration << ',' << command.motion.elapsedTime
-                << ',' << command.motion.landingTimeError << '\n';
+                << ',' << command.motion.landingTimeError << ',';
+            if (command.motion.valid)
+            {
+                const float ahead = command.motion.hasSupportDeadline ? static_cast<float>(PhysicsWorld::FixedDeltaTime) : 0.0f;
+                stream << PARS::SampleFootstepPosition(command, ahead).y;
+            }
+            stream << '\n';
         }
     }
 
@@ -621,7 +629,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     try
     {
         Character* dummy = test.GetDummy();
-        check(report.good() && samples.good() && events.good() && landingCom.good() && dummy && scenario <= 6 && frames > 0 && frames <= 720,
+        check(report.good() && samples.good() && events.good() && landingCom.good() && dummy && scenario <= 8 && frames > 0 && frames <= 720,
             "Open actual-character body impact validation");
         std::string error;
         check(test.Reset(), "Reset grounded Idle dummy with original automatic support");
@@ -652,10 +660,20 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         controller->SetMoveInput(0, 0, false);
         check(player.StopRagdoll(error), "Reset player simulation");
         player.GetCharacterMovement().StopMovementImmediately();
-        const float yaw = scenario == 3 || scenario == 5 ? DirectX::XM_PIDIV2 :
+        const bool continuousFrontPush = scenario == 7 || scenario == 8;
+        float yaw = scenario == 3 || scenario == 5 ? DirectX::XM_PIDIV2 :
             scenario == 4 ? -DirectX::XM_PIDIV2 : scenario == 6 ? DirectX::XM_PIDIV4 : 0.0f;
+        float lateralOffset = 0.0f;
+        if (continuousFrontPush)
+        {
+            // 일반 전진 입력으로 더미의 정면에서 밀어 뒷걸음이 발생하는 상황을 재현한다.
+            const Vector3 facing = dummy->GetMesh().GetComponentTransform().GetBasis() * Vector3(kZUnitVector);
+            yaw = std::atan2(-float(facing.GetX()), -float(facing.GetZ()));
+            CommandLineArgs::GetFloat(L"bodyimpactoffset", lateralOffset);
+        }
         const Vector3 direction(std::sin(yaw), 0, std::cos(yaw));
-        const Vector3 origin = dummy->GetActorLocation() - direction * 2.0f;
+        const Vector3 right(std::cos(yaw), 0, -std::sin(yaw));
+        const Vector3 origin = dummy->GetActorLocation() - direction * 2.0f + right * lateralOffset;
         player.SetActorTransform(AffineTransform(Quaternion(Vector3(kYUnitVector), yaw),
             Vector3(origin.GetX(), player.GetCapsuleComponent().GetHalfHeight(), origin.GetZ())));
         controller->SetControlYaw(yaw);
@@ -728,9 +746,13 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                     "Runtime toggle changes only the independent collision mass");
             }
             // 기본 입력: 2초 안정화, 3초 접근, 2초 후퇴, 2초 재접근, 나머지는 정지한다.
-            const float input = scenario == 0 || frame < 120 || frame >= 540 ? 0.0f :
+            float input = scenario == 0 || frame < 120 || frame >= 540 ? 0.0f :
                 frame < 300 ? 1.0f : frame < 420 ? -1.0f : 1.0f;
-            controller->SetMoveInput(input, 0, scenario != 1);
+            if (continuousFrontPush)
+            {
+                input = frame >= 120 && frame < 540 ? 1.0f : 0.0f;
+            }
+            controller->SetMoveInput(input, 0, scenario != 1 && scenario != 7);
             if (scenario == 5 && frame == 120)
             {
                 // 토크 상한과 밀침 설정을 그대로 둔 고속 충격 시험 입력이다.

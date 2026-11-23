@@ -53,6 +53,7 @@ namespace
             (!motion.hasSupportDeadline || (std::isfinite(motion.progress) && motion.progress >= 0 && motion.progress <= 1 &&
                 std::isfinite(motion.progressPerSecond) && motion.progressPerSecond >= 0)) &&
             std::isfinite(motion.initialHeight) && motion.initialHeight >= 0 &&
+            std::isfinite(motion.liftTimeRatio) && motion.liftTimeRatio >= 1.0f &&
             std::isfinite(motion.elapsedTime) && motion.elapsedTime >= 0 &&
             std::isfinite(motion.takeoffElapsedTime) && motion.takeoffElapsedTime >= 0 &&
             std::isfinite(motion.landingLowering) && motion.landingLowering >= 0 &&

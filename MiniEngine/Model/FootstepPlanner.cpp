@@ -28,7 +28,9 @@ namespace
 
     float SwingHeight(const FootstepMotion& motion, float progress)
     {
-        return motion.initialHeight * .5f * (1.0f - std::cos(PxTwoPi * progress));
+        // 뒷걸음은 최고점을 늦춰 착지점에 가까워질 때까지 발끝과 바닥 사이의 여유를 유지한다.
+        const float heightProgress = progress / (1.0f + (motion.liftTimeRatio - 1.0f) * (1.0f - progress));
+        return motion.initialHeight * .5f * (1.0f - std::cos(PxTwoPi * heightProgress));
     }
 
     PxVec3 SwingPosition(const FootstepCommand& command, const PxVec3& takeoff, float progress)
@@ -52,6 +54,7 @@ namespace
             std::isfinite(s.maximumStepLength) && s.maximumStepLength > 0 &&
             std::isfinite(s.crossingOffset) && s.crossingOffset >= 0 &&
             std::isfinite(s.liftHeightScale) && s.liftHeightScale > 0 &&
+            std::isfinite(s.backwardLiftTimeRatio) && s.backwardLiftTimeRatio >= 1.0f &&
             std::isfinite(s.stepDuration) && s.stepDuration > 0 &&
             std::isfinite(s.minimumLiftHeight) && s.minimumLiftHeight > 0 &&
             std::isfinite(s.landingLockProgress) && s.landingLockProgress >= .5f && s.landingLockProgress <= 1 &&
@@ -308,7 +311,8 @@ namespace
         motion.hasSupportDeadline = true;
     }
 
-    bool HasLandingContact(const FootstepCommand& command, const FootstepFootInput& foot)
+    bool HasLandingContact(const FootstepCommand& command, const FootstepFootInput& foot,
+        const FootstepSettings& settings, bool bearingWeight)
     {
         if (!command.hasTakenOff || !foot.grounded)
         {
@@ -318,7 +322,14 @@ namespace
         {
             return true;
         }
-        // 시한 전에는 목표가 실제 발바닥 아래에 들어온 접촉만 착지로 삼는다.
+        const FootstepMotion& motion = command.motion;
+        const float peakProgress = motion.liftTimeRatio / (1.0f + motion.liftTimeRatio);
+        if (bearingWeight && motion.progress > peakProgress &&
+            SwingHeight(motion, motion.progress) <= settings.minimumLiftHeight)
+        {
+            // 하강 끝에 지면이 체중을 받으면 남은 수평 목표로 발을 끌지 않는다.
+            return true;
+        }
         return foot.hasSoleRectangle && IsInsideFootSupportHull(
             BuildFootSupportHull(FootstepPolygon(foot.corners.begin(), foot.corners.end())), command.target.position);
     }
@@ -478,13 +489,9 @@ namespace
         return selected;
     }
 
-    void UpdateLoadTransfer(const FootstepInput& input, const FootstepSettings& settings,
-        bool consecutiveSample, FootstepSnapshot& state)
+    std::array<float, 2> MeasureFootLoads(const FootstepInput& input)
     {
-        FootstepLoadTransfer& transfer = state.loadTransfer;
-        transfer.loadRatios = {};
-        transfer.ready = false;
-        std::array<bool, 2> valid{};
+        std::array<float, 2> loads{};
         if (std::isfinite(input.bodyWeight) && input.bodyWeight > 0)
         {
             const double denominator = static_cast<double>(input.bodyWeight) * input.fixedDeltaTime;
@@ -498,11 +505,18 @@ namespace
                 {
                     // 접촉 충격량의 수직 성분을 힘으로 바꾸고 전신 체중으로 정규화한다.
                     const float ratio = static_cast<float>(static_cast<double>(foot.normalImpulse) * normal.y / denominator);
-                    valid[side] = std::isfinite(ratio);
-                    transfer.loadRatios[side] = valid[side] ? ratio : 0;
+                    loads[side] = std::isfinite(ratio) ? ratio : 0;
                 }
             }
         }
+        return loads;
+    }
+
+    void UpdateLoadTransfer(const FootstepInput& input, const FootstepSettings& settings,
+        bool consecutiveSample, FootstepSnapshot& state)
+    {
+        FootstepLoadTransfer& transfer = state.loadTransfer;
+        transfer.ready = false;
         bool landedThisStep = false;
         for (const FootstepCommand& command : state.feet)
         {
@@ -520,7 +534,7 @@ namespace
         }
         for (size_t side = 0; side < input.feet.size(); ++side)
         {
-            if (valid[side] && transfer.loadRatios[side] >= settings.supportLoadRatio * (1.0f - 1e-6f))
+            if (transfer.loadRatios[side] >= settings.supportLoadRatio * (1.0f - 1e-6f))
             {
                 transfer.confirmationTimes[side] = (std::min)(settings.supportConfirmationTime,
                     transfer.confirmationTimes[side] + input.fixedDeltaTime);
@@ -534,7 +548,7 @@ namespace
         {
             // 발 선택은 유지하고, 그 발을 들었을 때 남을 접촉의 실측 하중만 검사한다.
             const size_t receivingFoot = static_cast<size_t>(1 - state.requestedFoot);
-            transfer.ready = valid[receivingFoot] && transfer.confirmationTimes[receivingFoot] > 0 &&
+            transfer.ready = transfer.confirmationTimes[receivingFoot] > 0 &&
                 transfer.confirmationTimes[receivingFoot] + 1e-6f >= settings.supportConfirmationTime;
         }
     }
@@ -793,6 +807,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.startCom = {};
     state.candidates = {};
     state.loadTransfer.ready = false;
+    const std::array<float, 2> previousLoads = state.loadTransfer.loadRatios;
+    state.loadTransfer.loadRatios = {};
     for (FootstepCommand& command : state.feet)
     {
         command.justStarted = false;
@@ -878,6 +894,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.loadTransfer.confirmationTimes = {};
         return;
     }
+    state.loadTransfer.loadRatios = MeasureFootLoads(input);
     UpdateGroundPlane(input, state);
     if (input.hasImpact && input.impactPosition.isFinite())
     {
@@ -938,7 +955,9 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 }
                 motion.landingTargetLocked = motion.landingTargetLocked || motion.progress >= motion.landingLockProgress;
             }
-            if (HasLandingContact(command, foot))
+            const bool bearingWeight = consecutiveSample && previousLoads[side] > 0 &&
+                state.loadTransfer.loadRatios[side] >= settings.supportLoadRatio;
+            if (HasLandingContact(command, foot, settings, bearingWeight))
             {
                 command.phase = FootstepPhase::Landed;
                 command.reason = FootstepReason::Landed;
@@ -1064,6 +1083,13 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             command.motion.heightLimit = foot.calfLength;
             command.motion.initialHeight = (std::min)((std::max)(command.initialDistance * settings.liftHeightScale,
                 settings.minimumLiftHeight), foot.calfLength);
+            const PxVec3 forward(-input.supportRight.z, 0, input.supportRight.x);
+            if (forward.isFinite())
+            {
+                const float backward = PxClamp((foot.position - candidate.position).dot(forward.getNormalized()) /
+                    command.initialDistance, 0.0f, 1.0f);
+                command.motion.liftTimeRatio = 1.0f + backward * (settings.backwardLiftTimeRatio - 1.0f);
+            }
             const float remaining = SupportLandingTime(input, state, side);
             command.motion.hasSupportDeadline = std::isfinite(remaining);
             command.motion.duration = command.motion.hasSupportDeadline ? remaining :

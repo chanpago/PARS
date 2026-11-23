@@ -73,7 +73,9 @@ namespace
             Clamp(Range(motion.progress) + time * Range(motion.progressPerSecond), 0, 1) :
             Clamp(elapsed / Range(motion.duration), 0, 1);
         Vector position = takeoff + (Vector(command.target.position) - takeoff) * Blend(progress);
-        position.y = position.y + Range(.5f * motion.initialHeight) * (Range(1) - Cos(Range(PxTwoPi) * progress));
+        const Range heightProgress = Clamp(progress /
+            (Range(1) + Range(motion.liftTimeRatio - 1.0f) * (Range(1) - progress)), 0, 1);
+        position.y = position.y + Range(.5f * motion.initialHeight) * (Range(1) - Cos(Range(PxTwoPi) * heightProgress));
         position.y = Minimum(position.y, PxMax(command.startPosition.y, command.target.position.y) + motion.initialHeight);
         const Range overtime = Maximum(elapsed - Range(motion.duration), 0);
         const Range lowering = Minimum(Range(motion.landingLowering) + overtime * Range(motion.landingLoweringSpeed),
