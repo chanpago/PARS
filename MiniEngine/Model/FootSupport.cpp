@@ -436,7 +436,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
     input.fixedDeltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
     input.bodyWeight = m_Snapshot.totalMass * 9.81f;
-    // 실제 루트 충격점과 각 발 사이의 수평 거리로 명령 대상을 고른다.
+    // 몸 밀기는 골반 접촉을, 발사 구는 실제 피격 부위를 기준으로 이동발을 고른다.
     const Ragdoll& ragdoll = mesh.GetRagdoll();
     const int root = ragdoll.GetImpactRootBody();
     input.fallingBackward = input.active && input.automaticSupport && idle && !input.rootReleased &&
@@ -450,12 +450,10 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     float impactWeight = 0;
     if (input.active && root >= 0)
     {
-        std::vector<RagdollBodyImpulse> impacts;
-        ragdoll.CaptureExternalImpacts(impacts);
-        for (const RagdollBodyImpulse& impact : impacts)
+        for (const RagdollBodyImpulse& impact : ragdoll.GetExternalImpacts())
         {
             const float weight = impact.impulse.magnitude();
-            if (impact.body == static_cast<size_t>(root) && impact.position.isFinite() &&
+            if ((impact.fromProjectile || impact.body == static_cast<size_t>(root)) && impact.position.isFinite() &&
                 std::isfinite(weight) && weight > 1e-6f)
             {
                 input.impactPosition += impact.position * weight;

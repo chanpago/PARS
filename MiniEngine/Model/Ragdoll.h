@@ -88,6 +88,7 @@ namespace PARS
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
+        void UpdateProjectileReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
             float heightScale = 1.0f);
@@ -115,7 +116,10 @@ namespace PARS
         void UpdateArticulationDrives(float deltaTime = 0);
         void SetArticulationTarget(size_t joint, Math::Quaternion rotation, Math::Vector3 angularVelocity);
         void WakeBodies();
+        void ConfigureD6JointDrives();
         void ConfigureRootSupportDrives();
+        void RecordProjectileImpacts(const std::vector<RagdollBodyImpulse>& impacts);
+        void YieldImpactJoints(size_t body, bool isRoot, float amount);
         std::vector<float> ComputeSupportGeneralizedForce();
         void InvalidateContactState();
         void RefreshCharacterImpactFilters();
@@ -226,7 +230,9 @@ namespace PARS
         bool GetBodyGroundContact(size_t body, PhysicsGroundContact& contact) const;
         bool AreBodiesInContact(size_t first, size_t second) const;
         float GetExternalImpactImpulse() const;
+        const std::vector<RagdollBodyImpulse>& GetExternalImpacts() const;
         void CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const;
+        bool IsTopplingFromProjectile() const;
         bool HasApproachingImpact(float minimumDeltaVelocity) const;
         int GetImpactRootBody() const;
         bool IsCharacterImpactBody(size_t body) const;
@@ -259,7 +265,9 @@ namespace PARS
         bool IsFinite() const;
 
     private:
-        float GetJointDriveStrength(const PhysicsConstraint& joint) const;
+        float GetJointDriveStrength(size_t jointIndex) const;
+        float GetProjectileJointDriveScale(size_t jointIndex) const;
+        float GetProjectilePelvisDriveScale() const;
 
     private:
         static constexpr float PelvisLinearFrequency = 30.0f;
@@ -270,6 +278,12 @@ namespace PARS
     private:
         uint64_t m_ContactRevision = 0;
         uint64_t m_HorizontalSupportStep = UINT64_MAX;
+        mutable uint64_t m_ImpactSampleStep = UINT64_MAX;
+        mutable uint64_t m_ImpactSampleClock = UINT64_MAX;
+        uint64_t m_ProjectileReactionStep = UINT64_MAX;
+        uint64_t m_ProjectileReactionClock = UINT64_MAX;
+        mutable std::vector<RagdollBodyImpulse> m_ExternalImpacts;
+        std::vector<float> m_JointYieldTimes;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
@@ -293,6 +307,7 @@ namespace PARS
         int m_ArticulationRoot = -1;
         int m_SupportBody = -1;
         float m_RootSupportWeight = 0;
+        float m_PelvisYieldTime = 0;
         float m_ArmDriveStrength = 1.0f;
         float m_ArmDriveOverride = -1.0f;
         std::array<float, 2> m_ArmDriveScales{1.0f, 1.0f};

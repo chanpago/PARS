@@ -140,6 +140,48 @@ void RunSupportAnkleDriveTests()
         "Lost support clears all ankle gain");
     check(world.GetErrorCount() == 0, "Support gain updates have no PhysX errors");
     std::puts("PASS: support ankle gains, load transfer, swing isolation, blending and disable");
+
+    // 검사 축의 힘 게인을 고정해 발 위치에 따른 유효 관성 변화와 피격 배율을 분리한다.
+    for (PhysicsConstraint& constraint : asset.constraints)
+    {
+        constraint.drives[0].useAcceleration = false;
+        constraint.drives[0].stiffness = 120;
+        constraint.drives[0].damping = 16;
+    }
+    check(asset.UsesArticulation() && ragdoll.ApplyDriveSettings(asset, error) && ragdoll.UpdateDriveTargets(pose, 0, error),
+        "Configure projectile drive test");
+    const float fullLeft = joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
+    const float fullRight = joints[1]->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
+    const float dt = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+    RagdollBodyImpulse hit;
+    hit.body = 1;
+    hit.position = PxVec3(-.2f, .05f, 0);
+    hit.impulse = PxVec3(0, 0, 20);
+    ragdoll.UpdateProjectileReaction({hit}, dt);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error) && joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == fullLeft,
+        "Ordinary contact preserves joint stiffness");
+    world.Step();
+    hit.fromProjectile = true;
+    ragdoll.UpdateProjectileReaction({hit}, dt);
+    ragdoll.UpdateProjectileReaction({}, 1.0f);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Apply projectile drive response");
+    const float struck = joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
+    check(struck > 0 && struck < .1f * fullLeft && joints[1]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == fullRight,
+        "A strong hit yields only the struck limb and a repeated call in the same step cannot age it");
+    for (unsigned step = 1; step <= 21; ++step)
+    {
+        world.Step();
+        ragdoll.UpdateProjectileReaction({}, dt);
+        check(ragdoll.UpdateDriveTargets(pose, dt, error), "Advance projectile drive recovery");
+        if (step == 10)
+        {
+            const float recovering = joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
+            check(recovering > struck && recovering < fullLeft, "Struck limb recovers progressively");
+        }
+    }
+    check(joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == fullLeft && world.GetErrorCount() == 0,
+        "The joint regains full stiffness after the last projectile contact");
+    std::puts("PASS: projectile drive isolation, fixed-step deduplication and recovery");
 }
 
 namespace

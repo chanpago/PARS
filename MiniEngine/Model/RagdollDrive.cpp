@@ -38,9 +38,10 @@ namespace PARS
     }
 #endif
 
-    float Ragdoll::GetJointDriveStrength(const PhysicsConstraint& joint) const
+    float Ragdoll::GetJointDriveStrength(size_t jointIndex) const
     {
-        std::string name = joint.childBone;
+        const float impactScale = GetProjectileJointDriveScale(jointIndex);
+        std::string name = m_Asset.constraints[jointIndex].childBone;
         std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) -> char
         {
             return static_cast<char>(std::tolower(value));
@@ -50,12 +51,12 @@ namespace PARS
             name.find("wrist") != std::string::npos || name.find("elbow") != std::string::npos;
         if (!arm)
         {
-            return 1.0f;
+            return impactScale;
         }
         const float scale = name.find("left") != std::string::npos ? m_ArmDriveScales[0] :
             name.find("right") != std::string::npos ? m_ArmDriveScales[1] : 1.0f;
         const float strength = m_ArmDriveOverride >= 0 ? m_ArmDriveOverride : m_ArmDriveStrength;
-        return strength * scale;
+        return strength * scale * impactScale;
     }
 
     bool Ragdoll::SetArmDriveScales(const std::array<float, 2>& scales, float overrideStrength)
@@ -111,30 +112,15 @@ namespace PARS
         if (!m_DrivesEnabled)
         {
             m_HorizontalSupportForce = physx::PxVec3(0);
-        }
-#if defined(_M_X64)
-        const PxD6Drive::Enum axes[] = {PxD6Drive::eTWIST, PxD6Drive::eSWING1, PxD6Drive::eSWING2};
-        for (size_t i = 0; i < m_Joints.size(); ++i)
-        {
-            const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
-            const float strength = GetJointDriveStrength(data);
-            const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
-            m_Joints[i]->setAngularDriveConfig(data.useSlerpDrive ? PxD6AngularDriveConfig::eSLERP : PxD6AngularDriveConfig::eSWING_TWIST);
-            for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
+            m_JointYieldTimes.clear();
+            if (m_PelvisYieldTime > 0)
             {
-                const PARS::PhysicsAngularDrive& drive = data.drives[axis];
-                // 기존 PA의 힘 모드는 D6에서 유지한다. Articulation 모터는 아래에서 별도로 갱신한다.
-                const bool on = !m_Articulation && m_DrivesEnabled && strength > 0 && Enabled(drive, motions[axis]);
-                PxD6JointDrive motor;
-                if (on)
-                {
-                    // 강성 배율을 낮추면서 감쇠비는 유지한다.
-                    motor = PxD6JointDrive(drive.GetStiffness() * strength, drive.GetDamping() * std::sqrt(strength),
-                        drive.maxTorque * strength, drive.useAcceleration);
-                }
-                m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], motor);
+                m_PelvisYieldTime = 0;
+                ConfigureRootSupportDrives();
             }
         }
+#if defined(_M_X64)
+        ConfigureD6JointDrives();
         if (m_Articulation)
         {
             // 모터 활성 여부와 관계없이 자기 충돌을 허용한다. 직접 연결된 부모·자식 링크는 PhysX가 제외한다.
@@ -155,6 +141,33 @@ namespace PARS
         {
             m_HasDriveTargets = false;
         }
+    }
+
+    void Ragdoll::ConfigureD6JointDrives()
+    {
+#if defined(_M_X64)
+        const PxD6Drive::Enum axes[] = {PxD6Drive::eTWIST, PxD6Drive::eSWING1, PxD6Drive::eSWING2};
+        for (size_t i = 0; i < m_Joints.size(); ++i)
+        {
+            const PhysicsConstraint& data = m_Asset.constraints[i];
+            const float strength = GetJointDriveStrength(i);
+            const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
+            m_Joints[i]->setAngularDriveConfig(data.useSlerpDrive ? PxD6AngularDriveConfig::eSLERP : PxD6AngularDriveConfig::eSWING_TWIST);
+            for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
+            {
+                const PhysicsAngularDrive& drive = data.drives[axis];
+                const bool on = !m_Articulation && m_DrivesEnabled && strength > 0 && Enabled(drive, motions[axis]);
+                PxD6JointDrive motor;
+                if (on)
+                {
+                    // 강성 배율을 낮추면서 감쇠비는 유지한다.
+                    motor = PxD6JointDrive(drive.GetStiffness() * strength, drive.GetDamping() * std::sqrt(strength),
+                        drive.maxTorque * strength, drive.useAcceleration);
+                }
+                m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], motor);
+            }
+        }
+#endif
     }
 
     bool Ragdoll::ApplyDriveSettings(const PhysicsAsset& asset, std::string& error)
@@ -657,10 +670,11 @@ namespace PARS
         m_SupportJoint->setDrive(PxD6Drive::eY, m_FootDrivenSupport ? PxD6JointDrive() : position);
         m_SupportJoint->setDrive(PxD6Drive::eZ, m_SupportHorizontal ? position : PxD6JointDrive());
         // Active articulations use the coupled mass-matrix PD in UpdateArticulationDrives.
+        const float rotationWeight = w * GetProjectilePelvisDriveScale();
         const PxD6JointDrive rotation = m_Articulation ? (m_DrivesEnabled ? PxD6JointDrive() :
-            PxD6JointDrive(PelvisAngularFrequency * PelvisAngularFrequency * w,
-                2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency * w, PX_MAX_F32 * w, true)) :
-            PxD6JointDrive(mass * 200.0f * w, mass * 10.0f * w, mass * 20.0f * w, false);
+            PxD6JointDrive(PelvisAngularFrequency * PelvisAngularFrequency * rotationWeight,
+                2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency * rotationWeight, PX_MAX_F32 * rotationWeight, true)) :
+            PxD6JointDrive(mass * 200.0f * rotationWeight, mass * 10.0f * rotationWeight, mass * 20.0f * rotationWeight, false);
         m_SupportJoint->setDrive(PxD6Drive::eSLERP, rotation);
 #endif
     }

@@ -436,7 +436,7 @@ namespace PARS
             for (const RagdollBodyImpulse& bodyImpact : impacts)
             {
                 const float weight = bodyImpact.impulse.magnitude();
-                if (impactRoot >= 0 && bodyImpact.body == static_cast<size_t>(impactRoot) &&
+                if ((bodyImpact.fromProjectile || (impactRoot >= 0 && bodyImpact.body == static_cast<size_t>(impactRoot))) &&
                     bodyImpact.position.isFinite() && std::isfinite(weight) && weight > 1e-6f)
                 {
                     impactPosition += bodyImpact.position * weight;
@@ -463,6 +463,8 @@ namespace PARS
             m_KinematicRecoveryTimer.Reset();
             m_PendingRecoveryImpact = !interruptedStandingUp && (impact || approaching);
             m_Ragdoll.ApplyExternalImpacts(impacts);
+            // 모드 교체로 소멸한 접촉도 이번 틱의 관절 반응에는 그대로 넘긴다.
+            m_Ragdoll.UpdateProjectileReaction(impacts, deltaTime);
             if (impactWeight > 0)
             {
                 m_FootSupport.RecordImpact(impactPosition / impactWeight);

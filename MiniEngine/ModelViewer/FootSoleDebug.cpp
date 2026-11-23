@@ -938,6 +938,9 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         case PARS::RootSupportRelease::OutsideBuffer:
             state = u8"실제 COM의 B 연속 이탈로 해제";
             break;
+        case PARS::RootSupportRelease::ProjectileImpact:
+            state = u8"피격 후 몸통 기울기 증가로 해제";
+            break;
         default:
             break;
         }

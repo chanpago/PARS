@@ -27,7 +27,8 @@ namespace PARS
         OutsideBuffer,
         NoSupport,
         Inactive,
-        Error
+        Error,
+        ProjectileImpact
     };
 
     enum class FallDirection : uint8_t

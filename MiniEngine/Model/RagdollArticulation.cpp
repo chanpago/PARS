@@ -656,7 +656,7 @@ namespace PARS
             // 골반 6개를 제외하고 관절 수 * 3개의 목표 각속도
             for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
             {
-                const float strength = GetJointDriveStrength(m_Asset.constraints[i]);
+                const float strength = GetJointDriveStrength(i);
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     targetVelocity[6 + m_ArticulationDofOffsets[i] + axis] = strength > 0 ?
@@ -680,7 +680,7 @@ namespace PARS
         // 팔의 애니메이션 가속도 선행 보상도 같은 강도로 줄여 약한 PD를 우회하지 않게 한다.
         for (size_t i = 0; i < m_ArticulationJoints.size(); ++i)
         {
-            const float strength = GetJointDriveStrength(m_Asset.constraints[i]);
+            const float strength = GetJointDriveStrength(i);
             for (unsigned axis = 0; axis < 3; ++axis)
             {
                 targetAcceleration[6 + m_ArticulationDofOffsets[i] + axis] *= strength;
@@ -699,9 +699,10 @@ namespace PARS
         if (m_SupportJoint)
         {
             // 활성 제어 중에는 아래 질량행렬 PD가 골반 회전을 담당한다. 두 PD를 중복 적용하지 않는다.
+            const float rotationWeight = supportWeight * GetProjectilePelvisDriveScale();
             const PxD6JointDrive rotation = compensate ? PxD6JointDrive() :
-                PxD6JointDrive(PelvisAngularFrequency * PelvisAngularFrequency * supportWeight,
-                    2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency * supportWeight, PX_MAX_F32 * supportWeight, true);
+                PxD6JointDrive(PelvisAngularFrequency * PelvisAngularFrequency * rotationWeight,
+                    2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency * rotationWeight, PX_MAX_F32 * rotationWeight, true);
             m_SupportJoint->setDrive(PxD6Drive::eSLERP, rotation);
         }
 
@@ -712,7 +713,7 @@ namespace PARS
             const PxVec3 error = RotationVector(m_SupportJoint->getDrivePosition().q * root->getGlobalPose().q.getConjugate());
             const PxVec3 velocity = root->getAngularVelocity();
             // 발 기반 지지는 A~B에서도 골반 회전의 복원과 제동을 유지한다. 지지 해제 조건은 기존 경로에서 처리한다.
-            const float rotationWeight = m_FootDrivenSupport ? 1.0f : supportWeight;
+            const float rotationWeight = (m_FootDrivenSupport ? 1.0f : supportWeight) * GetProjectilePelvisDriveScale();
             const float stiffness = PelvisAngularFrequency * PelvisAngularFrequency * rotationWeight;
             const float damping = 2.0f * PelvisAngularDampingRatio * PelvisAngularFrequency * rotationWeight;
             const float denominator = 1.0f + damping * deltaTime + stiffness * deltaTime * deltaTime; // pd식 분모
@@ -765,7 +766,7 @@ namespace PARS
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     const PhysicsAngularDrive& drive = data.drives[data.useSlerpDrive ? 0 : axis];
-                    const bool driven = GetJointDriveStrength(data) > 0 && drive.enabled && drive.maxTorque > 0 &&
+                    const bool driven = GetJointDriveStrength(i) > 0 && drive.enabled && drive.maxTorque > 0 &&
                         (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
                     if (motions[axis] != PhysicsJointMotion::Locked && !driven)
                     {
@@ -859,7 +860,7 @@ namespace PARS
         {
             const PhysicsConstraint& data = m_Asset.constraints[i];
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
-            const float strength = GetJointDriveStrength(data);
+            const float strength = GetJointDriveStrength(i);
             float ankleDriveScale = 1.0f;
             float inverseLandingTime = 0.0f;
             if (m_FootDrivenSupport)

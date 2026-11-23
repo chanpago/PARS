@@ -349,6 +349,15 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         CommandLineArgs::GetFloat(L"impactmass", projectileMass);
         CommandLineArgs::GetFloat(L"impactspeed", projectileSpeed);
         check(test.SetProjectileSettings(projectileMass, projectileSpeed), "Set explicit projectile test input");
+        uint32_t aimBody = 0;
+        const bool aimed = CommandLineArgs::GetInteger(L"impactaimbody", aimBody);
+        uint32_t physicalContactOnly = 0;
+        CommandLineArgs::GetInteger(L"impactcontactonly", physicalContactOnly);
+        if (aimed)
+        {
+            check(aimBody < mesh.GetRagdoll().GetBodyCount(), "Resolve the requested projectile aim body");
+            report << "aim_bone=" << mesh.GetPhysicsAsset()->bodies[aimBody].bone << " contact_only=" << physicalContactOnly << std::endl;
+        }
         report << "projectile_mass=" << projectileMass << " projectile_speed=" << projectileSpeed
             << " source_x=" << sourceX << " source_z=" << sourceZ << std::endl;
         PhysicsSkeleton skeleton;
@@ -368,6 +377,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         unsigned confirmedTakeoffs = 0;
         unsigned confirmedLandings = 0;
         unsigned validatedDebugFrames = 0;
+        bool observedProjectileContact = false;
         std::array<bool, 2> commandObserved{};
         std::array<bool, 2> takeoffObserved{};
         PhysicsAnimationMode previousMode = mesh.GetPhysicsMode();
@@ -378,7 +388,30 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 (scenario == 4 && seenReturn && !secondShot && mesh.IsBlendingToKinematic()) ||
                 (scenario == 5 && seenActive && !secondShot && mesh.GetKinematicStableTime() >= .8f))
             {
-                check(test.FireFrom(player), "Fire a real colliding projectile");
+                if (aimed)
+                {
+                    physx::PxGeometryHolder geometry;
+                    physx::PxTransform inBone;
+                    physx::PxTransform shapePose;
+                    check(mesh.GetRagdoll().GetBodyCollisionShape(aimBody, geometry, inBone, shapePose),
+                        "Resolve the current target shape");
+                    const Vector3 origin = player.GetActorLocation() + Vector3(0, .15f, 0);
+                    const Vector3 target(shapePose.p.x, shapePose.p.y, shapePose.p.z);
+                    check(test.FireAimed(player, origin, target - origin), "Fire through the normal aim path");
+                    if (physicalContactOnly)
+                    {
+                        // 대조군은 같은 공을 발사하되 관절 반응용 표식만 제거한다.
+                        physx::PxShape* shape = nullptr;
+                        check(test.GetProjectiles().back()->getShapes(&shape, 1) == 1, "Resolve control projectile shape");
+                        physx::PxFilterData filter = shape->getSimulationFilterData();
+                        filter.word3 &= ~PhysicsWorld::ProjectileFilterFlag;
+                        shape->setSimulationFilterData(filter);
+                    }
+                }
+                else
+                {
+                    check(test.FireFrom(player), "Fire a real colliding projectile");
+                }
                 secondShot = seenActive;
             }
             const float beforeTimer = mesh.GetKinematicStableTime();
@@ -412,6 +445,24 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             world.Tick(1.0f / 60.0f);
             test.Update();
             RecordLandingComFrame(landingCom, mesh, frame);
+            if (aimed)
+            {
+                for (const RagdollBodyImpulse& impact : mesh.GetRagdoll().GetExternalImpacts())
+                {
+                    if (!impact.fromProjectile || impact.impulse.magnitudeSquared() < 1e-8f)
+                    {
+                        continue;
+                    }
+                    observedProjectileContact = true;
+                    report << "contact_frame=" << frame << " bone=" << mesh.GetPhysicsAsset()->bodies[impact.body].bone
+                        << " impulse_ns=" << impact.impulse.magnitude() << '\n';
+                }
+            }
+            if (beforeRelease == RootSupportRelease::None && mesh.GetRootSupportRelease() == RootSupportRelease::ProjectileImpact)
+            {
+                check(mesh.GetBalanceState() == CharacterBalanceState::GroundFall && !mesh.GetRagdoll().IsRootSupported() &&
+                    !mesh.GetRagdoll().UsesFootDrivenSupport(), "Projectile toppling releases support and starts the ground fall in the same tick");
+            }
             if (beforeRelease == RootSupportRelease::None && mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer)
             {
                 const FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
@@ -565,6 +616,11 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             }
         }
         world.SetPhysicsPaused(true);
+        if (aimed)
+        {
+            check(observedProjectileContact == (scenario != 0 && !physicalContactOnly),
+                "Aimed shot reports a tagged impact only for the projectile reaction");
+        }
         report << "entries=" << entries << " returns=" << returns << std::endl;
         report << "foot_commands=" << footCommands << " physical_takeoffs=" << confirmedTakeoffs
             << " confirmed_landings=" << confirmedLandings << std::endl;

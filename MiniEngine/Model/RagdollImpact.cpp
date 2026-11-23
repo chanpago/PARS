@@ -27,16 +27,26 @@ namespace PARS
         return false;
     }
 
-    void Ragdoll::CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const
+    const std::vector<RagdollBodyImpulse>& Ragdoll::GetExternalImpacts() const
     {
-        impacts.clear();
         if (!m_World || !m_CollisionEnabled)
         {
-            return;
+            m_ExternalImpacts.clear();
+            return m_ExternalImpacts;
         }
+        const uint64_t step = m_World->GetStepCount();
+        const uint64_t clock = m_World->GetClockRevision();
+        if (m_ImpactSampleStep == step && m_ImpactSampleClock == clock)
+        {
+            return m_ExternalImpacts;
+        }
+        // 발 선택과 관절 구동은 같은 완료 스텝의 접촉을 공유한다.
+        m_ImpactSampleStep = step;
+        m_ImpactSampleClock = clock;
+        m_ExternalImpacts.clear();
+        std::vector<PhysicsContactImpulse> contacts;
         for (size_t index = 0; index < m_Bodies.size(); ++index)
         {
-            std::vector<PhysicsContactImpulse> contacts;
             m_World->GetExternalImpactImpulse(*m_Bodies[index], m_QueryOwner, &contacts);
             for (const PhysicsContactImpulse& contact : contacts)
             {
@@ -45,9 +55,15 @@ namespace PARS
                 impact.position = contact.position;
                 impact.impulse = contact.impulse;
                 impact.fromProjectile = contact.fromProjectile;
-                impacts.push_back(impact);
+                m_ExternalImpacts.push_back(impact);
             }
         }
+        return m_ExternalImpacts;
+    }
+
+    void Ragdoll::CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const
+    {
+        impacts = GetExternalImpacts();
     }
 
     void Ragdoll::ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts)
@@ -70,6 +86,16 @@ namespace PARS
 
     namespace
     {
+        constexpr float ProjectileHoldTime = .08f;
+        constexpr float ProjectileRecoveryTime = .24f;
+        constexpr float ProjectileResponseTime = ProjectileHoldTime + ProjectileRecoveryTime;
+
+        float ProjectileYield(float remaining)
+        {
+            const float t = PxClamp(remaining / ProjectileRecoveryTime, 0.0f, 1.0f);
+            return t * t * (3.0f - 2.0f * t);
+        }
+
         bool IsSpine(const std::string& name)
         {
             std::string lower = name;
@@ -92,6 +118,181 @@ namespace PARS
                 lower.find("foot") != std::string::npos || lower.find("ankle") != std::string::npos ||
                 lower.find("toe") != std::string::npos;
         }
+    }
+
+    float Ragdoll::GetProjectileJointDriveScale(size_t jointIndex) const
+    {
+        return jointIndex < m_JointYieldTimes.size() ? 1.0f - .96f * ProjectileYield(m_JointYieldTimes[jointIndex]) : 1.0f;
+    }
+
+    float Ragdoll::GetProjectilePelvisDriveScale() const
+    {
+        return 1.0f - .85f * ProjectileYield(m_PelvisYieldTime);
+    }
+
+    void Ragdoll::UpdateProjectileReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
+    {
+        if (!m_World || !m_DrivesEnabled || !std::isfinite(deltaTime) || deltaTime <= 0)
+        {
+            return;
+        }
+        const uint64_t clock = m_World->GetClockRevision();
+        const uint64_t step = m_World->GetStepCount();
+        const bool hadReaction = !m_JointYieldTimes.empty() || m_PelvisYieldTime > 0;
+        if (m_ProjectileReactionClock != clock)
+        {
+            m_JointYieldTimes.clear();
+            m_PelvisYieldTime = 0;
+        }
+        else if (m_ProjectileReactionStep == step)
+        {
+            return;
+        }
+        m_ProjectileReactionClock = clock;
+        m_ProjectileReactionStep = step;
+        m_PelvisYieldTime = PxMax(0.0f, m_PelvisYieldTime - deltaTime);
+        for (float& remaining : m_JointYieldTimes)
+        {
+            remaining = PxMax(0.0f, remaining - deltaTime);
+        }
+        RecordProjectileImpacts(impacts);
+        if (std::none_of(m_JointYieldTimes.begin(), m_JointYieldTimes.end(), [](float time) -> bool
+            {
+                return time > 0;
+            }))
+        {
+            m_JointYieldTimes.clear();
+        }
+        if (!m_Articulation && (hadReaction || !m_JointYieldTimes.empty() || m_PelvisYieldTime > 0))
+        {
+            ConfigureD6JointDrives();
+            ConfigureRootSupportDrives();
+        }
+    }
+
+    void Ragdoll::RecordProjectileImpacts(const std::vector<RagdollBodyImpulse>& impacts)
+    {
+        // 한 번의 접촉이 여러 점으로 나뉘어도 같은 바디의 충격량과 골반 기준 각충격량을 합친다.
+        std::vector<PxVec3> impulses;
+        PxVec3 angularImpulse(0);
+        PxVec3 pelvisCenter(0);
+        int root = -1;
+        for (const RagdollBodyImpulse& hit : impacts)
+        {
+            if (!hit.fromProjectile || hit.body >= m_Bodies.size() ||
+                !hit.position.isFinite() || !hit.impulse.isFinite() || hit.impulse.magnitudeSquared() < 1e-8f)
+            {
+                continue;
+            }
+            if (impulses.empty())
+            {
+                root = GetImpactRootBody();
+                if (root < 0)
+                {
+                    return;
+                }
+                const PxRigidBody& pelvis = *m_Bodies[root];
+                pelvisCenter = (pelvis.getGlobalPose() * pelvis.getCMassLocalPose()).p;
+                impulses.resize(m_Bodies.size(), PxVec3(0));
+            }
+            impulses[hit.body] += hit.impulse;
+            angularImpulse += (hit.position - pelvisCenter).cross(hit.impulse);
+        }
+        if (impulses.empty())
+        {
+            return;
+        }
+        float totalMass = 0;
+        for (const PxRigidBody* body : m_Bodies)
+        {
+            totalMass += body->getMass();
+        }
+        // 지렛팔 30cm를 기준으로 전신을 돌릴 만큼 큰 충격일 때만 골반의 회전 보조도 잠시 줄인다.
+        const float rotation = angularImpulse.magnitude() / (.3f * totalMass);
+        m_PelvisYieldTime = PxMax(m_PelvisYieldTime, ProjectileResponseTime * PxClamp((rotation - .1f) / .65f, 0.0f, 1.0f));
+        for (size_t body = 0; body < impulses.size(); ++body)
+        {
+            const float mass = PxMax(m_Bodies[body]->getMass(), .06f * totalMass);
+            const float speedChange = impulses[body].magnitude() / mass;
+            const float amount = PxClamp((speedChange - .4f) / 3.5f, 0.0f, 1.0f);
+            if (amount > 0)
+            {
+                YieldImpactJoints(body, body == static_cast<size_t>(root), amount);
+            }
+        }
+    }
+
+    void Ragdoll::YieldImpactJoints(size_t body, bool isRoot, float amount)
+    {
+        m_JointYieldTimes.resize(m_Asset.constraints.size(), 0);
+        const std::string& hitBone = m_Asset.bodies[body].bone;
+        if (isRoot || IsSpine(hitBone))
+        {
+            for (size_t joint = 0; joint < m_Asset.constraints.size(); ++joint)
+            {
+                const PhysicsConstraint& child = m_Asset.constraints[joint];
+                if (child.parentBone == hitBone && IsSpine(child.childBone))
+                {
+                    m_JointYieldTimes[joint] = PxMax(m_JointYieldTimes[joint], ProjectileResponseTime * amount * .84f);
+                }
+            }
+        }
+        // 맞은 관절에서 부모 두 단계까지 전파해 반대편 팔다리의 자세 구동은 유지한다.
+        const std::string* bone = &hitBone;
+        for (unsigned depth = 0; depth < 3; ++depth)
+        {
+            const std::vector<PhysicsConstraint>::const_iterator joint = std::find_if(m_Asset.constraints.begin(),
+                m_Asset.constraints.end(), [bone](const PhysicsConstraint& entry) -> bool
+                {
+                    return entry.childBone == *bone;
+                });
+            if (joint == m_Asset.constraints.end())
+            {
+                break;
+            }
+            const size_t index = static_cast<size_t>(joint - m_Asset.constraints.begin());
+            m_JointYieldTimes[index] = PxMax(m_JointYieldTimes[index], ProjectileResponseTime * amount);
+            bone = &joint->parentBone;
+            amount *= .80f;
+        }
+    }
+
+    bool Ragdoll::IsTopplingFromProjectile() const
+    {
+        if (m_PelvisYieldTime <= 0)
+        {
+            return false;
+        }
+        const int root = GetImpactRootBody();
+        if (root < 0)
+        {
+            return false;
+        }
+        const PxRigidBody& pelvis = *m_Bodies[root];
+        const PxVec3 base = (pelvis.getGlobalPose() * pelvis.getCMassLocalPose()).p;
+        PxVec3 torso(0);
+        PxVec3 velocity(0);
+        for (size_t body = 0; body < m_Bodies.size(); ++body)
+        {
+            if (IsSpine(m_Asset.bodies[body].bone))
+            {
+                const PxRigidBody& spine = *m_Bodies[body];
+                const PxVec3 offset = (spine.getGlobalPose() * spine.getCMassLocalPose()).p - base;
+                if (offset.magnitudeSquared() > torso.magnitudeSquared())
+                {
+                    torso = offset;
+                    velocity = spine.getLinearVelocity() - pelvis.getLinearVelocity();
+                }
+            }
+        }
+        // 위쪽 척추가 이미 35도를 넘고, 0.15초 뒤 기울기가 50도를 넘으며 계속 증가할 때만 지지를 놓는다.
+        const PxVec3 predicted = torso + velocity * .15f;
+        if (torso.normalize() < 1e-4f || predicted.magnitudeSquared() < 1e-8f)
+        {
+            return false;
+        }
+        const float predictedUp = predicted.getNormalized().y;
+        return torso.y < std::cos(PxPi * 35.0f / 180.0f) && predictedUp < std::cos(PxPi * 50.0f / 180.0f) && predictedUp < torso.y;
     }
 
     int Ragdoll::GetImpactRootBody() const

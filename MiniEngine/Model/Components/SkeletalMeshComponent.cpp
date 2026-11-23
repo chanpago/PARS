@@ -190,6 +190,10 @@ namespace PARS
         // 여기서 발 움직임을 계산하고 지지영역을 조사해 가중치를 구한다
         m_Ragdoll.SetHorizontalSupportForce(physx::PxVec3(0));
         UpdateFootSupport();
+        if (IsActiveRagdoll())
+        {
+            m_Ragdoll.UpdateProjectileReaction(m_Ragdoll.GetExternalImpacts(), deltaTime);
+        }
 
         //
         if (!UpdateAutomaticRagdoll(deltaTime))

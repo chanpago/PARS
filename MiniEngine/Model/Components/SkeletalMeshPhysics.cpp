@@ -551,6 +551,10 @@ namespace PARS
             {
                 m_RootSupportRelease = RootSupportRelease::OutsideBuffer;
             }
+            else if ((sample.footstep.needsStep || balance.zone != FootSupportZone::Inside) && m_Ragdoll.IsTopplingFromProjectile())
+            {
+                m_RootSupportRelease = RootSupportRelease::ProjectileImpact;
+            }
         }
         float weight = 0;
         if (m_RootSupportRelease == RootSupportRelease::None)

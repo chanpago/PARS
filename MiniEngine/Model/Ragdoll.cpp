@@ -810,7 +810,20 @@ namespace PARS
 
     void Ragdoll::InvalidateContactState()
     {
+        const bool restoreDrives = !m_Articulation && m_DrivesEnabled && (!m_JointYieldTimes.empty() || m_PelvisYieldTime > 0);
         ++m_ContactRevision;
+        m_ImpactSampleStep = UINT64_MAX;
+        m_ImpactSampleClock = UINT64_MAX;
+        m_ProjectileReactionStep = UINT64_MAX;
+        m_ProjectileReactionClock = UINT64_MAX;
+        m_ExternalImpacts.clear();
+        m_JointYieldTimes.clear();
+        m_PelvisYieldTime = 0;
+        if (restoreDrives)
+        {
+            ConfigureD6JointDrives();
+            ConfigureRootSupportDrives();
+        }
         m_HorizontalSupportForce = physx::PxVec3(0);
         m_HorizontalSupportStep = UINT64_MAX;
 #if defined(_M_X64)
@@ -858,6 +871,10 @@ namespace PARS
     }
     void Ragdoll::SetQueryOwner(void* owner)
     {
+        if (m_QueryOwner != owner)
+        {
+            m_ImpactSampleStep = UINT64_MAX;
+        }
         m_QueryOwner = owner;
 #if defined(_M_X64)
         if (m_CharacterCapsuleBody)
