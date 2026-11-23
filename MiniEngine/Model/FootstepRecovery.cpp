@@ -336,7 +336,7 @@ namespace
         }
     }
 
-    void AddCrossPoseCandidates(const FootstepPolygon& piece, size_t mode, const PxVec3& preferred,
+    void AddAlternativePoseCandidates(const FootstepPolygon& piece, size_t mode, const PxVec3& preferred,
         std::vector<LandingCandidate>& candidates)
     {
         const PxVec3 center = PolygonCenter(piece);
@@ -386,31 +386,20 @@ namespace
                     candidates.push_back(nearest);
                     if (checkAlternatives)
                     {
-                        AddCrossPoseCandidates(result.reachable[mode], mode, input.preferred, candidates);
+                        AddAlternativePoseCandidates(result.reachable[mode], mode, input.preferred, candidates);
                     }
                 }
                 continue;
             }
+            // 일반 딛기는 Idle 발 배치와 보폭을 반영한 목표에 가까운 교집합 후보부터 검사한다.
+            const PxVec3& preferred = mode == 0 && input.normalTarget.isFinite() ? input.normalTarget : input.preferred;
             for (const FootstepPolygon& piece : result.intersections[mode])
             {
-                if (mode != 0)
-                {
-                    const PxVec3 point = ClosestFootstepPoint(piece, input.preferred);
-                    candidates.push_back({mode, point, DistanceSquared(point, input.preferred)});
-                    if (checkAlternatives)
-                    {
-                        AddCrossPoseCandidates(piece, mode, input.preferred, candidates);
-                    }
-                    continue;
-                }
-                // 교집합 안에서는 회복 영역까지의 거리가 모두 0이다. 넓은 조각의 내부부터 검사한다.
-                candidates.push_back({mode, PolygonCenter(piece), -FootstepPolygonArea(piece)});
+                const PxVec3 closest = ClosestFootstepPoint(piece, preferred);
+                candidates.push_back({mode, closest, DistanceSquared(closest, preferred)});
                 if (checkAlternatives)
                 {
-                    for (const PxVec3& point : piece)
-                    {
-                        candidates.push_back({mode, point, 0.0f});
-                    }
+                    AddAlternativePoseCandidates(piece, mode, preferred, candidates);
                 }
             }
             std::stable_sort(candidates.begin() + first, candidates.end());

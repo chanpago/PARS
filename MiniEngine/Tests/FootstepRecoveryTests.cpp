@@ -169,10 +169,12 @@ namespace
         settings.maximumSteps = 1;
         FootstepRecoveryInput input = Input();
         input.velocity = PxVec3(0, 0, .6f);
+        input.normalTarget.x += .025f;
         FootstepRecoverySnapshot result = SelectFootstepRecovery(input, settings);
         Check(result.hasTarget && result.mode == FootstepMode::Normal && result.modelFeasible,
             "ordinary forward recovery keeps the normal mode");
-        Check(InAny(result.intersections[0], result.target), "normal target lies in both required regions");
+        Check(InAny(result.intersections[0], result.target) && (result.target - input.normalTarget).magnitudeSquared() < 1e-8f,
+            "normal selection uses the corrected stance target even when the crossover preference differs");
         input.velocity = PxVec3(-.8f, 0, 0);
         input.com.z = .15f;
         result = SelectFootstepRecovery(input, settings);
@@ -497,7 +499,7 @@ namespace
             "regaining balance on landing ends the sequence without forcing another step");
     }
 
-    void TestNormalLandingWithoutIdleOffset()
+    void TestNormalLandingPrefersStanceTarget()
     {
         FootstepSettings settings;
         settings.recovery.maximumSteps = 1;
@@ -509,7 +511,8 @@ namespace
         planner.Update(input, settings);
         const FootstepTarget first = planner.GetSnapshot().candidates[1];
         Check(planner.GetSnapshot().feet[1].justStarted && first.recovery.mode == FootstepMode::Normal &&
-            InAny(first.recovery.intersections[0], first.position), "normal landing is inside both regions");
+            InAny(first.recovery.intersections[0], first.raw) && (first.position - first.raw).magnitudeSquared() < 1e-8f,
+            "a normal step keeps the stance target when it lies inside the overlap");
 
         input.feet[0].timeToReachLimit = .3f;
         planner.Reset();
@@ -526,13 +529,23 @@ namespace
             std::abs(GetFootstepRemainingTime(planner.GetSnapshot().feet[1]) - .3f) < 1e-5f,
             "A long support forecast selects a validated target using the 0.3 second landing deadline");
         input.feet[0].timeToReachLimit = std::numeric_limits<float>::infinity();
-        input.feet[1].stanceOffset.z += .9f;
+        input.feet[1].stanceOffset.x += .6f;
+        FootstepPolygon checked;
+        input.acceptsLanding = [&checked](size_t, const PxVec3& point) -> bool
+        {
+            checked.push_back(point);
+            return checked.size() == 2;
+        };
         planner.Reset();
         planner.Update(input, settings);
         const FootstepTarget& second = planner.GetSnapshot().candidates[1];
-        Check(planner.GetSnapshot().feet[1].justStarted && (second.raw - first.raw).magnitude() > .5f &&
-            (second.position - first.position).magnitude() < 1e-5f,
-            "changing the idle reference leaves the geometric landing unchanged");
+        Check(planner.GetSnapshot().feet[1].justStarted && second.recovery.mode == FootstepMode::Normal &&
+            second.recovery.intersections[0].size() == 1 && !InAny(second.recovery.intersections[0], second.raw) &&
+            checked.size() == 2, "a wider stance moves the reference outside the overlap and a second pose is accepted");
+        const PxVec3 closest = ClosestFootstepPoint(second.recovery.intersections[0].front(), second.raw);
+        Check((checked.front() - closest).magnitudeSquared() < 1e-8f && second.position == checked.back() &&
+            InAny(second.recovery.intersections[0], second.position),
+            "an outside stance target tries the closest overlap point first and keeps the alternative inside");
 
         input.velocity.z = -4.0f;
         input.acceptsLanding = [](size_t, const PxVec3&) -> bool
@@ -693,7 +706,7 @@ void TestFootstepRecovery()
     TestThreeStepReachForBothFeet();
     TestOneStepCaptureMargin();
     TestFollowupAfterOneStepLanding();
-    TestNormalLandingWithoutIdleOffset();
+    TestNormalLandingPrefersStanceTarget();
     TestStepModeLock();
     TestPlannerIntegration();
     FootstepRecoveryInput input = Input();
