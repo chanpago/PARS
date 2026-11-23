@@ -73,6 +73,17 @@ namespace PARS
             IdleBlend
         };
 
+        struct ImpactFlailPlayback
+        {
+        public:
+            std::vector<GraphNode> pose;
+            uint32_t clip = UINT32_MAX;
+            float time = 0;
+            float weight = 0;
+            float impactTimeRemaining = 0;
+            MotionFrameUsage usage = MotionFrameUsage::Idle;
+        };
+
         struct ImpactHandReach
         {
         public:
@@ -128,6 +139,7 @@ namespace PARS
         void UpdateHorizontalBalance(float deltaTime);
         void ApplyCrossStepDrivePose(const FootSupportSnapshot& support, float deltaTime, std::vector<Math::Matrix4>& target);
         void ResetCrossStepPlayback();
+        void UpdateImpactFlail(bool longitudinalImpact, float deltaTime);
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
             const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
@@ -149,7 +161,7 @@ namespace PARS
         ImpactHandReach FindImpactHandReach(const std::vector<RagdollBodyImpulse>& impacts) const;
         void ApplyImpactHandReach(const PhysicsWorld& physics, const std::array<FallArmSample, 2>& arms,
             std::vector<physx::PxTransform>& frames, FallArmSnapshot& corrected);
-        void ApplyArmTargets(std::vector<Math::Matrix4>& target, float deltaTime);
+        void ApplyArmTargets(std::vector<Math::Matrix4>& target);
         void ResetFallArms();
 
     public:
@@ -263,17 +275,13 @@ namespace PARS
         {
             return m_ArmDriveStrength;
         }
-        FallArmSettings& GetFallArmSettings()
+        uint32_t GetImpactFlailClip() const
         {
-            return m_FallArmSettings;
+            return m_ImpactFlail.clip;
         }
-        const FallArmSettings& GetFallArmSettings() const
+        float GetImpactFlailTime() const
         {
-            return m_FallArmSettings;
-        }
-        const FallArmSnapshot& GetFallArmSnapshot() const
-        {
-            return m_FallArmBrace.GetSnapshot();
+            return m_ImpactFlail.time;
         }
         const HorizontalBalanceSnapshot& GetHorizontalBalanceSnapshot() const
         {
@@ -335,10 +343,14 @@ namespace PARS
         }
         bool IsFallingClip(uint32_t animationIndex) const;
         bool IsAirborneFallClip(uint32_t animationIndex) const;
-        uint32_t SelectFallingAnimation() const;
+        MotionMatchResult SelectFallingAnimation() const;
+        const std::vector<GraphNode>& GetImpactAnimationPose() const
+        {
+            return m_ImpactFlail.pose.empty() ? m_AnimInstance->GetPose() : m_ImpactFlail.pose;
+        }
         const std::vector<GraphNode>& GetRagdollAnimationPose() const
         {
-            return m_CrossStepPose.empty() ? m_AnimInstance->GetPose() : m_CrossStepPose;
+            return m_CrossStepPose.empty() ? GetImpactAnimationPose() : m_CrossStepPose;
         }
 
     private:
@@ -355,7 +367,7 @@ namespace PARS
         AirborneFallTimer m_AirborneFallTimer;
         StandingSupport m_StandingSupport;
         HorizontalBalance m_HorizontalBalance;
-        FallArmBrace m_FallArmBrace;
+        ImpactFlailPlayback m_ImpactFlail;
         ImpactHandReach m_ImpactHandReach;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
@@ -372,7 +384,6 @@ namespace PARS
         RecoverySettings m_RecoverySettings;
         StandingSupportSettings m_StandingSupportSettings;
         HorizontalBalanceSettings m_HorizontalBalanceSettings;
-        FallArmSettings m_FallArmSettings;
         std::array<FallArmSetup, 2> m_FallArmSetups;
         std::array<physx::PxTransform, 2> m_RecoverySoles{
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};

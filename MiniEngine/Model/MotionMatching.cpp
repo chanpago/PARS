@@ -41,6 +41,7 @@ namespace PARS
             Math::Matrix3 toHeadingSpace;
             std::array<Math::Vector3, 2> feet;
             std::array<Math::Vector3, 2> modelFeet;
+            std::array<DirectX::XMFLOAT3, 3> upperBodyPositions{};
             float time;
         };
 
@@ -94,10 +95,15 @@ namespace PARS
             return skeleton.names.size();
         }
 
-        bool SampleClip(const AnimInstance& animation, uint32_t clipIndex, const PhysicsSkeleton& skeleton,
-            const MotionBones& bones, std::vector<MotionSample>& samples, std::string& error)
+        bool IsImpactUsage(MotionFrameUsage usage)
         {
-            const float duration = animation.GetAnimationDuration(clipIndex);
+            return usage == MotionFrameUsage::FlailFront || usage == MotionFrameUsage::FlailBack || usage == MotionFrameUsage::ShoveFall;
+        }
+
+        bool SampleClip(const AnimInstance& animation, const MotionClipSelection& clip, const PhysicsSkeleton& skeleton,
+            const MotionBones& bones, const std::array<size_t, 3>& upperJoints, std::vector<MotionSample>& samples, std::string& error)
+        {
+            const float duration = animation.GetAnimationDuration(clip.clipIndex);
             const double intervals = std::max(1.0, std::round(static_cast<double>(duration) * SamplesPerSecond));
             if (intervals >= static_cast<double>(UINT32_MAX))
             {
@@ -116,7 +122,7 @@ namespace PARS
                     error = u8"클립의 인접 샘플을 서로 다른 재생 시각으로 표현할 수 없습니다.";
                     return false;
                 }
-                if (!animation.SampleAnimationPose(clipIndex, sample.time, pose))
+                if (!animation.SampleAnimationPose(clip.clipIndex, sample.time, pose))
                 {
                     error = u8"애니메이션 트랙에서 본 자세를 읽을 수 없습니다.";
                     return false;
@@ -128,7 +134,17 @@ namespace PARS
 
                 const Math::Matrix4& hips = modelPose[bones.hips];
                 sample.pelvis = Math::Vector3(hips.GetW());
-                if (!MakeHeadingSpace(hips, bones.bindForwardInPelvis, sample.toHeadingSpace))
+                const bool impact = IsImpactUsage(clip.usage);
+                if (impact)
+                {
+                    // 낙상으로 골반이 누워도 클립의 정면을 기준으로 팔다리와 머리의 기울기를 비교한다.
+                    sample.toHeadingSpace = Math::Matrix3(Math::kIdentity);
+                    for (size_t joint = 0; joint < upperJoints.size(); ++joint)
+                    {
+                        DirectX::XMStoreFloat3(&sample.upperBodyPositions[joint], Math::Vector3(modelPose[upperJoints[joint]].GetW()) - sample.pelvis);
+                    }
+                }
+                else if (!MakeHeadingSpace(hips, bones.bindForwardInPelvis, sample.toHeadingSpace))
                 {
                     error = u8"골반의 수평 전방을 계산할 수 없습니다.";
                     return false;
@@ -226,6 +242,7 @@ namespace PARS
                 frame.clipIndex = clip.clipIndex;
                 frame.clipTimeSeconds = sample.time;
                 frame.usage = clip.usage;
+                frame.features.upperBodyPositions = sample.upperBodyPositions;
                 frame.features.walkingAngleDegrees = walkingAngle;
                 for (size_t foot = 0; foot < sample.feet.size(); ++foot)
                 {
@@ -300,6 +317,28 @@ namespace PARS
         database->bindForwardInPelvis = bones.bindForwardInPelvis;
         database->pelvisNode = static_cast<int>(bones.hips);
 
+        const bool hasImpactClips = std::any_of(clips.begin(), clips.end(), [](const MotionClipSelection& clip) -> bool
+        {
+            return IsImpactUsage(clip.usage);
+        });
+        if (hasImpactClips)
+        {
+            const size_t spine = FindJoint(skeleton, "Spine");
+            database->upperBodyJoints = {FindJoint(skeleton, "LeftHand"), FindJoint(skeleton, "RightHand"), FindJoint(skeleton, "Head")};
+            if (spine >= skeleton.parents.size() || std::find(database->upperBodyJoints.begin(), database->upperBodyJoints.end(),
+                skeleton.parents.size()) != database->upperBodyJoints.end())
+            {
+                error = u8"충격 반응에 필요한 척추, 양손 또는 머리 본을 찾을 수 없습니다.";
+                return false;
+            }
+            database->upperBodyMask.resize(skeleton.parents.size());
+            for (size_t node = 0; node < skeleton.parents.size(); ++node)
+            {
+                const int parent = skeleton.parents[node];
+                database->upperBodyMask[node] = node == spine || (parent >= 0 && database->upperBodyMask[parent]);
+            }
+        }
+
         std::vector<MotionSample> samples;
         for (size_t usageIndex = 0; usageIndex < database->groups.size(); ++usageIndex)
         {
@@ -307,7 +346,7 @@ namespace PARS
             group.range.firstFrameIndex = database->frames.size();
             for (const MotionClipSelection& clip : group.clips)
             {
-                if (!SampleClip(*this, clip.clipIndex, skeleton, bones, samples, error))
+                if (!SampleClip(*this, clip, skeleton, bones, database->upperBodyJoints, samples, error))
                 {
                     error = GetAnimationName(clip.clipIndex) + " - " + error;
                     return false;
@@ -338,7 +377,7 @@ namespace PARS
     }
 
     MotionMatchResult AnimInstance::FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures,
-        const WalkingSwing& swing, float desiredSwingTime) const
+        const WalkingSwing& swing, float desiredSwingTime, uint32_t requiredClip) const
     {
         const MotionFrameRange range = GetMotionFrameRange(usage);
         const std::vector<MotionFrame>& frames = GetMotionFrames();
@@ -351,6 +390,33 @@ namespace PARS
         for (size_t offset = 0; offset < range.frameCount; ++offset)
         {
             const MotionFrame& frame = frames[range.firstFrameIndex + offset];
+            if (IsImpactUsage(usage))
+            {
+                if ((requiredClip != UINT32_MAX && frame.clipIndex != requiredClip) ||
+                    frame.clipTimeSeconds > (std::max)(0.0f, GetAnimationDuration(frame.clipIndex) - MotionFeatures::PredictionTimeSeconds))
+                {
+                    continue;
+                }
+                float poseError = 0.0f;
+                for (size_t joint = 0; joint < currentFeatures.upperBodyPositions.size(); ++joint)
+                {
+                    poseError += SquaredDistance(currentFeatures.upperBodyPositions[joint], frame.features.upperBodyPositions[joint]);
+                }
+                if (usage == MotionFrameUsage::ShoveFall)
+                {
+                    for (size_t foot = 0; foot < currentFeatures.footPositions.size(); ++foot)
+                    {
+                        poseError += SquaredDistance(currentFeatures.footPositions[foot], frame.features.footPositions[foot]);
+                    }
+                }
+                if (poseError < best.score)
+                {
+                    best.score = poseError;
+                    best.clipIndex = frame.clipIndex;
+                    best.clipTimeSeconds = frame.clipTimeSeconds;
+                }
+                continue;
+            }
             if (swing.movingFoot != UINT32_MAX && (frame.swing.movingFoot != swing.movingFoot || frame.swing.mode != swing.mode))
             {
                 continue;
@@ -384,6 +450,64 @@ namespace PARS
             }
         }
         return best;
+    }
+
+    MotionMatchResult AnimInstance::FindImpactPoseMatch(MotionFrameUsage usage, uint32_t requiredClip) const
+    {
+        if (!IsImpactUsage(usage) || GetMotionFrameRange(usage).frameCount == 0)
+        {
+            return {};
+        }
+        const Ragdoll& ragdoll = m_Owner.GetRagdoll();
+        const std::vector<int>& nodes = ragdoll.GetBoneNodes();
+        const int root = ragdoll.GetImpactRootBody();
+        if (root < 0 || static_cast<size_t>(root) >= nodes.size())
+        {
+            return {};
+        }
+        const Math::Vector3 origin(ragdoll.GetBoneWorld(root).GetW());
+        Math::Matrix3 toHeading;
+        if (!MakeHeadingSpace(Math::Matrix4(m_Owner.GetComponentTransform()), Math::Vector3(Math::kZUnitVector), toHeading))
+        {
+            return {};
+        }
+        const std::array<FootSoleSample, 2>& feet = m_Owner.GetFootSupport().GetSnapshot().feet;
+        MotionFeatures query;
+        const size_t upperCount = query.upperBodyPositions.size();
+        const size_t count = upperCount + (usage == MotionFrameUsage::ShoveFall ? feet.size() : 0);
+        for (size_t joint = 0; joint < count; ++joint)
+        {
+            const int node = joint < upperCount ? static_cast<int>(m_MotionDatabase->upperBodyJoints[joint]) : feet[joint - upperCount].boneNode;
+            const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), node);
+            if (body == nodes.end())
+            {
+                return {};
+            }
+            const Math::Vector3 point(ragdoll.GetBoneWorld(static_cast<size_t>(body - nodes.begin())).GetW());
+            DirectX::XMFLOAT3& position = joint < upperCount ? query.upperBodyPositions[joint] : query.footPositions[joint - upperCount];
+            DirectX::XMStoreFloat3(&position, toHeading * (point - origin));
+        }
+        return FindMotionMatch(usage, query, {}, 0.0f, requiredClip);
+    }
+
+    bool AnimInstance::SampleUpperBodyPose(uint32_t clip, float time, float weight, std::vector<GraphNode>& pose) const
+    {
+        if (!m_MotionDatabase || m_MotionDatabase->upperBodyMask.size() != m_Pose.size() || !SampleAnimationPose(clip, time, pose))
+        {
+            return false;
+        }
+        for (size_t node = 0; node < pose.size(); ++node)
+        {
+            if (m_MotionDatabase->upperBodyMask[node])
+            {
+                BlendAnimationPoses(&m_Pose[node], &pose[node], 1, weight);
+            }
+            else
+            {
+                pose[node] = m_Pose[node];
+            }
+        }
+        return true;
     }
 
     MotionMatchResult AnimInstance::FindCrossStepMatch(const WalkingSwing& swing, float duration) const

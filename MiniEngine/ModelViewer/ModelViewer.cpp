@@ -101,7 +101,7 @@ namespace
 
 #if defined(_M_X64)
     bool RegisterFallAnimations(PARS::SkeletalMeshComponent& mesh, const std::wstring& directory, bool forceRebuild,
-        SkeletalMeshViewer::AnimationModels& models, std::string& error)
+        SkeletalMeshViewer::AnimationModels& models, const std::array<uint32_t, 4>& shoveClips, std::string& error)
     {
         PARS::AnimInstance& animation = mesh.GetAnimInstance();
         const uint32_t fallback = static_cast<uint32_t>(animation.GetAnimationCount());
@@ -118,21 +118,11 @@ namespace
             error = u8"기상 클립 Standing Up을 등록하지 못했습니다.";
             return false;
         }
-        const std::pair<PARS::FallDirection, const char*> clips[] =
+        for (size_t direction = 0; direction < shoveClips.size(); ++direction)
         {
-            {PARS::FallDirection::Forward, "ShoveFallForward"},
-            {PARS::FallDirection::Backward, "ShoveFallBackward"},
-            {PARS::FallDirection::Left, "ShoveFallLeft"},
-            {PARS::FallDirection::Right, "ShoveFallRight"}
-        };
-        for (const std::pair<PARS::FallDirection, const char*>& clip : clips)
-        {
-            const std::wstring path = directory + L"ShoveFalls/" + Utility::UTF8ToWideString(clip.second) + L".gltf";
-            const uint32_t index = static_cast<uint32_t>(animation.GetAnimationCount());
-            if (!animation.AddAnimation(clip.second, LoadAnimationModel(path, forceRebuild, models)) ||
-                !mesh.SetDirectionalFallingAnimation(clip.first, index))
+            if (!mesh.SetDirectionalFallingAnimation(static_cast<PARS::FallDirection>(direction), shoveClips[direction]))
             {
-                error = std::string(u8"방향별 낙상 클립을 등록하지 못했습니다. ") + clip.second;
+                error = u8"방향별 낙상 클립을 연결하지 못했습니다.";
                 return false;
             }
         }
@@ -1006,13 +996,41 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
         motionClips.push_back({index, PARS::MotionFrameUsage::Walking});
     }
+    for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::FlailFront, PARS::MotionFrameUsage::FlailBack})
+    {
+        const std::string name = usage == PARS::MotionFrameUsage::FlailFront ? "FlailFront" : "FlailBack";
+        const std::wstring file = Utility::UTF8ToWideString(name);
+        const uint32_t index = static_cast<uint32_t>(motionSource.GetAnimationCount());
+        if (!motionSource.AddAnimation(name, LoadAnimationModel(convertedDirectory + file + L"/" + file + L".gltf", forceRebuild, animationModels)))
+        {
+            m_PreviewError = std::string(u8"상체 충격 클립을 등록하지 못했습니다. ") + name;
+            character->Destroy();
+            return;
+        }
+        motionClips.push_back({index, usage});
+    }
+    const std::array<const char*, 4> shoveNames = {"ShoveFallForward", "ShoveFallBackward", "ShoveFallLeft", "ShoveFallRight"};
+    std::array<uint32_t, 4> shoveClips;
+    for (size_t direction = 0; direction < shoveNames.size(); ++direction)
+    {
+        const char* name = shoveNames[direction];
+        const std::wstring path = convertedDirectory + L"ShoveFalls/" + Utility::UTF8ToWideString(name) + L".gltf";
+        shoveClips[direction] = static_cast<uint32_t>(motionSource.GetAnimationCount());
+        if (!motionSource.AddAnimation(name, LoadAnimationModel(path, forceRebuild, animationModels)))
+        {
+            m_PreviewError = std::string(u8"낙상 클립을 등록하지 못했습니다. ") + name;
+            character->Destroy();
+            return;
+        }
+        motionClips.push_back({shoveClips[direction], PARS::MotionFrameUsage::ShoveFall});
+    }
     if (!motionSource.BuildMotionFrames(motionClips, m_PreviewError))
     {
         character->Destroy();
         return;
     }
 #if defined(_M_X64)
-    if (m_PhysicsDemo && !RegisterFallAnimations(mesh, convertedDirectory, forceRebuild, animationModels, m_PreviewError))
+    if (m_PhysicsDemo && !RegisterFallAnimations(mesh, convertedDirectory, forceRebuild, animationModels, shoveClips, m_PreviewError))
     {
         character->Destroy();
         return;
@@ -1126,7 +1144,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
             m_ImpactTest.reset();
         }
-        else if (!RegisterFallAnimations(m_ImpactTest->GetDummy()->GetMesh(), convertedDirectory, forceRebuild, animationModels, m_RagdollMessage))
+        else if (!RegisterFallAnimations(m_ImpactTest->GetDummy()->GetMesh(), convertedDirectory, forceRebuild, animationModels, shoveClips, m_RagdollMessage))
         {
             m_ImpactTest.reset();
         }

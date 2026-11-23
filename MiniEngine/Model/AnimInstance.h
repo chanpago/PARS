@@ -38,6 +38,8 @@ namespace PARS
             Math::Vector3 bindForwardInPelvis{Math::kZUnitVector};
             std::vector<MotionFrame> frames;
             std::array<MotionFrameGroup, static_cast<std::size_t>(MotionFrameUsage::Count)> groups;
+            std::array<size_t, 3> upperBodyJoints{};
+            std::vector<bool> upperBodyMask;
             int pelvisNode = -1;
         };
 
@@ -57,11 +59,14 @@ namespace PARS
         // 같은 기준 메시를 쓰는 캐릭터가 동일한 클립 번호로 후보 배열을 공유한다.
         bool ShareMotionFramesFrom(const AnimInstance& source, std::string& error);
         MotionMatchResult FindMotionMatch(MotionFrameUsage usage, const MotionFeatures& currentFeatures,
-            const WalkingSwing& swing = {}, float desiredSwingTime = 0.0f) const;
+            const WalkingSwing& swing = {}, float desiredSwingTime = 0.0f, uint32_t requiredClip = UINT32_MAX) const;
+        MotionMatchResult FindImpactPoseMatch(MotionFrameUsage usage, uint32_t requiredClip = UINT32_MAX) const;
+        bool SampleUpperBodyPose(uint32_t clip, float time, float weight, std::vector<GraphNode>& pose) const;
         MotionMatchResult FindCrossStepMatch(const WalkingSwing& swing, float duration) const;
         bool PlayAnimation(uint32_t index, bool loop = true, float startTime = 0.0f);
         // 시작 시점을 지정해 발 디딤 위상을 맞출 수 있다. 일반 전환에서는 두 클립의 시간을 함께 진행한다.
-        bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true, float startTime = 0.0f);
+        bool TransitionToAnimation(uint32_t index, float duration = 0.2f, bool loop = true, float startTime = 0.0f,
+            const std::vector<GraphNode>* sourcePose = nullptr);
         // 재생 상태를 바꾸지 않고 지정한 클립의 자세를 계산한다.
         bool SampleAnimationPose(uint32_t index, float time, std::vector<GraphNode>& pose) const;
         void Stop();

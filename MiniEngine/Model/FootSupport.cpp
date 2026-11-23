@@ -439,7 +439,9 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     // 몸 밀기는 골반 접촉을, 발사 구는 실제 피격 부위를 기준으로 이동발을 고른다.
     const Ragdoll& ragdoll = mesh.GetRagdoll();
     const int root = ragdoll.GetImpactRootBody();
-    input.fallingBackward = input.active && input.automaticSupport && idle && !input.rootReleased &&
+    const bool fullBodyFall = mesh.IsFallingAnimationEnabled() &&
+        mesh.GetAnimInstance().GetMotionFrameRange(MotionFrameUsage::ShoveFall).frameCount > 0;
+    input.fallingBackward = !fullBodyFall && input.active && input.automaticSupport && idle && !input.rootReleased &&
         (input.zone == FootSupportZone::Outside || input.zone == FootSupportZone::Invalid) &&
         mesh.GetGroundFallDirection() == FallDirection::Backward;
     if (root >= 0 && (input.fallingBackward || continuingFallSteps))

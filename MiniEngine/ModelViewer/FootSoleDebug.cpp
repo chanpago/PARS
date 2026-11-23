@@ -531,7 +531,14 @@ std::string FootSoleDebug::GetFollowedAnimationText(const PARS::SkeletalMeshComp
 
     char timing[128];
     std::snprintf(timing, sizeof(timing), " (%.2f / %.2f s)", animation.GetAnimationTime(), animation.GetAnimationDuration(clip));
-    return animation.GetAnimationName(clip) + timing;
+    std::string followed = animation.GetAnimationName(clip) + timing;
+    const uint32_t flail = mesh.GetImpactFlailClip();
+    if (flail < animation.GetAnimationCount())
+    {
+        std::snprintf(timing, sizeof(timing), " (%.2f / %.2f s)", mesh.GetImpactFlailTime(), animation.GetAnimationDuration(flail));
+        followed += std::string(u8" · 상체 ") + animation.GetAnimationName(flail) + timing;
+    }
+    return followed;
 }
 
 std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponent& mesh) const
@@ -654,23 +661,6 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     if (!m_Visible)
     {
         return;
-    }
-    const PARS::FallArmSnapshot& protection = mesh.GetFallArmSnapshot();
-    for (const PARS::FallArmTarget& arm : protection.arms)
-    {
-        if (!arm.applied)
-        {
-            continue;
-        }
-        const PxU32 color = arm.phase == PARS::FallArmPhase::Bracing ? 0xff55ee88 : 0xffff9933;
-        lines.emplace_back(arm.shoulder, arm.elbow, color);
-        lines.emplace_back(arm.elbow, arm.solvedPalm, color);
-        lines.emplace_back(arm.actualPalm, arm.palm.p, color);
-        for (const PxVec3& axis : {PxVec3(.035f, 0, 0), PxVec3(0, .035f, 0), PxVec3(0, 0, .035f)})
-        {
-            lines.emplace_back(arm.palm.p - axis, arm.palm.p + axis, color);
-        }
-        lines.emplace_back(arm.palm.p, arm.palm.p + protection.direction * .2f, color);
     }
     const PARS::FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
     const PARS::FootstepRecoverySnapshot* recovery = VisibleRecovery(mesh);
@@ -1048,23 +1038,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         }
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip(u8"낙상 시작 시 캐릭터 기준으로 넘어지는 방향의 클립을 한 번 재생합니다. 끄면 Idle 자세에서 손 뻗기와 착지 후 기상을 처리합니다.");
-        }
-        PARS::FallArmSettings& fallArms = mesh.GetFallArmSettings();
-        ImGui::Checkbox(u8"낙상 중 손 뻗기 / 버티기", &fallArms.enabled);
-        if (fallArms.enabled)
-        {
-            ImGui::SliderFloat(u8"팔 최대 뻗기 비율", &fallArms.reachRatio, .75f, .98f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-            ImGui::SliderFloat(u8"손 접촉 후 팔 강도 배율", &fallArms.braceDriveScale, .2f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-            const PARS::FallArmSnapshot& protection = mesh.GetFallArmSnapshot();
-            for (size_t side = 0; side < protection.arms.size(); ++side)
-            {
-                const PARS::FallArmTarget& arm = protection.arms[side];
-                ImGui::Text(u8"%s: %s / 보정 %.0f%% / 추종 %.0f%% / 실제 접촉 %s", side == 0 ? u8"왼팔" : u8"오른팔",
-                    PARS::FallArmPhaseLabel(arm.phase), arm.weight * 100,
-                    mesh.GetRagdoll().GetEffectiveArmDriveStrength(side) * 100, arm.touching ? "ON" : "OFF");
-            }
-            ImGui::TextUnformatted(u8"팔 목표 표시: 주황=뻗기, 초록=접촉 후 버티기");
+            ImGui::SetTooltip(u8"낙상 방향과 현재 전신 자세에 맞는 ShoveFall을 한 번 재생합니다.");
         }
         ImGui::Checkbox(u8"골반 XZ 직접 PD 보조", &horizontalSettings.enabled);
         if (horizontalSettings.enabled)

@@ -81,15 +81,60 @@ namespace PARS
         return left >= 0.0f ? FallDirection::Left : FallDirection::Right;
     }
 
-    uint32_t SkeletalMeshComponent::SelectFallingAnimation() const
+    void SkeletalMeshComponent::UpdateImpactFlail(bool longitudinalImpact, float deltaTime)
+    {
+        if (IsFalling() || IsGroundFallActive() || m_StandingUpState != StandingUpState::None)
+        {
+            m_ImpactFlail = {};
+            return;
+        }
+        ImpactFlailPlayback& flail = m_ImpactFlail;
+        // 동적 바디로 전환한 직후에는 실제 COM 속도가 다음 물리 샘플에 나타날 수 있다.
+        flail.impactTimeRemaining = longitudinalImpact ? MotionFeatures::PredictionTimeSeconds :
+            (std::max)(0.0f, flail.impactTimeRemaining - deltaTime);
+        const bool recovering = flail.impactTimeRemaining > 0 ||
+            (flail.clip != UINT32_MAX && m_BalanceState == CharacterBalanceState::Unbalanced);
+        const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
+        const Vector3 forward(GetComponentTransform().GetZ());
+        const float travel = float(forward.GetX()) * support.centerOfMassVelocity.x + float(forward.GetZ()) * support.centerOfMassVelocity.z;
+        if (recovering && support.hasCenterOfMassVelocity && std::abs(travel) >= .05f)
+        {
+            const MotionFrameUsage usage = travel > 0 ? MotionFrameUsage::FlailFront : MotionFrameUsage::FlailBack;
+            if (flail.usage != usage)
+            {
+                const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(usage);
+                if (match.clipIndex != UINT32_MAX)
+                {
+                    flail.usage = usage;
+                    flail.clip = match.clipIndex;
+                    flail.time = match.clipTimeSeconds;
+                }
+            }
+        }
+        if (flail.clip == UINT32_MAX)
+        {
+            return;
+        }
+        constexpr float blendDuration = .1f;
+        flail.weight = Clamp(flail.weight + (recovering ? deltaTime : -deltaTime) / blendDuration, 0.0f, 1.0f);
+        if (flail.weight <= 0 || !m_AnimInstance->SampleUpperBodyPose(flail.clip, flail.time, flail.weight, flail.pose))
+        {
+            flail = {};
+            return;
+        }
+        flail.time = (std::min)(flail.time + deltaTime, m_AnimInstance->GetAnimationDuration(flail.clip));
+    }
+
+    MotionMatchResult SkeletalMeshComponent::SelectFallingAnimation() const
     {
         const FallDirection direction = GetGroundFallDirection();
-        if (direction == FallDirection::Count)
+        const uint32_t directionalClip = direction == FallDirection::Count ? UINT32_MAX : m_DirectionalFallingAnimations[static_cast<size_t>(direction)];
+        MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(MotionFrameUsage::ShoveFall, directionalClip);
+        if (match.clipIndex == UINT32_MAX)
         {
-            return m_FallingAnimationIndex;
+            match.clipIndex = directionalClip < m_AnimInstance->GetAnimationCount() ? directionalClip : m_FallingAnimationIndex;
         }
-        const uint32_t index = m_DirectionalFallingAnimations[static_cast<size_t>(direction)];
-        return index < m_AnimInstance->GetAnimationCount() ? index : m_FallingAnimationIndex;
+        return match;
     }
 
     bool SkeletalMeshComponent::SetStandingUpAnimation(uint32_t animationIndex, uint32_t idleAnimationIndex)
@@ -138,8 +183,8 @@ namespace PARS
         {
             return UpdateStandingUpAnimation(deltaTime);
         }
-        const uint32_t fallClip = m_FallingAnimationEnabled ? SelectFallingAnimation() : UINT32_MAX;
-        if (fallClip >= m_AnimInstance->GetAnimationCount())
+        const MotionMatchResult fall = m_FallingAnimationEnabled ? SelectFallingAnimation() : MotionMatchResult{};
+        if (fall.clipIndex >= m_AnimInstance->GetAnimationCount())
         {
             // 낙상 클립을 꺼도 물리 낙상과 착지 후 기상은 계속 처리한다.
             if (IsFollowingFallingAnimation() || IsFollowingStandingUpAnimation() ||
@@ -163,7 +208,8 @@ namespace PARS
             return UpdateStandingUpAnimation(deltaTime);
         }
         // 낙상은 한 번 재생하고 착지 후 기상을 기다린다. 위치와 회전 지지는 이미 해제된 상태다.
-        if (!m_AnimInstance->TransitionToAnimation(fallClip, .2f, false))
+        const std::vector<GraphNode>* previous = m_ImpactFlail.pose.empty() && m_CrossStepPose.empty() ? nullptr : &GetRagdollAnimationPose();
+        if (!m_AnimInstance->TransitionToAnimation(fall.clipIndex, .2f, false, fall.clipTimeSeconds, previous))
         {
             m_PhysicsError = "Cannot transition to the falling animation.";
             return false;
@@ -658,6 +704,11 @@ namespace PARS
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const FootstepSnapshot& step = sample.footstep;
 
+        if (IsGroundFallActive() && IsFollowingFallingAnimation())
+        {
+            // 지상 낙상 클립이 시작된 뒤에는 팔과 다리도 선택된 전신 자세를 따른다.
+            return true;
+        }
         if (step.backwardFallStepsRemaining > 0)
         {
             // 낙상 클립의 상체를 유지하고 지면을 짚는 다리에만 목표를 적용한다.
@@ -847,7 +898,7 @@ namespace PARS
         // 복귀 중에는 캡처한 물리 자세에서 현재 애니메이션 자세로 보간
         if (recovery.state == RecoveryState::Animation && recovery.blending)
         {
-            std::vector<GraphNode> pose = m_AnimInstance->GetPose();
+            std::vector<GraphNode> pose = GetImpactAnimationPose();
             if (m_RecoveryBlendSource.size() != pose.size() || !BlendRecoveryPose(m_RecoveryBlendSource, pose, recovery.blendAlpha))
             {
                 m_PhysicsError = "Invalid physical pose in animation recovery.";

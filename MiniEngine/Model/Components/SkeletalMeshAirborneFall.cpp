@@ -48,6 +48,7 @@ namespace PARS
 
     void SkeletalMeshComponent::ResetAirborneFall()
     {
+        m_ImpactFlail = {};
         if (IsFalling() && m_StandingIdleAnimationIndex < m_AnimInstance->GetAnimationCount())
         {
             m_AnimInstance->TransitionToAnimation(m_StandingIdleAnimationIndex, .15f);

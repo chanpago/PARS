@@ -13,6 +13,9 @@ namespace PARS
     {
         Idle,
         Walking,
+        FlailFront,
+        FlailBack,
+        ShoveFall,
         Count
     };
 
@@ -53,6 +56,8 @@ namespace PARS
         std::array<DirectX::XMFLOAT3, 2> footPositions{};
         // 골반 기준 발 위치의 변화율(m/s).
         std::array<DirectX::XMFLOAT3, 2> footVelocities{};
+        // 충격 반응은 골반 기준 양손과 머리의 위치로 현재 상체와 가까운 자세를 찾는다.
+        std::array<DirectX::XMFLOAT3, 3> upperBodyPositions{};
         // 예측 시간 동안의 골반 변위(m)를 로컬 X(좌우), Y(상하), Z(전후) 순서로 저장한다.
         // 클립 후보에는 실제 변위를, 검색 입력에는 원하는 변위를 담는다.
         DirectX::XMFLOAT3 futureDisplacement{};

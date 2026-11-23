@@ -12,6 +12,7 @@
 #include <functional>
 #include <limits>
 #include <array>
+#include <cstring>
 
 namespace
 {
@@ -48,7 +49,15 @@ namespace
         {
             walkingFrameCount += clip.frameCount;
         }
-        check(frames.size() == kIdleClip.frameCount + walkingFrameCount, "Only the selected clips contribute motion candidates");
+        size_t total = kIdleClip.frameCount + walkingFrameCount;
+        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::FlailFront, PARS::MotionFrameUsage::FlailBack,
+            PARS::MotionFrameUsage::ShoveFall})
+        {
+            const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
+            check(range.firstFrameIndex == total, "Impact frames follow the previous usage without a gap");
+            total += range.frameCount;
+        }
+        check(frames.size() == total, "Only the selected clips contribute motion candidates");
         for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::Idle, PARS::MotionFrameUsage::Walking})
         {
             const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
@@ -180,6 +189,61 @@ namespace
             << " backward_lift_time_ratio=" << settings.backwardLiftTimeRatio << std::endl;
     }
 
+    void CheckImpactMotionClips(const PARS::SkeletalMeshComponent& mesh, const std::function<void(bool, const char*)>& check)
+    {
+        const PARS::AnimInstance& animation = mesh.GetAnimInstance();
+        PARS::PhysicsSkeleton skeleton;
+        std::string error;
+        check(mesh.BuildPhysicsSkeleton(skeleton, error), "Resolve the live dummy skeleton for the upper-body mask");
+        const std::array<const char*, 6> names = {"FlailFront", "FlailBack", "ShoveFallForward", "ShoveFallBackward", "ShoveFallLeft", "ShoveFallRight"};
+        size_t slot = 0;
+        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::FlailFront, PARS::MotionFrameUsage::FlailBack, PARS::MotionFrameUsage::ShoveFall})
+        {
+            const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
+            uint32_t previous = UINT32_MAX;
+            for (size_t index = range.firstFrameIndex; index < range.firstFrameIndex + range.frameCount; ++index)
+            {
+                const PARS::MotionFrame& frame = animation.GetMotionFrames()[index];
+                if (frame.clipIndex == previous)
+                {
+                    continue;
+                }
+                previous = frame.clipIndex;
+                check(slot < names.size() && animation.GetAnimationName(previous) == names[slot], "Registered impact clip has the requested direction");
+                ++slot;
+                const PARS::MotionMatchResult match = animation.FindImpactPoseMatch(usage, previous);
+                check(match.clipIndex == previous && std::isfinite(match.score) && match.clipTimeSeconds < animation.GetAnimationDuration(previous),
+                    "Live physical pose matches a playable frame of the directional clip");
+                if (usage == PARS::MotionFrameUsage::ShoveFall)
+                {
+                    continue;
+                }
+                std::vector<GraphNode> layer;
+                std::vector<GraphNode> authored;
+                check(animation.SampleAnimationPose(previous, .3f, authored) && animation.SampleUpperBodyPose(previous, .3f, 1, layer),
+                    "Sample the authored and upper-body impact poses");
+                bool movesUpperBody = false;
+                bool matchesMask = true;
+                for (size_t node = 0; node < layer.size(); ++node)
+                {
+                    int ancestor = static_cast<int>(node);
+                    while (ancestor >= 0 && skeleton.names[ancestor].substr(skeleton.names[ancestor].rfind(':') + 1) != "Spine")
+                    {
+                        ancestor = skeleton.parents[ancestor];
+                    }
+                    const GraphNode& base = animation.GetPose()[node];
+                    const GraphNode& expected = ancestor >= 0 ? authored[node] : base;
+                    movesUpperBody |= ancestor >= 0 && std::memcmp(&layer[node].rotation, &base.rotation, sizeof(base.rotation)) != 0;
+                    matchesMask &= std::memcmp(&layer[node].rotation, &expected.rotation, sizeof(expected.rotation)) == 0 &&
+                        std::memcmp(&layer[node].scale, &expected.scale, sizeof(expected.scale)) == 0 &&
+                        Math::LengthSquare(Math::Vector3(layer[node].xform.GetW()) - Math::Vector3(expected.xform.GetW())) < 1e-10f;
+                }
+                check(matchesMask && movesUpperBody, "Spine and descendants follow Flail while the pelvis and legs keep the base pose");
+            }
+        }
+        check(slot == names.size(), "Both flails and all four shove falls are indexed on the shared dummy database");
+    }
+
     void WriteLandingComHeader(std::ostream& stream)
     {
         stream << "frame,physics_step,side,mode,root_release,recovery,phase,started,landed,moving,grounded,locked,"
@@ -191,7 +255,7 @@ namespace
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state,"
             "actual_com_outside_b,outside_b_time_s,"
-            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,swing_target_y,backward_fall_steps_remaining\n";
+            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,swing_target_y,backward_fall_steps_remaining,upper_body_clip,upper_body_time_s\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -248,7 +312,13 @@ namespace
                 const float ahead = command.motion.hasSupportDeadline ? static_cast<float>(PhysicsWorld::FixedDeltaTime) : 0.0f;
                 stream << PARS::SampleFootstepPosition(command, ahead).y;
             }
-            stream << ',' << support.footstep.backwardFallStepsRemaining << '\n';
+            const uint32_t upper = mesh.GetImpactFlailClip();
+            stream << ',' << support.footstep.backwardFallStepsRemaining << ',';
+            if (upper < animation.GetAnimationCount())
+            {
+                stream << animation.GetAnimationName(upper);
+            }
+            stream << ',' << mesh.GetImpactFlailTime() << '\n';
         }
     }
 
@@ -1010,6 +1080,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(&candidates == &playerAnimation.GetMotionFrames(),
             "Player and impact dummy share the initialized motion frames");
         CheckMotionFrameRanges(dummyAnimation, kWalkingClips, check);
+        CheckImpactMotionClips(dummy->GetMesh(), check);
 
         PARS::AnimInstance mixedClips(player.GetMesh());
         mixedClips.Initialize(player.GetMesh().GetSkeletalMesh());

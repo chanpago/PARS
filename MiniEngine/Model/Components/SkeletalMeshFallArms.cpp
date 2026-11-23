@@ -62,7 +62,6 @@ namespace
 
 void SkeletalMeshComponent::ResetFallArms()
 {
-    m_FallArmBrace.Reset();
     m_ImpactHandReach = {};
     m_Ragdoll.SetArmDriveScales({1.0f, 1.0f});
 }
@@ -254,31 +253,15 @@ void SkeletalMeshComponent::InitializeFallArms()
     }
 }
 
-void SkeletalMeshComponent::ApplyArmTargets(std::vector<Matrix4>& target, float deltaTime)
+void SkeletalMeshComponent::ApplyArmTargets(std::vector<Matrix4>& target)
 {
-    World* world = GetOwner().GetWorld();
-    PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
-    if (!IsActiveRagdoll() || !physics)
+    if (m_ImpactHandReach.body < 0)
     {
-        ResetFallArms();
         return;
     }
-    const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
-    const bool canProtect = m_AutomaticRootSupport && m_StandingUpState == StandingUpState::None;
-    const bool falling = IsGroundFallActive();
-    // B 밖에서 회복 스텝을 밟는 동안에도 팔은 충돌에 대비한다.
-    const bool preparing = canProtect && m_RootSupportRelease == RootSupportRelease::None &&
-        support.balance.zone == FootSupportZone::Outside;
-    const bool requested = falling || preparing;
-    if (falling || m_StandingUpState != StandingUpState::None)
-    {
-        m_ImpactHandReach = {};
-    }
-    // 균형을 다시 잡는 동안은 손 짚기에 양보한다. 실제 낙상에 들어가면 피격 동작을 끝낸다.
-    const bool touchingHit = m_ImpactHandReach.body >= 0 && !(preparing && m_FallArmSettings.enabled);
-    if (!touchingHit && (!m_FallArmSettings.enabled || !std::isfinite(m_FallArmSettings.trackingStrength) ||
-        m_FallArmSettings.trackingStrength < 0 || m_FallArmSettings.trackingStrength > 1 ||
-        (!requested && !m_FallArmBrace.GetSnapshot().active)))
+    World* world = GetOwner().GetWorld();
+    PhysicsWorld* physics = world ? world->GetPhysicsWorld() : nullptr;
+    if (!physics || IsGroundFallActive() || IsFalling() || m_StandingUpState != StandingUpState::None)
     {
         ResetFallArms();
         return;
@@ -293,69 +276,18 @@ void SkeletalMeshComponent::ApplyArmTargets(std::vector<Matrix4>& target, float 
     {
         frames.push_back(ToFrame(matrix));
     }
-    FallArmInput input;
-    // 발 샘플의 리비전은 물리 월드 시계 재설정과 래그돌 재생성을 함께 반영한다.
-    input.revision = support.contactRevision;
-    input.completedStep = physics->GetStepCount();
-    input.deltaTime = deltaTime;
-    input.falling = falling;
-    input.preparing = preparing;
-    for (size_t side = 0; side < input.arms.size(); ++side)
+    std::array<FallArmSample, 2> arms;
+    for (size_t side = 0; side < arms.size(); ++side)
     {
-        FallArmSample& arm = input.arms[side];
+        FallArmSample& arm = arms[side];
         arm.setup = m_FallArmSetups[side];
-        if (!arm.setup.available)
+        if (arm.setup.available)
         {
-            continue;
+            arm.actualAnchor = ToFrame(m_Ragdoll.GetBoneWorld(arm.setup.anchorBody));
+            arm.actualHand = ToFrame(m_Ragdoll.GetBoneWorld(arm.setup.handBody));
         }
-        arm.actualAnchor = ToFrame(m_Ragdoll.GetBoneWorld(arm.setup.anchorBody));
-        arm.actualHand = ToFrame(m_Ragdoll.GetBoneWorld(arm.setup.handBody));
-        if (touchingHit)
-        {
-            continue;
-        }
-        const PxTransform mapping = arm.actualAnchor * frames[arm.setup.anchorNode].getInverse();
-        const PxVec3 shoulder = (mapping * frames[arm.setup.shoulderNode]).p;
-        arm.shoulderVelocity = m_Ragdoll.GetBodyPointVelocity(arm.setup.anchorBody, shoulder);
-        PhysicsGroundContact contact;
-        arm.touching = m_Ragdoll.GetBodyGroundContact(arm.setup.handBody, contact);
-        arm.contactPosition = contact.position;
-        arm.contactNormal = contact.normal;
     }
-    if (touchingHit)
-    {
-        m_FallArmBrace.Reset();
-        FallArmSnapshot corrected;
-        ApplyImpactHandReach(*physics, input.arms, frames, corrected);
-        WriteArmPose(frames, corrected.correctedNodes, target);
-        return;
-    }
-    const int root = m_Ragdoll.GetImpactRootBody();
-    PhysicsGroundContact rootContact;
-    Vector3 velocity(kZero);
-    input.bodySettled = root >= 0 && m_Ragdoll.GetBodyGroundContact(root, rootContact) &&
-        m_Ragdoll.GetCenterOfMassVelocity(velocity) && float(Length(velocity)) <= m_RecoverySettings.maximumReturnSpeed;
-    const FallArmGroundQuery query = [&](const PxVec3& origin, float distance, PxVec3& position, PxVec3& normal) -> bool
-    {
-        PxRaycastHit hit;
-        if (!physics->Raycast(origin, PxVec3(0, -distance, 0), hit, &GetOwner()))
-        {
-            return false;
-        }
-        position = hit.position;
-        normal = hit.normal;
-        return true;
-    };
-    m_FallArmBrace.Apply(input, m_FallArmSettings, m_PhysicsSkeleton.parents, query, frames);
-    const FallArmSnapshot& snapshot = m_FallArmBrace.GetSnapshot();
-    WriteArmPose(frames, snapshot.correctedNodes, target);
-    if (requested)
-    {
-        m_Ragdoll.SetArmDriveScales({snapshot.arms[0].driveScale, snapshot.arms[1].driveScale}, m_FallArmSettings.trackingStrength);
-    }
-    else
-    {
-        // 회복하면 사용자 기본 강도를 복원하고, 남아 있는 팔 자세 보정만 부드럽게 해제한다.
-        m_Ragdoll.SetArmDriveScales({1.0f, 1.0f});
-    }
+    FallArmSnapshot corrected;
+    ApplyImpactHandReach(*physics, arms, frames, corrected);
+    WriteArmPose(frames, corrected.correctedNodes, target);
 }

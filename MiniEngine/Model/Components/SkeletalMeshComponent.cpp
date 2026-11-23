@@ -101,6 +101,7 @@ namespace PARS
             }
         }
         m_Ragdoll.Swap(candidate);
+        m_ImpactFlail = {};
         ResetCrossStepPlayback();
         ResetFallArms();
         m_FallArmsInitialized = false;
@@ -191,6 +192,7 @@ namespace PARS
         m_Ragdoll.SetHorizontalSupportForce(physx::PxVec3(0));
         UpdateFootSupport();
         ImpactHandReach hit;
+        bool longitudinalImpact = false;
         if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()))
         {
             const std::vector<RagdollBodyImpulse>& impacts = m_Ragdoll.GetExternalImpacts();
@@ -198,6 +200,15 @@ namespace PARS
             if (!IsFalling() && !IsGroundFallActive() && m_StandingUpState == StandingUpState::None)
             {
                 hit = FindImpactHandReach(impacts);
+                physx::PxVec3 impulse(0);
+                for (const RagdollBodyImpulse& contact : impacts)
+                {
+                    impulse += contact.impulse;
+                }
+                const Math::Vector3 facing(GetComponentTransform().GetZ());
+                const float axial = float(facing.GetX()) * impulse.x + float(facing.GetZ()) * impulse.z;
+                const float lateral = float(facing.GetZ()) * impulse.x - float(facing.GetX()) * impulse.z;
+                longitudinalImpact = std::abs(axial) > 1e-5f && std::abs(axial) >= std::abs(lateral);
             }
             if (IsActiveRagdoll())
             {
@@ -244,6 +255,7 @@ namespace PARS
         if (IsActiveRagdoll())
         {
             std::vector<Math::Matrix4> target;
+            UpdateImpactFlail(longitudinalImpact, deltaTime);
 
             // 이 부분에서 액티브 래그돌 물리처리를한다(pd구동 및 추가보상토크계산)
             // EvaluateAnimationPhysicsPose부분에서 이번 프레임의 애니메이션의 목표 본 자세를 월드 기준으로 계산하고 target에 저장한다.
@@ -257,14 +269,14 @@ namespace PARS
             //      - 골반보정
             //      - 타겟을 목표로 유효관성을 계산하고 중력보상, 코리올리-원심력 보상을 토크값에 더함
             //      - 각 관절의 각 축에 얼마만큼의 PD를 적용시킬지 계산
-            bool evaluated = fallingTargetReady && EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError);
+            bool evaluated = fallingTargetReady && EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, target, m_PhysicsError, &GetImpactAnimationPose());
             if (evaluated && !IsFalling())
             {
                 evaluated = ApplyRecoveryTargets(target, deltaTime);
                 if (evaluated)
                 {
                     UpdateHorizontalBalance(deltaTime);
-                    ApplyArmTargets(target, deltaTime);
+                    ApplyArmTargets(target);
                 }
             }
             if (!evaluated || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))

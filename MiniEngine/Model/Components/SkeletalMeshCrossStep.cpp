@@ -49,7 +49,7 @@ namespace PARS
         // 실제 이륙을 기준으로 선택 프레임에서 같은 발의 착지 프레임까지 진행한다.
         playback.timeSeconds = m_AnimInstance->GetWalkingPlaybackTime(playback.match,
             command.motion.progress * playback.match.remainingSwingTime);
-        const std::vector<GraphNode>& base = m_AnimInstance->GetPose();
+        const std::vector<GraphNode>& base = GetImpactAnimationPose();
         if (!m_AnimInstance->SampleAnimationPose(playback.match.clipIndex, playback.timeSeconds, m_CrossStepPose) ||
             m_CrossStepPose.size() != base.size() || m_PhysicsSkeleton.parents.size() != base.size())
         {

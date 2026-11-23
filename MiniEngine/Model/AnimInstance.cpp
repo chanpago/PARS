@@ -105,9 +105,11 @@ namespace PARS
         EvaluatePose();
     }
 
-    bool AnimInstance::TransitionToAnimation(uint32_t index, float duration, bool loop, float startTime)
+    bool AnimInstance::TransitionToAnimation(uint32_t index, float duration, bool loop, float startTime,
+        const std::vector<GraphNode>* sourcePose)
     {
-        if (index >= m_Clips.size() || !std::isfinite(duration) || !std::isfinite(startTime) || startTime < 0.0f)
+        if (index >= m_Clips.size() || !std::isfinite(duration) || !std::isfinite(startTime) || startTime < 0.0f ||
+            (sourcePose && sourcePose->size() != m_Pose.size()))
         {
             return false;
         }
@@ -121,11 +123,11 @@ namespace PARS
         }
         // 일반 전환은 이전 클립도 계속 재생한다. 전환 도중 재전환할 때는 현재 혼합 포즈를
         // 시작점으로 보존해, 아직 덜 섞인 이전 목표 클립으로 자세가 튀지 않게 한다.
-        m_AdvanceBlendSource = m_Playing && !IsBlending();
+        m_AdvanceBlendSource = !sourcePose && m_Playing && !IsBlending();
         m_BlendSourceClip = m_CurrentClip;
         m_BlendSourceTime = m_Time;
         m_BlendSourceLoop = m_Loop;
-        m_BlendSource = m_Pose;
+        m_BlendSource = sourcePose ? *sourcePose : m_Pose;
         m_BlendElapsed = 0.0f;
         m_BlendDuration = duration;
         m_CurrentClip = index;
