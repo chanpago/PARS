@@ -69,7 +69,7 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const Phys
     dummy->GetCapsuleComponent().SetPhysicsEnabled(false);
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
     mesh.SetFootCandidateDebugVisible(true);
-    mesh.SetArmDriveStrength(.1f);
+    mesh.SetArmDriveStrength(1.0f);
     if (!mesh.SetSkeletalMesh(idle))
     {
         m_Message = u8"더미 메시를 초기화하지 못했습니다.";
