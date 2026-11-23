@@ -370,8 +370,10 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
 
     // 애니메이션 전환 중이 아니고 현재 클립이름이 idle일때만 true
     const bool idle = !animation.IsBlending() && animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle";
+    const bool continuingFallSteps = m_FootstepPlanner.GetSnapshot().backwardFallStepsRemaining > 0;
+    const bool planningSteps = idle || continuingFallSteps;
 
-    if (m_IdleReferenceRevision != m_Snapshot.contactRevision || !idle)
+    if (m_IdleReferenceRevision != m_Snapshot.contactRevision || !planningSteps)
     {
         m_HasIdleReference = false;
         m_IdleReferenceRevision = m_Snapshot.contactRevision;
@@ -411,7 +413,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     FootstepInput input;
     FootstepLandingQuery landingQuery;
     std::array<FootstepReachInput, 2> reaches;
-    if (m_FootstepSettings.recovery.enabled && idle && mesh.UsesAutomaticRootSupport())
+    if (m_FootstepSettings.recovery.enabled && planningSteps && mesh.UsesAutomaticRootSupport())
     {
         landingQuery.Prepare(mesh, m_Snapshot, reaches);
         input.acceptsLanding = [&landingQuery](size_t side, const PxVec3& position) -> bool
@@ -430,12 +432,21 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.hull = m_Snapshot.hull;
     input.bufferHull = m_Snapshot.balance.bufferHull;
     input.zone = m_Snapshot.balance.zone;
+    input.hasFloorProjection = m_Snapshot.projectedPointCount > 0;
     input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
     input.fixedDeltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
     input.bodyWeight = m_Snapshot.totalMass * 9.81f;
     // 실제 루트 충격점과 각 발 사이의 수평 거리로 명령 대상을 고른다.
     const Ragdoll& ragdoll = mesh.GetRagdoll();
     const int root = ragdoll.GetImpactRootBody();
+    input.fallingBackward = input.active && input.automaticSupport && idle && !input.rootReleased &&
+        (input.zone == FootSupportZone::Outside || input.zone == FootSupportZone::Invalid) &&
+        mesh.GetGroundFallDirection() == FallDirection::Backward;
+    if (root >= 0 && (input.fallingBackward || continuingFallSteps))
+    {
+        PhysicsGroundContact contact;
+        input.pelvisGrounded = ragdoll.GetBodyGroundContact(static_cast<size_t>(root), contact);
+    }
     float impactWeight = 0;
     if (input.active && root >= 0)
     {
@@ -506,6 +517,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.available = foot.available;
         target.hasContactSample = foot.contact.hasSample;
         target.grounded = foot.contact.grounded;
+        target.landed = foot.contact.landed;
         target.position = ToPx(Vector3(foot.soleWorld.GetW()));
         target.contactPosition = foot.contact.position;
         target.normal = foot.contact.normal;
@@ -514,7 +526,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         target.corners = foot.corners;
         target.hasSoleRectangle = foot.available;
         const Sole& sole = m_Feet[side];
-        if (input.active && input.automaticSupport && idle && foot.available && foot.leg.available &&
+        if (input.active && input.automaticSupport && planningSteps && foot.available && foot.leg.available &&
             foot.contact.hasSample && foot.contact.grounded && sole.hipBodyIndex >= 0)
         {
             const PxVec3 hip = ToPx(Vector3(ragdoll.GetBoneWorld(sole.hipBodyIndex).GetW()));

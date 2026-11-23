@@ -48,7 +48,7 @@ namespace PARS
         return IsFallingClip(current) || (IsFalling() && IsAirborneFallClip(current));
     }
 
-    uint32_t SkeletalMeshComponent::SelectFallingAnimation() const
+    FallDirection SkeletalMeshComponent::GetGroundFallDirection() const
     {
         const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
         PxVec3 travel = support.centerOfMassVelocity;
@@ -57,12 +57,12 @@ namespace PARS
             // 천천히 쓰러질 때는 지지 영역 밖으로 기운 쪽을 사용한다.
             if (!support.hasCenterOfMass || !support.balance.hasDirection || support.balance.zone == FootSupportZone::Inside)
             {
-                return m_FallingAnimationIndex;
+                return FallDirection::Count;
             }
             travel = support.centerOfMass - support.balance.center;
             if (!travel.isFinite() || std::hypot(travel.x, travel.z) < 0.02f)
             {
-                return m_FallingAnimationIndex;
+                return FallDirection::Count;
             }
         }
 
@@ -72,16 +72,21 @@ namespace PARS
         const float left = float(facing.GetZ()) * travel.x - float(facing.GetX()) * travel.z;
         if (!std::isfinite(forward) || !std::isfinite(left) || (forward == 0.0f && left == 0.0f))
         {
-            return m_FallingAnimationIndex;
+            return FallDirection::Count;
         }
-        FallDirection direction;
         if (std::abs(forward) >= std::abs(left))
         {
-            direction = forward >= 0.0f ? FallDirection::Forward : FallDirection::Backward;
+            return forward >= 0.0f ? FallDirection::Forward : FallDirection::Backward;
         }
-        else
+        return left >= 0.0f ? FallDirection::Left : FallDirection::Right;
+    }
+
+    uint32_t SkeletalMeshComponent::SelectFallingAnimation() const
+    {
+        const FallDirection direction = GetGroundFallDirection();
+        if (direction == FallDirection::Count)
         {
-            direction = left >= 0.0f ? FallDirection::Left : FallDirection::Right;
+            return m_FallingAnimationIndex;
         }
         const uint32_t index = m_DirectionalFallingAnimations[static_cast<size_t>(direction)];
         return index < m_AnimInstance->GetAnimationCount() ? index : m_FallingAnimationIndex;
@@ -465,7 +470,8 @@ namespace PARS
             return m_Ragdoll.SetRootSupported(!releaseRoot, m_PhysicsError);
         }
         // 이번 틱에 발딛기를 포기한 경우도 낙상 경로에 맡겨, 서기 복귀가 먼저 시작되지 않게 한다.
-        if (!IsActiveRagdoll() || IsFalling() || IsGroundFallActive() || sample.footstep.aborted)
+        if (!IsActiveRagdoll() || IsFalling() || IsGroundFallActive() ||
+            sample.footstep.aborted || sample.footstep.backwardFallStepsRemaining > 0)
         {
             m_KinematicRecoveryTimer.Reset();
             return true;
@@ -649,6 +655,13 @@ namespace PARS
         // UpdateFootSupport() 에서 계산한 발 지지 정보와 발딛기 결과를 가져옴
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const FootstepSnapshot& step = sample.footstep;
+
+        if (step.backwardFallStepsRemaining > 0)
+        {
+            // 낙상 클립의 상체를 유지하고 지면을 짚는 다리에만 목표를 적용한다.
+            ApplyFootstepIKTargets(target, deltaTime);
+            return true;
+        }
 
         // 현재 애니메이션이 안정적으로 idle을 재생 중인지 확인
         // 애니메이션 클립사이의 전환 보간 중이 아니여야함. 현재 재생 중인 애니메이션 이름이 idle

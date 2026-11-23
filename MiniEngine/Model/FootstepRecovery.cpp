@@ -455,6 +455,15 @@ namespace
         {
             std::stable_sort(candidates.begin(), candidates.end());
         }
+        if (input.backwardFall && input.previousMode == FootstepMode::Normal && !result.reachable[0].empty())
+        {
+            // 이미 넘어지는 중에는 골반 아래에서 짧게 짚을 수 있는 자세를 같은 검사 예산 안에서 먼저 찾는다.
+            const FootstepPolygon& reach = result.reachable[0];
+            const PxVec3 underHip = ClosestFootstepPoint(reach, result.normalReach.center);
+            const PxVec3 towardFall = ClosestFootstepPoint(reach, input.preferred);
+            const PxVec3 underFoot = ClosestFootstepPoint(reach, input.feet[input.movingFoot].stepOrigin);
+            candidates.insert(candidates.begin(), {{0, (underHip + towardFall) * .5f, 0}, {0, underHip, 0}, {0, underFoot, 0}});
+        }
         for (const LandingCandidate& candidate : candidates)
         {
             if (!TryLandingPose(input, settings.maximumPoseChecks, candidate.position, tested, result))
@@ -468,10 +477,10 @@ namespace
             result.target = candidate.position;
             result.mode = static_cast<FootstepMode>(candidate.mode);
             result.hasTarget = true;
-            result.modelFeasible = hasOverlap;
-            result.status = hasOverlap ? FootstepRecoveryStatus::Feasible : FootstepRecoveryStatus::BestEffort;
+            result.modelFeasible = hasOverlap && (!input.backwardFall || Contains(result.intersections[candidate.mode], candidate.position));
+            result.status = result.modelFeasible ? FootstepRecoveryStatus::Feasible : FootstepRecoveryStatus::BestEffort;
             // 기존 착지점을 확보한 뒤에만 남은 검사 한 번으로 이동발 바깥쪽 보정을 시도한다.
-            if (hasOverlap && result.mode == FootstepMode::Normal && result.poseChecks < settings.maximumPoseChecks &&
+            if (result.modelFeasible && result.mode == FootstepMode::Normal && result.poseChecks < settings.maximumPoseChecks &&
                 std::isfinite(input.idleLateralOffset) && input.idleLateralOffset > 0)
             {
                 const float outwardDistance = input.idleLateralOffset * NormalIdleOffsetScale;

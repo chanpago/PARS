@@ -79,6 +79,7 @@ namespace PARS
         bool stepping = false;
         bool locked = false;
         bool hasRejectedTarget = false;
+        bool backwardFall = false;
     };
 
     struct FootstepNormalReach

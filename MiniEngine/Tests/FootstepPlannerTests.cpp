@@ -496,6 +496,120 @@ namespace
         Check(state.aborted && state.abortCount == 1, "Re-entry after timeout keeps the fall latched");
     }
 
+    void TestBackwardFallSteps()
+    {
+        FootstepPlanner planner;
+        const FootstepSettings settings = TestSettings();
+        FootstepInput input = Standing();
+        input.fallingBackward = true;
+        input.com.z = -.45f;
+        input.velocity.z = -.5f;
+        input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+        planner.Update(input, settings);
+        const FootstepSnapshot& state = planner.GetSnapshot();
+        input.feet[1].grounded = false;
+        Advance(planner, input, settings, 18);
+        Check(state.backwardFallStepsRemaining == 2 && state.feet[1].IsInProgress() && state.startCount == 1,
+            "A backward fall keeps the airborne first step at the normal fall threshold");
+        input.rootReleased = true;
+        input.idleAnimation = false;
+        input.fallingBackward = false;
+        Advance(planner, input, settings);
+        Check(state.feet[1].motion.valid && state.landingCount == 0 && !state.aborted,
+            "Releasing the pelvis and switching to a fall clip preserve the swing");
+
+        input.feet[1].grounded = true;
+        Advance(planner, input, settings);
+        planner.Update(input, settings);
+        Check(state.backwardFallStepsRemaining == 1 && state.landingCount == 1 && state.startCount == 1,
+            "The first physical landing counts once and does not immediately lift the other foot");
+        input.com.z = -.05f;
+        input.zone = FootSupportZone::Inside;
+        input.velocity.z = 0;
+        input.feet[1].normalImpulse = 0;
+        Advance(planner, input, settings, 4);
+        Check(state.startCount == 1 && state.backwardFallStepsRemaining == 1,
+            "The opposite leg waits for the foot that landed to take the load");
+        input.feet[1].normalImpulse = input.bodyWeight * input.fixedDeltaTime;
+        Advance(planner, input, settings, 4);
+        Check(state.startCount == 2 && state.feet[0].IsInProgress() && state.feet[0].motion.valid,
+            "The other leg can step during the fall even after the COM re-enters the hull");
+        input.feet[0].grounded = false;
+        Advance(planner, input, settings);
+        input.feet[0].grounded = true;
+        Advance(planner, input, settings);
+        Check(state.feet[0].justLanded && state.landingCount == 2 && state.backwardFallStepsRemaining == 0 &&
+                state.aborted && !state.IsInProgress(), "The second real landing ends backward fall stepping");
+        Advance(planner, input, settings, 8);
+        Check(state.startCount == 2 && state.abortCount == 1, "A latched fall cannot start a third step");
+
+        planner.Reset();
+        input = Standing();
+        input.requestedFoot = 1;
+        input.feet[1].grounded = false;
+        planner.Update(input, settings);
+        input.feet[1].grounded = true;
+        Advance(planner, input, settings);
+        Check(state.followupFoot == 0, "Ordinary recovery queues the foot opposite its last landing");
+        input.zone = FootSupportZone::Invalid;
+        input.fallingBackward = true;
+        input.feet[1].grounded = false;
+        input.feet[0].timeToReachLimit = .25f;
+        Advance(planner, input, settings);
+        Check(state.feet[1].justStarted && state.feet[1].motion.hasSupportDeadline,
+            "A backward fall takes over the free foot even when ordinary recovery had queued the planted foot");
+        input.rootReleased = true;
+        input.feet[1].grounded = true;
+        input.feet[1].landed = true;
+        input.feet[1].normalImpulse = .01f;
+        input.feet[0].grounded = false;
+        input.feet[0].position.y += .1f;
+        input.velocity = PxVec3(0);
+        Advance(planner, input, settings);
+        Check(state.feet[0].justStarted && state.feet[0].hasTakenOff && state.feet[0].motion.valid &&
+                Near(state.feet[0].motion.initialHeight, 0) && state.feet[1].justLanded && state.backwardFallStepsRemaining == 1,
+            "An already airborne foot can reach straight down without another takeoff or a standing load");
+    }
+
+    void TestBackwardFallInterruptions()
+    {
+        FootstepPlanner planner;
+        const FootstepSettings settings = TestSettings();
+        FootstepInput input = Standing();
+        input.zone = FootSupportZone::Invalid;
+        input.hull.clear();
+        input.fallingBackward = true;
+        planner.Update(input, settings);
+        const FootstepSnapshot& state = planner.GetSnapshot();
+        Check(state.backwardFallStepsRemaining == 2, "A grounded backward fall can start when the support hull is lost");
+        input.rootReleased = true;
+        input.pelvisGrounded = true;
+        Advance(planner, input, settings);
+        Check(state.aborted && state.landingCount == 0, "Pelvis contact ends the attempt without crediting a step");
+
+        planner.Reset();
+        input.rootReleased = false;
+        input.pelvisGrounded = false;
+        planner.Update(input, settings);
+        input.feet[0].grounded = false;
+        input.feet[1].grounded = false;
+        input.hasFloorProjection = true;
+        Advance(planner, input, settings);
+        Check(!state.aborted, "A remaining floor ray keeps the falling swing active without a complete support hull");
+        input.hasFloorProjection = false;
+        Advance(planner, input, settings);
+        Check(state.aborted && state.backwardFallStepsRemaining == 0, "Losing the floor ends the remaining attempts");
+
+        planner.Reset();
+        input.feet[0].grounded = true;
+        input.feet[1].grounded = true;
+        planner.Update(input, settings);
+        input.rootReleased = true;
+        Advance(planner, input, settings, 38);
+        Check(state.aborted && state.landingCount == 0 && !state.IsInProgress(),
+            "A blocked foot times out without inventing a touchdown");
+    }
+
     void TestClockAndAbort()
     {
         FootstepPlanner planner;
@@ -1305,6 +1419,8 @@ void TestFootstepPlanner()
     TestGeometry();
     TestGatesAndInvalidData();
     TestActualComBufferTimeout();
+    TestBackwardFallSteps();
+    TestBackwardFallInterruptions();
     TestClockAndAbort();
     TestBackwardSwing();
     TestLoadedTouchdown();

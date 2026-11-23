@@ -104,6 +104,27 @@ namespace
         }
     }
 
+    void TestBackwardFallFoothold()
+    {
+        FootstepRecoveryInput input = Input();
+        input.backwardFall = true;
+        input.velocity.z = -3.0f;
+        input.preferred.z = -1.0f;
+        FootstepRecoverySettings settings;
+        settings.maximumSteps = 1;
+        settings.oneStepCaptureScale = 1.0f;
+        settings.maximumPoseChecks = 2;
+        const PxVec3 underHip(.12f, 0, 0);
+        input.acceptsTarget = [underHip](const PxVec3& position) -> bool
+        {
+            return (position - underHip).magnitudeSquared() < 1e-6f;
+        };
+        const FootstepRecoverySnapshot result = SelectFootstepRecovery(input, settings);
+        Check(result.hasTarget && result.status == FootstepRecoveryStatus::BestEffort &&
+            result.poseChecks == 2 && (result.target - underHip).magnitudeSquared() < 1e-6f,
+            "A falling character can plant under the hip within the usual pose budget when balance is out of reach");
+    }
+
     void TestNormalReachDisplay()
     {
         FootstepRecoverySettings settings;
@@ -663,6 +684,7 @@ void TestFootstepRecovery()
     checks = 0;
     TestPolygonGeometry();
     TestNormalReachDisplay();
+    TestBackwardFallFoothold();
     TestModeChoice();
     TestNearestNormalLanding();
     TestCaptureAndTiming();

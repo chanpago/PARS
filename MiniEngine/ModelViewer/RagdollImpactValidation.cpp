@@ -191,7 +191,7 @@ namespace
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state,"
             "actual_com_outside_b,outside_b_time_s,"
-            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,swing_target_y\n";
+            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,swing_target_y,backward_fall_steps_remaining\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -248,7 +248,7 @@ namespace
                 const float ahead = command.motion.hasSupportDeadline ? static_cast<float>(PhysicsWorld::FixedDeltaTime) : 0.0f;
                 stream << PARS::SampleFootstepPosition(command, ahead).y;
             }
-            stream << '\n';
+            stream << ',' << support.footstep.backwardFallStepsRemaining << '\n';
         }
     }
 
@@ -416,11 +416,13 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             {
                 const FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
                 check(support.footstep.actualComOutsideBuffer &&
-                        support.footstep.outsideBufferTime + 1e-9 >= FootstepPlanner::OutsideBufferDuration && support.footstep.aborted &&
+                        support.footstep.outsideBufferTime + 1e-9 >= FootstepPlanner::OutsideBufferDuration &&
+                        (support.footstep.aborted || (mesh.GetGroundFallDirection() == FallDirection::Backward &&
+                        support.footstep.backwardFallStepsRemaining > 0)) &&
                         !mesh.GetRagdoll().UsesFootDrivenSupport() && !mesh.GetRagdoll().IsRootSupported() &&
                         mesh.GetBalanceState() == CharacterBalanceState::GroundFall &&
                         (!mesh.IsFallingAnimationEnabled() || mesh.IsFollowingFallingAnimation()),
-                    "Continuous actual COM exit from B stops stepping and starts the ground fall in the same tick");
+                    "Continuous actual COM exit from B releases the pelvis and starts the ground fall in the same tick");
             }
             if (validateLandingRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
                 mesh.GetFootSupport().GetSnapshot().footstep.hasGroundPlane))

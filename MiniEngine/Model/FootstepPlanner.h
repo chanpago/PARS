@@ -86,6 +86,7 @@ namespace PARS
         bool available = false;
         bool hasContactSample = false;
         bool grounded = false;
+        bool landed = false;
         bool hasSoleRectangle = false;
     };
 
@@ -111,6 +112,9 @@ namespace PARS
         bool automaticSupport = false;
         bool idleAnimation = false;
         bool rootReleased = false;
+        bool fallingBackward = false;
+        bool pelvisGrounded = false;
+        bool hasFloorProjection = false;
         bool hasCom = false;
         bool hasVelocity = false;
         bool hasReference = false;
@@ -251,6 +255,7 @@ namespace PARS
     {
     public:
         bool IsInProgress() const;
+        bool HasTimedOutOutsideBuffer() const;
         float GetMaximumInitialDistance() const;
 
     public:
@@ -271,6 +276,7 @@ namespace PARS
         FootstepReason reason = FootstepReason::Inactive;
         int requestedFoot = -1;
         int followupFoot = -1;
+        uint32_t backwardFallStepsRemaining = 0;
         bool hasPrediction = false;
         bool actualComOutsideBuffer = false;
         bool needsStep = false;
@@ -288,6 +294,7 @@ namespace PARS
 
     private:
         void Abort(FootstepReason reason);
+        bool UpdateFallSteps(const FootstepInput& input, bool outsideBufferExpired);
         void UpdateMotion(FootstepCommand& command, const FootstepFootInput& foot, const FootstepInput& input);
 
     public:
@@ -298,9 +305,11 @@ namespace PARS
 
     public:
         static constexpr double OutsideBufferDuration = 0.3;
+        static constexpr uint32_t MaximumBackwardFallSteps = 2;
 
     private:
         FootstepSnapshot m_Snapshot;
+        uint64_t m_FallStepStart = 0;
         bool m_HasSample = false;
     };
 

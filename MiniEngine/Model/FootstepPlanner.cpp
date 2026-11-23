@@ -312,11 +312,16 @@ namespace
     }
 
     bool HasLandingContact(const FootstepCommand& command, const FootstepFootInput& foot,
-        const FootstepSettings& settings, bool bearingWeight)
+        const FootstepSettings& settings, bool bearingWeight, bool fallingStep)
     {
         if (!command.hasTakenOff || !foot.grounded)
         {
             return false;
+        }
+        if (fallingStep && ((foot.landed && foot.normalImpulse > 0) || bearingWeight))
+        {
+            // 넘어지면서 목표보다 일찍 바닥을 짚어도 실제 접촉이 다리를 받치면 그 자리에서 착지한다.
+            return true;
         }
         if (!command.motion.hasSupportDeadline || command.motion.progress >= 1)
         {
@@ -360,6 +365,7 @@ namespace
                 FootstepRecoveryInput::ModeSelection::GroundedNormal : FootstepRecoveryInput::ModeSelection::KeepCurrent;
         }
         request.stepping = needsStep || inProgress;
+        request.backwardFall = state.backwardFallStepsRemaining > 0;
         request.locked = inProgress && command.motion.landingTargetLocked;
         request.lockedTarget = command.target.position;
         request.previousMode = inProgress ? command.target.recovery.mode : FootstepMode::Normal;
@@ -441,6 +447,25 @@ namespace
 
     int SelectRequestedFoot(const FootstepInput& input, const FootstepSnapshot& state)
     {
+        if (state.backwardFallStepsRemaining > 0)
+        {
+            // 낙상 중에는 진행 중인 발을 먼저 착지시키고 그 발에 하중이 실리면 반대발을 든다.
+            for (size_t side = 0; side < state.feet.size(); ++side)
+            {
+                if (state.feet[side].IsInProgress())
+                {
+                    return static_cast<int>(side);
+                }
+            }
+            if (state.followupFoot >= 0)
+            {
+                return state.followupFoot;
+            }
+            if (input.feet[0].grounded != input.feet[1].grounded)
+            {
+                return input.feet[0].grounded ? 1 : 0;
+            }
+        }
         if (input.requestedFoot >= 0 && input.requestedFoot < 2)
         {
             return input.requestedFoot;
@@ -664,6 +689,11 @@ bool FootstepSnapshot::IsInProgress() const
     return feet[0].IsInProgress() || feet[1].IsInProgress();
 }
 
+bool FootstepSnapshot::HasTimedOutOutsideBuffer() const
+{
+    return actualComOutsideBuffer && outsideBufferTime + 1e-9 >= FootstepPlanner::OutsideBufferDuration;
+}
+
 float FootstepSnapshot::GetMaximumInitialDistance() const
 {
     float distance = 0;
@@ -680,6 +710,7 @@ float FootstepSnapshot::GetMaximumInitialDistance() const
 void FootstepPlanner::Reset()
 {
     m_Snapshot = {};
+    m_FallStepStart = 0;
     m_HasSample = false;
 }
 
@@ -690,6 +721,7 @@ void FootstepPlanner::Abort(FootstepReason reason)
         ++m_Snapshot.abortCount;
     }
     m_Snapshot.aborted = true;
+    m_Snapshot.backwardFallStepsRemaining = 0;
     m_Snapshot.reason = reason;
     m_Snapshot.followupFoot = -1;
     m_Snapshot.candidates = {};
@@ -702,6 +734,37 @@ void FootstepPlanner::Abort(FootstepReason reason)
         command.motion.valid = false;
         command.landingComDirection = FootstepLandingDirection::None;
     }
+}
+
+bool FootstepPlanner::UpdateFallSteps(const FootstepInput& input, bool outsideBufferExpired)
+{
+    const bool hasFloor = input.hasFloorProjection || !input.hull.empty() || input.feet[0].grounded || input.feet[1].grounded;
+    const bool canStep = hasFloor && !input.pelvisGrounded && input.hasReference && input.hasCom && input.hasVelocity &&
+        std::isfinite(input.fixedDeltaTime) && input.fixedDeltaTime > 0 && input.feet[0].available && input.feet[1].available &&
+        input.feet[0].hasContactSample && input.feet[1].hasContactSample;
+    if (m_Snapshot.backwardFallStepsRemaining > 0)
+    {
+        // 발 들기와 착지를 기다릴 시간을 주되 헛디딘 다리가 지면을 계속 붙잡지 않게 한다.
+        const double elapsed = static_cast<double>(input.completedStep - m_FallStepStart) * input.fixedDeltaTime;
+        if (!canStep || elapsed >= 2.0 * MaximumFootstepDuration)
+        {
+            Abort(FootstepReason::RootSupportReleased);
+            return false;
+        }
+    }
+    else if (canStep && input.fallingBackward && (outsideBufferExpired || input.zone == FootSupportZone::Invalid))
+    {
+        m_Snapshot.backwardFallStepsRemaining = MaximumBackwardFallSteps;
+        // 직전 회복 걸음의 다음 발 예약을 지워 낙상 순간에 이미 떠 있는 발부터 짚는다.
+        m_Snapshot.followupFoot = -1;
+        m_FallStepStart = input.completedStep;
+    }
+    else if (outsideBufferExpired)
+    {
+        Abort(FootstepReason::OutsideBuffer);
+        return false;
+    }
+    return true;
 }
 
 float PARS::GetFootstepRemainingTime(const FootstepCommand& command)
@@ -833,12 +896,12 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.outsideBufferTime + input.fixedDeltaTime : 0.0;
     state.actualComOutsideBuffer = false;
     state.outsideBufferTime = 0.0;
-    if (input.active && input.automaticSupport && input.rootReleased)
+    if (input.active && input.automaticSupport && input.rootReleased && state.backwardFallStepsRemaining == 0)
     {
         Abort(FootstepReason::RootSupportReleased);
         return;
     }
-    if (!input.active || !input.automaticSupport || !input.idleAnimation)
+    if (!input.active || !input.automaticSupport || (!input.idleAnimation && state.backwardFallStepsRemaining == 0))
     {
         state.feet = {};
         state.loadTransfer = {};
@@ -846,6 +909,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         state.hasGroundPlane = false;
         state.requestedFoot = -1;
         state.followupFoot = -1;
+        state.backwardFallStepsRemaining = 0;
         state.reason = !input.active ? FootstepReason::Inactive : !input.automaticSupport ?
             FootstepReason::AutomaticSupportRequired : FootstepReason::IdleRequired;
         if (!input.active && input.automaticSupport && input.idleAnimation && settings.recovery.enabled &&
@@ -876,11 +940,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     {
         state.actualComOutsideBuffer = true;
         state.outsideBufferTime = (std::min)(nextOutsideTime, OutsideBufferDuration);
-        if (state.outsideBufferTime + 1e-9 >= OutsideBufferDuration)
-        {
-            Abort(FootstepReason::OutsideBuffer);
-            return;
-        }
+    }
+    if (!UpdateFallSteps(input, state.HasTimedOutOutsideBuffer()))
+    {
+        return;
     }
     if (!validDeltaTime || !ValidSettings(settings))
     {
@@ -957,7 +1020,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             }
             const bool bearingWeight = consecutiveSample && previousLoads[side] > 0 &&
                 state.loadTransfer.loadRatios[side] >= settings.supportLoadRatio;
-            if (HasLandingContact(command, foot, settings, bearingWeight))
+            if (HasLandingContact(command, foot, settings, bearingWeight, state.backwardFallStepsRemaining > 0))
             {
                 command.phase = FootstepPhase::Landed;
                 command.reason = FootstepReason::Landed;
@@ -973,6 +1036,16 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 command.motion.remainingDistance = command.motion.landingError;
                 ++state.landingCount;
                 state.followupFoot = static_cast<int>(1 - side);
+                if (state.backwardFallStepsRemaining > 0)
+                {
+                    --state.backwardFallStepsRemaining;
+                    if (state.backwardFallStepsRemaining == 0)
+                    {
+                        Abort(FootstepReason::RootSupportReleased);
+                        return;
+                    }
+                    m_FallStepStart = input.completedStep;
+                }
             }
         }
         state.candidates[side] = MakeTarget(input, settings, state, side);
@@ -1010,7 +1083,8 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.hasPrediction = state.startCom.valid;
     const bool validArea = input.zone != FootSupportZone::Invalid && input.hull.size() >= 3;
     const bool canCheckBalance = state.hasPrediction && validArea;
-    state.needsStep = canCheckBalance && !IsInsideFootSupportHull(input.hull, state.predictedCom);
+    state.needsStep = state.hasPrediction && (state.backwardFallStepsRemaining > 0 ||
+        (validArea && !IsInsideFootSupportHull(input.hull, state.predictedCom)));
     state.reason = !state.hasPrediction ? FootstepReason::InvalidCom : !validArea ? FootstepReason::NoSupportArea :
         state.needsStep ? FootstepReason::ValidTarget : FootstepReason::PredictedInside;
     if (state.requestedFoot >= 0 && state.requestedFoot < 2)
@@ -1043,6 +1117,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             {
                 continue;
             }
+            if (state.backwardFallStepsRemaining > 0 && !input.feet[1 - side].grounded)
+            {
+                continue;
+            }
             command.reason = candidate.reason;
             if (!candidate.valid)
             {
@@ -1058,12 +1136,14 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 command.reason = FootstepReason::NoCalfLength;
                 continue;
             }
-            if (candidate.travelDistance <= MinimumStepDistance)
+            const bool landingFreeFoot = state.backwardFallStepsRemaining > 0 && !foot.grounded;
+            if (candidate.travelDistance <= MinimumStepDistance && !landingFreeFoot)
             {
                 command.reason = FootstepReason::NoStepDistance;
                 continue;
             }
-            if (state.loadTransfer.required && !state.loadTransfer.ready)
+            // 이미 떠 있는 발은 지지발에 새 하중을 넘겨 이륙할 필요 없이 지면을 향할 수 있다.
+            if (state.loadTransfer.required && !state.loadTransfer.ready && !landingFreeFoot)
             {
                 command.reason = FootstepReason::WaitingSupportLoad;
                 continue;
@@ -1081,10 +1161,10 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
             command.hasTakenOff = !foot.grounded;
             command.justStarted = true;
             command.motion.heightLimit = foot.calfLength;
-            command.motion.initialHeight = (std::min)((std::max)(command.initialDistance * settings.liftHeightScale,
-                settings.minimumLiftHeight), foot.calfLength);
+            command.motion.initialHeight = landingFreeFoot ? 0.0f : (std::min)((std::max)(
+                command.initialDistance * settings.liftHeightScale, settings.minimumLiftHeight), foot.calfLength);
             const PxVec3 forward(-input.supportRight.z, 0, input.supportRight.x);
-            if (forward.isFinite())
+            if (forward.isFinite() && command.initialDistance > MinimumStepDistance)
             {
                 const float backward = PxClamp((foot.position - candidate.position).dot(forward.getNormalized()) /
                     command.initialDistance, 0.0f, 1.0f);

@@ -217,6 +217,7 @@ namespace PARS
         {
             return m_BalanceState;
         }
+        FallDirection GetGroundFallDirection() const;
         bool IsFollowingFallingAnimation() const;
         bool SetStandingUpAnimation(uint32_t animationIndex, uint32_t idleAnimationIndex);
         bool IsFollowingStandingUpAnimation() const;

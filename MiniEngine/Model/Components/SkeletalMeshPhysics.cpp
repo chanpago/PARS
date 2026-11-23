@@ -144,10 +144,11 @@ namespace PARS
         // IK를 실행할 수 있는 상태인지 확인. 발 지지 정보와 발딛기 상태를 가져옴
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const FootstepSnapshot& step = sample.footstep;
+        const bool fallingSteps = step.backwardFallStepsRemaining > 0;
+        const bool hasRecoveryTargets = m_RootSupportRelease == RootSupportRelease::None && m_HasRecoverySoles &&
+            (m_Ragdoll.UsesFootDrivenSupport() || m_Recovery.GetSnapshot().state == RecoveryState::Recovery);
 
-        if (!IsActiveRagdoll() || !m_AutomaticRootSupport || m_RootSupportRelease != RootSupportRelease::None ||
-            (!m_Ragdoll.UsesFootDrivenSupport() && m_Recovery.GetSnapshot().state != RecoveryState::Recovery) ||
-            !m_HasRecoverySoles)
+        if (!IsActiveRagdoll() || !m_AutomaticRootSupport || (!fallingSteps && !hasRecoveryTargets))
         {
             m_FootstepIK.Reset();
             m_FootstepAvoidance.Reset();
@@ -256,7 +257,18 @@ namespace PARS
             leg.soleInBone = toPx(foot.soleInBone);
             // 지지발은 현재 접촉한 발바닥 자세를 목표로 삼는다. 바디를 월드에 고정하지 않는다.
             // Recovery 진입/착지 시 저장한 유효 자세를 접촉이 잠시 끊겨도 유지한다.
-            leg.targetSole = m_RecoverySoles[side];
+            const FootstepCommand& command = step.feet[side];
+            const PxTransform actualSole = toPx(foot.soleWorld);
+            leg.targetSole = fallingSteps ? actualSole : m_RecoverySoles[side];
+            if (fallingSteps && command.motion.valid)
+            {
+                const PxVec3 position = command.motion.hasSupportDeadline ?
+                    SampleFootstepPosition(command, deltaTime) : command.motion.position;
+                if (!MakeFootSoleTarget(position, command.target.normal, actualSole, leg.targetSole))
+                {
+                    continue;
+                }
+            }
             leg.available = leg.targetSole.isSane();
 
             // 서있기 보정에 필요한 발,골반 관계를 계산
@@ -272,7 +284,7 @@ namespace PARS
 
             support.sole = leg.targetSole;
             support.soleInBone = leg.soleInBone;
-            support.actualSole = toPx(foot.soleWorld);
+            support.actualSole = actualSole;
             support.supportNormal = foot.contact.support.GetNormal();
 
             // 입력 목표 포즈의 발바닥을 계산
@@ -288,6 +300,10 @@ namespace PARS
             그냥 목표로 적용되어있던 관절을 루트만 바꿔서 물리로 바꿔주기위한 도움 변수 행렬이다
             */
             const PxTransform toPhysical = leg.actualAnchor * rigidTargets[leg.anchorNode].getInverse();
+            if (fallingSteps && !support.hasMotionTarget && !support.grounded)
+            {
+                leg.targetSole = toPhysical * support.animatedSole;
+            }
 
             // 물리 엉덩이본과 물리 골반이랑 위치차이를 구한다.
             support.hipOffset = (toPhysical * rigidTargets[leg.hipNode]).p - leg.actualAnchor.p;
@@ -305,7 +321,6 @@ namespace PARS
             contacts[side].normal = foot.contact.support.GetNormal();
             contacts[side].ankleDriveBoost = m_StandingSupportSettings.ankleDriveBoost;
             contacts[side].ankleDriveBlendTime = m_StandingSupportSettings.ankleDriveBlendTime;
-            const FootstepCommand& command = step.feet[side];
             if (support.hasMotionTarget && command.motion.hasSupportDeadline && deltaTime > 0)
             {
                 contacts[side].swingNodes = {{setup.hipNode, setup.kneeNode, setup.ankleNode}};
@@ -315,7 +330,10 @@ namespace PARS
         }
 
         // 실제 접촉만 전달한다. 이동 명령과 접촉 유예로 하중을 만들어 내지 않는다.
-        m_Ragdoll.SetSupportContacts(contacts);
+        if (!fallingSteps)
+        {
+            m_Ragdoll.SetSupportContacts(contacts);
+        }
 
         // 발 기반 지지에서는 기본 발 목표에 서 있기 보정을 더함
         if (standing.enabled)
@@ -529,7 +547,7 @@ namespace PARS
             {
                 m_RootSupportRelease = RootSupportRelease::NoSupport;
             }
-            else if (sample.footstep.reason == FootstepReason::OutsideBuffer)
+            else if (sample.footstep.HasTimedOutOutsideBuffer())
             {
                 m_RootSupportRelease = RootSupportRelease::OutsideBuffer;
             }
