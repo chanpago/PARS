@@ -147,6 +147,7 @@ namespace
         FootstepRecoverySettings settings;
         settings.maximumSteps = 1;
         FootstepRecoveryInput input = Input();
+        input.idleLateralOffset = .12f;
         input.velocity = PxVec3(0, 0, .6f);
         FootstepRecoverySnapshot result = SelectFootstepRecovery(input, settings);
         Check(result.hasTarget && result.mode == FootstepMode::Normal && result.modelFeasible,
@@ -213,6 +214,7 @@ namespace
         settings.maximumSteps = 1;
         settings.oneStepCaptureScale = 1.0f;
         FootstepRecoveryInput input = Input();
+        input.idleLateralOffset = .12f;
         input.feet[1].maximumDistance = .4f;
         for (float direction : {-1.0f, 1.0f})
         {
@@ -476,7 +478,82 @@ namespace
             "regaining balance on landing ends the sequence without forcing another step");
     }
 
-    void TestNormalLandingWithoutIdleOffset()
+    void TestNormalIdleLateralOffset()
+    {
+        FootstepSettings settings;
+        settings.recovery.maximumSteps = 1;
+        settings.recovery.oneStepCaptureScale = 1.0f;
+        for (size_t side = 0; side < 2; ++side)
+        {
+            FootstepInput input = PlannerInput();
+            input.requestedFoot = static_cast<int>(side);
+            input.com.z = 0;
+            input.feet[1 - side].timeToReachLimit = .25f;
+            const float sign = side == 0 ? -1.0f : 1.0f;
+            input.feet[side].stanceOffset.x = sign * .14f;
+            for (float sidewaysSpeed : {0.0f, .11f})
+            {
+                input.velocity = PxVec3(sign * sidewaysSpeed, 0, -.6f);
+                FootstepPlanner planner;
+                planner.Update(input, settings);
+                const FootstepTarget& target = planner.GetSnapshot().candidates[side];
+                const PxVec3 prediction = target.landingCom.raw - input.com;
+                const PxVec3 outward = PxVec3(-prediction.z, 0, prediction.x).getNormalized() * sign;
+                Check(target.recovery.hasTarget && target.recovery.mode == FootstepMode::Normal &&
+                    InAny(target.recovery.intersections[0], target.position) &&
+                    std::abs((target.position - input.com).dot(outward) - .112f) < 1e-5f,
+                    "each normal backstep lands inside the overlap at 80 percent of its own idle offset from the COM line");
+            }
+        }
+
+        FootstepRecoveryInput input = Input();
+        input.velocity.z = -.6f;
+        const FootstepRecoverySnapshot original = SelectFootstepRecovery(input, settings.recovery);
+        input.idleLateralOffset = 2.0f;
+        const FootstepRecoverySnapshot outside = SelectFootstepRecovery(input, settings.recovery);
+        Check(original.hasTarget && outside.target == original.target && outside.poseChecks == original.poseChecks &&
+            outside.intersections[0] == original.intersections[0],
+            "an offset outside the whole overlap preserves the normal target, region and pose search");
+
+        input.idleLateralOffset = .12f;
+        const FootstepRecoverySnapshot preferred = SelectFootstepRecovery(input, settings.recovery);
+        input.acceptsTarget = [&preferred](const PxVec3& point) -> bool
+        {
+            return (point - preferred.target).magnitudeSquared() > 1e-8f;
+        };
+        const FootstepRecoverySnapshot alternate = SelectFootstepRecovery(input, settings.recovery);
+        Check(alternate.hasTarget && alternate.poseRejected && InAny(alternate.intersections[0], alternate.target) &&
+            std::abs(alternate.target.x - .096f) < 1e-5f,
+            "a second point on the offset line can pass when the closest landing pose fails");
+        input.acceptsTarget = [](const PxVec3& point) -> bool
+        {
+            return std::abs(point.x - .096f) > 1e-5f;
+        };
+        const FootstepRecoverySnapshot fallback = SelectFootstepRecovery(input, settings.recovery);
+        Check(fallback.hasTarget && fallback.poseRejected && fallback.target == original.target &&
+            fallback.poseChecks <= settings.recovery.maximumPoseChecks,
+            "when all offset poses fail, the previous normal target is validated within the same pose budget");
+
+        input = Input();
+        input.velocity = PxVec3(.2f, 0, -.6f);
+        const FootstepRecoverySnapshot diagonal = SelectFootstepRecovery(input, settings.recovery);
+        Check(diagonal.hasTarget && diagonal.intersections[0].size() == 1, "the diagonal step has one normal overlap");
+        const PxVec3 lateral = PxVec3(-input.velocity.z, 0, input.velocity.x).getNormalized();
+        float outermost = 0;
+        for (const PxVec3& point : diagonal.intersections[0].front())
+        {
+            outermost = (std::max)(outermost, (point - input.com).dot(lateral));
+        }
+        const float nearCorner = outermost - .002f;
+        input.idleLateralOffset = nearCorner / .8f;
+        const PxVec3 projected = diagonal.target + lateral * (nearCorner - (diagonal.target - input.com).dot(lateral));
+        const FootstepRecoverySnapshot clipped = SelectFootstepRecovery(input, settings.recovery);
+        Check(!InAny(diagonal.intersections[0], projected) && clipped.hasTarget &&
+            InAny(clipped.intersections[0], clipped.target) && std::abs((clipped.target - input.com).dot(lateral) - nearCorner) < 1e-5f,
+            "the offset can still be met at the edge when moving the old target sideways would leave the overlap");
+    }
+
+    void TestNormalLandingTiming()
     {
         FootstepSettings settings;
         settings.recovery.maximumSteps = 1;
@@ -511,7 +588,7 @@ namespace
         const FootstepTarget& second = planner.GetSnapshot().candidates[1];
         Check(planner.GetSnapshot().feet[1].justStarted && (second.raw - first.raw).magnitude() > .5f &&
             (second.position - first.position).magnitude() < 1e-5f,
-            "changing the idle reference leaves the geometric landing unchanged");
+            "changing the fore-aft idle offset preserves the normal landing");
 
         input.velocity.z = -4.0f;
         input.acceptsLanding = [](size_t, const PxVec3&) -> bool
@@ -669,7 +746,8 @@ void TestFootstepRecovery()
     TestThreeStepReachForBothFeet();
     TestOneStepCaptureMargin();
     TestFollowupAfterOneStepLanding();
-    TestNormalLandingWithoutIdleOffset();
+    TestNormalIdleLateralOffset();
+    TestNormalLandingTiming();
     TestStepModeLock();
     TestPlannerIntegration();
     FootstepRecoveryInput input = Input();
