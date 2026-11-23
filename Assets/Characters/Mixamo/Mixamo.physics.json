@@ -1641,7 +1641,7 @@
         ]
       },
       "swingY": "limited",
-      "swingYLimit": 0.8726646304130554,
+      "swingYLimit": 1.1344640254974365,
       "swingZ": "limited",
       "swingZMax": 0.4363323152065277,
       "swingZMin": -0.22689279913902283,
@@ -1830,7 +1830,7 @@
         ]
       },
       "swingY": "limited",
-      "swingYLimit": 0.8726646304130554,
+      "swingYLimit": 1.1344640254974365,
       "swingZ": "limited",
       "swingZMax": 0.22689279913902283,
       "swingZMin": -0.4363323152065277,
