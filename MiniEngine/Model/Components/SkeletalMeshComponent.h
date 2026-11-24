@@ -73,13 +73,6 @@ namespace PARS
             IdleBlend
         };
 
-        enum class UpperBodyImpact : uint8_t
-        {
-            None,
-            Longitudinal,
-            Capsule
-        };
-
         struct ImpactFlailPlayback
         {
         public:
@@ -107,6 +100,8 @@ namespace PARS
         {
         public:
             bool ApplyCapsuleImpacts(const std::vector<RagdollBodyImpulse>& impacts);
+            bool ApplyTorsoLean(const PhysicsSkeleton& skeleton, const physx::PxQuat& currentRotation,
+                float elapsed, std::string& error);
             ImpactWarmupStep PlanStep(const FootstepPolygon& hull, const physx::PxVec3& com, const physx::PxVec3& velocity,
                 bool secondStep) const;
 
@@ -120,8 +115,9 @@ namespace PARS
             Math::AffineTransform actorAtStart{Math::kIdentity};
             std::vector<GraphNode> sourcePose;
             std::vector<GraphNode> pose;
-            std::vector<GraphNode> drivePose;
             std::vector<Math::Matrix4> sourceBones;
+            std::vector<int> spineNodes;
+            RagdollImpactReaction reaction;
             std::array<TwoBoneIKInput, 2> legs;
             std::array<ImpactWarmupStep, 2> steps;
             physx::PxQuat componentRotation{physx::PxIdentity};
@@ -131,6 +127,7 @@ namespace PARS
             physx::PxVec3 sweepStart{0};
             physx::PxVec3 sweepCenter{0};
             physx::PxVec3 turnPivotInComponent{0};
+            physx::PxVec3 peakTorsoLean{0};
             float mass = 0;
             float torsoMass = 0;
             float slideDeceleration = 0;
@@ -186,7 +183,7 @@ namespace PARS
         void UpdateHorizontalBalance(float deltaTime);
         void ApplyCrossStepDrivePose(const FootSupportSnapshot& support, float deltaTime, std::vector<Math::Matrix4>& target);
         void ResetCrossStepPlayback();
-        void UpdateImpactFlail(UpperBodyImpact impact, float deltaTime);
+        void UpdateImpactFlail(bool triggerReaction, float deltaTime);
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
             const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
@@ -196,9 +193,7 @@ namespace PARS
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
         bool UpdateAutomaticRagdoll(float deltaTime, bool firstHit);
-        void ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts,
-            const std::vector<RagdollBodyImpulse>& kinematicImpacts, float deltaTime);
-        void ResetImpactWarmup();
+        void ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         bool UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses);
         bool BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses, float deltaTime);
         bool AdvanceImpactWarmup(float deltaTime);

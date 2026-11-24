@@ -452,7 +452,7 @@ namespace PARS
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
             pose[m_BoneNodes[i]] = GetBoneWorld(i);
-            if (IsSimulating() || IsWarmupDynamicBody(i))
+            if (IsSimulating())
             {
                 const physx::PxVec3 v = m_Bodies[i]->getLinearVelocity();
                 const physx::PxVec3 w = m_Bodies[i]->getAngularVelocity();
@@ -493,7 +493,6 @@ namespace PARS
             }
             // 대기 구성은 골반 지지와 모터 이력을 남기지 않고 씬 밖에 보관한다.
             SetRootSupported(false, error);
-            EndWarmupUpperBody();
             SetDrivesEnabled(false);
             SetSceneActive(false, error);
             SwapConfiguration(*m_Standby);

@@ -67,14 +67,6 @@ namespace PARS
         float projectilePelvisYieldTime = 0;
     };
 
-    struct RagdollBodyMotion
-    {
-    public:
-        size_t body = 0;
-        physx::PxVec3 linear{0};
-        physx::PxVec3 angular{0};
-    };
-
     struct RagdollSupportContact
     {
     public:
@@ -148,8 +140,6 @@ namespace PARS
             const physx::PxVec3& target, float weight);
         void ReleaseWoundGrip();
         void UpdateImpactReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
-        void BeginWarmupUpperBody(const std::vector<RagdollBodyMotion>& motion, RagdollImpactReaction reaction);
-        void EndWarmupUpperBody();
         bool AdvanceImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts,
             float deltaTime) const;
         // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
@@ -270,11 +260,6 @@ namespace PARS
             return m_MaxTargetClampAngle;
         }
         size_t GetKinematicBodyCount() const;
-        std::vector<RagdollBodyMotion> GetUpperBodyMotion(const physx::PxVec3& center, const physx::PxVec3& addedSpin) const;
-        bool IsWarmupDynamicBody(size_t body) const
-        {
-            return body < m_WarmupDynamicBodies.size() && m_WarmupDynamicBodies[body] != 0;
-        }
         size_t GetBodyCount() const
         {
             return m_Bodies.size();
@@ -368,7 +353,6 @@ namespace PARS
         uint64_t m_WoundClock = UINT64_MAX;
         std::vector<JointWound> m_JointWounds;
         RagdollImpactReaction m_ImpactReaction;
-        std::vector<uint8_t> m_WarmupDynamicBodies;
         mutable std::vector<RagdollBodyImpulse> m_ExternalImpacts;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;

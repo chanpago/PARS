@@ -102,7 +102,7 @@ namespace PARS
         return UINT32_MAX;
     }
 
-    void SkeletalMeshComponent::UpdateImpactFlail(UpperBodyImpact impact, float deltaTime)
+    void SkeletalMeshComponent::UpdateImpactFlail(bool triggerReaction, float deltaTime)
     {
         if (IsFalling() || IsGroundFallActive() || m_StandingUpState != StandingUpState::None)
         {
@@ -111,24 +111,10 @@ namespace PARS
         }
         ImpactFlailPlayback& flail = m_ImpactFlail;
         // 충격 직후 균형 상태가 갱신될 때까지 상체 반응을 이어 간다.
-        flail.impactTimeRemaining = impact != UpperBodyImpact::None ? MotionFeatures::PredictionTimeSeconds :
+        flail.impactTimeRemaining = triggerReaction ? MotionFeatures::PredictionTimeSeconds :
             (std::max)(0.0f, flail.impactTimeRemaining - deltaTime);
         const bool recovering = flail.impactTimeRemaining > 0 || m_BalanceState == CharacterBalanceState::Unbalanced;
-        if (impact == UpperBodyImpact::Capsule)
-        {
-            const uint32_t idle = GetIdleAnimationIndex();
-            if (idle == UINT32_MAX)
-            {
-                flail = {};
-                return;
-            }
-            if (flail.clip != idle)
-            {
-                flail.clip = idle;
-                flail.time = idle == m_AnimInstance->GetCurrentAnimationIndex() ? m_AnimInstance->GetAnimationTime() : 0.0f;
-            }
-        }
-        else if (recovering && flail.clip == UINT32_MAX)
+        if (recovering && flail.clip == UINT32_MAX)
         {
             const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(MotionFrameUsage::BalanceUpperBody);
             flail.clip = match.clipIndex;
@@ -146,7 +132,7 @@ namespace PARS
             flail = {};
             return;
         }
-        const float playbackRate = m_AnimInstance->GetAnimationName(flail.clip) == "Idle" ? 1.0f : 0.5f;
+        constexpr float playbackRate = 0.5f;
         flail.time = std::fmod(flail.time + deltaTime * playbackRate, m_AnimInstance->GetAnimationDuration(flail.clip));
     }
 
@@ -455,7 +441,7 @@ namespace PARS
     {
         if (!enabled)
         {
-            ResetImpactWarmup();
+            m_ImpactWarmup = {};
         }
         m_AutomaticRagdoll = enabled;
         m_KinematicRecoveryTimer.Reset();
@@ -476,10 +462,9 @@ namespace PARS
         }
     }
 
-    void SkeletalMeshComponent::ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts,
-        const std::vector<RagdollBodyImpulse>& kinematicImpacts, float deltaTime)
+    void SkeletalMeshComponent::ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
     {
-        m_Ragdoll.ApplyExternalImpacts(kinematicImpacts);
+        m_Ragdoll.ApplyExternalImpacts(impacts);
         m_Ragdoll.ApplyImpactResponses(m_Ragdoll.GetImpactResponses(impacts));
         // 모드 교체로 소멸한 접촉도 이번 틱의 관절 반응에는 그대로 넘긴다.
         m_Ragdoll.UpdateImpactReaction(impacts, deltaTime);
@@ -548,7 +533,7 @@ namespace PARS
             ResetRecovery();
             m_KinematicRecoveryTimer.Reset();
             m_PendingRecoveryImpact = !interruptedStandingUp && (impact || approaching);
-            ReplayKinematicImpacts(impacts, impacts, deltaTime);
+            ReplayKinematicImpacts(impacts, deltaTime);
             if (impactWeight > 0)
             {
                 m_FootSupport.RecordImpact(impactPosition / impactWeight);

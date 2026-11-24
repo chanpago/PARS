@@ -192,7 +192,7 @@ namespace PARS
     void Ragdoll::SetDrivesEnabled(bool enabled, RagdollImpactReaction* warmupReaction)
     {
         m_DrivesEnabled = enabled && IsSimulating();
-        if (!m_DrivesEnabled && m_WarmupDynamicBodies.empty())
+        if (!m_DrivesEnabled)
         {
             ReleaseWoundGrip();
             m_HorizontalSupportForce = physx::PxVec3(0);
@@ -226,7 +226,7 @@ namespace PARS
         }
         WakeBodies();
 #endif
-        if (!m_DrivesEnabled && m_WarmupDynamicBodies.empty())
+        if (!m_DrivesEnabled)
         {
             m_HasDriveTargets = false;
         }
@@ -240,14 +240,12 @@ namespace PARS
         {
             const PhysicsConstraint& data = m_Asset.constraints[i];
             const float strength = GetJointDriveStrength(i);
-            const bool driven = m_DrivesEnabled || (!m_WarmupDynamicBodies.empty() &&
-                IsWarmupDynamicBody(m_Asset.FindBody(data.childBone)));
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             m_Joints[i]->setAngularDriveConfig(data.useSlerpDrive ? PxD6AngularDriveConfig::eSLERP : PxD6AngularDriveConfig::eSWING_TWIST);
             for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
             {
                 const PhysicsAngularDrive& drive = data.drives[axis];
-                const bool on = !m_Articulation && driven && strength > 0 && Enabled(drive, motions[axis]);
+                const bool on = !m_Articulation && m_DrivesEnabled && strength > 0 && Enabled(drive, motions[axis]);
                 PxD6JointDrive motor;
                 if (on)
                 {
@@ -492,8 +490,7 @@ namespace PARS
             // 목표가 바뀌었거나 실제 자세가 목표에서 멀면 잠든 물리 객체도 다시 깨운다.
             bool changed = !history || Angle(q, ToPx(m_DriveTargets[i])) > 1e-4f;
             const PARS::PhysicsConstraint& data = m_Asset.constraints[i];
-            if ((m_DrivesEnabled || (!m_WarmupDynamicBodies.empty() && IsWarmupDynamicBody(m_Asset.FindBody(data.childBone)))) &&
-                HasEnabledAngularDrive(data))
+            if (m_DrivesEnabled && HasEnabledAngularDrive(data))
             {
                 PxRigidActor* a;
                 PxRigidActor* b;

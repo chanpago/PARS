@@ -14,8 +14,8 @@ namespace
 {
     constexpr float MaximumRestSpeed = .25f;
     constexpr float FirstLandingTurnFraction = .6f;
-    constexpr float ImpactTurnTime = .1f;
-    constexpr float MaximumImpactTurn = PxPi / 8.0f;
+    constexpr float TorsoLeanPeakTime = .1f;
+    constexpr float MaximumTorsoLean = PxPi / 8.0f;
 
     PxTransform RigidFrame(const Matrix4& matrix)
     {
@@ -52,10 +52,37 @@ bool SkeletalMeshComponent::ImpactWarmup::ApplyCapsuleImpacts(const std::vector<
     return pushed;
 }
 
-void SkeletalMeshComponent::ResetImpactWarmup()
+bool SkeletalMeshComponent::ImpactWarmup::ApplyTorsoLean(const PhysicsSkeleton& skeleton, const PxQuat& currentRotation,
+    float elapsed, std::string& error)
 {
-    m_Ragdoll.EndWarmupUpperBody();
-    m_ImpactWarmup = {};
+    PxVec3 axis = currentRotation.rotateInv(peakTorsoLean);
+    const float peakAngle = axis.normalize();
+    if (peakAngle <= 1e-6f || spineNodes.empty())
+    {
+        return true;
+    }
+
+    std::vector<Matrix4> bones;
+    if (!EvaluatePhysicsPose(skeleton, pose, Matrix4(kIdentity), bones, error))
+    {
+        return false;
+    }
+    // 최초 각충격량의 임계감쇠 응답에 예열 시작부터의 경과 시간을 쓴다.
+    const float t = elapsed / TorsoLeanPeakTime;
+    const float jointAngle = peakAngle * t * std::exp(1.0f - t) / static_cast<float>(spineNodes.size());
+    for (int node : spineNodes)
+    {
+        // 이번 틱의 부모 자세에서 회전축을 구해 각 척추 관절에 같은 방향으로 굽힘을 더한다.
+        const PxVec3 parentAxis = RigidFrame(bones[skeleton.parents[node]]).q.rotateInv(axis);
+        const Quaternion bend(Vector3(parentAxis.x, parentAxis.y, parentAxis.z), jointAngle);
+        GraphNode& joint = pose[node];
+        joint.rotation = Normalize(bend * joint.rotation);
+        if (!joint.staleMatrix)
+        {
+            joint.xform.Set3x3(Matrix3(bend) * joint.xform.Get3x3());
+        }
+    }
+    return true;
 }
 
 ImpactWarmupStep SkeletalMeshComponent::ImpactWarmup::PlanStep(const FootstepPolygon& hull, const PxVec3& com,
@@ -147,7 +174,7 @@ bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vecto
         {
             return FinishImpactWarmup(false);
         }
-        m_Ragdoll.UpdateImpactReaction(impacts, deltaTime);
+        m_Ragdoll.AdvanceImpactReaction(m_ImpactWarmup.reaction, impacts, deltaTime);
         if (!pushed)
         {
             // 미는 힘이 끊기면 바닥의 동마찰만큼 감속하고, 남은 속도를 실제 발딛기에 넘긴다.
@@ -222,13 +249,27 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
         return false;
     }
     next.pose = next.sourcePose;
-    next.drivePose = next.sourcePose;
+    const int pelvisBody = m_Ragdoll.GetImpactRootBody();
+    if (pelvisBody < 0)
+    {
+        return false;
+    }
+    const Vector3 pelvis(m_Ragdoll.GetBoneWorld(pelvisBody).GetW());
+    const PxVec3 pelvisPosition(pelvis.GetX(), pelvis.GetY(), pelvis.GetZ());
+    float torsoLengthSquared = 0;
     // 예열 중 다리는 위치로 따라간다. 캡슐이 직접 미는 골반과 척추의 질량으로 루트 반응을 구한다.
     for (size_t body = 0; body < m_PhysicsAsset->bodies.size(); ++body)
     {
         if (m_Ragdoll.IsCharacterImpactBody(body))
         {
             next.torsoMass += m_PhysicsAsset->bodies[body].mass;
+            const int node = m_Ragdoll.GetBoneNodes()[body];
+            if (static_cast<int>(body) != pelvisBody && m_PhysicsSkeleton.parents[node] >= 0)
+            {
+                next.spineNodes.push_back(node);
+                const Vector3 spine(m_Ragdoll.GetBoneWorld(body).GetW());
+                torsoLengthSquared = PxMax(torsoLengthSquared, float(LengthSquare(spine - pelvis)));
+            }
         }
     }
     if (next.torsoMass <= 0)
@@ -238,10 +279,12 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     next.mass = sample.totalMass;
     next.momentum = m_ImpactWarmup.restVelocity * next.mass;
     const std::vector<RagdollBodyImpulse>& impacts = m_Ragdoll.GetExternalImpacts();
-    RagdollImpactReaction reaction = m_Ragdoll.GetImpactReaction();
-    m_Ragdoll.AdvanceImpactReaction(reaction, impacts, deltaTime);
+    // 예열 전에 남아 있던 피격 반응은 전신 물리로 돌아갈 때까지 경과 시간만 갱신한다.
+    next.reaction = m_Ragdoll.GetImpactReaction();
+    m_Ragdoll.AdvanceImpactReaction(next.reaction, impacts, deltaTime);
     float yawImpulse = 0;
     float horizontalImpulse = 0;
+    PxVec3 leanImpulse(0);
     for (const RagdollBodyImpulse& contact : impacts)
     {
         if (contact.fromCharacterCapsule)
@@ -249,6 +292,7 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
             const PxVec3 push(contact.impulse.x, 0, contact.impulse.z);
             yawImpulse += (contact.position - sample.centerOfMass).cross(push).y;
             horizontalImpulse += push.magnitude();
+            leanImpulse += (contact.position - pelvisPosition).cross(contact.impulse);
         }
         const PxVec3 approach(contact.capsuleVelocity.x, 0, contact.capsuleVelocity.z);
         if (contact.fromAnimatedCapsule && approach.magnitudeSquared() > next.approachVelocity.magnitudeSquared())
@@ -263,13 +307,22 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     {
         // 솔버의 지속 밀기 속도 제한을 먼저 적용한 뒤, 첫 접촉에서만 설정한 추가 운동량을 더한다.
         next.momentum += PxVec3(response.impulse.x, 0, response.impulse.z);
+        leanImpulse += (response.partPosition - pelvisPosition).cross(response.partImpulse);
         bodyAngularImpulse += response.GetAngularImpulse(sample.centerOfMass);
     }
     const PxVec3 bodySpin = bodyAngularImpulse.isZero() ? PxVec3(0) :
         m_Ragdoll.GetImpactAngularVelocity(sample.centerOfMass, bodyAngularImpulse);
-    if (!next.momentum.isFinite() || !bodySpin.isFinite())
+    if (!next.momentum.isFinite() || !leanImpulse.isFinite() || !bodySpin.isFinite())
     {
         return false;
+    }
+    if (torsoLengthSquared > 1e-6f)
+    {
+        // 골반 기준의 수평 회전축만 써서 기존 좌우 회전과 분리한다. 관성은 몸통 질량과 골반~가슴 길이로 근사한다.
+        leanImpulse.y = 0;
+        PxVec3 angularVelocity = leanImpulse / (next.torsoMass * torsoLengthSquared) + PxVec3(bodySpin.x, 0, bodySpin.z);
+        const float angularSpeed = angularVelocity.normalize();
+        next.peakTorsoLean = angularVelocity * PxMin(MaximumTorsoLean, angularSpeed * TorsoLeanPeakTime * std::exp(-1.0f));
     }
     next.actorAtStart = character->GetActorTransform();
     const Matrix4 componentTransform(GetComponentTransform());
@@ -312,7 +365,7 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     next.turnYaw = SelectImpactWarmupYaw(next.componentRotation.rotate(PxVec3(0, 0, 1)), velocity, turnPreference,
         soleOffsets[next.firstFoot], soleOffsets[1 - next.firstFoot], next.steps[0].stride);
     // 빗맞은 전신 충격의 수직축 회전도 첫 착지부터 발과 루트에 함께 반영한다.
-    next.turnYaw += PxClamp(bodySpin.y * ImpactTurnTime, -MaximumImpactTurn, MaximumImpactTurn);
+    next.turnYaw += PxClamp(bodySpin.y * TorsoLeanPeakTime, -MaximumTorsoLean, MaximumTorsoLean);
     const PxQuat landingTurn(next.turnYaw, PxVec3(0, 1, 0));
     const PxQuat landingSoleTurn(next.GetLandingSoleYaw(0), PxVec3(0, 1, 0));
     // 첫 착지를 미리 배치한다. 루트의 예상 평행이동은 COM과 양발에 공통이므로 함께 생략한다.
@@ -360,27 +413,13 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     }
     next.sweepStart = sweep.centre;
     next.sweepCenter = sweep.centre;
-    const std::vector<RagdollBodyMotion> upperMotion = m_Ragdoll.GetUpperBodyMotion(sample.centerOfMass, PxVec3(bodySpin.x, 0, bodySpin.z));
-    std::vector<RagdollBodyImpulse> upperImpulses;
-    if (!IsRagdoll())
-    {
-        // 직전 솔버에서 키네마틱이었던 상체에만 원래 접촉 충격량을 재생한다.
-        upperImpulses = impacts;
-    }
     if (IsRagdoll() && !character->StopRagdoll(m_PhysicsError))
     {
         return false;
     }
     for (const RagdollImpactResponse& response : responses)
     {
-        if (physics.ConsumeImpactContact(response.contactId) && !response.partImpulse.isZero())
-        {
-            RagdollBodyImpulse part;
-            part.body = response.body;
-            part.position = response.partPosition;
-            part.impulse = response.partImpulse;
-            upperImpulses.push_back(part);
-        }
+        physics.ConsumeImpactContact(response.contactId);
     }
     if (idleClip != currentClip || m_AnimInstance->IsBlending())
     {
@@ -389,8 +428,6 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     m_ImpactWarmup = std::move(next);
     m_FootSupport.ResetFootstep();
     UpdateKinematicPose(true);
-    m_Ragdoll.BeginWarmupUpperBody(upperMotion, std::move(reaction));
-    m_Ragdoll.ApplyExternalImpacts(upperImpulses);
     return true;
 }
 
@@ -486,13 +523,12 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
             targets.push_back(FootstepPoseMatrix(frames[joint]) * Invert(PhysicsBoneFrame(original)) * original);
         }
     }
-    UpdateImpactFlail(UpperBodyImpact::Capsule, deltaTime);
+    UpdateImpactFlail(true, deltaTime);
     const std::vector<GraphNode>& basePose = m_ImpactFlail.pose.empty() ? warmup.sourcePose : m_ImpactFlail.pose;
-    if (!OverridePhysicsPose(m_PhysicsSkeleton, basePose, Matrix4(kIdentity), nodes, targets, warmup.drivePose))
-    {
-        return FinishImpactWarmup(false);
-    }
-    if (!UpdateKinematicPose(false))
+    const float elapsed = first ? warmup.stepTime : warmup.steps[0].duration + warmup.stepTime;
+    if (!OverridePhysicsPose(m_PhysicsSkeleton, basePose, Matrix4(kIdentity), nodes, targets, warmup.pose) ||
+        !warmup.ApplyTorsoLean(m_PhysicsSkeleton, componentRotation, elapsed, m_PhysicsError) ||
+        !UpdateKinematicPose(false))
     {
         return FinishImpactWarmup(false);
     }
@@ -506,40 +542,28 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
 
 bool SkeletalMeshComponent::FinishImpactWarmup(bool lostFloor, bool replayCapsuleImpacts)
 {
-    PxVec3 momentum = m_ImpactWarmup.momentum;
-    const float mass = m_ImpactWarmup.mass;
+    const PxVec3 targetVelocity = m_ImpactWarmup.momentum / m_ImpactWarmup.mass;
     const uint32_t supportFoot = 1u - m_ImpactWarmup.firstFoot;
     const bool bothStepsCompleted = m_ImpactWarmup.landings == 2;
     // 예열 루트에 아직 반영되지 않은 캡슐 접촉만 첫 물리 스텝으로 넘긴다.
     std::vector<RagdollBodyImpulse> pendingImpacts;
-    std::vector<RagdollBodyImpulse> kinematicImpacts;
     for (const RagdollBodyImpulse& impact : m_Ragdoll.GetExternalImpacts())
     {
         if (!impact.fromCharacterCapsule || replayCapsuleImpacts)
         {
             pendingImpacts.push_back(impact);
-            if (m_Ragdoll.IsWarmupDynamicBody(impact.body))
-            {
-                // 상체는 이미 솔버에서 받은 충격이다. 전신 속도를 맞출 때 그 운동량까지 보존한다.
-                momentum += impact.impulse;
-            }
-            else
-            {
-                kinematicImpacts.push_back(impact);
-            }
         }
     }
     Character& character = static_cast<Character&>(GetOwner());
     if (!character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_PhysicsError))
     {
-        ResetImpactWarmup();
+        m_ImpactWarmup = {};
         return true;
     }
     // 각 다리의 상대 속도는 유지하면서 계승된 전신 수평 운동량의 차이만 보충한다.
     Vector3 inherited(kZero);
     if (m_Ragdoll.GetCenterOfMassVelocity(inherited))
     {
-        const PxVec3 targetVelocity = momentum / mass;
         m_Ragdoll.AddVelocity(Vector3(targetVelocity.x - inherited.GetX(), 0, targetVelocity.z - inherited.GetZ()));
     }
     m_RootSupportRelease = lostFloor ? RootSupportRelease::NoSupport : RootSupportRelease::None;
@@ -560,7 +584,7 @@ bool SkeletalMeshComponent::FinishImpactWarmup(bool lostFloor, bool replayCapsul
     m_PendingRecoveryImpact = m_RootSupportRelease == RootSupportRelease::None;
     if (!pendingImpacts.empty())
     {
-        ReplayKinematicImpacts(pendingImpacts, kinematicImpacts, static_cast<float>(PhysicsWorld::FixedDeltaTime));
+        ReplayKinematicImpacts(pendingImpacts, static_cast<float>(PhysicsWorld::FixedDeltaTime));
     }
     UpdateFootSupport();
     return false;

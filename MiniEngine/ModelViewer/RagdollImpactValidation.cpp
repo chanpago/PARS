@@ -916,6 +916,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         float firstStepHandTravel = 0;
         float previousUpperBodyTime = 0;
         float peakChestDeflection = 0;
+        float lastChestDeflection = 0;
         float startPelvisY = 0;
         std::array<float, 2> startSoleY{};
         std::array<int, 2> swingFeet{-1, -1};
@@ -1095,16 +1096,16 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             if (checkWarmup && dummyMesh.IsImpactWarmupActive())
             {
                 const Ragdoll& body = dummyMesh.GetRagdoll();
-                check(body.IsWarmupDynamicBody(chestBody) && !body.GetImpactReaction().IsYielding() &&
-                    dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Idle",
-                    "The dynamic upper body tracks Idle at full drive strength during capsule warmup");
+                check(body.GetKinematicBodyCount() == body.GetBodyCount() &&
+                    dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Slow Jog Backwards",
+                    "The kinematic upper body follows Slow Jog Backwards during capsule warmup");
                 const Vector3 pelvis(body.GetBoneWorld(body.GetImpactRootBody()).GetW());
                 const float pelvisY = pelvis.GetY();
                 const Vector3 root = dummy->GetActorLocation();
                 const Vector3 handOffset = Vector3(body.GetBoneWorld(handBody).GetW()) - pelvis;
                 if (centeredWarmup && warmupTicks * PhysicsWorld::FixedDeltaTime >= .1)
                 {
-                    // 같은 시각의 Idle 자세와 비교해 골반 이동과 애니메이션 자체의 움직임을 제외한다.
+                    // 블렌딩이 끝난 같은 시각의 원본 상체와 비교해 골반 이동과 조깅 애니메이션을 측정에서 제외한다.
                     std::vector<GraphNode> authored;
                     std::vector<Matrix4> authoredWorld;
                     check(dummyMesh.GetAnimInstance().SampleUpperBodyPose(dummyMesh.GetImpactFlailClip(),
@@ -1113,8 +1114,8 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                         "Sample the matching upper-body frame with the same pelvis");
                     const int chestNode = body.GetBoneNodes()[chestBody];
                     const Vector3 chest(body.GetBoneWorld(chestBody).GetW());
-                    const float deflection = Dot(chest - Vector3(authoredWorld[chestNode].GetW()), direction);
-                    peakChestDeflection = Max(peakChestDeflection, std::abs(deflection));
+                    lastChestDeflection = Dot(chest - Vector3(authoredWorld[chestNode].GetW()), direction);
+                    peakChestDeflection = Max(peakChestDeflection, lastChestDeflection);
                 }
                 previousUpperBodyTime = dummyMesh.GetImpactFlailTime();
                 if (warmupTicks == 0)
@@ -1178,8 +1179,8 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                     check(dummyMesh.IsActiveRagdoll() && warmupLandings == 2 && swingFeet[0] >= 0 &&
                         swingFeet[1] == 1 - swingFeet[0], "Two opposite feet swing and land before the physical handoff");
                     check(!dummyMesh.GetRagdoll().GetImpactReaction().IsYielding() &&
-                        dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Idle",
-                        "The first active step continues tracking Idle at full drive strength");
+                        dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Slow Jog Backwards",
+                        "The first active step continues tracking Slow Jog Backwards at full drive strength");
                     check(slideVelocity.magnitude() > .25f && (velocity - slideVelocity).magnitude() < .025f,
                         "The active body inherits the last horizontal slide velocity");
                     handedOff = true;
@@ -1327,6 +1328,8 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             check(firstStepHandTravel > .05f, "The upper body reacts relative to the pelvis during the first step");
             if (centeredWarmup)
             {
+                check(peakChestDeflection > .005f && lastChestDeflection < peakChestDeflection * .8f,
+                    "Chest bends with the shove and relaxes during continued contact");
                 // 기본 20 kg 플레이어로 측정한 예열 전 골반 변위는 각각 0.20 m, 1.65 m다.
                 check(earlyPushDistance >= .15f && earlyPushDistance <= .27f &&
                     halfSecondPushDistance >= 1.40f && halfSecondPushDistance <= 1.90f,

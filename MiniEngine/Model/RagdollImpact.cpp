@@ -112,26 +112,14 @@ namespace PARS
 
     void Ragdoll::ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts)
     {
+        if (!IsSimulating())
+        {
+            return;
+        }
         // 키네마틱 바디가 받지 못했던 충격만 전환 직후 동일한 접촉점에 한 번 적용한다.
         for (const RagdollBodyImpulse& impact : impacts)
         {
-            if (impact.body >= m_Bodies.size() || !impact.position.isFinite() || !impact.impulse.isFinite())
-            {
-                continue;
-            }
-            if (IsWarmupDynamicBody(impact.body))
-            {
-                // 첫 발을 내딛기 전에 예열이 끝나도 접촉으로 얻은 속도가 새 솔버에 인계되도록 한다.
-                PxRigidDynamic& body = *m_Bodies[impact.body]->is<PxRigidDynamic>();
-                const PxVec3 center = (body.getGlobalPose() * body.getCMassLocalPose()).p;
-                const PxVec3 angularImpulse = (impact.position - center).cross(impact.impulse);
-                PxVec3 linearChange(0);
-                PxVec3 angularChange(0);
-                PxRigidBodyExt::computeVelocityDeltaFromImpulse(body, impact.impulse, angularImpulse, linearChange, angularChange);
-                body.setLinearVelocity(body.getLinearVelocity() + linearChange);
-                body.setAngularVelocity(body.getAngularVelocity() + angularChange);
-            }
-            else if (IsSimulating())
+            if (impact.body < m_Bodies.size() && impact.position.isFinite() && impact.impulse.isFinite())
             {
                 ApplyImpulseAtPoint(*m_Bodies[impact.body], impact.impulse, impact.position);
             }
@@ -192,81 +180,6 @@ namespace PARS
                 lower.find("foot") != std::string::npos || lower.find("ankle") != std::string::npos ||
                 lower.find("toe") != std::string::npos;
         }
-    }
-
-    std::vector<RagdollBodyMotion> Ragdoll::GetUpperBodyMotion(const PxVec3& center, const PxVec3& addedSpin) const
-    {
-        std::vector<RagdollBodyMotion> motion;
-        const int root = GetImpactRootBody();
-        for (size_t body = 0; body < m_Bodies.size(); ++body)
-        {
-            // 척추의 자손인 팔과 머리도 풀어야 키네마틱 자식이 가슴을 고정하지 않는다.
-            int ancestor = static_cast<int>(body);
-            for (size_t depth = 0; depth < m_Bodies.size() && ancestor >= 0 && ancestor != root; ++depth)
-            {
-                const std::string& bone = m_Asset.bodies[ancestor].bone;
-                if (IsSpine(bone))
-                {
-                    const PxRigidBody& rigid = *m_Bodies[body];
-                    const PxVec3 offset = (rigid.getGlobalPose() * rigid.getCMassLocalPose()).p - center;
-                    motion.push_back({body, rigid.getLinearVelocity() + addedSpin.cross(offset), rigid.getAngularVelocity() + addedSpin});
-                    break;
-                }
-                const std::vector<PhysicsConstraint>::const_iterator parent = std::find_if(m_Asset.constraints.begin(),
-                    m_Asset.constraints.end(), [&bone](const PhysicsConstraint& joint) -> bool
-                    {
-                        return joint.childBone == bone;
-                    });
-                ancestor = parent == m_Asset.constraints.end() ? -1 : m_Asset.FindBody(parent->parentBone);
-            }
-        }
-        return motion;
-    }
-
-    void Ragdoll::BeginWarmupUpperBody(const std::vector<RagdollBodyMotion>& motion, RagdollImpactReaction reaction)
-    {
-        if (IsSimulating() || !m_WarmupDynamicBodies.empty())
-        {
-            return;
-        }
-        m_WarmupDynamicBodies.assign(m_Bodies.size(), 0);
-        for (const RagdollBodyMotion& entry : motion)
-        {
-            if (entry.body >= m_Bodies.size() || !entry.linear.isFinite() || !entry.angular.isFinite())
-            {
-                continue;
-            }
-            PxRigidDynamic* body = m_Bodies[entry.body]->is<PxRigidDynamic>();
-            body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
-            body->setLinearVelocity(entry.linear);
-            body->setAngularVelocity(entry.angular);
-            body->wakeUp();
-            m_WarmupDynamicBodies[entry.body] = 1;
-        }
-        m_ImpactReaction = std::move(reaction);
-        RefreshCharacterImpactFilters(false);
-        ResetDriveTargetHistory();
-        ConfigureD6JointDrives();
-    }
-
-    void Ragdoll::EndWarmupUpperBody()
-    {
-        if (m_WarmupDynamicBodies.empty())
-        {
-            return;
-        }
-        for (size_t i = 0; i < m_Bodies.size(); ++i)
-        {
-            if (IsWarmupDynamicBody(i))
-            {
-                m_Bodies[i]->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-            }
-        }
-        m_WarmupDynamicBodies.clear();
-        m_ImpactReaction = {};
-        RefreshCharacterImpactFilters(false);
-        ConfigureD6JointDrives();
-        ResetDriveTargetHistory();
     }
 
     bool Ragdoll::IsPrimaryProjectileHit(const RagdollBodyImpulse& hit, const std::vector<RagdollBodyImpulse>& impacts) const
@@ -572,8 +485,7 @@ namespace PARS
 
     void Ragdoll::UpdateImpactReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
     {
-        if ((m_DrivesEnabled || !m_WarmupDynamicBodies.empty()) &&
-            AdvanceImpactReaction(m_ImpactReaction, impacts, deltaTime) && !m_Articulation)
+        if (m_DrivesEnabled && AdvanceImpactReaction(m_ImpactReaction, impacts, deltaTime) && !m_Articulation)
         {
             ConfigureD6JointDrives();
             ConfigureRootSupportDrives();
@@ -947,7 +859,7 @@ namespace PARS
                 {
                     shape->setSimulationFilterData(data);
                 }
-                shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, IsSimulating() || IsWarmupDynamicBody(i) ||
+                shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, IsSimulating() ||
                     (m_SweepKinematicTorso && (data.word3 & PhysicsWorld::CharacterImpactTargetFilterFlag) != 0));
             }
             if (updateSimulationFilters && body->getScene())
