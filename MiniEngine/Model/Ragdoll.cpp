@@ -653,6 +653,24 @@ namespace PARS
         return Matrix4(kIdentity);
 #endif
     }
+    bool Ragdoll::GetBodyPose(const std::string& bone, physx::PxTransform& pose) const
+    {
+#if defined(_M_X64)
+        for (size_t body = 0; body < m_Bodies.size(); ++body)
+        {
+            if (m_Asset.bodies[body].bone == bone)
+            {
+                pose = m_Bodies[body]->getGlobalPose();
+                return true;
+            }
+        }
+#else
+        (void)bone;
+        (void)pose;
+#endif
+        return false;
+    }
+
     bool Ragdoll::GetBodyCollisionShape(size_t body, physx::PxGeometryHolder& geometry,
         physx::PxTransform& inBone, physx::PxTransform& actualPose) const
     {

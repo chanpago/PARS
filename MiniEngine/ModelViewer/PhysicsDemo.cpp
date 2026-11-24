@@ -1,5 +1,6 @@
 ﻿#include "PhysicsDemo.h"
 #include "GameFramework/World.h"
+#include "ImpactProjectile.h"
 #include "BufferManager.h"
 #include "Camera.h"
 #include "CommandContext.h"
@@ -142,6 +143,30 @@ namespace
         PxVec3 normal;
         PxVec3 color;
     };
+
+    void AppendArrowCylinder(std::vector<Vertex>& vertices, const ImpactProjectileVisual& arrow)
+    {
+        constexpr int sides = 12;
+        const PxVec3 axis = arrow.pose.q.getBasisVector0();
+        const PxVec3 halfShaft = axis * (arrow.length * .5f);
+        const PxVec3 tip = arrow.pose.p + halfShaft;
+        const PxVec3 tail = arrow.pose.p - halfShaft;
+        const PxVec3 color(.92f, .72f, .43f);
+        PxVec3 normal = arrow.pose.q.getBasisVector1();
+        for (int side = 1; side <= sides; ++side)
+        {
+            const float angle = PxTwoPi * static_cast<float>(side) / sides;
+            const PxVec3 next = arrow.pose.q.rotate(PxVec3(0, std::cos(angle), std::sin(angle)));
+            const Vertex tailA{tail + normal * arrow.radius, normal, color};
+            const Vertex tailB{tail + next * arrow.radius, next, color};
+            const Vertex tipA{tip + normal * arrow.radius, normal, color};
+            const Vertex tipB{tip + next * arrow.radius, next, color};
+            vertices.insert(vertices.end(), {tailA, tailB, tipB, tailA, tipB, tipA,
+                {tip, axis, color}, {tipA.position, axis, color}, {tipB.position, axis, color},
+                {tail, -axis, color}, {tailB.position, -axis, color}, {tailA.position, -axis, color}});
+            normal = next;
+        }
+    }
 
     void AppendBox(Vertex*& output, const PxTransform& pose, const PxVec3& halfExtents,
         const PxVec3& color)
@@ -513,29 +538,33 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
     }
 }
 
-void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& camera,
+void PhysicsDemo::RenderProjectiles(GraphicsContext& context, const Math::Camera& camera,
     const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
-    const std::vector<PxRigidDynamic*>& spheres)
+    const std::vector<ImpactProjectileVisual>& projectiles)
 {
+    if (projectiles.empty())
+    {
+        return;
+    }
     constexpr int latitudeCount = 12;
     constexpr int longitudeCount = 24;
     std::vector<Vertex> vertices;
-    vertices.reserve(spheres.size() * latitudeCount * longitudeCount * 6);
+    vertices.reserve(projectiles.size() * latitudeCount * longitudeCount * 6);
     const std::function<physx::PxVec3(int, int)> normal = [=](int latitude, int longitude) -> physx::PxVec3
     {
         const float a = -PxHalfPi + PxPi * latitude / latitudeCount;
         const float b = PxTwoPi * longitude / longitudeCount;
         return PxVec3(std::cos(a) * std::cos(b), std::sin(a), std::cos(a) * std::sin(b));
     };
-    for (const physx::PxRigidDynamic* sphere : spheres)
+    for (const ImpactProjectileVisual& projectile : projectiles)
     {
-        PxShape* shape = nullptr;
-        if (sphere->getShapes(&shape, 1) != 1 || shape->getGeometry().getType() != PxGeometryType::eSPHERE)
+        if (projectile.type == ImpactProjectileType::Arrow)
         {
+            AppendArrowCylinder(vertices, projectile);
             continue;
         }
-        const float radius = static_cast<const PxSphereGeometry&>(shape->getGeometry()).radius;
-        const PxTransform pose = sphere->getGlobalPose() * shape->getLocalPose();
+        const float radius = projectile.radius;
+        const PxTransform& pose = projectile.pose;
         for (int y = 0; y < latitudeCount; ++y)
         {
             for (int x = 0; x < longitudeCount; ++x)
@@ -548,10 +577,6 @@ void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& ca
                 }
             }
         }
-    }
-    if (vertices.empty())
-    {
-        return;
     }
     context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
     context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);

@@ -20,6 +20,7 @@
   <ItemGroup>
     <ClInclude Include="FootSoleDebug.h" />
     <ClInclude Include="RagdollImpactTest.h" />
+    <ClInclude Include="ImpactProjectile.h" />
   </ItemGroup>
   <ItemGroup>
     <CopyFileToFolders Include="Textures\Atrium_diffuseIBL.dds">

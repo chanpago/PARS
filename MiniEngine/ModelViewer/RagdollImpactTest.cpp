@@ -20,14 +20,89 @@ namespace
 {
     constexpr float MinimumProjectileRadius = .01f;
     constexpr float MaximumProjectileRadius = 1.0f;
-    constexpr char ProjectileRangeError[] = u8"구 반지름은 1~100cm, 질량은 0.1~100kg, 속도는 1~100m/s, 부위·전신 충격량과 회전 배율은 0 이상이어야 합니다.";
+    constexpr float MinimumArrowRadius = .002f;
+    constexpr float MaximumArrowRadius = .05f;
+    constexpr float MinimumArrowLength = .15f;
+    constexpr float MaximumArrowLength = 1.5f;
 
-    bool ValidProjectileSettings(float mass, float speed, float bodyImpulse, float torqueMultiplier, float partImpulse, float radius)
+    bool ValidProjectileSettings(ImpactProjectileType type, const ImpactProjectileSettings& settings)
     {
-        return std::isfinite(mass) && std::isfinite(speed) && mass >= .1f && mass <= 100 && speed >= 1 && speed <= 100 &&
-            std::isfinite(bodyImpulse) && bodyImpulse >= 0 && std::isfinite(torqueMultiplier) && torqueMultiplier >= 0 &&
-            std::isfinite(partImpulse) && partImpulse >= 0 &&
-            std::isfinite(radius) && radius >= MinimumProjectileRadius && radius <= MaximumProjectileRadius;
+        const bool arrow = type == ImpactProjectileType::Arrow;
+        const float minRadius = arrow ? MinimumArrowRadius : MinimumProjectileRadius;
+        const float maxRadius = arrow ? MaximumArrowRadius : MaximumProjectileRadius;
+        return (arrow || type == ImpactProjectileType::Sphere) && std::isfinite(settings.mass) && settings.mass >= .1f && settings.mass <= 100 &&
+            std::isfinite(settings.speed) && settings.speed >= 1 && settings.speed <= 100 &&
+            std::isfinite(settings.radius) && settings.radius >= minRadius && settings.radius <= maxRadius &&
+            (!arrow || (std::isfinite(settings.length) && settings.length >= MinimumArrowLength && settings.length <= MaximumArrowLength)) &&
+            std::isfinite(settings.partImpulse) && settings.partImpulse >= 0 && std::isfinite(settings.bodyImpulse) && settings.bodyImpulse >= 0 &&
+            std::isfinite(settings.torqueMultiplier) && settings.torqueMultiplier >= 0;
+    }
+
+    ImpactProjectileSettings ReadProjectileSettings(const nlohmann::json& data, int version, ImpactProjectileType type)
+    {
+        ImpactProjectileSettings settings;
+        settings.mass = data.at("massKg").get<float>();
+        settings.speed = data.at("speedMetersPerSecond").get<float>();
+        if (version >= 2)
+        {
+            settings.bodyImpulse = data.at("bodyImpulseNs").get<float>();
+            settings.torqueMultiplier = data.at("bodyTorqueMultiplier").get<float>();
+        }
+        if (version >= 3)
+        {
+            settings.partImpulse = data.at("partImpulseNs").get<float>();
+        }
+        if (version >= 4)
+        {
+            settings.radius = data.at("radiusMeters").get<float>();
+        }
+        if (type == ImpactProjectileType::Arrow)
+        {
+            settings.length = data.at("lengthMeters").get<float>();
+        }
+        if (!ValidProjectileSettings(type, settings))
+        {
+            throw std::runtime_error(u8"발사체 설정값이 허용 범위를 벗어났습니다.");
+        }
+        return settings;
+    }
+
+    nlohmann::json WriteProjectileSettings(ImpactProjectileType type, const ImpactProjectileSettings& settings)
+    {
+        if (!ValidProjectileSettings(type, settings))
+        {
+            throw std::runtime_error(u8"발사체 설정값이 허용 범위를 벗어났습니다.");
+        }
+        nlohmann::json data = {{"massKg", settings.mass}, {"speedMetersPerSecond", settings.speed}, {"radiusMeters", settings.radius},
+            {"partImpulseNs", settings.partImpulse}, {"bodyImpulseNs", settings.bodyImpulse}, {"bodyTorqueMultiplier", settings.torqueMultiplier}};
+        if (type == ImpactProjectileType::Arrow)
+        {
+            data["lengthMeters"] = settings.length;
+        }
+        return data;
+    }
+
+    bool GetAttachmentPose(const PhysicsProjectileAttachment& hit, const Character* dummy, const PxScene* scene, PxTransform& pose)
+    {
+        PxTransform targetPose(PxIdentity);
+        if (dummy && hit.targetOwner == dummy)
+        {
+            // 키네마틱 전환으로 물리 바디가 교체되어도 같은 본의 현재 자세를 찾는다.
+            if (!dummy->GetMesh().GetRagdoll().GetBodyPose(hit.targetName, targetPose))
+            {
+                return false;
+            }
+        }
+        else if (hit.target && hit.target->getScene() == scene)
+        {
+            targetPose = hit.target->getGlobalPose();
+        }
+        else
+        {
+            return false;
+        }
+        pose = targetPose * hit.localPose;
+        return true;
     }
 
     std::wstring ImpactSettingsPath(const std::string& path)
@@ -187,16 +262,30 @@ bool RagdollImpactTest::SetAutomaticSupport(bool enabled)
 bool RagdollImpactTest::SetProjectileSettings(float mass, float speed, float bodyImpulse, float torqueMultiplier,
     float partImpulse, float radius)
 {
-    if (!ValidProjectileSettings(mass, speed, bodyImpulse, torqueMultiplier, partImpulse, radius))
+    ImpactProjectileSettings settings;
+    settings.mass = mass;
+    settings.speed = speed;
+    settings.radius = radius;
+    settings.partImpulse = partImpulse;
+    settings.bodyImpulse = bodyImpulse;
+    settings.torqueMultiplier = torqueMultiplier;
+    return SetProjectileSettings(ImpactProjectileType::Sphere, settings);
+}
+
+const ImpactProjectileSettings& RagdollImpactTest::GetSelectedProjectileSettings() const
+{
+    return m_ProjectileType == ImpactProjectileType::Arrow ? m_ArrowSettings : m_SphereSettings;
+}
+
+bool RagdollImpactTest::SetProjectileSettings(ImpactProjectileType type, const ImpactProjectileSettings& settings)
+{
+    if (!ValidProjectileSettings(type, settings))
     {
         return false;
     }
-    m_Mass = mass;
-    m_Speed = speed;
-    m_ProjectileRadius = radius;
-    m_PartImpulseMagnitude = partImpulse;
-    m_BodyImpulseMagnitude = bodyImpulse;
-    m_BodyTorqueMultiplier = torqueMultiplier;
+    ImpactProjectileSettings& selected = type == ImpactProjectileType::Arrow ? m_ArrowSettings : m_SphereSettings;
+    selected = settings;
+    m_ProjectileType = type;
     return true;
 }
 
@@ -208,58 +297,63 @@ bool RagdollImpactTest::LoadProjectileSettings(const std::string& path)
         std::ifstream file(ImpactSettingsPath(path));
         if (!file)
         {
-            throw std::runtime_error(u8"구 설정 파일을 열 수 없습니다. 현재 설정을 유지합니다.");
+            throw std::runtime_error(u8"발사체 설정 파일을 열 수 없습니다.");
         }
         nlohmann::json data;
         file >> data;
         const int version = data.at("version").get<int>();
-        if (version < 1 || version > 4)
+        if (version < 1 || version > 5)
         {
-            throw std::runtime_error(u8"지원하지 않는 구 설정 파일 버전입니다.");
+            throw std::runtime_error(u8"지원하지 않는 발사체 설정 파일 버전입니다.");
         }
-        const float mass = data.at("massKg").get<float>();
-        const float speed = data.at("speedMetersPerSecond").get<float>();
-        const float radius = version < 4 ? DefaultProjectileRadius : data.at("radiusMeters").get<float>();
-        const float partImpulse = version < 3 ? 0.0f : data.at("partImpulseNs").get<float>();
-        const float bodyImpulse = version == 1 ? 0.0f : data.at("bodyImpulseNs").get<float>();
-        const float torqueMultiplier = version == 1 ? 0.0f : data.at("bodyTorqueMultiplier").get<float>();
-        if (!SetProjectileSettings(mass, speed, bodyImpulse, torqueMultiplier, partImpulse, radius))
+        const ImpactProjectileSettings sphere = ReadProjectileSettings(version == 5 ? data.at("sphere") : data, version, ImpactProjectileType::Sphere);
+        const ImpactProjectileSettings arrow = version == 5 ? ReadProjectileSettings(data.at("arrow"), version, ImpactProjectileType::Arrow) :
+            ImpactProjectileSettings::ArrowDefaults();
+        const std::string selected = version == 5 ? data.at("selected").get<std::string>() : "sphere";
+        if (selected != "sphere" && selected != "arrow")
         {
-            throw std::runtime_error(ProjectileRangeError);
+            throw std::runtime_error(u8"알 수 없는 발사체 종류입니다.");
         }
-        m_ProjectileSettingsMessage = u8"저장된 구 설정을 불러왔습니다.";
+        m_SphereSettings = sphere;
+        m_ArrowSettings = arrow;
+        m_ProjectileType = selected == "arrow" ? ImpactProjectileType::Arrow : ImpactProjectileType::Sphere;
+        m_ProjectileSettingsMessage = u8"발사체 설정을 불러왔습니다.";
         return true;
     }
     catch (const std::exception& exception)
     {
-        m_ProjectileSettingsMessage = u8"구 설정 불러오기 실패: " + std::string(exception.what());
+        m_ProjectileSettingsMessage = u8"발사체 설정 불러오기 실패: " + std::string(exception.what());
         return false;
     }
 }
 
 bool RagdollImpactTest::SaveProjectileSettings()
 {
+    std::wstring temporary;
     try
     {
-        if (!ValidProjectileSettings(m_Mass, m_Speed, m_BodyImpulseMagnitude, m_BodyTorqueMultiplier, m_PartImpulseMagnitude, m_ProjectileRadius))
-        {
-            throw std::runtime_error(ProjectileRangeError);
-        }
-        const nlohmann::json data = {{"version", 4}, {"massKg", m_Mass}, {"speedMetersPerSecond", m_Speed}, {"radiusMeters", m_ProjectileRadius},
-            {"partImpulseNs", m_PartImpulseMagnitude}, {"bodyImpulseNs", m_BodyImpulseMagnitude}, {"bodyTorqueMultiplier", m_BodyTorqueMultiplier}};
-        std::ofstream file(ImpactSettingsPath(m_ProjectileSettingsPath), std::ios::trunc);
+        const nlohmann::json data = {{"version", 5}, {"selected", m_ProjectileType == ImpactProjectileType::Arrow ? "arrow" : "sphere"},
+            {"sphere", WriteProjectileSettings(ImpactProjectileType::Sphere, m_SphereSettings)},
+            {"arrow", WriteProjectileSettings(ImpactProjectileType::Arrow, m_ArrowSettings)}};
+        const std::wstring destination = ImpactSettingsPath(m_ProjectileSettingsPath);
+        temporary = destination + L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetCurrentThreadId());
+        std::ofstream file(temporary, std::ios::trunc);
         file << data.dump(4) << '\n';
-        file.flush();
-        if (!file)
+        file.close();
+        if (!file || !MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         {
-            throw std::runtime_error(u8"구 설정 파일에 저장할 수 없습니다.");
+            throw std::runtime_error(u8"발사체 설정 파일에 저장할 수 없습니다.");
         }
-        m_ProjectileSettingsMessage = u8"구 설정을 저장했습니다. 다음 실행부터 자동으로 불러옵니다.";
+        m_ProjectileSettingsMessage = u8"구와 화살 설정을 저장했습니다. 다음 실행부터 자동으로 불러옵니다.";
         return true;
     }
     catch (const std::exception& exception)
     {
-        m_ProjectileSettingsMessage = u8"구 설정 저장 실패: " + std::string(exception.what());
+        if (!temporary.empty())
+        {
+            DeleteFileW(temporary.c_str());
+        }
+        m_ProjectileSettingsMessage = u8"발사체 설정 저장 실패: " + std::string(exception.what());
         return false;
     }
 }
@@ -402,8 +496,8 @@ bool RagdollImpactTest::FireAimed(const Character& player, Vector3 cameraPositio
             }
         }
     }
-    // 공 표면이 조준점에 닿는 순간의 중심은 피격 표면에서 반지름만큼 떨어져 있다.
-    const PxVec3 target = closest.position + closest.normal * m_ProjectileRadius;
+    // 구의 표면 또는 화살 끝의 충돌 구가 조준점에 닿도록 중심 위치를 보정한다.
+    const PxVec3 target = closest.position + closest.normal * GetSelectedProjectileSettings().radius;
     const PxVec3 origin = toPx(player.GetActorLocation()) + PxVec3(0, .15f, 0);
     if ((target - origin).dot(ray) <= 0)
     {
@@ -423,8 +517,15 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool aim
     }
     const Vector3 origin = player.GetActorLocation() + Vector3(0, .15f, 0);
     const Vector3 delta = target - origin;
-    const float clearance = player.GetCapsuleComponent().GetRadius() + m_ProjectileRadius + .15f;
-    if (float(Length(delta)) < clearance + m_ProjectileRadius)
+    const ImpactProjectileSettings& settings = GetSelectedProjectileSettings();
+    if (!ValidProjectileSettings(m_ProjectileType, settings))
+    {
+        m_Message = u8"발사체 설정값을 확인하세요.";
+        return false;
+    }
+    const bool arrow = m_ProjectileType == ImpactProjectileType::Arrow;
+    const float clearance = player.GetCapsuleComponent().GetRadius() + .15f + (arrow ? settings.length : settings.radius);
+    if (float(Length(delta)) < clearance + settings.radius)
     {
         m_Message = u8"목표에서 조금 더 떨어져 발사하세요.";
         return false;
@@ -436,44 +537,56 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool aim
         return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ()));
     };
     // 카메라에서 보이는 표적이라도 발사 위치 앞이 막혀 있으면 장애물 너머에 구를 생성하지 않는다.
-    if (aimed && physics->SweepSphereDistance(toPx(origin), toPx(muzzle - origin), m_ProjectileRadius, &player) < clearance - .001f)
+    if ((aimed || arrow) && physics->SweepSphereDistance(toPx(origin), toPx(muzzle - origin), settings.radius, &player) < clearance - .001f)
     {
         m_Message = u8"발사 위치가 막혀 있습니다. 장애물에서 떨어져 발사하세요.";
         return false;
     }
-    physx::PxRigidDynamic* sphere = physics->CreateDynamicBody(PxTransform(toPx(muzzle)), PxSphereGeometry(m_ProjectileRadius),
-        m_Mass, "Impact sphere");
-    if (!sphere)
+    const PxVec3 heading = toPx(direction);
+    const PxTransform start(toPx(muzzle), arrow ? PxShortestRotation(PxVec3(1, 0, 0), heading) : PxQuat(PxIdentity));
+    PxRigidDynamic* projectile = physics->CreateDynamicBody(start, PxSphereGeometry(settings.radius),
+        settings.mass, arrow ? "Impact arrow tip" : "Impact sphere");
+    if (!projectile)
     {
-        m_Message = u8"발사 구를 생성하지 못했습니다.";
+        m_Message = u8"발사체를 생성하지 못했습니다.";
         return false;
     }
     // 바닥 하중이나 캐릭터의 지속 밀기와 구별해 실제 발사 구의 접촉만 피격 반응에 사용한다.
     physx::PxShape* shape = nullptr;
-    if (sphere->getShapes(&shape, 1) != 1 ||
-        !physics->SetProjectileBodyImpulse(*sphere, m_BodyImpulseMagnitude, m_BodyTorqueMultiplier, m_PartImpulseMagnitude))
+    if (projectile->getShapes(&shape, 1) != 1 ||
+        !physics->SetProjectileBodyImpulse(*projectile, settings.bodyImpulse, settings.torqueMultiplier, settings.partImpulse))
     {
-        sphere->release();
+        projectile->release();
         return false;
     }
     PxFilterData filter = shape->getSimulationFilterData();
     filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
+    if (arrow)
+    {
+        filter.word3 |= PhysicsWorld::AttachOnContactFilterFlag;
+    }
     if (aimed)
     {
         filter.word3 |= PhysicsWorld::AimedProjectileFilterFlag;
-        sphere->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
-        sphere->setMinCCDAdvanceCoefficient(0.0f);
+        projectile->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
     }
     shape->setSimulationFilterData(filter);
-    // 조준 공은 이번 스텝에 실제로 지나가는 구간에서 최초 충돌 시점을 구한다.
-    sphere->setRigidBodyFlag(aimed ? PxRigidBodyFlag::eENABLE_CCD : PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
-    sphere->setLinearVelocity(toPx(direction * m_Speed));
+    if (aimed || arrow)
+    {
+        projectile->setMinCCDAdvanceCoefficient(0.0f);
+        projectile->setRigidBodyFlag(PxRigidBodyFlag::eENABLE_CCD, true);
+    }
+    else
+    {
+        projectile->setRigidBodyFlag(PxRigidBodyFlag::eENABLE_SPECULATIVE_CCD, true);
+    }
+    projectile->setLinearVelocity(heading * settings.speed);
     if (m_Shots.size() >= 12)
     {
         m_Shots.front().body->release();
         m_Shots.erase(m_Shots.begin());
     }
-    m_Shots.push_back({sphere, physics->GetStepCount() + 600});
+    m_Shots.push_back({projectile, physics->GetStepCount() + 600, settings.radius, arrow ? settings.length : 0.0f, m_ProjectileType});
     m_HipsReference = dummy->GetMesh().GetRagdoll().GetPosition();
     m_MaxHipsDisplacement = 0;
     m_Message.clear();
@@ -499,12 +612,56 @@ std::vector<PxRigidDynamic*> RagdollImpactTest::GetProjectiles() const
     return bodies;
 }
 
+std::vector<ImpactProjectileVisual> RagdollImpactTest::GetProjectileVisuals() const
+{
+    std::vector<ImpactProjectileVisual> visuals;
+    visuals.reserve(m_Shots.size());
+    const PhysicsWorld* physics = m_World.GetPhysicsWorld();
+    const Character* dummy = GetDummy();
+    for (const Shot& shot : m_Shots)
+    {
+        ImpactProjectileVisual visual;
+        visual.type = shot.type;
+        visual.radius = shot.radius;
+        visual.length = shot.length;
+        visual.pose = shot.body->getGlobalPose();
+        if (shot.type == ImpactProjectileType::Arrow)
+        {
+            const PhysicsProjectileAttachment* hit = physics->GetProjectileAttachment(*shot.body);
+            float tipOffset = shot.radius;
+            if (hit)
+            {
+                if (!GetAttachmentPose(*hit, dummy, shot.body->getScene(), visual.pose))
+                {
+                    continue;
+                }
+                tipOffset = shot.length * .1f;
+            }
+            else
+            {
+                PxVec3 direction = shot.body->getLinearVelocity();
+                if (direction.normalize() > 1e-5f)
+                {
+                    visual.pose.q = PxShortestRotation(PxVec3(1, 0, 0), direction);
+                }
+            }
+            visual.pose.p += visual.pose.q.getBasisVector0() * (tipOffset - shot.length * .5f);
+        }
+        visuals.push_back(visual);
+    }
+    return visuals;
+}
+
 void RagdollImpactTest::Update()
 {
-    const uint64_t step = m_World.GetPhysicsWorld()->GetStepCount();
-    m_Shots.erase(std::remove_if(m_Shots.begin(), m_Shots.end(), [&](const Shot& shot) -> bool
-                      {
-        if (step < shot.expiresAtStep)
+    const PhysicsWorld* physics = m_World.GetPhysicsWorld();
+    const uint64_t step = physics->GetStepCount();
+    PARS::Character* dummy = GetDummy();
+    m_Shots.erase(std::remove_if(m_Shots.begin(), m_Shots.end(), [physics, step, dummy](const Shot& shot) -> bool
+    {
+        const PhysicsProjectileAttachment* hit = shot.type == ImpactProjectileType::Arrow ? physics->GetProjectileAttachment(*shot.body) : nullptr;
+        PxTransform pose(PxIdentity);
+        if (hit ? GetAttachmentPose(*hit, dummy, shot.body->getScene(), pose) : step < shot.expiresAtStep)
         {
             return false;
         }
@@ -512,7 +669,7 @@ void RagdollImpactTest::Update()
         return true;
     }),
         m_Shots.end());
-    if (PARS::Character* dummy = GetDummy())
+    if (dummy)
     {
         m_MaxHipsDisplacement = Max(m_MaxHipsDisplacement,
             float(Length(dummy->GetMesh().GetRagdoll().GetPosition() - m_HipsReference)));
@@ -578,6 +735,78 @@ void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)
     }
 }
 
+void RagdollImpactTest::DrawProjectileUI(Character* player)
+{
+    if (!ImGui::CollapsingHeader(u8"발사체 설정", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        return;
+    }
+    if (ImGui::RadioButton(u8"구 설정", m_ProjectileType == ImpactProjectileType::Sphere))
+    {
+        m_ProjectileType = ImpactProjectileType::Sphere;
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton(u8"화살 설정", m_ProjectileType == ImpactProjectileType::Arrow))
+    {
+        m_ProjectileType = ImpactProjectileType::Arrow;
+    }
+    const bool arrow = m_ProjectileType == ImpactProjectileType::Arrow;
+    ImpactProjectileSettings& settings = arrow ? m_ArrowSettings : m_SphereSettings;
+    ImGui::PushID(arrow ? "arrow" : "sphere");
+    float radiusCm = settings.radius * 100.0f;
+    const float minRadius = arrow ? MinimumArrowRadius : MinimumProjectileRadius;
+    const float maxRadius = arrow ? MaximumArrowRadius : MaximumProjectileRadius;
+    if (ImGui::DragFloat(arrow ? u8"화살대 반지름" : u8"공 반지름", &radiusCm, arrow ? .1f : .5f,
+        minRadius * 100.0f, maxRadius * 100.0f, "%.1f cm", ImGuiSliderFlags_AlwaysClamp) && std::isfinite(radiusCm))
+    {
+        settings.radius = radiusCm / 100.0f;
+    }
+    if (arrow)
+    {
+        float lengthCm = settings.length * 100.0f;
+        if (ImGui::DragFloat(u8"화살 길이", &lengthCm, .5f, MinimumArrowLength * 100.0f, MaximumArrowLength * 100.0f,
+            "%.1f cm", ImGuiSliderFlags_AlwaysClamp) && std::isfinite(lengthCm))
+        {
+            settings.length = lengthCm / 100.0f;
+        }
+    }
+    ImGui::DragFloat(arrow ? u8"화살 질량" : u8"구 질량", &settings.mass, arrow ? .1f : .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::DragFloat(u8"발사 속도", &settings.speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::DragFloat(u8"피격 부위 추가 충격량", &settings.partImpulse, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::DragFloat(u8"전신 충격량", &settings.bodyImpulse, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::DragFloat(u8"전신 회전 배율", &settings.torqueMultiplier, .01f, 0.0f, PX_MAX_F32, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::PopID();
+    ImGui::BeginDisabled(m_ProjectileSettingsPath.empty());
+    if (ImGui::Button(u8"발사체 설정 저장"))
+    {
+        SaveProjectileSettings();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(u8"발사체 설정 불러오기"))
+    {
+        LoadProjectileSettings(m_ProjectileSettingsPath);
+    }
+    ImGui::EndDisabled();
+    if (!m_ProjectileSettingsMessage.empty())
+    {
+        ImGui::TextWrapped("%s", m_ProjectileSettingsMessage.c_str());
+    }
+    ImGui::TextWrapped("%s", u8"우클릭으로 조준하고 좌클릭 또는 R로 발사합니다. 조준하지 않고 R을 누르면 더미 골반을 향해 발사합니다.");
+    ImGui::BeginDisabled(!player);
+    if (ImGui::Button(arrow ? u8"더미로 화살 발사" : u8"더미로 구 발사") && player)
+    {
+        FireFrom(*player);
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button(u8"발사체 제거"))
+    {
+        ClearProjectiles();
+    }
+    ImGui::SameLine();
+    ImGui::Text(u8"남은 발사체 %zu개", m_Shots.size());
+}
+
 void RagdollImpactTest::DrawUI(Character* player)
 {
     ImGui::SetNextWindowPos(ImVec2(450, 70), ImGuiCond_FirstUseEver);
@@ -585,104 +814,77 @@ void RagdollImpactTest::DrawUI(Character* player)
     if (ImGui::Begin(u8"PARS - 더미 충격 테스트"))
     {
         DrawBodyImpactUI(player);
-        ImGui::TextWrapped("%s", u8"우클릭 유지: 조준 / 조준 중 좌클릭 또는 R: 발사");
-        ImGui::TextWrapped("%s", u8"조준하지 않을 때 R: 더미 골반으로 발사");
-        float radiusCm = m_ProjectileRadius * 100.0f;
-        if (ImGui::DragFloat(u8"공 반지름", &radiusCm, .5f, MinimumProjectileRadius * 100.0f, MaximumProjectileRadius * 100.0f,
-            "%.1f cm", ImGuiSliderFlags_AlwaysClamp) && std::isfinite(radiusCm))
+        DrawProjectileUI(player);
+        PARS::Character* dummy = GetDummy();
+        if (ImGui::CollapsingHeader(u8"더미 상태 및 초기화"))
         {
-            m_ProjectileRadius = radiusCm / 100.0f;
-        }
-        ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::DragFloat(u8"피격 부위 추가 충격량", &m_PartImpulseMagnitude, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::DragFloat(u8"전신 충격량", &m_BodyImpulseMagnitude, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::DragFloat(u8"전신 회전 배율", &m_BodyTorqueMultiplier, .01f, 0.0f, PX_MAX_F32, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::BeginDisabled(m_ProjectileSettingsPath.empty());
-        if (ImGui::Button(u8"구 설정 저장"))
-        {
-            SaveProjectileSettings();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(u8"구 설정 불러오기"))
-        {
-            LoadProjectileSettings(m_ProjectileSettingsPath);
-        }
-        ImGui::EndDisabled();
-        ImGui::TextWrapped("%s", u8"구 설정을 저장하면 다음 실행 시 자동으로 적용합니다.");
-        if (!m_ProjectileSettingsMessage.empty())
-        {
-            ImGui::TextWrapped("%s", m_ProjectileSettingsMessage.c_str());
-        }
-        ImGui::BeginDisabled(!player);
-        if (ImGui::Button(u8"더미로 구 발사") && player)
-        {
-            FireFrom(*player);
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (ImGui::Button(u8"더미 초기화"))
-        {
-            Reset();
-        }
-        if (ImGui::Button(u8"발사한 구 제거"))
-        {
-            ClearProjectiles();
-        }
-        ImGui::SameLine();
-        ImGui::Text(u8"남은 구: %zu개", m_Shots.size());
-        if (PARS::Character* dummy = GetDummy())
-        {
-            PARS::Ragdoll& ragdoll = dummy->GetMesh().GetRagdoll();
-            bool automatic = m_AutomaticSupport;
-            if (ImGui::Checkbox(u8"COM 자동 골반 지지", &automatic))
+            if (ImGui::Button(u8"더미 초기화"))
             {
-                SetAutomaticSupport(automatic);
+                Reset();
             }
-            ImGui::TextUnformatted(u8"모드 변경 시 더미를 초기화합니다.");
+            if (dummy)
+            {
+                const SkeletalMeshComponent& mesh = dummy->GetMesh();
+                ImGui::Text(u8"물리 모드: %s", mesh.IsActiveRagdoll() ? u8"액티브 래그돌" :
+                    mesh.IsRagdoll() ? u8"패시브 래그돌" : mesh.IsBlendingToKinematic() ? u8"키네마틱 복귀 보간" : u8"키네마틱");
+                ImGui::Text(u8"추종 애니메이션  %s", FootSoleDebug::GetFollowedAnimationText(mesh).c_str());
+            }
+        }
+        if (dummy)
+        {
             SkeletalMeshComponent& mesh = dummy->GetMesh();
-            ImGui::Text(u8"물리 모드: %s", mesh.IsActiveRagdoll() ? u8"액티브 래그돌" :
-                mesh.IsRagdoll() ? u8"패시브 래그돌" : mesh.IsBlendingToKinematic() ? u8"키네마틱 복귀 보간" : u8"키네마틱");
-            ImGui::Text(u8"추종 애니메이션  %s", FootSoleDebug::GetFollowedAnimationText(mesh).c_str());
-            float stableDuration = mesh.GetKinematicStableDuration();
-            if (ImGui::DragFloat(u8"A영역 복귀 대기 시간", &stableDuration, .1f, .1f, 10.0f, "%.1f s", ImGuiSliderFlags_AlwaysClamp))
+            PARS::Ragdoll& ragdoll = mesh.GetRagdoll();
+            if (ImGui::CollapsingHeader(u8"골반 지지 및 복귀"))
             {
-                mesh.SetKinematicStableDuration(stableDuration);
-            }
-            ImGui::Text(u8"A영역 연속 유지: %.2f / %.2f s", mesh.GetKinematicStableTime(), stableDuration);
-            bool supported = ragdoll.IsRootSupported();
-            ImGui::BeginDisabled(m_AutomaticSupport);
-            if (ImGui::Checkbox(u8"더미 골반 지지", &supported))
-            {
-                ragdoll.SetRootSupported(supported, m_Message);
-            }
-            ImGui::EndDisabled();
-            ImGui::Text(u8"지지 축: X %s / Y %s / Z %s / 회전 %s",
-                ragdoll.IsRootAxisSupported(0) ? "ON" : "OFF", ragdoll.IsRootAxisSupported(1) ? "ON" : "OFF",
-                ragdoll.IsRootAxisSupported(2) ? "ON" : "OFF", ragdoll.IsRootAxisSupported(3) ? "ON" : "OFF");
-            const Math::Vector3 hips = ragdoll.GetPosition();
-            ImGui::Text(u8"실제 Hips: (%.3f, %.3f, %.3f) m", float(hips.GetX()), float(hips.GetY()), float(hips.GetZ()));
-            ImGui::Text(u8"기준 대비 골반 이동: %.2f cm / 최대 %.2f cm",
-                float(Length(hips - m_HipsReference)) * 100, m_MaxHipsDisplacement * 100);
-            if (supported)
-            {
-                ImGui::Text(u8"목표 Y %.3f m / 지지 위치 오차 %.2f cm",
-                    ragdoll.GetRootTargetHeight(), ragdoll.GetRootPositionError() * 100);
-            }
-            ImGui::TextUnformatted(u8"기준은 초기화 또는 마지막 발사 시점입니다.");
-            ImGui::PushID("ImpactDummy");
-            if (m_FootSoles.IsVisible())
-            {
-                m_FootSoles.DrawUI(dummy->GetMesh(), [this]() -> void
+                bool automatic = m_AutomaticSupport;
+                if (ImGui::Checkbox(u8"COM 자동 골반 지지", &automatic))
                 {
-                    DrawDummySupportSettingsUI();
-                });
+                    SetAutomaticSupport(automatic);
+                }
+                ImGui::TextUnformatted(u8"모드 변경 시 더미를 초기화합니다.");
+                bool supported = ragdoll.IsRootSupported();
+                ImGui::BeginDisabled(m_AutomaticSupport);
+                if (ImGui::Checkbox(u8"더미 골반 지지", &supported))
+                {
+                    ragdoll.SetRootSupported(supported, m_Message);
+                }
+                ImGui::EndDisabled();
+                ImGui::Text(u8"지지 축: X %s / Y %s / Z %s / 회전 %s",
+                    ragdoll.IsRootAxisSupported(0) ? "ON" : "OFF", ragdoll.IsRootAxisSupported(1) ? "ON" : "OFF",
+                    ragdoll.IsRootAxisSupported(2) ? "ON" : "OFF", ragdoll.IsRootAxisSupported(3) ? "ON" : "OFF");
+                float stableDuration = mesh.GetKinematicStableDuration();
+                if (ImGui::DragFloat(u8"A영역 복귀 대기 시간", &stableDuration, .1f, .1f, 10.0f, "%.1f s", ImGuiSliderFlags_AlwaysClamp))
+                {
+                    mesh.SetKinematicStableDuration(stableDuration);
+                }
+                ImGui::Text(u8"A영역 연속 유지: %.2f / %.2f s", mesh.GetKinematicStableTime(), stableDuration);
             }
-            ImGui::PopID();
+            if (ImGui::CollapsingHeader(u8"골반 이동 측정"))
+            {
+                const Math::Vector3 hips = ragdoll.GetPosition();
+                ImGui::Text(u8"실제 Hips: (%.3f, %.3f, %.3f) m", float(hips.GetX()), float(hips.GetY()), float(hips.GetZ()));
+                ImGui::Text(u8"기준 대비 골반 이동: %.2f cm / 최대 %.2f cm",
+                    float(Length(hips - m_HipsReference)) * 100, m_MaxHipsDisplacement * 100);
+                if (ragdoll.IsRootSupported())
+                {
+                    ImGui::Text(u8"목표 Y %.3f m / 지지 위치 오차 %.2f cm",
+                        ragdoll.GetRootTargetHeight(), ragdoll.GetRootPositionError() * 100);
+                }
+                ImGui::TextUnformatted(u8"기준은 초기화 또는 마지막 발사 시점입니다.");
+            }
         }
-        if (!m_Message.empty())
+        if (!m_Message.empty() && ImGui::CollapsingHeader(u8"테스트 메시지", ImGuiTreeNodeFlags_DefaultOpen))
         {
             ImGui::TextWrapped("%s", m_Message.c_str());
+        }
+        if (dummy && m_FootSoles.IsVisible())
+        {
+            ImGui::PushID("ImpactDummy");
+            m_FootSoles.DrawUI(dummy->GetMesh(), [this]() -> void
+            {
+                DrawDummySupportSettingsUI();
+            });
+            ImGui::PopID();
         }
     }
     ImGui::End();

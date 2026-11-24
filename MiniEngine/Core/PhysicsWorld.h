@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 // 쿼리용 형상만 사용한다. PxActor/PxShape나 CCT 프록시 바디는 생성하지 않는다.
@@ -77,6 +78,16 @@ public:
     float torqueMultiplier = 0;
 };
 
+// 최초 접촉점과 진입 방향을 상대 바디의 로컬 좌표로 보관한다.
+struct PhysicsProjectileAttachment
+{
+public:
+    std::string targetName;
+    const void* targetOwner = nullptr;
+    const physx::PxRigidActor* target = nullptr;
+    physx::PxTransform localPose{physx::PxIdentity};
+};
+
 // 미터, 킬로그램, 초 단위의 CPU 물리이며 +Y가 위쪽이다. 게임 스레드에서 사용한다.
 // Create*가 반환한 Actor는 명시적으로 해제하거나 Shutdown()을 호출할 때까지 씬이 소유한다.
 // Update()/Step()을 호출하기 전에 모든 읽기와 쓰기를 끝내야 한다.
@@ -128,6 +139,14 @@ private:
         float torqueMultiplier = 0;
         float partMagnitude = 0;
         bool consumed = false;
+    };
+    struct StoppedProjectile
+    {
+    public:
+        PhysicsProjectileAttachment attachment;
+        physx::PxRigidDynamic* actor = nullptr;
+        uint64_t step = 0;
+        float weight = -1;
     };
     class ErrorCallback : public physx::PxDefaultErrorCallback
     {
@@ -191,6 +210,8 @@ public:
 
 private:
     void RecordProjectileContact(ContactPair& pair, int projectileSide, const physx::PxContactPairVelocity* beforeContact);
+    void RecordProjectileAttachment(physx::PxRigidDynamic& projectile, const physx::PxRigidActor& target, const ContactPair& pair,
+        int side, const physx::PxContactPairVelocity* velocity, const physx::PxContactPairPose* pose);
     void onContact(const physx::PxContactPairHeader& header, const physx::PxContactPair* pairs,
         physx::PxU32 count) override;
     void onRelease(const physx::PxBase* object, void* userData, physx::PxDeletionEventFlag::Enum event) override;
@@ -210,6 +231,7 @@ public:
     bool HasContact(const physx::PxRigidActor& first, const physx::PxRigidActor& second) const;
     bool SetProjectileBodyImpulse(const physx::PxRigidDynamic& projectile, float bodyMagnitude,
         float torqueMultiplier, float partMagnitude = 0);
+    const PhysicsProjectileAttachment* GetProjectileAttachment(const physx::PxRigidDynamic& projectile) const;
     bool GetGroundContact(const physx::PxRigidActor& body, PhysicsGroundContact& contact,
         const void* ignoredOwner = nullptr) const;
     void GetCharacterCapsuleContacts(const physx::PxRigidActor& body,
@@ -278,6 +300,7 @@ public:
     static constexpr uint32_t AimedProjectileFilterFlag = 1u << 26;
     // 독립 캡슐의 운동을 애니메이션 플레이어가 구동하는지 접촉에 기록한다.
     static constexpr uint32_t AnimatedCapsuleFilterFlag = 1u << 25;
+    static constexpr uint32_t AttachOnContactFilterFlag = 1u << 24;
     static constexpr double FixedDeltaTime = 1.0 / 60.0;
     static constexpr uint32_t MaxSubsteps = 8;
 
@@ -285,6 +308,7 @@ private:
     std::vector<ContactPair> m_Contacts;
     std::vector<ProjectileSettings> m_ProjectileSettings;
     std::vector<ProjectileContact> m_ProjectileContacts;
+    std::vector<StoppedProjectile> m_StoppedProjectiles;
     uint64_t m_NextProjectileContactId = 1;
     std::vector<physx::PxRigidDynamic*> m_ImpactedAimedProjectiles;
     uint64_t m_ClockRevision = 0;

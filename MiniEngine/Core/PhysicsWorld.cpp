@@ -58,9 +58,13 @@ namespace
             {
                 pairFlags |= PxPairFlag::ePRE_SOLVER_VELOCITY;
             }
-            if ((data0.word3 | data1.word3) & PhysicsWorld::AimedProjectileFilterFlag)
+            if ((data0.word3 | data1.word3) & (PhysicsWorld::AimedProjectileFilterFlag | PhysicsWorld::AttachOnContactFilterFlag))
             {
                 pairFlags |= PxPairFlag::eDETECT_CCD_CONTACT;
+            }
+            if ((data0.word3 | data1.word3) & PhysicsWorld::AttachOnContactFilterFlag)
+            {
+                pairFlags |= PxPairFlag::eCONTACT_EVENT_POSE;
             }
         }
         return flags;
@@ -151,12 +155,14 @@ void PhysicsWorld::SweepCharacterCapsule(const PxTransform& pose, float radius, 
 void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactPair* pairs, PxU32 count)
 {
     const PxContactPairVelocity* beforeContact = nullptr;
+    const PxContactPairPose* contactPose = nullptr;
     if (header.extraDataStream && header.extraDataStreamSize > 0)
     {
         PxContactPairExtraDataIterator extra(header.extraDataStream, header.extraDataStreamSize);
         if (extra.nextItemSet())
         {
             beforeContact = extra.preSolverVelocity;
+            contactPose = extra.eventPose;
         }
     }
     for (PxU32 i = 0; i < count; ++i)
@@ -220,6 +226,15 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
             {
                 RecordProjectileContact(*cached, side, beforeContact);
             }
+            if (flags & AttachOnContactFilterFlag)
+            {
+                PxRigidDynamic* projectile = header.actors[side]->is<PxRigidDynamic>();
+                const PxRigidActor* target = header.actors[1 - side]->is<PxRigidActor>();
+                if (projectile && target)
+                {
+                    RecordProjectileAttachment(*projectile, *target, *cached, side, beforeContact, contactPose);
+                }
+            }
             if (!(flags & AimedProjectileFilterFlag))
             {
                 continue;
@@ -236,6 +251,64 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         }
     }
     // 잠든 바디에는 PERSISTS가 오지 않으므로 LOST 또는 명시적인 무효화 전까지 보존한다.
+}
+
+void PhysicsWorld::RecordProjectileAttachment(PxRigidDynamic& projectile, const PxRigidActor& target, const ContactPair& pair,
+    int side, const PxContactPairVelocity* velocity, const PxContactPairPose* pose)
+{
+    std::vector<StoppedProjectile>::iterator entry = std::find_if(m_StoppedProjectiles.begin(), m_StoppedProjectiles.end(),
+        [&projectile](const StoppedProjectile& stopped) -> bool
+        {
+            return stopped.actor == &projectile;
+        });
+    if (entry != m_StoppedProjectiles.end() && entry->step != pair.completedStep)
+    {
+        return;
+    }
+    for (const PxContactPairPoint& point : pair.points)
+    {
+        const float weight = point.impulse.magnitudeSquared();
+        if (!point.position.isFinite() || !std::isfinite(weight) || (weight == 0 && point.separation > 0) ||
+            (entry != m_StoppedProjectiles.end() && weight <= entry->weight))
+        {
+            continue;
+        }
+        PxVec3 direction = velocity ? velocity->linearVelocity[side] : PxVec3(0);
+        if (!direction.isFinite() || direction.normalize() < 1e-5f)
+        {
+            direction = side == 0 ? -point.normal : point.normal;
+        }
+        const PxTransform targetPose = pose ? pose->globalPose[1 - side] : target.getGlobalPose();
+        if (!direction.isNormalized() || !targetPose.isValid())
+        {
+            continue;
+        }
+        if (entry == m_StoppedProjectiles.end())
+        {
+            m_StoppedProjectiles.emplace_back();
+            entry = m_StoppedProjectiles.end() - 1;
+            entry->actor = &projectile;
+            entry->step = pair.completedStep;
+        }
+        entry->weight = weight;
+        entry->attachment.target = &target;
+        entry->attachment.targetOwner = target.userData;
+        entry->attachment.targetName = target.getName() ? target.getName() : "";
+        const PxTransform contact(point.position, PxShortestRotation(PxVec3(1, 0, 0), direction));
+        entry->attachment.localPose = targetPose.transformInv(contact);
+    }
+}
+
+const PhysicsProjectileAttachment* PhysicsWorld::GetProjectileAttachment(const PxRigidDynamic& projectile) const
+{
+    for (const StoppedProjectile& entry : m_StoppedProjectiles)
+    {
+        if (entry.actor == &projectile)
+        {
+            return &entry.attachment;
+        }
+    }
+    return nullptr;
 }
 
 bool PhysicsWorld::SetProjectileBodyImpulse(const PxRigidDynamic& projectile, float bodyMagnitude,
@@ -405,6 +478,18 @@ void PhysicsWorld::GetCharacterCapsuleContacts(const PxRigidActor& body,
 
 void PhysicsWorld::onRelease(const PxBase* object, void*, PxDeletionEventFlag::Enum)
 {
+    for (StoppedProjectile& entry : m_StoppedProjectiles)
+    {
+        if (entry.attachment.target == object)
+        {
+            entry.attachment.target = nullptr;
+        }
+    }
+    m_StoppedProjectiles.erase(std::remove_if(m_StoppedProjectiles.begin(), m_StoppedProjectiles.end(),
+        [object](const StoppedProjectile& entry) -> bool
+        {
+            return entry.actor == object;
+        }), m_StoppedProjectiles.end());
     // 해제된 객체를 역참조하지 않는다. PA 재생성 시 같은 주소가 재사용돼도 접촉이 남지 않는다.
     m_ProjectileSettings.erase(std::remove_if(m_ProjectileSettings.begin(), m_ProjectileSettings.end(),
         [object](const ProjectileSettings& settings) -> bool
@@ -792,6 +877,7 @@ void PhysicsWorld::Shutdown()
     }
     m_Contacts.clear();
     m_ProjectileSettings.clear();
+    m_StoppedProjectiles.clear();
     Release(m_Scene); // Actor와 각 Actor가 독점 소유하는 형상도 함께 해제한다.
     if (m_ServiceOwner)
     {
@@ -871,6 +957,20 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
     if (beforeStep)
     {
         beforeStep(static_cast<float>(FixedDeltaTime));
+    }
+
+    // 캐릭터가 직전 접촉의 충격과 피격 반응을 읽은 뒤, 다음 솔버부터 꽂힌 발사체를 제외한다.
+    for (const StoppedProjectile& stopped : m_StoppedProjectiles)
+    {
+        if (!stopped.actor->getActorFlags().isSet(PxActorFlag::eDISABLE_SIMULATION))
+        {
+            PxShape* shape = nullptr;
+            if (stopped.actor->getShapes(&shape, 1) == 1)
+            {
+                shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, false);
+            }
+            stopped.actor->setActorFlag(PxActorFlag::eDISABLE_SIMULATION, true);
+        }
     }
 
     if (IsPvdConnected())

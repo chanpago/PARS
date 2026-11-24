@@ -14,6 +14,7 @@ namespace PARS
     class World;
 }
 class GraphicsContext;
+struct ImpactProjectileVisual;
 
 class PhysicsDemo
 {
@@ -47,9 +48,9 @@ public:
     void Render(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor, bool comparisonScene = false);
     void RenderUI();
-    void RenderSpheres(GraphicsContext& context, const Math::Camera& camera,
+    void RenderProjectiles(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
-        const std::vector<physx::PxRigidDynamic*>& spheres);
+        const std::vector<ImpactProjectileVisual>& projectiles);
     void RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     void RenderDebugLines(GraphicsContext& context, const Math::Camera& camera,

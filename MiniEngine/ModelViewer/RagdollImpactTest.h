@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FootSoleDebug.h"
+#include "ImpactProjectile.h"
 #include "PhysicsAsset.h"
 #include "GameFramework/Actor.h"
 
@@ -20,6 +21,9 @@ private:
     public:
         physx::PxRigidDynamic* body;
         uint64_t expiresAtStep;
+        float radius;
+        float length;
+        ImpactProjectileType type;
     };
 
 public:
@@ -50,6 +54,7 @@ public:
 private:
     void ClearContactCheck();
     void DrawBodyImpactUI(PARS::Character* player);
+    void DrawProjectileUI(PARS::Character* player);
     void DrawDummySupportSettingsUI();
     void BuildBodyImpactLines(std::vector<physx::PxDebugLine>& lines);
     bool FireAt(const PARS::Character& player, Math::Vector3 target, bool aimed = false);
@@ -74,8 +79,10 @@ public:
     }
     bool SetProjectileSettings(float mass, float speed, float bodyImpulse = 0, float torqueMultiplier = 0,
         float partImpulse = 0, float radius = DefaultProjectileRadius);
+    bool SetProjectileSettings(ImpactProjectileType type, const ImpactProjectileSettings& settings);
     PARS::Character* GetDummy() const;
     std::vector<physx::PxRigidDynamic*> GetProjectiles() const;
+    std::vector<ImpactProjectileVisual> GetProjectileVisuals() const;
     float GetMaxHipsDisplacement() const
     {
         return m_MaxHipsDisplacement;
@@ -85,8 +92,11 @@ public:
         return m_Message;
     }
 
+private:
+    const ImpactProjectileSettings& GetSelectedProjectileSettings() const;
+
 public:
-    static constexpr float DefaultProjectileRadius = .15f;
+    static constexpr float DefaultProjectileRadius = ImpactProjectileSettings{}.radius;
 
 private:
     Math::Vector3 m_HipsReference{Math::kZero};
@@ -107,13 +117,10 @@ private:
     std::string m_LegContactMessage;
     std::string m_PausedLegContactMessage;
     uint32_t m_PreviousLegContacts = 0;
-    float m_Mass = 2.0f;
-    float m_Speed = 7.5f;
-    float m_ProjectileRadius = DefaultProjectileRadius;
-    float m_PartImpulseMagnitude = 0;
-    float m_BodyImpulseMagnitude = 0;
-    float m_BodyTorqueMultiplier = 0;
+    ImpactProjectileSettings m_SphereSettings;
+    ImpactProjectileSettings m_ArrowSettings = ImpactProjectileSettings::ArrowDefaults();
     float m_MaxHipsDisplacement = 0;
+    ImpactProjectileType m_ProjectileType = ImpactProjectileType::Sphere;
     bool m_AutomaticSupport = true;
     bool m_BodyImpactCapsuleVisible = true;
     bool m_ContactCheckEnabled = false;

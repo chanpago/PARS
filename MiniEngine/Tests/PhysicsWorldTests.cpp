@@ -190,6 +190,52 @@ namespace
         std::puts("PASS: one projectile touching two parts of the same receiver");
     }
 
+    void TestProjectileAttachment()
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize attachment test");
+        int owner = 0;
+        PxRigidDynamic* target = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, 0)), PxBoxGeometry(.2f, .2f, .1f), 2, "Head");
+        PxRigidDynamic* arrow = world.CreateDynamicBody(PxTransform(PxVec3(.06f, 3.04f, -.65f)), PxSphereGeometry(.01f), .5f, "Tip");
+        Check(target && arrow, "Create arrow and receiver");
+        target->userData = &owner;
+        target->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+        arrow->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+        arrow->setRigidBodyFlag(PxRigidBodyFlag::eENABLE_CCD, true);
+        arrow->setMinCCDAdvanceCoefficient(0);
+        PxShape* shape = nullptr;
+        Check(arrow->getShapes(&shape, 1) == 1, "Find arrow tip");
+        PxFilterData filter = shape->getSimulationFilterData();
+        filter.word3 |= PhysicsWorld::ProjectileFilterFlag | PhysicsWorld::AttachOnContactFilterFlag;
+        shape->setSimulationFilterData(filter);
+        Check(world.SetProjectileBodyImpulse(*arrow, 0, 0, 4), "Set arrow hit response");
+        arrow->setLinearVelocity(PxVec3(0, 0, 100));
+        for (int step = 0; step < 4 && !world.GetProjectileAttachment(*arrow); ++step)
+        {
+            world.Step();
+        }
+        const PhysicsProjectileAttachment* hit = world.GetProjectileAttachment(*arrow);
+        Check(hit && hit->target == target && hit->targetOwner == &owner && hit->targetName == "Head", "Capture the first struck body");
+        Check((hit->localPose.p - PxVec3(.06f, .04f, -.1f)).magnitude() < .025f && hit->localPose.q.getBasisVector0().z > .99f,
+            "Fast arrow keeps the surface point and incoming direction in body space");
+        world.Step([&world, target, &owner](float) -> void
+        {
+            std::vector<PhysicsContactImpulse> contacts;
+            PhysicsProjectileBodyImpulse response;
+            Check(world.GetExternalImpactImpulse(*target, &owner, &contacts) > 0 && !contacts.empty() && contacts.front().newProjectileHit &&
+                world.ConsumeProjectileContact(contacts.front().projectileContactId, response) && std::abs(response.partImpulse.z - 4) < .01f,
+                "The receiver processes the original hit before the arrow stops simulating");
+        });
+        Check(arrow->getActorFlags().isSet(PxActorFlag::eDISABLE_SIMULATION) && !shape->getFlags().isSet(PxShapeFlag::eSCENE_QUERY_SHAPE),
+            "Attached arrow no longer collides or blocks the next shot");
+        target->release();
+        hit = world.GetProjectileAttachment(*arrow);
+        Check(hit && hit->target == nullptr && hit->targetName == "Head", "Keep the attachment identity across body replacement");
+        arrow->release();
+        Check(world.GetErrorCount() == 0, "Release arrow and target without PhysX errors");
+        std::puts("PASS: fast arrow attachment, impact delivery and body replacement");
+    }
+
     void TestImpactPalm()
     {
         const std::vector<int32_t> parents{-1, 0, 1, 2, 0, 4, 5};
@@ -461,6 +507,7 @@ int main(int argc, char** argv)
     {
         TestApproachingImpact();
         TestSharedProjectileContact();
+        TestProjectileAttachment();
         TestImpactPalm();
         return 0;
     }
@@ -500,6 +547,7 @@ int main(int argc, char** argv)
     TestFootProjectionRaycast();
     TestApproachingImpact();
     TestSharedProjectileContact();
+    TestProjectileAttachment();
     TestImpactPalm();
     TestBodyPairContacts();
     TestFootSupportHull();

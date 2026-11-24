@@ -228,6 +228,7 @@ namespace PARS
             return m_BoneNodes;
         }
         Math::Matrix4 GetBoneWorld(size_t body) const;
+        bool GetBodyPose(const std::string& bone, physx::PxTransform& pose) const;
         bool GetBodyCollisionShape(size_t body, physx::PxGeometryHolder& geometry,
             physx::PxTransform& inBone, physx::PxTransform& actualPose) const;
         Math::Vector3 GetPosition() const;
