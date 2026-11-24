@@ -264,7 +264,8 @@ namespace PARS
             {
                 const PxVec3 position = command.motion.hasSupportDeadline ?
                     SampleFootstepPosition(command, deltaTime) : command.motion.position;
-                if (!MakeFootSoleTarget(position, command.target.normal, actualSole, leg.targetSole))
+                if (!MakeFootSoleTarget(position, command.target.normal, actualSole, leg.targetSole,
+                    command.target.position - command.startPosition))
                 {
                     continue;
                 }

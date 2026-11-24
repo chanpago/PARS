@@ -465,9 +465,10 @@ namespace
             const float idleWidth = std::abs(sign);
             reach.minimumWidth = MinimumStanceWidth(idleWidth, settings);
         }
-        request.acceptsTarget = [&input, side](const PxVec3& position) -> bool
+        const PxVec3 stepOrigin = request.feet[side].stepOrigin;
+        request.acceptsTarget = [&input, &state, side, stepOrigin](const PxVec3& position) -> bool
         {
-            return input.acceptsLanding && input.acceptsLanding(side, position);
+            return input.acceptsLanding && input.acceptsLanding(side, position, state.groundNormal, position - stepOrigin);
         };
         normal.recovery = SelectFootstepRecovery(request, settings.recovery);
         normal.recovery.pathRejected = inProgress && command.target.recovery.pathRejected;

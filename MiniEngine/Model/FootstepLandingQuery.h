@@ -26,7 +26,8 @@ namespace PARS
     public:
         void Prepare(const SkeletalMeshComponent& mesh, const FootSupportSnapshot& support,
             std::array<FootstepReachInput, 2>& reaches);
-        bool Accept(size_t side, const physx::PxVec3& position) const;
+        bool Accept(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
+            const physx::PxVec3& displacement) const;
 
     private:
         const PhysicsAsset* m_Asset = nullptr;

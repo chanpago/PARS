@@ -49,9 +49,12 @@ namespace PARS
         bool reachLimited = false;
     };
 
-    // 발바닥의 앞 방향은 애니메이션에서, 위 방향은 지지 평면에서 얻는다.
+    // 발끝과 가까운 쪽을 택해 보폭의 수평축을 정한다. 수평 이동이 없으면 영벡터를 반환한다.
+    physx::PxVec3 GetFootstepTravelForward(const physx::PxVec3& displacement, const physx::PxVec3& referenceForward);
+    // 이동발은 보폭 방향을, 제자리에서는 기준 발 방향을 지면에 맞춘다.
     bool MakeFootSoleTarget(const physx::PxVec3& position, const physx::PxVec3& normal,
-        const physx::PxTransform& animatedSole, physx::PxTransform& target);
+        const physx::PxTransform& referenceSole, physx::PxTransform& target,
+        const physx::PxVec3& displacement = physx::PxVec3(0));
     LegIKResult SolveTwoBoneIK(const TwoBoneIKInput& input);
     float PredictSupportReachTime(const physx::PxVec3& hipFromAnkle,
         const physx::PxVec3& hipVelocity, float thighLength, float calfLength);

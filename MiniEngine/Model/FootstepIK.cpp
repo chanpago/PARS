@@ -72,18 +72,34 @@ namespace
     }
 }
 
+PxVec3 PARS::GetFootstepTravelForward(const PxVec3& displacement, const PxVec3& referenceForward)
+{
+    PxVec3 travel(displacement.x, 0, displacement.z);
+    if (!Unit(travel))
+    {
+        return PxVec3(0);
+    }
+    return travel.dot(referenceForward) < 0 ? -travel : travel;
+}
+
 bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
-    const PxTransform& animatedSole, PxTransform& target)
+    const PxTransform& referenceSole, PxTransform& target, const PxVec3& displacement)
 {
     PxVec3 up = normal;
-    if (!position.isFinite() || !animatedSole.isSane() || !Unit(up))
+    if (!position.isFinite() || !referenceSole.isSane() || !Unit(up))
     {
         return false;
     }
-    PxVec3 forward = animatedSole.q.rotate(PxVec3(0, 0, 1));
+    PxVec3 forward = referenceSole.q.rotate(PxVec3(0, 0, 1));
+    const PxVec3 travel = GetFootstepTravelForward(displacement, forward);
+    if (!travel.isZero())
+    {
+        // 경사면에서도 발끝의 수평 방향이 보폭과 나란하도록 높이 성분만 지면에 맞춘다.
+        forward = PxVec3(travel.z, 0, -travel.x).cross(up);
+    }
     if (!ProjectHint(forward, up))
     {
-        PxVec3 right = animatedSole.q.rotate(PxVec3(1, 0, 0));
+        PxVec3 right = referenceSole.q.rotate(PxVec3(1, 0, 0));
         if (!ProjectHint(right, up))
         {
             return false;

@@ -84,6 +84,27 @@ ImpactWarmupStep SkeletalMeshComponent::ImpactWarmup::PlanStep(const FootstepPol
     return step;
 }
 
+float SkeletalMeshComponent::ImpactWarmup::GetLandingSoleYaw(size_t stepIndex) const
+{
+    const size_t side = stepIndex == 0 ? firstFoot : 1u - firstFoot;
+    const PxTransform& sole = legs[side].targetSole;
+    const PxQuat landingTurn(turnYaw, PxVec3(0, 1, 0));
+    const PxVec3 startOffset = componentRotation.rotate(sole.p - turnPivotInComponent);
+    // 양발에 공통인 슬라이드는 제외한다. 두 번째 이동발은 첫 보폭만큼 뒤에서 출발한다.
+    PxVec3 displacement = landingTurn.rotate(startOffset) - startOffset + steps[0].stride;
+    if (stepIndex == 1)
+    {
+        displacement += steps[1].stride;
+    }
+    const PxVec3 turnedForward = (landingTurn * componentRotation * sole.q).rotate(PxVec3(0, 0, 1));
+    const PxVec3 forward = GetFootstepTravelForward(displacement, turnedForward);
+    if (forward.isZero())
+    {
+        return turnYaw;
+    }
+    return turnYaw + std::atan2(turnedForward.cross(forward).y, turnedForward.dot(forward));
+}
+
 bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses)
 {
     if (!m_AutomaticRootSupport || (!m_AutomaticRagdoll && !IsActiveRagdoll() && !IsImpactWarmupActive()))
@@ -326,6 +347,7 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     // 빗맞은 전신 충격의 수직축 회전도 첫 착지부터 발과 루트에 함께 반영한다.
     next.turnYaw += PxClamp(bodySpin.y * YawPredictionTime, -MaximumImpactYaw, MaximumImpactYaw);
     const PxQuat landingTurn(next.turnYaw, PxVec3(0, 1, 0));
+    const PxQuat landingSoleTurn(next.GetLandingSoleYaw(0), PxVec3(0, 1, 0));
     // 첫 착지를 미리 배치한다. 루트의 예상 평행이동은 COM과 양발에 공통이므로 함께 생략한다.
     FootstepPolygon nextCorners;
     nextCorners.reserve(8);
@@ -333,14 +355,16 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     {
         const FootSoleSample& foot = sample.feet[side];
         const PxVec3 offset = side == next.firstFoot ? next.steps[0].stride : -next.steps[0].stride;
+        const PxVec3 center = turnPivot + soleOffsets[side];
+        const PxVec3 turnedCenter = turnPivot + landingTurn.rotate(soleOffsets[side]);
         for (size_t corner = 0; corner < foot.projected.size(); ++corner)
         {
             if (foot.projected[corner])
             {
                 PxVec3 point = foot.projections[corner];
-                if (side == next.firstFoot && next.turnYaw != 0)
+                if (side == next.firstFoot)
                 {
-                    point = turnPivot + landingTurn.rotate(point - turnPivot);
+                    point = turnedCenter + landingSoleTurn.rotate(point - center);
                 }
                 nextCorners.push_back(point + offset);
             }
@@ -459,6 +483,10 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
     const PxVec3 endTangent = -2.0f * stride;
     const PxVec3 tangent = t * (1.0f - t) * ((1.0f - t) * startTangent - t * endTangent);
     const uint32_t movingFoot = first ? warmup.firstFoot : 1u - warmup.firstFoot;
+    // 발을 들어 올리는 동안 방향을 맞추고, 착지 후에는 같은 월드 방향을 지지발에 유지한다.
+    const float liftProgress = PxMin(2.0f * t, 1.0f);
+    const float swingYaw = warmup.GetLandingSoleYaw(warmup.landings) * liftProgress * liftProgress * (3.0f - 2.0f * liftProgress);
+    const float supportYaw = first ? 0.0f : warmup.GetLandingSoleYaw(0);
     std::vector<int> nodes;
     std::vector<Matrix4> targets;
     nodes.reserve(6);
@@ -474,8 +502,9 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
             const float soleYaw = swing ? warmup.turnYaw * smooth : (first ? 0 : warmup.turnYaw);
             const PxQuat relativeTurn(soleYaw - rootYaw, localUp);
             leg.targetSole.p = warmup.turnPivotInComponent + relativeTurn.rotate(leg.targetSole.p - warmup.turnPivotInComponent);
-            leg.targetSole.q = relativeTurn * leg.targetSole.q;
         }
+        const float footYaw = swing ? swingYaw : supportYaw;
+        leg.targetSole.q = PxQuat(footYaw - rootYaw, localUp) * leg.targetSole.q;
         const PxVec3 start = first ? PxVec3(0) : (swing ? -firstStride : firstStride);
         const PxVec3 end = swing ? stride : -stride;
         leg.targetSole.p += start * (1.0f - smooth) + end * smooth + tangent - componentRotation.rotateInv(warmup.catchOffset);

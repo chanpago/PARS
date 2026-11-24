@@ -191,6 +191,19 @@ namespace
             PxTransform(PxVec3(0), PxQuat(-PxHalfPi, PxVec3(1, 0, 0))), target) && target.isSane(),
             "An animated forward direction parallel to the normal uses its side direction");
         Check(!MakeFootSoleTarget(PxVec3(0), PxVec3(0), animated, target), "A missing ground normal is rejected");
+
+        const PxVec3 travel(-.2f, .4f, .6f);
+        const PxVec3 horizontal = PxVec3(travel.x, 0, travel.z).getNormalized();
+        for (const PxVec3& displacement : {travel, -travel})
+        {
+            Check(MakeFootSoleTarget(PxVec3(0), normal, animated, target, displacement),
+                "Diagonal forward and backward steps produce a sloped sole target");
+            const PxVec3 toes = target.q.rotate(PxVec3(0, 0, 1));
+            Check(Near(PxVec3(toes.x, 0, toes.z).getNormalized(), horizontal) && Near(target.q.rotate(PxVec3(0, 1, 0)), normal),
+                "Toe-out straightens along the horizontal stride without reversing the toes on a backward step");
+        }
+        Check(MakeFootSoleTarget(PxVec3(0), PxVec3(0, 1, 0), animated, target, PxVec3(0, .1f, 0)) && Near(target, animated),
+            "A vertical lift alone preserves the current sole heading");
     }
 
     struct PoseFixture

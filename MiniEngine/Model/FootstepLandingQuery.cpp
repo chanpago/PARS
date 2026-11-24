@@ -72,20 +72,22 @@ void FootstepLandingQuery::Prepare(const SkeletalMeshComponent& mesh, const Foot
         leg.pose.calfLength = sample.leg.calfLength;
         leg.pose.referenceBend = leg.pose.hip.q.rotate(sample.leg.referenceBendInHip);
         leg.pose.soleInBone = Frame(sample.soleInBone);
-        const PxTransform actualSole = Frame(sample.soleWorld);
-        leg.available = MakeFootSoleTarget(actualSole.p, PxVec3(0, 1, 0), actualSole, leg.pose.targetSole) &&
+        leg.pose.targetSole = Frame(sample.soleWorld);
+        PxTransform levelSole(PxIdentity);
+        leg.available = MakeFootSoleTarget(leg.pose.targetSole.p, PxVec3(0, 1, 0), leg.pose.targetSole, levelSole) &&
             leg.shapes[0].available && leg.shapes[1].available && leg.shapes[2].available;
         FootstepReachInput& reach = reaches[side];
         reach.hip = leg.pose.hip.p;
-        reach.position = actualSole.p;
-        reach.ankleOffset = (leg.pose.targetSole * leg.pose.soleInBone.getInverse()).p - leg.pose.targetSole.p;
+        reach.position = leg.pose.targetSole.p;
+        reach.ankleOffset = (levelSole * leg.pose.soleInBone.getInverse()).p - levelSole.p;
         reach.legLength = sample.leg.thighLength + sample.leg.calfLength;
         reach.sole = BuildFootSupportHull(FootstepPolygon(sample.corners.begin(), sample.corners.end()));
         reach.available = leg.available;
     }
 }
 
-bool FootstepLandingQuery::Accept(size_t side, const PxVec3& position) const
+bool FootstepLandingQuery::Accept(size_t side, const PxVec3& position, const PxVec3& normal,
+    const PxVec3& displacement) const
 {
     if (side > 1 || !m_Legs[side].available || !m_Legs[1 - side].available || !m_Asset || !m_Ragdoll)
     {
@@ -93,7 +95,10 @@ bool FootstepLandingQuery::Accept(size_t side, const PxVec3& position) const
     }
     const Leg& leg = m_Legs[side];
     TwoBoneIKInput input = leg.pose;
-    input.targetSole.p = position;
+    if (!MakeFootSoleTarget(position, normal, leg.pose.targetSole, input.targetSole, displacement))
+    {
+        return false;
+    }
     const LegIKResult solved = SolveTwoBoneIK(input);
     if (!solved.valid || solved.reachError > .0001f)
     {

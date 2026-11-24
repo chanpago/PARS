@@ -104,6 +104,9 @@ namespace PARS
                 const TorsoBalance& torso, bool secondStep) const;
 
         public:
+            float GetLandingSoleYaw(size_t stepIndex) const;
+
+        public:
             static constexpr float MinimumImpactSpeedChange = .25f;
 
         public:

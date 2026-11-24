@@ -445,7 +445,7 @@ namespace
             foot.calfLength = .5f;
             foot.normalImpulse = input.bodyWeight * input.fixedDeltaTime * .5f;
         }
-        input.acceptsLanding = [](size_t, const PxVec3&) -> bool
+        input.acceptsLanding = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> bool
         {
             return true;
         };
@@ -531,8 +531,11 @@ namespace
         input.feet[0].timeToReachLimit = std::numeric_limits<float>::infinity();
         input.feet[1].stanceOffset.x += .6f;
         FootstepPolygon checked;
-        input.acceptsLanding = [&checked](size_t, const PxVec3& point) -> bool
+        input.acceptsLanding = [&checked, &input](size_t side, const PxVec3& point, const PxVec3& normal,
+            const PxVec3& displacement) -> bool
         {
+            Check(normal == PxVec3(0, 1, 0) && displacement == point - input.feet[side].position,
+                "Each landing pose is checked with its own stride from the stepping foot");
             checked.push_back(point);
             return checked.size() == 2;
         };
@@ -548,7 +551,7 @@ namespace
             "an outside stance target tries the closest overlap point first and keeps the alternative inside");
 
         input.velocity.z = -4.0f;
-        input.acceptsLanding = [](size_t, const PxVec3&) -> bool
+        input.acceptsLanding = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> bool
         {
             return false;
         };
@@ -644,7 +647,7 @@ namespace
         Check((replanned.target.position - first.target.position).magnitude() >= .0099f ||
             !planner.GetSnapshot().candidates[1].recovery.hasTarget,
             "a failed path requests an alternative landing instead of repeating the same candidate");
-        input.acceptsLanding = [](size_t, const PxVec3&) -> bool
+        input.acceptsLanding = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> bool
         {
             return false;
         };
@@ -652,7 +655,7 @@ namespace
         planner.Update(input, settings);
         Check((planner.GetSnapshot().feet[1].target.position - replanned.target.position).magnitude() < 1e-6f,
             "candidate rejection preserves an existing crossover goal instead of applying a normal clamp");
-        input.acceptsLanding = [](size_t, const PxVec3&) -> bool
+        input.acceptsLanding = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> bool
         {
             return true;
         };
