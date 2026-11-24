@@ -18,6 +18,7 @@ void TestFootstepIK();
 void TestFootstepCollision();
 void TestStandingSupport();
 void TestHorizontalBalance();
+void TestTorsoBalance();
 
 namespace
 {
@@ -571,6 +572,7 @@ int main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--impact-warmup-only") == 0)
     {
         TestImpactWarmupPlanning();
+        TestTorsoBalance();
         return 0;
     }
     if (argc == 2 && std::strcmp(argv[1], "--footstep-only") == 0)
@@ -601,6 +603,7 @@ int main(int argc, char** argv)
     TestFootSupportHull();
     TestFootSupportBalance();
     TestHorizontalBalance();
+    TestTorsoBalance();
     TestFootstepPlanner();
     TestFootstepIK();
     TestFootstepCollision();

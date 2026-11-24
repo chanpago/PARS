@@ -505,6 +505,7 @@ namespace PARS
         }
         if (enabled != m_AutomaticRootSupport)
         {
+            ResetTorsoBalance();
             m_ImpactWarmup = {};
             m_RootSupportRelease = RootSupportRelease::None;
             m_FootSupport.ResetFootstep();
@@ -580,6 +581,7 @@ namespace PARS
 
     void SkeletalMeshComponent::DestroyPhysicsState()
     {
+        ResetTorsoBalance();
         ResetAirborneFall();
         ResetFallArms();
         m_FallArmsInitialized = false;
@@ -770,16 +772,19 @@ namespace PARS
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
-        if (IsImpactWarmupActive())
-        {
-            m_ImpactWarmup = {};
-        }
         if (!active)
         {
+            ResetTorsoBalance();
             ResetAirborneFall();
         }
         ResetFallArms();
+        const bool wasInWarmup = IsImpactWarmupActive();
         m_Ragdoll.SetDrivesEnabled(active);
+        if (wasInWarmup)
+        {
+            m_Ragdoll.SetTorsoTorqueLimits(m_TorsoRig, m_TorsoBalance.GetHipTorqueLimit());
+            m_ImpactWarmup = {};
+        }
         UpdatePhysicsPose();
         UpdateFootSupport();
         error.clear();
@@ -860,6 +865,7 @@ namespace PARS
 
     void SkeletalMeshComponent::StopRagdoll()
     {
+        ResetTorsoBalance();
         m_ImpactWarmup = {};
         ResetFallArms();
         if (!IsRagdoll())

@@ -116,6 +116,7 @@ namespace PARS
         std::array<FootstepFootInput, 2> feet;
         physx::PxVec3 com{0};
         physx::PxVec3 velocity{0};
+        physx::PxVec3 torsoAcceleration{0};
         physx::PxVec3 supportRight{1, 0, 0};
         physx::PxVec3 impactPosition{0};
         FootSupportZone zone = FootSupportZone::Invalid;

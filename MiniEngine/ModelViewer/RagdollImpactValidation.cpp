@@ -917,6 +917,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         float previousUpperBodyTime = 0;
         float peakChestDeflection = 0;
         float lastChestDeflection = 0;
+        float maximumSpineLimitError = 0;
         float startPelvisY = 0;
         std::array<float, 2> startSoleY{};
         std::array<int, 2> swingFeet{-1, -1};
@@ -1113,6 +1114,21 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                     const Vector3 chest(body.GetBoneWorld(chestBody).GetW());
                     lastChestDeflection = Dot(chest - Vector3(authoredWorld[chestNode].GetW()), direction);
                     peakChestDeflection = Max(peakChestDeflection, lastChestDeflection);
+                    TorsoBalanceRig rig;
+                    check(body.BuildTorsoBalanceRig(rig), "Find the pelvis and spine joints in the physical asset");
+                    const PhysicsAsset& asset = *dummyMesh.GetPhysicsAsset();
+                    size_t parent = rig.pelvis;
+                    for (const TorsoBalanceLink& link : rig.links)
+                    {
+                        const PhysicsConstraint& joint = asset.constraints[link.joint];
+                        const Quaternion relative = EvaluateJointDriveTarget(joint,
+                            PhysicsBoneFrame(body.GetBoneWorld(parent)) * asset.bodies[parent].GetLocalTransform(),
+                            PhysicsBoneFrame(body.GetBoneWorld(link.body)) * asset.bodies[link.body].GetLocalTransform(), false);
+                        const Quaternion limited = ClampArticulationDriveTarget(joint, relative);
+                        const float dot = DirectX::XMVectorGetX(DirectX::XMVector4Dot(relative, limited));
+                        maximumSpineLimitError = Max(maximumSpineLimitError, 2.0f * std::acos(Clamp(std::abs(dot), 0.0f, 1.0f)));
+                        parent = link.body;
+                    }
                 }
                 previousUpperBodyTime = dummyMesh.GetImpactFlailTime();
                 if (warmupTicks == 0)
@@ -1318,12 +1334,13 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         if (checkWarmup)
         {
             report << "push_0.1s_m=" << earlyPushDistance << " push_0.5s_m=" << halfSecondPushDistance
-                << " first_step_hand_travel_m=" << firstStepHandTravel << " peak_chest_deflection_m=" << peakChestDeflection << std::endl;
+                << " first_step_hand_travel_m=" << firstStepHandTravel << " peak_chest_deflection_m=" << peakChestDeflection
+                << " final_warmup_chest_deflection_m=" << lastChestDeflection << " max_spine_limit_error_rad=" << maximumSpineLimitError << std::endl;
             check(firstStepHandTravel > .05f, "The upper body reacts relative to the pelvis during the first step");
             if (centeredWarmup)
             {
-                check(peakChestDeflection > .005f && lastChestDeflection < peakChestDeflection * .8f,
-                    "Chest bends with the shove and relaxes during continued contact");
+                check(peakChestDeflection > .005f && maximumSpineLimitError < .005f,
+                    "Chest bends with the shove while all spine joints stay within their physical handoff limits");
                 // 기본 20 kg 플레이어로 측정한 예열 전 골반 변위는 각각 0.20 m, 1.65 m다.
                 check(earlyPushDistance >= .15f && earlyPushDistance <= .27f &&
                     halfSecondPushDistance >= 1.40f && halfSecondPushDistance <= 1.90f,

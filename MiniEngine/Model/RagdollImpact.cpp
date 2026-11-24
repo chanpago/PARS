@@ -59,6 +59,7 @@ namespace PARS
                 impact.fromProjectile = contact.fromProjectile;
                 impact.newProjectileHit = contact.newProjectileHit;
                 impact.fromCharacterCapsule = contact.fromCharacterCapsule;
+                impact.newCapsuleHit = contact.newCapsuleHit;
                 impact.fromAnimatedCapsule = contact.fromAnimatedCapsule;
                 impact.capsuleVelocity = contact.capsuleVelocity;
                 impact.capsuleGroup = contact.capsuleGroup;
@@ -541,6 +542,103 @@ namespace PARS
         const PxRigidBody& rigid = *m_Bodies[body];
         const PxVec3 center = (rigid.getGlobalPose() * rigid.getCMassLocalPose()).p;
         return rigid.getLinearVelocity() + rigid.getAngularVelocity().cross(point - center);
+    }
+
+    bool Ragdoll::BuildTorsoBalanceRig(TorsoBalanceRig& rig) const
+    {
+        rig = {};
+        const int root = GetImpactRootBody();
+        if (root < 0)
+        {
+            return false;
+        }
+        rig.pelvis = static_cast<size_t>(root);
+        rig.pelvisNode = m_BoneNodes[root];
+        int parent = root;
+        // 물리 에셋의 연결 순서를 따라가므로 척추 이름의 번호나 바디 배열 순서에 의존하지 않는다.
+        for (size_t depth = 0; depth < m_Bodies.size(); ++depth)
+        {
+            const std::vector<PhysicsConstraint>::const_iterator joint = std::find_if(m_Asset.constraints.begin(),
+                m_Asset.constraints.end(), [this, parent](const PhysicsConstraint& entry) -> bool
+                {
+                    return entry.parentBone == m_Asset.bodies[parent].bone && IsSpine(entry.childBone);
+                });
+            if (joint == m_Asset.constraints.end())
+            {
+                break;
+            }
+            const int child = m_Asset.FindBody(joint->childBone);
+            if (child < 0)
+            {
+                return false;
+            }
+            if (parent == root)
+            {
+                rig.anchorInPelvis = PxVec3(joint->parentFrame.offset.x, joint->parentFrame.offset.y, joint->parentFrame.offset.z);
+                const Math::Vector3 anchor(m_Asset.bodies[root].GetLocalTransform() *
+                    Math::Vector3(rig.anchorInPelvis.x, rig.anchorInPelvis.y, rig.anchorInPelvis.z));
+                rig.anchorInPelvisBone = PxVec3(anchor.GetX(), anchor.GetY(), anchor.GetZ());
+            }
+            TorsoBalanceLink link;
+            link.body = static_cast<size_t>(child);
+            link.joint = static_cast<size_t>(joint - m_Asset.constraints.begin());
+            link.node = m_BoneNodes[child];
+            link.mass = m_Bodies[child]->getMass();
+            const PxVec3 localCenter = m_Bodies[child]->getCMassLocalPose().p;
+            const Math::Matrix4 shape = m_Asset.bodies[child].GetLocalTransform();
+            const Math::Vector3 center(shape * Math::Vector3(localCenter.x, localCenter.y, localCenter.z));
+            const Math::Vector3 anchor(shape * Math::Vector3(joint->childFrame.offset));
+            link.centerInBone = PxVec3(center.GetX(), center.GetY(), center.GetZ());
+            link.anchorInBone = PxVec3(anchor.GetX(), anchor.GetY(), anchor.GetZ());
+            rig.links.push_back(link);
+            parent = child;
+        }
+        return !rig.links.empty();
+    }
+
+    bool Ragdoll::GetTorsoBalanceSample(const TorsoBalanceRig& rig, TorsoBalanceSample& sample) const
+    {
+        sample = {};
+        if (rig.links.empty() || rig.pelvis >= m_Bodies.size() || !m_Bodies[rig.pelvis]->getScene())
+        {
+            return false;
+        }
+        sample.pivot = m_Bodies[rig.pelvis]->getGlobalPose().transform(rig.anchorInPelvis);
+        sample.pivotVelocity = GetBodyPointVelocity(rig.pelvis, sample.pivot);
+        sample.gravity = -m_Bodies[rig.pelvis]->getScene()->getGravity().y;
+        PxVec3 arm(0);
+        PxVec3 velocity(0);
+        for (const TorsoBalanceLink& link : rig.links)
+        {
+            if (link.body >= m_Bodies.size())
+            {
+                return false;
+            }
+            const PxRigidBody& body = *m_Bodies[link.body];
+            const PxTransform center = body.getGlobalPose() * body.getCMassLocalPose();
+            const PxVec3 displacement = center.p - sample.pivot;
+            const float mass = body.getMass();
+            sample.mass += mass;
+            arm += displacement * mass;
+            velocity += (body.getLinearVelocity() - sample.pivotVelocity) * mass;
+            // 좌우와 전후 굽힘에 쓰는 수평 두 축의 평균 관성이다. 각 바디의 고유 관성과 평행축 항을 모두 더한다.
+            const PxVec3 moments = body.getMassSpaceInertiaTensor();
+            const PxVec3 up = center.q.rotateInv(PxVec3(0, 1, 0));
+            const float verticalInertia = moments.dot(up.multiply(up));
+            sample.inertia += .5f * (moments.x + moments.y + moments.z - verticalInertia +
+                mass * (displacement.magnitudeSquared() + displacement.y * displacement.y));
+        }
+        arm /= sample.mass;
+        velocity /= sample.mass;
+        const float radiusSquared = arm.magnitudeSquared();
+        if (radiusSquared < .0004f || !arm.isFinite() || !velocity.isFinite() || !std::isfinite(sample.inertia))
+        {
+            return false;
+        }
+        sample.height = arm.y;
+        sample.lean = TorsoBalance::GetLean(arm);
+        sample.rate = arm.cross(velocity).cross(PxVec3(0, 1, 0)) / radiusSquared;
+        return true;
     }
 
     float Ragdoll::GetImpactRootYawSpeed() const

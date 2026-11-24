@@ -173,6 +173,8 @@ namespace
         result.origin = PxVec3(input.com.x, projectionHeight, input.com.z);
         result.raw = PxVec3(input.com.x + input.velocity.x * predictionTime,
             projectionHeight, input.com.z + input.velocity.z * predictionTime);
+        // 현재 전신 ICP는 실측 속도로 유지하고, 착지 후보에는 골반이 상체를 받으러 갈 거리도 포함한다.
+        result.raw += input.torsoAcceleration * (.5f * predictionTime * predictionTime);
         result.clamped = result.raw;
         result.enabled = settings.landingComClampEnabled;
         result.valid = result.raw.isFinite();

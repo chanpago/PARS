@@ -206,7 +206,7 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         cached->clockRevision = m_ClockRevision;
         cached->impactContactId = 0;
         cached->capsuleVelocity = PxVec3(0);
-        cached->hasInitialResponse = false;
+        cached->beginsImpact = false;
         for (int side = 0; side < 2; ++side)
         {
             const uint32_t flags = pair.shapes[side]->getSimulationFilterData().word3;
@@ -394,11 +394,11 @@ void PhysicsWorld::RecordImpactContact(ContactPair& pair, int sourceSide, bool c
     {
         return;
     }
+    pair.beginsImpact = true;
     if (contact->settings.bodyImpulse == 0 && contact->settings.partImpulse == 0)
     {
         return;
     }
-    pair.hasInitialResponse = true;
     if (!capsule && beforeContact && contact->incomingDirection.isZero())
     {
         const PxVec3 incoming = beforeContact->linearVelocity[sourceSide];
@@ -651,7 +651,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
         for (const physx::PxContactPairPoint& point : pair.points)
         {
             const PxVec3 normal = side == 0 ? point.normal : -point.normal;
-            if (normal.isFinite() && (projectile || (capsule && pair.hasInitialResponse) || normal.y < .70710678f) && point.impulse.isFinite())
+            if (normal.isFinite() && (projectile || (capsule && pair.beginsImpact) || normal.y < .70710678f) && point.impulse.isFinite())
             {
                 impulse += point.impulse.magnitude();
                 if (contacts && point.position.isFinite())
@@ -664,6 +664,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
                     contact.fromProjectile = projectile;
                     contact.newProjectileHit = projectile && pair.firstImpulseStep == m_StepCount;
                     contact.fromCharacterCapsule = capsule;
+                    contact.newCapsuleHit = capsule && pair.beginsImpact;
                     contact.fromAnimatedCapsule = (sourceFlags & AnimatedCapsuleFilterFlag) != 0;
                     contact.capsuleVelocity = pair.capsuleVelocity;
                     contact.capsuleGroup = sourceData.word2;

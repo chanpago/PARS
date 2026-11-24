@@ -14,6 +14,7 @@ void SkeletalMeshComponent::UpdateHorizontalBalance(float deltaTime)
     input.completedStep = sample.completedPhysicsStep;
     input.com = sample.centerOfMass;
     input.velocity = sample.centerOfMassVelocity;
+    input.torsoAcceleration = m_TorsoBalance.GetRequestedAcceleration();
     input.mass = sample.totalMass;
     input.deltaTime = deltaTime;
     input.supportWeight = m_Ragdoll.GetRootSupportWeight();

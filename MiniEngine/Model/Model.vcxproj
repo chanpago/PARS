@@ -257,6 +257,9 @@
     <ClInclude Include="StandingSupport.h" />
     <ClCompile Include="StandingSupport.cpp" />
     <ClInclude Include="HorizontalBalance.h" />
+    <ClInclude Include="TorsoBalance.h" />
+    <ClCompile Include="TorsoBalance.cpp" />
+    <ClCompile Include="Components\SkeletalMeshTorsoBalance.cpp" />
     <ClCompile Include="HorizontalBalance.cpp" />
     <ClCompile Include="Components\SkeletalMeshHorizontalBalance.cpp" />
     <ClCompile Include="RagdollArticulation.cpp" />

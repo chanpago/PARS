@@ -730,6 +730,7 @@ namespace PARS
         // 각 관절 축을 돌리는데 필요한 "유효 관성"을 계산하는 부분. 이후 관절 PD의 강성,감쇠를 관성에 맞춰 정할 때 사용
         std::vector<float> inertias;
         std::vector<unsigned> freeAxes;
+        std::vector<unsigned> torqueLimitedAxes;
         if (m_DrivesEnabled)
         {
             // 각 관절에 필요한 토크가 함께 계산됨 이게 바로 관성행렬(질량 행렬 M). 현재 물리자세, 질량, 관성,연결 구조로 행렬을 계산
@@ -768,9 +769,19 @@ namespace PARS
                     const PhysicsAngularDrive& drive = data.drives[data.useSlerpDrive ? 0 : axis];
                     const bool driven = GetJointDriveStrength(i) > 0 && drive.enabled && drive.maxTorque > 0 &&
                         (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
-                    if (motions[axis] != PhysicsJointMotion::Locked && !driven)
+                    if (motions[axis] == PhysicsJointMotion::Locked)
                     {
-                        freeAxes.push_back(6 + m_ArticulationDofOffsets[i] + axis);
+                        continue;
+                    }
+                    const float torsoLimit = GetTorsoTorqueLimit(i, axis);
+                    const unsigned dof = 6 + m_ArticulationDofOffsets[i] + axis;
+                    if (!driven || torsoLimit == 0)
+                    {
+                        freeAxes.push_back(dof);
+                    }
+                    else if (torsoLimit < PX_MAX_F32)
+                    {
+                        torqueLimitedAxes.push_back(dof);
                     }
                 }
             }
@@ -807,6 +818,8 @@ namespace PARS
             {
                 contactForce[axis] += horizontalForce[axis];
             }
+            // 힘이 제한된 척추의 자세 목표 가속도를 이웃 관절에 명령하지 않는다. 모터 게인은 실제 관성을 유지한다.
+            freeAxes.insert(freeAxes.end(), torqueLimitedAxes.begin(), torqueLimitedAxes.end());
             ResolveFreeAcceleration(cache, count, freeAxes, gravityWeight, contactForce, targetAcceleration);
 
             // 이 부분에서 아티큘레이션의 루트 즉, 골반만 먼저 중력보상, 코리올리 원심력보상을 addTorque()로 적용한다.
@@ -903,13 +916,16 @@ namespace PARS
                     // feedForward = PxClamp(feedForward, -drive.maxTorque, drive.maxTorque);
                 }
 
-                // 보상토크를 저장한다.
+                float remainingTorque = enabled ? PX_MAX_F32 : 0;
+                const float torsoLimit = GetTorsoTorqueLimit(i, axis);
+                if (enabled && torsoLimit < PX_MAX_F32)
+                {
+                    // 몸통을 받는 동안 허리 근력 한도를 보상 토크와 자세 구동이 공유한다.
+                    const float limit = PxMin(torsoLimit, drive.maxTorque);
+                    feedForward = PxClamp(feedForward, -.5f * limit, .5f * limit);
+                    remainingTorque = limit - PxAbs(feedForward);
+                }
                 cache.jointForce[dof] = feedForward;
-
-
-                // 상한 해제 실험: 보상 사용량을 차감하지 않고 PD에 사실상 무제한 토크를 허용한다.
-                // const float remainingTorque = enabled ? PxMax(0.0f, drive.maxTorque - PxAbs(feedForward)) : 0;
-                const float remainingTorque = enabled ? PX_MAX_F32 : 0;
 
                 // 최신 Articulation에는 구형 internalCompliance가 없다. 다른 모터의 지지 상태를 반영한
                 // 관성으로 Kp=I*omegaN^2, Kd=2*zeta*I*omegaN을 만들고 암시적 토크 드라이브에 전달한다.

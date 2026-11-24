@@ -68,6 +68,7 @@ public:
     bool newProjectileHit = false;
     bool fromCharacterCapsule = false;
     bool fromAnimatedCapsule = false;
+    bool newCapsuleHit = false;
 };
 
 // 최초 접촉점과 진입 방향을 상대 바디의 로컬 좌표로 보관한다.
@@ -107,7 +108,7 @@ private:
         uint64_t firstImpulseStep = 0;
         uint64_t impactContactId = 0;
         physx::PxVec3 capsuleVelocity{0};
-        bool hasInitialResponse = false;
+        bool beginsImpact = false;
     };
     struct ImpactSource
     {

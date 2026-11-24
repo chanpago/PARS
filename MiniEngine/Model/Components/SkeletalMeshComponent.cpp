@@ -101,6 +101,7 @@ namespace PARS
                 stretch.push_back(Invert(PhysicsBoneFrame(pose[node])) * pose[node]);
             }
         }
+        ResetTorsoBalance();
         m_Ragdoll.Swap(candidate);
         m_ImpactWarmup = {};
         m_ImpactFlail = {};
@@ -134,6 +135,7 @@ namespace PARS
             return false;
         }
         instance->Initialize(m_SkeletalMesh);
+        ResetTorsoBalance();
         m_ImpactWarmup = {};
         m_AnimInstance = std::move(instance);
         ResetFallArms();
@@ -208,6 +210,11 @@ namespace PARS
         {
             m_Ragdoll.ApplyImpactResponses(responses);
         }
+        if (IsActiveRagdoll())
+        {
+            StartDynamicTorsoBalance(m_Ragdoll.GetExternalImpacts());
+            UpdateDynamicTorsoBalance(deltaTime);
+        }
         UpdateFootSupport();
         if (UpdateImpactWarmup(deltaTime, responses))
         {
@@ -242,7 +249,12 @@ namespace PARS
             }
         }
 
-        if (!UpdateAutomaticRagdoll(deltaTime, hit.body >= 0 || !responses.empty()))
+        const std::vector<RagdollBodyImpulse>& contacts = m_Ragdoll.GetExternalImpacts();
+        const bool capsuleImpact = m_AutomaticRootSupport && std::any_of(contacts.begin(), contacts.end(), [](const RagdollBodyImpulse& impact) -> bool
+        {
+            return impact.newCapsuleHit && impact.impulse.magnitudeSquared() > 1e-8f;
+        });
+        if (!UpdateAutomaticRagdoll(deltaTime, hit.body >= 0 || !responses.empty() || capsuleImpact))
         {
             return;
         }
@@ -302,6 +314,11 @@ namespace PARS
                 if (evaluated)
                 {
                     UpdateHorizontalBalance(deltaTime);
+                    if (m_TorsoBalance.IsActive())
+                    {
+                        ApplyTorsoBalancePose(target);
+                        m_Ragdoll.ApplyTorsoHipTorque(m_TorsoRig, m_TorsoBalance.GetHipTorque());
+                    }
                     ApplyArmTargets(target);
                 }
             }

@@ -923,6 +923,109 @@ namespace
     }
 }
 
+void RunTorsoBalanceRagdollTests()
+{
+    std::array<float, 2> endLean{};
+    for (size_t trial = 0; trial < endLean.size(); ++trial)
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize torso balance world");
+        PhysicsBody pelvis;
+        pelvis.bone = "Hips";
+        pelvis.shape = PhysicsShapeType::Box;
+        pelvis.halfExtents = XMFLOAT3(.08f, .08f, .08f);
+        pelvis.mass = 12;
+        PhysicsBody chest = pelvis;
+        chest.bone = "Spine2";
+        chest.halfExtents = XMFLOAT3(.08f, .25f, .08f);
+        chest.offset.y = .25f;
+        chest.mass = 20;
+        PhysicsAsset asset;
+        asset.bodies = {pelvis, chest};
+        const std::vector<std::string> names{pelvis.bone, chest.bone};
+        std::vector<Matrix4> pose{Pose(Vector3(0, 2, 0)), Pose(Vector3(0, 2.1f, 0))};
+        PhysicsConstraint joint;
+        joint.parentBone = pelvis.bone;
+        joint.childBone = chest.bone;
+        joint.twist = PhysicsJointMotion::Limited;
+        joint.twistMin = -1.0f;
+        joint.twistMax = 1.0f;
+        joint.swingY = PhysicsJointMotion::Free;
+        joint.swingZ = PhysicsJointMotion::Free;
+        joint.SetWorldFrame(pose[0], pose[1] * chest.GetLocalTransform(), pose[1]);
+        asset.constraints.push_back(joint);
+        ConfigureDefaultDrives(asset);
+        Ragdoll ragdoll;
+        std::string error;
+        Check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error), "Create torso articulation");
+        const PxRigidStatic* marker = world.CreateStaticBox(PxTransform(PxVec3(0, -5, 0)), PxVec3(1), "floor");
+        PxArticulationReducedCoordinate* articulation = nullptr;
+        Check(marker && marker->getScene()->getArticulations(&articulation, 1) == 1, "Find torso articulation");
+        PxArticulationLink* links[2]{};
+        Check(articulation->getLinks(links, 2) == 2, "Find pelvis and spine");
+        PxArticulationLink* root = links[0]->getInboundJoint() ? links[1] : links[0];
+        PxArticulationJointReducedCoordinate* motor = links[0] == root ? links[1]->getInboundJoint() : links[0]->getInboundJoint();
+        PxScene& scene = *marker->getScene();
+        PxRigidDynamic* driver = scene.getPhysics().createRigidDynamic(root->getGlobalPose());
+        Check(driver != nullptr, "Create controlled pelvis support");
+        driver->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+        scene.addActor(*driver);
+        PxFixedJoint* support = PxFixedJointCreate(scene.getPhysics(), driver, PxTransform(PxIdentity), root, PxTransform(PxIdentity));
+        Check(support != nullptr, "Constrain the actual pelvis to the support");
+        TorsoBalanceRig rig;
+        TorsoBalanceSample sample;
+        Check(ragdoll.BuildTorsoBalanceRig(rig) && rig.links.size() == 1 && ragdoll.GetTorsoBalanceSample(rig, sample) &&
+            std::abs(sample.height - .25f) < .001f && sample.mass == 20, "Measure the torso above the physical joint anchor");
+        TorsoBalance balance;
+        balance.Begin(sample, sample.lean);
+        ragdoll.SetDrivesEnabled(true);
+        ragdoll.SetTorsoTorqueLimits(rig, balance.GetHipTorqueLimit());
+        Check(ragdoll.UpdateDriveTargets(pose, 0, error) &&
+            motor->getDriveParams(PxArticulationAxis::eTWIST).maxForce <= balance.GetHipTorqueLimit() &&
+            motor->getDriveParams(PxArticulationAxis::eSWING1).maxForce > balance.GetHipTorqueLimit(),
+            "Spine bending is torque-limited and vertical twist keeps its drive");
+        RagdollBodyImpulse hit;
+        hit.body = 1;
+        hit.position = sample.pivot + PxVec3(0, .30f, 0);
+        hit.impulse = PxVec3(0, 0, -12);
+        hit.fromCharacterCapsule = true;
+        hit.newCapsuleHit = true;
+        ragdoll.ApplyExternalImpacts({hit});
+        const float dt = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+        float speed = 0;
+        float travel = 0;
+        float peak = 0;
+        PxVec3 previousVelocity = sample.pivotVelocity;
+        for (int tick = 0; tick < 75; ++tick)
+        {
+            world.Step();
+            Check(ragdoll.GetTorsoBalanceSample(rig, sample), "Measure tilt from simulated links");
+            peak = PxMax(peak, -sample.lean.z);
+            balance.Observe(sample);
+            balance.Advance(dt, sample.pivotVelocity - previousVelocity);
+            previousVelocity = sample.pivotVelocity;
+            if (trial == 0)
+            {
+                speed += PxClamp(balance.GetRequestedAcceleration().z, -6.0f, 6.0f) * dt;
+                travel += speed * dt;
+            }
+            driver->setKinematicTarget(PxTransform(PxVec3(0, 2, travel)));
+            pose[0] = Pose(Vector3(0, 2, travel));
+            pose[1] = Pose(Vector3(0, 2.1f, travel), Quaternion(Vector3(kXUnitVector), balance.lean.z));
+            ragdoll.ApplyTorsoHipTorque(rig, balance.GetHipTorque());
+            Check(ragdoll.UpdateDriveTargets(pose, dt, error), "Drive the measured torso through the physical joint");
+        }
+        endLean[trial] = -sample.lean.z;
+        std::printf("PhysX torso moving_support=%d peak_deg=%.2f end_deg=%.2f pelvis_z=%.3f\n",
+            trial == 0, peak * 180 / PxPi, endLean[trial] * 180 / PxPi, sample.pivot.z);
+        Check(peak > .04f && world.GetErrorCount() == 0 && ragdoll.IsFinite(), "Physical torso bends toward the shove");
+        support->release();
+        driver->release();
+    }
+    Check(std::abs(endLean[0]) < .15f && endLean[1] > .50f,
+        "Under equal impulses the moving physical pelvis catches the chest and the blocked pelvis cannot");
+}
+
 void RunPelvisDriveTests()
 {
     TestWeightedPelvisSupport();

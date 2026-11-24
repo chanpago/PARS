@@ -38,6 +38,74 @@ namespace PARS
     }
 #endif
 
+    float Ragdoll::GetTorsoTorqueLimit(size_t joint, int axis) const
+    {
+        return joint < m_TorsoTorqueLimits.size() ? m_TorsoTorqueLimits[joint][axis] : PX_MAX_F32;
+    }
+
+    void Ragdoll::SetTorsoTorqueLimits(const TorsoBalanceRig& rig, float torque)
+    {
+#if defined(_M_X64)
+        if (torque > 0 && !rig.links.empty() && m_DrivesEnabled)
+        {
+            m_TorsoTorqueLimits.assign(m_Asset.constraints.size(), physx::PxVec3(PX_MAX_F32));
+            for (const TorsoBalanceLink& link : rig.links)
+            {
+                const PhysicsConstraint& joint = m_Asset.constraints[link.joint];
+                const DirectX::XMFLOAT4& frame = joint.childFrame.rotation;
+                const physx::PxQuat orientation = m_Bodies[link.body]->getGlobalPose().q * physx::PxQuat(frame.x, frame.y, frame.z, frame.w);
+                const physx::PxVec3 up = orientation.rotateInv(physx::PxVec3(0, 1, 0)).abs();
+                const int twist = up.x >= up.y && up.x >= up.z ? 0 : up.y >= up.z ? 1 : 2;
+                // 최하단 굽힘은 모델의 허리 토크가 전담하고, 위쪽 척추는 제한된 힘으로 곡률을 분담한다.
+                m_TorsoTorqueLimits[link.joint] = physx::PxVec3(link.joint == rig.links.front().joint ? 0.0f : torque);
+                m_TorsoTorqueLimits[link.joint][twist] = PX_MAX_F32;
+            }
+        }
+        else
+        {
+            if (m_TorsoTorqueLimits.empty())
+            {
+                return;
+            }
+            m_TorsoTorqueLimits.clear();
+        }
+        if (!m_Articulation)
+        {
+            ConfigureD6JointDrives();
+        }
+#endif
+    }
+
+    void Ragdoll::ApplyTorsoHipTorque(const TorsoBalanceRig& rig, const physx::PxVec3& torque)
+    {
+#if defined(_M_X64)
+        if (!m_Simulating || !m_DrivesEnabled || rig.links.empty() || m_TorsoTorqueLimits.empty() || !torque.isFinite())
+        {
+            return;
+        }
+        const TorsoBalanceLink& spine = rig.links.front();
+        const PhysicsConstraint& joint = m_Asset.constraints[spine.joint];
+        const DirectX::XMFLOAT4& rotation = joint.parentFrame.rotation;
+        const PxQuat frame = m_Bodies[rig.pelvis]->getGlobalPose().q * PxQuat(rotation.x, rotation.y, rotation.z, rotation.w);
+        PxVec3 local = frame.rotateInv(torque);
+        const float strength = GetJointDriveStrength(spine.joint);
+        const PhysicsJointMotion motions[] = {joint.twist, joint.swingY, joint.swingZ};
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const PhysicsAngularDrive& drive = joint.drives[joint.useSlerpDrive ? 0 : axis];
+            const bool bending = GetTorsoTorqueLimit(spine.joint, axis) == 0 && Enabled(drive, motions[axis]);
+            local[axis] = bending ? PxClamp(local[axis], -drive.maxTorque, drive.maxTorque) * strength : 0;
+        }
+        const PxVec3 effort = frame.rotate(local);
+        if (!effort.isZero())
+        {
+            // 내부 관절 토크의 작용과 반작용을 함께 가해 전신에 순각운동량을 더하지 않는다.
+            m_Bodies[spine.body]->addTorque(effort, PxForceMode::eFORCE);
+            m_Bodies[rig.pelvis]->addTorque(-effort, PxForceMode::eFORCE);
+        }
+#endif
+    }
+
     float Ragdoll::GetJointDriveStrength(size_t jointIndex) const
     {
         const float impactScale = GetProjectileJointDriveScale(jointIndex);
@@ -113,6 +181,7 @@ namespace PARS
         {
             m_HorizontalSupportForce = physx::PxVec3(0);
             m_JointYieldTimes.clear();
+            m_TorsoTorqueLimits.clear();
             if (m_PelvisYieldTime > 0)
             {
                 m_PelvisYieldTime = 0;
@@ -152,19 +221,21 @@ namespace PARS
             const PhysicsConstraint& data = m_Asset.constraints[i];
             const float strength = GetJointDriveStrength(i);
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
-            m_Joints[i]->setAngularDriveConfig(data.useSlerpDrive ? PxD6AngularDriveConfig::eSLERP : PxD6AngularDriveConfig::eSWING_TWIST);
-            for (int axis = 0; axis < (data.useSlerpDrive ? 1 : 3); ++axis)
+            const bool torsoLimited = i < m_TorsoTorqueLimits.size() && m_TorsoTorqueLimits[i].minElement() < PX_MAX_F32;
+            const bool slerp = data.useSlerpDrive && !torsoLimited;
+            m_Joints[i]->setAngularDriveConfig(slerp ? PxD6AngularDriveConfig::eSLERP : PxD6AngularDriveConfig::eSWING_TWIST);
+            for (int axis = 0; axis < (slerp ? 1 : 3); ++axis)
             {
-                const PhysicsAngularDrive& drive = data.drives[axis];
+                const PhysicsAngularDrive& drive = data.drives[data.useSlerpDrive ? 0 : axis];
                 const bool on = !m_Articulation && m_DrivesEnabled && strength > 0 && Enabled(drive, motions[axis]);
                 PxD6JointDrive motor;
                 if (on)
                 {
                     // 강성 배율을 낮추면서 감쇠비는 유지한다.
                     motor = PxD6JointDrive(drive.GetStiffness() * strength, drive.GetDamping() * std::sqrt(strength),
-                        drive.maxTorque * strength, drive.useAcceleration);
+                        PxMin(drive.maxTorque * strength, GetTorsoTorqueLimit(i, axis)), drive.useAcceleration);
                 }
-                m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], motor);
+                m_Joints[i]->setDrive(slerp ? PxD6Drive::eSLERP : axes[axis], motor);
             }
         }
 #endif

@@ -187,6 +187,7 @@ namespace PARS
     }
     void Ragdoll::Destroy()
     {
+        m_TorsoTorqueLimits.clear();
         RemoveCharacterCapsule();
         InvalidateContactState();
         m_Standby.reset();
@@ -266,6 +267,7 @@ namespace PARS
         m_BoneNodes.swap(other.m_BoneNodes);
         m_Bodies.swap(other.m_Bodies);
         m_Joints.swap(other.m_Joints);
+        m_TorsoTorqueLimits.swap(other.m_TorsoTorqueLimits);
         std::swap(m_World, other.m_World);
         m_BoneNames.swap(other.m_BoneNames);
         std::swap(m_QueryOwner, other.m_QueryOwner);

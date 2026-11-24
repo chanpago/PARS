@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "PhysicsAsset.h"
+#include "TorsoBalance.h"
 #include "ImpactImpulseSettings.h"
 #include <foundation/PxVec3.h>
 #include <foundation/PxTransform.h>
@@ -39,6 +40,7 @@ namespace PARS
         bool newProjectileHit = false;
         bool fromCharacterCapsule = false;
         bool fromAnimatedCapsule = false;
+        bool newCapsuleHit = false;
     };
 
     struct RagdollImpactResponse : public PhysicsImpactResponse
@@ -105,7 +107,9 @@ namespace PARS
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
+        void ApplyTorsoHipTorque(const TorsoBalanceRig& rig, const physx::PxVec3& torque);
         void ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
+        bool BuildTorsoBalanceRig(TorsoBalanceRig& rig) const;
         void UpdateProjectileReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
@@ -257,6 +261,8 @@ namespace PARS
         bool HasApproachingImpact(float minimumDeltaVelocity, float deferCapsuleDeltaVelocity = PX_MAX_F32) const;
         int GetImpactRootBody() const;
         bool IsCharacterImpactBody(size_t body) const;
+        bool GetTorsoBalanceSample(const TorsoBalanceRig& rig, TorsoBalanceSample& sample) const;
+        void SetTorsoTorqueLimits(const TorsoBalanceRig& rig, float torque);
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;
         physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
         float GetImpactRootYawSpeed() const;
@@ -289,6 +295,7 @@ namespace PARS
     private:
         float GetJointDriveStrength(size_t jointIndex) const;
         float GetProjectileJointDriveScale(size_t jointIndex) const;
+        float GetTorsoTorqueLimit(size_t joint, int axis) const;
         float GetProjectilePelvisDriveScale() const;
 
     private:
@@ -304,6 +311,7 @@ namespace PARS
         mutable uint64_t m_ImpactSampleClock = UINT64_MAX;
         uint64_t m_ProjectileReactionStep = UINT64_MAX;
         uint64_t m_ProjectileReactionClock = UINT64_MAX;
+        std::vector<physx::PxVec3> m_TorsoTorqueLimits;
         mutable std::vector<RagdollBodyImpulse> m_ExternalImpacts;
         std::vector<float> m_JointYieldTimes;
         PhysicsAsset m_Asset;
