@@ -205,20 +205,10 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     }
     // 다른 서기 클립에서 멈춰 있었어도 현재 자세에서 출발하고, 인계 후에는 기존 Idle 회복기를 사용한다.
     const uint32_t currentClip = m_AnimInstance->GetCurrentAnimationIndex();
-    uint32_t idleClip = currentClip;
-    if (m_AnimInstance->GetAnimationName(currentClip) != "Idle")
+    const uint32_t idleClip = GetIdleAnimationIndex();
+    if (idleClip == UINT32_MAX)
     {
-        for (idleClip = 0; idleClip < m_AnimInstance->GetAnimationCount(); ++idleClip)
-        {
-            if (m_AnimInstance->GetAnimationName(idleClip) == "Idle")
-            {
-                break;
-            }
-        }
-        if (idleClip == m_AnimInstance->GetAnimationCount())
-        {
-            return false;
-        }
+        return false;
     }
     if (IsRagdoll())
     {
@@ -496,7 +486,7 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
             targets.push_back(FootstepPoseMatrix(frames[joint]) * Invert(PhysicsBoneFrame(original)) * original);
         }
     }
-    UpdateImpactFlail(true, deltaTime);
+    UpdateImpactFlail(UpperBodyImpact::Capsule, deltaTime);
     const std::vector<GraphNode>& basePose = m_ImpactFlail.pose.empty() ? warmup.sourcePose : m_ImpactFlail.pose;
     if (!OverridePhysicsPose(m_PhysicsSkeleton, basePose, Matrix4(kIdentity), nodes, targets, warmup.drivePose))
     {

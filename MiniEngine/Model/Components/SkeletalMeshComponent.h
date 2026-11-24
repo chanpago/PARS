@@ -73,6 +73,13 @@ namespace PARS
             IdleBlend
         };
 
+        enum class UpperBodyImpact : uint8_t
+        {
+            None,
+            Longitudinal,
+            Capsule
+        };
+
         struct ImpactFlailPlayback
         {
         public:
@@ -179,7 +186,7 @@ namespace PARS
         void UpdateHorizontalBalance(float deltaTime);
         void ApplyCrossStepDrivePose(const FootSupportSnapshot& support, float deltaTime, std::vector<Math::Matrix4>& target);
         void ResetCrossStepPlayback();
-        void UpdateImpactFlail(bool triggerReaction, float deltaTime);
+        void UpdateImpactFlail(UpperBodyImpact impact, float deltaTime);
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
             const std::vector<physx::PxTransform>& sourcePose, float deltaTime);
@@ -407,6 +414,7 @@ namespace PARS
         }
         bool IsFallingClip(uint32_t animationIndex) const;
         bool IsAirborneFallClip(uint32_t animationIndex) const;
+        uint32_t GetIdleAnimationIndex() const;
         MotionMatchResult SelectFallingAnimation() const;
         const std::vector<GraphNode>& GetImpactAnimationPose() const
         {

@@ -81,7 +81,28 @@ namespace PARS
         return left >= 0.0f ? FallDirection::Left : FallDirection::Right;
     }
 
-    void SkeletalMeshComponent::UpdateImpactFlail(bool triggerReaction, float deltaTime)
+    uint32_t SkeletalMeshComponent::GetIdleAnimationIndex() const
+    {
+        const uint32_t current = m_AnimInstance->GetCurrentAnimationIndex();
+        if (m_AnimInstance->GetAnimationName(current) == "Idle")
+        {
+            return current;
+        }
+        if (m_StandingIdleAnimationIndex < m_AnimInstance->GetAnimationCount())
+        {
+            return m_StandingIdleAnimationIndex;
+        }
+        for (uint32_t clip = 0; clip < m_AnimInstance->GetAnimationCount(); ++clip)
+        {
+            if (m_AnimInstance->GetAnimationName(clip) == "Idle")
+            {
+                return clip;
+            }
+        }
+        return UINT32_MAX;
+    }
+
+    void SkeletalMeshComponent::UpdateImpactFlail(UpperBodyImpact impact, float deltaTime)
     {
         if (IsFalling() || IsGroundFallActive() || m_StandingUpState != StandingUpState::None)
         {
@@ -90,10 +111,24 @@ namespace PARS
         }
         ImpactFlailPlayback& flail = m_ImpactFlail;
         // 충격 직후 균형 상태가 갱신될 때까지 상체 반응을 이어 간다.
-        flail.impactTimeRemaining = triggerReaction ? MotionFeatures::PredictionTimeSeconds :
+        flail.impactTimeRemaining = impact != UpperBodyImpact::None ? MotionFeatures::PredictionTimeSeconds :
             (std::max)(0.0f, flail.impactTimeRemaining - deltaTime);
         const bool recovering = flail.impactTimeRemaining > 0 || m_BalanceState == CharacterBalanceState::Unbalanced;
-        if (recovering && flail.clip == UINT32_MAX)
+        if (impact == UpperBodyImpact::Capsule)
+        {
+            const uint32_t idle = GetIdleAnimationIndex();
+            if (idle == UINT32_MAX)
+            {
+                flail = {};
+                return;
+            }
+            if (flail.clip != idle)
+            {
+                flail.clip = idle;
+                flail.time = idle == m_AnimInstance->GetCurrentAnimationIndex() ? m_AnimInstance->GetAnimationTime() : 0.0f;
+            }
+        }
+        else if (recovering && flail.clip == UINT32_MAX)
         {
             const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(MotionFrameUsage::BalanceUpperBody);
             flail.clip = match.clipIndex;
@@ -111,7 +146,7 @@ namespace PARS
             flail = {};
             return;
         }
-        constexpr float playbackRate = 0.5f;
+        const float playbackRate = m_AnimInstance->GetAnimationName(flail.clip) == "Idle" ? 1.0f : 0.5f;
         flail.time = std::fmod(flail.time + deltaTime * playbackRate, m_AnimInstance->GetAnimationDuration(flail.clip));
     }
 

@@ -296,7 +296,9 @@ namespace PARS
         if (IsActiveRagdoll())
         {
             std::vector<Math::Matrix4> target;
-            UpdateImpactFlail(capsuleImpact || longitudinalImpact, deltaTime);
+            const UpperBodyImpact upperBodyImpact = capsuleImpact ? UpperBodyImpact::Capsule :
+                (longitudinalImpact ? UpperBodyImpact::Longitudinal : UpperBodyImpact::None);
+            UpdateImpactFlail(upperBodyImpact, deltaTime);
 
             // 이 부분에서 액티브 래그돌 물리처리를한다(pd구동 및 추가보상토크계산)
             // EvaluateAnimationPhysicsPose부분에서 이번 프레임의 애니메이션의 목표 본 자세를 월드 기준으로 계산하고 target에 저장한다.
