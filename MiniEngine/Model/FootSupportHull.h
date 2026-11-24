@@ -116,13 +116,16 @@ namespace PARS
         bool hasDirection = false;
     };
 
-    // A is a CCW convex hull from BuildFootSupportHull. B scales XZ distances
-    // about its AREA centroid; a scale of 2 gives four times the area.
+    // 기준 다리 길이를 구할 수 없는 모델에 사용하는 완충 확장 반경(m).
+    constexpr float DefaultFootSupportBufferRadius = 1.0f;
+
+    // A의 면적 중심을 기준으로 B를 확대하되, 가장 먼 꼭짓점이 제한 반경에 닿으면 확장을 멈춘다.
     inline FootSupportBalance EvaluateFootSupportBalance(const std::vector<physx::PxVec3>& hull,
-        const physx::PxVec3& point, float scale = 2.0f)
+        const physx::PxVec3& point, float scale = 2.0f, float radiusLimit = DefaultFootSupportBufferRadius)
     {
         FootSupportBalance result;
-        if (hull.size() < 3 || !std::isfinite(scale) || scale <= 1.0f)
+        if (hull.size() < 3 || !std::isfinite(scale) || scale <= 1.0f ||
+            !std::isfinite(radiusLimit) || radiusLimit <= 0.0f)
         {
             return result;
         }
@@ -134,15 +137,20 @@ namespace PARS
             }
         }
 
-        // Translate before the shoelace sum to avoid cancellation far from the origin.
+        // 월드 원점에서 멀 때도 면적과 중심을 안정적으로 구하도록 첫 꼭짓점을 기준으로 옮긴다.
         const physx::PxVec3& origin = hull[0];
-        double area2 = 0, cx = 0, cz = 0, height = 0;
+        double area2 = 0;
+        double cx = 0;
+        double cz = 0;
+        double height = 0;
         for (size_t i = 0; i < hull.size(); ++i)
         {
             const physx::PxVec3& a = hull[i];
             const physx::PxVec3& b = hull[(i + 1) % hull.size()];
-            const double ax = double(a.x) - origin.x, az = double(a.z) - origin.z;
-            const double bx = double(b.x) - origin.x, bz = double(b.z) - origin.z;
+            const double ax = double(a.x) - origin.x;
+            const double az = double(a.z) - origin.z;
+            const double bx = double(b.x) - origin.x;
+            const double bz = double(b.z) - origin.z;
             const double cross = ax * bz - az * bx;
             area2 += cross;
             cx += (ax + bx) * cross;
@@ -156,10 +164,21 @@ namespace PARS
         cx = origin.x + cx / (3 * area2);
         cz = origin.z + cz / (3 * area2);
         result.center = physx::PxVec3(float(cx), float(height / hull.size()), float(cz));
+        double radiusSquared = 0;
         for (const physx::PxVec3& vertex : hull)
         {
-            const physx::PxVec3 expanded(float(cx + scale * (vertex.x - cx)), vertex.y,
-                float(cz + scale * (vertex.z - cz)));
+            const double x = double(vertex.x) - cx;
+            const double z = double(vertex.z) - cz;
+            radiusSquared = (std::max)(radiusSquared, x * x + z * z);
+        }
+        // A가 이미 제한 반경을 채웠으면 B를 A와 일치시켜 실제 발 지지 영역을 보존한다.
+        const double bufferScale = physx::PxClamp(radiusLimit / std::sqrt(radiusSquared), 1.0, static_cast<double>(scale));
+        const double expansion = bufferScale - 1.0;
+        result.bufferHull.reserve(hull.size());
+        for (const physx::PxVec3& vertex : hull)
+        {
+            const physx::PxVec3 expanded(float(vertex.x + expansion * (vertex.x - cx)), vertex.y,
+                float(vertex.z + expansion * (vertex.z - cz)));
             if (!expanded.isFinite())
             {
                 return {};
@@ -171,7 +190,8 @@ namespace PARS
             return result;
         }
 
-        const double dx = double(point.x) - cx, dz = double(point.z) - cz;
+        const double dx = double(point.x) - cx;
+        const double dz = double(point.z) - cz;
         const double distance = std::sqrt(dx * dx + dz * dz);
         result.comDistance = float(distance);
         if (distance <= 1e-8)
@@ -180,24 +200,26 @@ namespace PARS
             result.zone = FootSupportZone::Inside;
             return result;
         }
-        const double directionX = dx / distance, directionZ = dz / distance;
+        const double directionX = dx / distance;
+        const double directionZ = dz / distance;
         double inner = std::numeric_limits<double>::infinity();
         for (size_t i = 0; i < hull.size(); ++i)
         {
             const physx::PxVec3& a = hull[i];
             const physx::PxVec3& b = hull[(i + 1) % hull.size()];
-            const double ex = double(b.x) - a.x, ez = double(b.z) - a.z;
+            const double ex = double(b.x) - a.x;
+            const double ez = double(b.z) - a.z;
             const double outward = ez * directionX - ex * directionZ;
             if (outward > 0)
             {
                 inner = (std::min)(inner, (ex * (cz - a.z) - ez * (cx - a.x)) / outward);
             }
         }
-        const double outer = scale * inner;
-        if (!std::isfinite(inner) || inner <= 0 || outer - inner <= 1e-8)
+        if (!std::isfinite(inner) || inner <= 0)
         {
             return result;
         }
+        const double outer = bufferScale * inner;
         result.hasDirection = true;
         result.innerDistance = float(inner);
         result.outerDistance = float(outer);
@@ -206,7 +228,7 @@ namespace PARS
             result.weight = 1;
             result.zone = FootSupportZone::Inside;
         }
-        else if (distance >= outer - 1e-6)
+        else if (distance >= outer - 1e-6 || outer == inner)
         {
             result.zone = FootSupportZone::Outside;
         }

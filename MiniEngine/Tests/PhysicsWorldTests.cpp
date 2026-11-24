@@ -482,17 +482,19 @@ namespace
     {
         using namespace PARS;
         const std::vector<physx::PxVec3> hull = BuildFootSupportHull({{-1, .4f, -2}, {1, .4f, -2}, {1, .4f, 2}, {-1, .4f, 2}});
-        const PARS::FootSupportBalance center = EvaluateFootSupportBalance(hull, PxVec3(0));
+        // 이 큰 사각형에서는 상한에 닿기 전의 배율과 보간을 확인한다.
+        constexpr float radiusLimit = 8.0f;
+        const PARS::FootSupportBalance center = EvaluateFootSupportBalance(hull, PxVec3(0), 2.0f, radiusLimit);
         Check(center.zone == FootSupportZone::Inside && center.weight == 1 && !center.hasDirection,
             "COM at the area centroid has full weight without normalizing a zero vector");
         Check(center.bufferHull.size() == 4 && center.bufferHull[0] == PxVec3(-2, .4f, -4),
             "B doubles XZ distances while preserving surface height");
         for (const PxVec3 direction : {PxVec3(1, 0, 0), PxVec3(0, 0, 2), PxVec3(1, 0, 2)})
         {
-            const PARS::FootSupportBalance edgeA = EvaluateFootSupportBalance(hull, direction);
-            const PARS::FootSupportBalance middle = EvaluateFootSupportBalance(hull, direction * 1.5f);
-            const PARS::FootSupportBalance edgeB = EvaluateFootSupportBalance(hull, direction * 2);
-            const PARS::FootSupportBalance outside = EvaluateFootSupportBalance(hull, direction * 3);
+            const PARS::FootSupportBalance edgeA = EvaluateFootSupportBalance(hull, direction, 2.0f, radiusLimit);
+            const PARS::FootSupportBalance middle = EvaluateFootSupportBalance(hull, direction * 1.5f, 2.0f, radiusLimit);
+            const PARS::FootSupportBalance edgeB = EvaluateFootSupportBalance(hull, direction * 2, 2.0f, radiusLimit);
+            const PARS::FootSupportBalance outside = EvaluateFootSupportBalance(hull, direction * 3, 2.0f, radiusLimit);
             Check(edgeA.weight == 1 && edgeA.zone == FootSupportZone::Inside,
                 "A edges and corners have full weight");
             Check(std::abs(middle.weight - .5f) < 1e-6f && middle.zone == FootSupportZone::Buffer,
@@ -505,7 +507,7 @@ namespace
         float previous = 1;
         for (int i = 0; i <= 100; ++i)
         {
-            const float weight = EvaluateFootSupportBalance(hull, PxVec3(1 + i * .01f, 50, 0)).weight;
+            const float weight = EvaluateFootSupportBalance(hull, PxVec3(1 + i * .01f, 50, 0), 2.0f, radiusLimit).weight;
             Check(weight <= previous && weight >= 0 && weight <= 1, "Weight decreases monotonically across the band");
             previous = weight;
         }
@@ -523,12 +525,23 @@ namespace
         {
             vertex = transform(vertex);
         }
-        const PARS::FootSupportBalance movedBalance = EvaluateFootSupportBalance(moved, transform(PxVec3(1.5f, 0, 0)));
+        const PARS::FootSupportBalance movedBalance = EvaluateFootSupportBalance(moved, transform(PxVec3(1.5f, 0, 0)), 2.0f, radiusLimit);
         Check(std::abs(movedBalance.weight - .5f) < 1e-6f &&
                 (movedBalance.center - transform(center.center)).magnitude() < 1e-5f,
             "Translation and rotation move A, B and centroid without changing weight");
-        Check(EvaluateFootSupportBalance(hull, PxVec3(2, 0, 0), 3).weight == .5f,
+        Check(EvaluateFootSupportBalance(hull, PxVec3(2, 0, 0), 3, radiusLimit).weight == .5f,
             "Changing B scale changes the fade interval");
+        const std::vector<PxVec3> wide = BuildFootSupportHull({{-.6f, 0, 0}, {0, 0, -.15f}, {.6f, 0, 0}, {0, 0, .15f}});
+        const FootSupportBalance capped = EvaluateFootSupportBalance(wide, PxVec3(.75f, 0, 0), 2.86f, .9f);
+        Check(capped.zone == FootSupportZone::Buffer && std::abs(capped.weight - .5f) < 1e-6f &&
+                std::abs(capped.outerDistance - .9f) < 1e-6f && IsInsideFootSupportHull(capped.bufferHull, PxVec3(.9f, 0, 0)) &&
+                !IsInsideFootSupportHull(capped.bufferHull, PxVec3(.91f, 0, 0)),
+            "The radius cap bounds both the support fade and the polygon used for the fall timer");
+        const FootSupportBalance atFoot = EvaluateFootSupportBalance(wide, PxVec3(.6f, 0, 0), 2.86f, .5f);
+        const FootSupportBalance pastFoot = EvaluateFootSupportBalance(wide, PxVec3(.61f, 0, 0), 2.86f, .5f);
+        Check(atFoot.bufferHull == wide && atFoot.zone == FootSupportZone::Inside && atFoot.weight == 1 &&
+                pastFoot.zone == FootSupportZone::Outside && pastFoot.weight == 0,
+            "A stance exceeding the cap keeps its actual support and gains no extra buffer");
         const float nan = std::numeric_limits<float>::quiet_NaN();
         for (const std::vector<physx::PxVec3>& invalid : {std::vector<PxVec3>{}, std::vector<PxVec3>{{0, 0, 0}, {1, 0, 0}},
                  std::vector<PxVec3>{{0, 0, 0}, {1, 0, 0}, {2, 0, 0}},

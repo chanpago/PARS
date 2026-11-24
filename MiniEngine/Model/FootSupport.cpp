@@ -363,6 +363,19 @@ void PARS::FootSupport::UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorl
     }
 }
 
+float PARS::FootSupport::GetBufferRadiusLimit() const
+{
+    float longestLeg = 0.0f;
+    for (const Sole& sole : m_Feet)
+    {
+        if (sole.leg.available)
+        {
+            longestLeg = (std::max)(longestLeg, sole.leg.thighLength + sole.leg.calfLength);
+        }
+    }
+    return longestLeg > 0.0f ? longestLeg : DefaultFootSupportBufferRadius;
+}
+
 bool PARS::FootSupport::SetBufferScale(float scale)
 {
     if (!std::isfinite(scale) || scale < 1.01f || scale > 10.0f)
@@ -695,7 +708,9 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     // 여기서 저장한 weight를 다음 updateautomaticrootsupport에서 읽어서 골반 지지 강도에 적용
 
     // 현재 COM이 어디에 있는지 기록한다.
-    m_Snapshot.balance = EvaluateFootSupportBalance(m_Snapshot.hull, m_Snapshot.hasComProjection ? m_Snapshot.projectedCenterOfMass : PxVec3(std::numeric_limits<float>::quiet_NaN()), m_BufferScale);
+    const PxVec3 projectedCom = m_Snapshot.hasComProjection ? m_Snapshot.projectedCenterOfMass :
+        PxVec3(std::numeric_limits<float>::quiet_NaN());
+    m_Snapshot.balance = EvaluateFootSupportBalance(m_Snapshot.hull, projectedCom, m_BufferScale, GetBufferRadiusLimit());
 
     // COM 예측과 발 접촉 정보를 바탕으로 발딛기 필요 여부, 움직일 발과 착지 목표를 판단한다.
     // 실제 발의 이동·접촉에 따라 진행 상태와 발 이동 목표를 갱신하고 m_Snapshot.footstep에 저장한다.
