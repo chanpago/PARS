@@ -18,9 +18,10 @@ using namespace physx;
 
 namespace
 {
-    bool ValidProjectileSettings(float mass, float speed)
+    bool ValidProjectileSettings(float mass, float speed, float bodyImpulse, float torqueMultiplier)
     {
-        return std::isfinite(mass) && std::isfinite(speed) && mass >= .1f && mass <= 100 && speed >= 1 && speed <= 100;
+        return std::isfinite(mass) && std::isfinite(speed) && mass >= .1f && mass <= 100 && speed >= 1 && speed <= 100 &&
+            std::isfinite(bodyImpulse) && bodyImpulse >= 0 && std::isfinite(torqueMultiplier) && torqueMultiplier >= 0;
     }
 
     std::wstring ImpactSettingsPath(const std::string& path)
@@ -177,14 +178,16 @@ bool RagdollImpactTest::SetAutomaticSupport(bool enabled)
     return Reset();
 }
 
-bool RagdollImpactTest::SetProjectileSettings(float mass, float speed)
+bool RagdollImpactTest::SetProjectileSettings(float mass, float speed, float bodyImpulse, float torqueMultiplier)
 {
-    if (!ValidProjectileSettings(mass, speed))
+    if (!ValidProjectileSettings(mass, speed, bodyImpulse, torqueMultiplier))
     {
         return false;
     }
     m_Mass = mass;
     m_Speed = speed;
+    m_BodyImpulseMagnitude = bodyImpulse;
+    m_BodyTorqueMultiplier = torqueMultiplier;
     return true;
 }
 
@@ -200,16 +203,18 @@ bool RagdollImpactTest::LoadProjectileSettings(const std::string& path)
         }
         nlohmann::json data;
         file >> data;
-        if (data.at("version") != 1)
+        const int version = data.at("version").get<int>();
+        if (version != 1 && version != 2)
         {
             throw std::runtime_error(u8"지원하지 않는 구 설정 파일 버전입니다.");
         }
         const float mass = data.at("massKg").get<float>();
         const float speed = data.at("speedMetersPerSecond").get<float>();
-        // 두 값을 모두 검증한 뒤 적용해 불러오기 실패 시 현재 설정을 유지한다.
-        if (!SetProjectileSettings(mass, speed))
+        const float bodyImpulse = version == 1 ? 0.0f : data.at("bodyImpulseNs").get<float>();
+        const float torqueMultiplier = version == 1 ? 0.0f : data.at("bodyTorqueMultiplier").get<float>();
+        if (!SetProjectileSettings(mass, speed, bodyImpulse, torqueMultiplier))
         {
-            throw std::runtime_error(u8"구 질량은 0.1~100kg, 발사 속도는 1~100m/s여야 합니다.");
+            throw std::runtime_error(u8"구 질량은 0.1~100kg, 속도는 1~100m/s, 전신 충격량과 회전 배율은 0 이상이어야 합니다.");
         }
         m_ProjectileSettingsMessage = u8"저장된 구 설정을 불러왔습니다.";
         return true;
@@ -225,11 +230,12 @@ bool RagdollImpactTest::SaveProjectileSettings()
 {
     try
     {
-        if (!ValidProjectileSettings(m_Mass, m_Speed))
+        if (!ValidProjectileSettings(m_Mass, m_Speed, m_BodyImpulseMagnitude, m_BodyTorqueMultiplier))
         {
             throw std::runtime_error(u8"구 질량은 0.1~100kg, 발사 속도는 1~100m/s여야 합니다.");
         }
-        const nlohmann::json data = {{"version", 1}, {"massKg", m_Mass}, {"speedMetersPerSecond", m_Speed}};
+        const nlohmann::json data = {{"version", 2}, {"massKg", m_Mass}, {"speedMetersPerSecond", m_Speed},
+            {"bodyImpulseNs", m_BodyImpulseMagnitude}, {"bodyTorqueMultiplier", m_BodyTorqueMultiplier}};
         std::ofstream file(ImpactSettingsPath(m_ProjectileSettingsPath), std::ios::trunc);
         file << data.dump(4) << '\n';
         file.flush();
@@ -433,7 +439,7 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool aim
     }
     // 바닥 하중이나 캐릭터의 지속 밀기와 구별해 실제 발사 구의 접촉만 피격 반응에 사용한다.
     physx::PxShape* shape = nullptr;
-    if (sphere->getShapes(&shape, 1) != 1)
+    if (sphere->getShapes(&shape, 1) != 1 || !physics->SetProjectileBodyImpulse(*sphere, m_BodyImpulseMagnitude, m_BodyTorqueMultiplier))
     {
         sphere->release();
         return false;
@@ -572,6 +578,8 @@ void RagdollImpactTest::DrawUI(Character* player)
         ImGui::TextUnformatted(u8"반지름 15cm / 중력과 실제 충돌 적용");
         ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::DragFloat(u8"전신 충격량", &m_BodyImpulseMagnitude, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::DragFloat(u8"전신 회전 배율", &m_BodyTorqueMultiplier, .01f, 0.0f, PX_MAX_F32, "%.2f", ImGuiSliderFlags_AlwaysClamp);
         ImGui::BeginDisabled(m_ProjectileSettingsPath.empty());
         if (ImGui::Button(u8"구 설정 저장"))
         {
@@ -583,7 +591,7 @@ void RagdollImpactTest::DrawUI(Character* player)
             LoadProjectileSettings(m_ProjectileSettingsPath);
         }
         ImGui::EndDisabled();
-        ImGui::TextWrapped("%s", u8"구 질량과 발사 속도를 저장하면 다음 실행 시 자동으로 적용합니다.");
+        ImGui::TextWrapped("%s", u8"구 설정을 저장하면 다음 실행 시 자동으로 적용합니다.");
         if (!m_ProjectileSettingsMessage.empty())
         {
             ImGui::TextWrapped("%s", m_ProjectileSettingsMessage.c_str());

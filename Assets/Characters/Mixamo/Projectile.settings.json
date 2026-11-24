@@ -1,5 +1,7 @@
 {
+    "bodyImpulseNs": 25.0,
+    "bodyTorqueMultiplier": 0.5,
     "massKg": 0.5,
     "speedMetersPerSecond": 100.0,
-    "version": 1
+    "version": 2
 }

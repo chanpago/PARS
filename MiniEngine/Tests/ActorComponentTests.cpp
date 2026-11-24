@@ -174,6 +174,7 @@ void RunCharacterMovementTests();
 void RunPhysicsAssetTests();
 void RunJointLimitTests();
 void RunRagdollTests();
+void RunProjectileBodyImpulseTests();
 void RunAnatomicalLimitTests();
 void RunActiveRagdollTests();
 void RunRagdollReuseTests(bool verifyReuse);
@@ -189,6 +190,11 @@ void RunArmDriveTests();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--projectile-impulse-only") == 0)
+    {
+        RunProjectileBodyImpulseTests();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--arm-drive-only") == 0)
     {
         RunArmDriveTests();

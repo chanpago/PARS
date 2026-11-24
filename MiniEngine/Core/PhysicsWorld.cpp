@@ -54,6 +54,10 @@ namespace
         {
             pairFlags |= PxPairFlag::eNOTIFY_CONTACT_POINTS | PxPairFlag::eNOTIFY_TOUCH_FOUND |
                 PxPairFlag::eNOTIFY_TOUCH_PERSISTS | PxPairFlag::eNOTIFY_TOUCH_LOST;
+            if ((data0.word3 | data1.word3) & PhysicsWorld::ProjectileFilterFlag)
+            {
+                pairFlags |= PxPairFlag::ePRE_SOLVER_VELOCITY;
+            }
             if ((data0.word3 | data1.word3) & PhysicsWorld::AimedProjectileFilterFlag)
             {
                 pairFlags |= PxPairFlag::eDETECT_CCD_CONTACT;
@@ -194,6 +198,7 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         }
         cached->completedStep = m_StepCount + 1;
         cached->clockRevision = m_ClockRevision;
+        cached->projectileContactId = 0;
         cached->capsuleVelocity = PxVec3(0);
         for (int side = 0; side < 2; ++side)
         {
@@ -211,6 +216,10 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
             {
                 cached->firstImpulseStep = cached->completedStep;
             }
+            if (flags & ProjectileFilterFlag)
+            {
+                RecordProjectileContact(*cached, side, beforeContact);
+            }
             if (!(flags & AimedProjectileFilterFlag))
             {
                 continue;
@@ -227,6 +236,119 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         }
     }
     // 잠든 바디에는 PERSISTS가 오지 않으므로 LOST 또는 명시적인 무효화 전까지 보존한다.
+}
+
+bool PhysicsWorld::SetProjectileBodyImpulse(const PxRigidDynamic& projectile, float magnitude, float torqueMultiplier)
+{
+    if (!m_Scene || projectile.getScene() != m_Scene || !std::isfinite(magnitude) || magnitude < 0 ||
+        !std::isfinite(torqueMultiplier) || torqueMultiplier < 0)
+    {
+        return false;
+    }
+    std::vector<ProjectileSettings>::iterator settings = std::find_if(m_ProjectileSettings.begin(), m_ProjectileSettings.end(),
+        [&projectile](const ProjectileSettings& entry) -> bool
+        {
+            return entry.actor == &projectile;
+        });
+    if (settings == m_ProjectileSettings.end())
+    {
+        m_ProjectileSettings.emplace_back();
+        settings = m_ProjectileSettings.end() - 1;
+        settings->actor = &projectile;
+    }
+    settings->magnitude = magnitude;
+    settings->torqueMultiplier = torqueMultiplier;
+    return true;
+}
+
+void PhysicsWorld::RecordProjectileContact(ContactPair& pair, int projectileSide, const PxContactPairVelocity* beforeContact)
+{
+    const PxActor* projectile = pair.actors[projectileSide];
+    const PxActor* target = pair.actors[1 - projectileSide];
+    if (!target->is<PxRigidBody>() || (pair.shapes[1 - projectileSide]->getSimulationFilterData().word3 & ProjectileFilterFlag))
+    {
+        return;
+    }
+    // 같은 캐릭터의 머리와 목, 키네마틱과 동적 바디가 같은 피격을 공유한다.
+    const void* receiver = target->userData;
+    if (!receiver)
+    {
+        const PxArticulationLink* link = target->is<PxArticulationLink>();
+        receiver = link ? static_cast<const void*>(&link->getArticulation()) : static_cast<const void*>(target);
+    }
+    std::vector<ProjectileContact>::iterator contact = std::find_if(m_ProjectileContacts.begin(), m_ProjectileContacts.end(),
+        [projectile, receiver](const ProjectileContact& entry) -> bool
+        {
+            return entry.projectile == projectile && entry.receiver == receiver;
+        });
+    if (contact == m_ProjectileContacts.end())
+    {
+        const std::vector<ProjectileSettings>::const_iterator settings = std::find_if(m_ProjectileSettings.begin(), m_ProjectileSettings.end(),
+            [projectile](const ProjectileSettings& entry) -> bool
+            {
+                return entry.actor == projectile;
+            });
+        if (settings == m_ProjectileSettings.end() || settings->magnitude == 0)
+        {
+            return;
+        }
+        m_ProjectileContacts.emplace_back();
+        contact = m_ProjectileContacts.end() - 1;
+        contact->projectile = projectile;
+        contact->receiver = receiver;
+        contact->id = m_NextProjectileContactId++;
+        contact->magnitude = settings->magnitude;
+        contact->torqueMultiplier = settings->torqueMultiplier;
+    }
+    pair.projectileContactId = contact->id;
+    if (contact->firstImpulseStep == 0 && pair.firstImpulseStep == pair.completedStep)
+    {
+        contact->firstImpulseStep = pair.completedStep;
+    }
+    if (contact->firstImpulseStep != pair.completedStep)
+    {
+        return;
+    }
+    if (beforeContact && contact->incomingDirection.isZero())
+    {
+        const PxVec3 incoming = beforeContact->linearVelocity[projectileSide];
+        if (incoming.isFinite() && incoming.magnitudeSquared() > 1e-8f)
+        {
+            contact->incomingDirection = incoming.getNormalized();
+        }
+    }
+    // 여러 바디와 동시에 닿으면 접촉 충격량으로 가중한 한 점을 전신 회전의 작용점으로 쓴다.
+    for (const PxContactPairPoint& point : pair.points)
+    {
+        const float weight = point.impulse.magnitude();
+        if (point.position.isFinite() && std::isfinite(weight) && weight > 0)
+        {
+            contact->weight += weight;
+            contact->weightedPosition += point.position * weight;
+            contact->contactImpulse += projectileSide == 0 ? -point.impulse : point.impulse;
+        }
+    }
+}
+
+bool PhysicsWorld::ConsumeProjectileContact(uint64_t id, PhysicsProjectileBodyImpulse& response)
+{
+    for (ProjectileContact& contact : m_ProjectileContacts)
+    {
+        if (contact.id == id && contact.firstImpulseStep == m_StepCount && !contact.consumed)
+        {
+            contact.consumed = true;
+            if (contact.weight <= 0 || !std::isfinite(contact.weight))
+            {
+                return false;
+            }
+            const PxVec3 direction = contact.incomingDirection.isZero() ? contact.contactImpulse.getNormalized() : contact.incomingDirection;
+            response.position = contact.weightedPosition / contact.weight;
+            response.impulse = direction * contact.magnitude;
+            response.torqueMultiplier = contact.torqueMultiplier;
+            return response.position.isFinite() && response.impulse.isFinite() && !response.impulse.isZero();
+        }
+    }
+    return false;
 }
 
 void PhysicsWorld::InvalidateContacts(const PxRigidActor& body)
@@ -278,6 +400,16 @@ void PhysicsWorld::GetCharacterCapsuleContacts(const PxRigidActor& body,
 void PhysicsWorld::onRelease(const PxBase* object, void*, PxDeletionEventFlag::Enum)
 {
     // 해제된 객체를 역참조하지 않는다. PA 재생성 시 같은 주소가 재사용돼도 접촉이 남지 않는다.
+    m_ProjectileSettings.erase(std::remove_if(m_ProjectileSettings.begin(), m_ProjectileSettings.end(),
+        [object](const ProjectileSettings& settings) -> bool
+        {
+            return settings.actor == object;
+        }), m_ProjectileSettings.end());
+    m_ProjectileContacts.erase(std::remove_if(m_ProjectileContacts.begin(), m_ProjectileContacts.end(),
+        [object](const ProjectileContact& contact) -> bool
+        {
+            return contact.projectile == object || contact.receiver == object;
+        }), m_ProjectileContacts.end());
     m_Contacts.erase(std::remove_if(m_Contacts.begin(), m_Contacts.end(), [&](const ContactPair& pair) -> bool
                          {
         return pair.actors[0] == object || pair.actors[1] == object ||
@@ -408,6 +540,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
                 if (contacts && point.position.isFinite())
                 {
                     PhysicsContactImpulse contact;
+                    contact.projectileContactId = projectile ? pair.projectileContactId : 0;
                     contact.position = point.position;
                     contact.impulse = side == 0 ? point.impulse : -point.impulse;
                     contact.outwardNormal = -normal;
@@ -652,6 +785,7 @@ void PhysicsWorld::Shutdown()
         m_ListeningForDeletion = false;
     }
     m_Contacts.clear();
+    m_ProjectileSettings.clear();
     Release(m_Scene); // Actor와 각 Actor가 독점 소유하는 형상도 함께 해제한다.
     if (m_ServiceOwner)
     {
@@ -707,6 +841,7 @@ bool PhysicsWorld::IsPvdConnected() const
 void PhysicsWorld::ResetClock()
 {
     ++m_ClockRevision;
+    m_ProjectileContacts.clear();
     m_Accumulator = 0.0;
     m_DroppedTime = 0.0;
     m_StepCount = 0;
@@ -750,6 +885,15 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
         // PhysX는 시뮬레이션이 끝나면 fetchResults()를 호출해야 한다. fetchResults()가 끝나야 Actor의 pose를 읽을 수 있다. true파라미터는 simulate의 결과를 다 받고 진행하겠다는 뜻.
         m_Scene->fetchResults(true);
     }
+    // 모든 형상의 FOUND/LOST를 받은 뒤 끊긴 접촉만 끝낸다. 모드 교체 직후에도 같은 공은 한 번만 민다.
+    m_ProjectileContacts.erase(std::remove_if(m_ProjectileContacts.begin(), m_ProjectileContacts.end(),
+        [this](const ProjectileContact& contact) -> bool
+        {
+            return std::none_of(m_Contacts.begin(), m_Contacts.end(), [&contact](const ContactPair& pair) -> bool
+            {
+                return pair.projectileContactId == contact.id;
+            });
+        }), m_ProjectileContacts.end());
     // 접촉 콜백에서는 PhysX 바디를 수정할 수 없으므로 다음 고정 스텝 전에 적용한다.
     for (PxRigidDynamic* ball : m_ImpactedAimedProjectiles)
     {

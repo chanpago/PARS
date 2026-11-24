@@ -72,7 +72,7 @@ public:
     {
         return m_AutomaticSupport;
     }
-    bool SetProjectileSettings(float mass, float speed);
+    bool SetProjectileSettings(float mass, float speed, float bodyImpulse = 0, float torqueMultiplier = 0);
     PARS::Character* GetDummy() const;
     std::vector<physx::PxRigidDynamic*> GetProjectiles() const;
     float GetMaxHipsDisplacement() const
@@ -108,6 +108,8 @@ private:
     uint32_t m_PreviousLegContacts = 0;
     float m_Mass = 2.0f;
     float m_Speed = 7.5f;
+    float m_BodyImpulseMagnitude = 0;
+    float m_BodyTorqueMultiplier = 0;
     float m_MaxHipsDisplacement = 0;
     bool m_AutomaticSupport = true;
     bool m_BodyImpactCapsuleVisible = true;

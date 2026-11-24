@@ -1,4 +1,4 @@
-#include "../Model/Ragdoll.h"
+﻿#include "../Model/Ragdoll.h"
 #include "../Model/PhysicsPose.h"
 #include "../Core/PhysicsWorld.h"
 #include <cstdio>
@@ -111,6 +111,78 @@ namespace
         }
         Check(world.GetErrorCount() == 0, "COM queries and local mass frames have no PhysX errors");
         std::puts("PASS: whole-body COM, unequal masses and rotated local mass frames on D6/articulation");
+    }
+
+    void TestProjectileBodyImpulse(bool articulation, float torqueMultiplier, float hitHeight)
+    {
+        using namespace physx;
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize whole-body projectile test");
+        const std::vector<std::string> names{"hip", "head"};
+        const std::vector<Matrix4> pose{
+            Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 3, 0))),
+            Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 4, 0)))};
+        PhysicsAsset asset;
+        for (const std::string& name : names)
+        {
+            PhysicsBody body;
+            body.bone = name;
+            body.shape = PhysicsShapeType::Sphere;
+            body.radius = .20f;
+            body.mass = 2.0f;
+            asset.bodies.push_back(body);
+        }
+        PhysicsConstraint joint;
+        joint.parentBone = names[0];
+        joint.childBone = names[1];
+        joint.SetWorldFrame(pose[0], pose[1], pose[1]);
+        asset.constraints.push_back(joint);
+        if (articulation)
+        {
+            ConfigureDefaultDrives(asset);
+        }
+        Ragdoll ragdoll;
+        std::string error;
+        Check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error, false), "Create kinematic hit receiver");
+        ragdoll.SetQueryOwner(&ragdoll);
+        PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(-.6f, hitHeight, 0)), PxSphereGeometry(.12f), 1, "Ball");
+        Check(ball && world.SetProjectileBodyImpulse(*ball, 8.0f, torqueMultiplier), "Set the projectile's full-body response");
+        ball->getScene()->setGravity(PxVec3(0));
+        PxShape* shape = nullptr;
+        Check(ball->getShapes(&shape, 1) == 1, "Find projectile shape");
+        PxFilterData filter = shape->getSimulationFilterData();
+        filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
+        shape->setSimulationFilterData(filter);
+        ball->setLinearVelocity(PxVec3(4, 0, 0));
+        std::vector<RagdollBodyImpulse> impacts;
+        for (int step = 0; step < 15; ++step)
+        {
+            world.Step();
+            ragdoll.CaptureExternalImpacts(impacts);
+            if (!impacts.empty() && impacts.front().newProjectileHit)
+            {
+                break;
+            }
+        }
+        Check(!impacts.empty() && impacts.front().projectileContactId != 0, "Capture contact before changing the physical bodies");
+        ball->setGlobalPose(PxTransform(PxVec3(-10, hitHeight, 0)));
+        ball->setLinearVelocity(PxVec3(0));
+        Check(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.UsesArticulation() == articulation,
+            "Activate the requested receiver backend");
+        ragdoll.SetDrivesEnabled(false);
+        // 국소 충격을 재생하지 않고 전신 추가분만 측정한다. 같은 접촉을 다시 전달해도 한 번만 적용돼야 한다.
+        ragdoll.ApplyProjectileBodyImpulses(impacts);
+        ragdoll.ApplyProjectileBodyImpulses(impacts);
+        world.Step();
+        Vector3 velocity(kZero);
+        Check(ragdoll.GetCenterOfMassVelocity(velocity) && float(Length(velocity - Vector3(2, 0, 0))) < .02f,
+            "An 8 N s whole-body impulse gives a 4 kg rig a 2 m/s COM velocity");
+        const PxVec3 base(0, 3, 0);
+        const PxVec3 angularSample = ragdoll.GetBodyPointVelocity(0, base + PxVec3(1, 0, 0)) - ragdoll.GetBodyPointVelocity(0, base);
+        // 두 구의 중심 관성과 평행축 항의 합은 z축 기준 1.064 kg m²다.
+        const float expectedSpin = -(hitHeight - 3.5f) * 8.0f * torqueMultiplier / 1.064f;
+        Check(std::abs(angularSample.y - expectedSpin) < .08f && world.GetErrorCount() == 0,
+            "Offset and torque multiplier determine rigid-body spin about the actual COM");
     }
 
     void TestMovementBlocking()
@@ -228,9 +300,21 @@ namespace
     }
 }
 
+void RunProjectileBodyImpulseTests()
+{
+    for (bool articulation : {false, true})
+    {
+        TestProjectileBodyImpulse(articulation, 0.0f, 4.0f);
+        TestProjectileBodyImpulse(articulation, 1.0f, 4.0f);
+        TestProjectileBodyImpulse(articulation, .5f, 3.0f);
+    }
+    std::puts("PASS: projectile whole-body translation, offset torque and one hit across the kinematic transition on D6/articulation");
+}
+
 void RunRagdollTests()
 {
     TestCenterOfMass();
+    RunProjectileBodyImpulseTests();
     TestMovementBlocking();
     // A skin root ignores the .01 armature above it. The mesh supplies that
     // scale exactly once, as in the imported Mixamo skeleton and DefaultVS.

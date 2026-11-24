@@ -444,6 +444,7 @@ namespace PARS
     void SkeletalMeshComponent::ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
     {
         m_Ragdoll.ApplyExternalImpacts(impacts);
+        m_Ragdoll.ApplyProjectileBodyImpulses(impacts);
         // 모드 교체로 소멸한 접촉도 이번 틱의 관절 반응에는 그대로 넘긴다.
         m_Ragdoll.UpdateProjectileReaction(impacts, deltaTime);
     }

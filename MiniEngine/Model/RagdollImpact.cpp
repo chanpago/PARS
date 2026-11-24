@@ -52,6 +52,7 @@ namespace PARS
             {
                 RagdollBodyImpulse impact;
                 impact.body = index;
+                impact.projectileContactId = contact.projectileContactId;
                 impact.position = contact.position;
                 impact.impulse = contact.impulse;
                 impact.outwardNormal = contact.outwardNormal;
@@ -92,6 +93,26 @@ namespace PARS
 
     namespace
     {
+        PxVec3 GetImpactAngularVelocity(const std::vector<PxRigidBody*>& bodies, const PxVec3& center, const PxVec3& angularImpulse)
+        {
+            PxMat33 inertia(PxZero);
+            for (const PxRigidBody* body : bodies)
+            {
+                const PxTransform massFrame = body->getGlobalPose() * body->getCMassLocalPose();
+                const PxMat33 rotation(massFrame.q);
+                const PxVec3 offset = massFrame.p - center;
+                // 각 바디의 관성을 월드 축으로 회전하고 평행축 정리로 전신 질량중심에 모은다.
+                inertia += rotation * PxMat33::createDiagonal(body->getMassSpaceInertiaTensor()) * rotation.getTranspose();
+                inertia += (PxMat33(PxIdentity) * offset.magnitudeSquared() - PxMat33::outer(offset, offset)) * body->getMass();
+            }
+            const float determinant = inertia.getDeterminant();
+            if (!std::isfinite(determinant) || determinant <= 0)
+            {
+                return PxVec3(0);
+            }
+            return inertia.getInverse() * angularImpulse;
+        }
+
         constexpr float ProjectileHoldTime = .08f;
         constexpr float ProjectileRecoveryTime = .24f;
         constexpr float ProjectileResponseTime = ProjectileHoldTime + ProjectileRecoveryTime;
@@ -124,6 +145,72 @@ namespace PARS
                 lower.find("foot") != std::string::npos || lower.find("ankle") != std::string::npos ||
                 lower.find("toe") != std::string::npos;
         }
+    }
+
+    void Ragdoll::ApplyProjectileBodyImpulses(const std::vector<RagdollBodyImpulse>& impacts)
+    {
+        if (!m_World || !IsSimulating())
+        {
+            return;
+        }
+        PxVec3 center(0);
+        float mass = 0;
+        PxVec3 linearImpulse(0);
+        PxVec3 angularImpulse(0);
+        for (const RagdollBodyImpulse& hit : impacts)
+        {
+            PhysicsProjectileBodyImpulse response;
+            if (!hit.newProjectileHit || hit.projectileContactId == 0 || !m_World->ConsumeProjectileContact(hit.projectileContactId, response))
+            {
+                continue;
+            }
+            if (mass == 0)
+            {
+                Math::Vector3 position(Math::kZero);
+                if (!GetCenterOfMass(position, mass) || !std::isfinite(mass) || mass <= 0)
+                {
+                    return;
+                }
+                center = PxVec3(position.GetX(), position.GetY(), position.GetZ());
+            }
+            linearImpulse += response.impulse;
+            angularImpulse += (response.position - center).cross(response.impulse) * response.torqueMultiplier;
+        }
+        if (mass == 0 || !linearImpulse.isFinite() || !angularImpulse.isFinite())
+        {
+            return;
+        }
+        PxVec3 linear = linearImpulse / mass;
+        if (!angularImpulse.isZero())
+        {
+            const PxVec3 angular = GetImpactAngularVelocity(m_Bodies, center, angularImpulse);
+            if (!angular.isFinite() || !linear.isFinite())
+            {
+                return;
+            }
+            if (m_Articulation)
+            {
+                // 루트 질량중심에 같은 강체 운동을 주면 기존 관절 속도를 유지한 채 모든 링크에 전파된다.
+                const PxRigidBody* root = m_Bodies[m_ArticulationRoot];
+                const PxVec3 rootCenter = (root->getGlobalPose() * root->getCMassLocalPose()).p;
+                linear += angular.cross(rootCenter - center);
+                m_Articulation->setRootAngularVelocity(m_Articulation->getRootAngularVelocity() + angular);
+            }
+            else
+            {
+                for (PxRigidBody* body : m_Bodies)
+                {
+                    if (body->getRigidBodyFlags().isSet(PxRigidBodyFlag::eKINEMATIC))
+                    {
+                        continue;
+                    }
+                    const PxVec3 partCenter = (body->getGlobalPose() * body->getCMassLocalPose()).p;
+                    body->addTorque(angular, PxForceMode::eVELOCITY_CHANGE);
+                    body->addForce(angular.cross(partCenter - center), PxForceMode::eVELOCITY_CHANGE);
+                }
+            }
+        }
+        AddVelocity(Math::Vector3(linear.x, linear.y, linear.z));
     }
 
     float Ragdoll::GetProjectileJointDriveScale(size_t jointIndex) const

@@ -419,9 +419,13 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         }
         float projectileMass = scenario == 3 ? 20.0f : 2.0f;
         float projectileSpeed = 7.5f;
+        float bodyImpulse = 0;
+        float torqueMultiplier = 0;
         CommandLineArgs::GetFloat(L"impactmass", projectileMass);
         CommandLineArgs::GetFloat(L"impactspeed", projectileSpeed);
-        check(test.SetProjectileSettings(projectileMass, projectileSpeed), "Set explicit projectile test input");
+        CommandLineArgs::GetFloat(L"impactbodyimpulse", bodyImpulse);
+        CommandLineArgs::GetFloat(L"impacttorque", torqueMultiplier);
+        check(test.SetProjectileSettings(projectileMass, projectileSpeed, bodyImpulse, torqueMultiplier), "Set explicit projectile test input");
         uint32_t aimBody = 0;
         const bool aimed = CommandLineArgs::GetInteger(L"impactaimbody", aimBody);
         uint32_t physicalContactOnly = 0;
@@ -432,6 +436,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             report << "aim_bone=" << mesh.GetPhysicsAsset()->bodies[aimBody].bone << " contact_only=" << physicalContactOnly << std::endl;
         }
         report << "projectile_mass=" << projectileMass << " projectile_speed=" << projectileSpeed
+            << " body_impulse_ns=" << bodyImpulse << " body_torque_multiplier=" << torqueMultiplier
             << " source_x=" << sourceX << " source_z=" << sourceZ << std::endl;
         PhysicsSkeleton skeleton;
         check(mesh.BuildPhysicsSkeleton(skeleton, error), "Read actual dummy skeleton");

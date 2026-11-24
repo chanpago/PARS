@@ -28,6 +28,7 @@ namespace PARS
     {
     public:
         size_t body = 0;
+        uint64_t projectileContactId = 0;
         physx::PxVec3 position{0};
         physx::PxVec3 impulse{0};
         physx::PxVec3 outwardNormal{0};
@@ -94,6 +95,7 @@ namespace PARS
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
+        void ApplyProjectileBodyImpulses(const std::vector<RagdollBodyImpulse>& impacts);
         void UpdateProjectileReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,

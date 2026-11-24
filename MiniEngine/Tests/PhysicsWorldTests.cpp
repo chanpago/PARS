@@ -89,6 +89,7 @@ namespace
         PxFilterData filter = shape->getSimulationFilterData();
         filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
         shape->setSimulationFilterData(filter);
+        Check(world.SetProjectileBodyImpulse(*source, 25.0f, .5f), "Set independent body impulse on the projectile");
         std::vector<PhysicsContactImpulse> contacts;
         float strength = 0;
         for (int step = 0; step < 6 && strength <= 1e-4f; ++step)
@@ -97,6 +98,12 @@ namespace
             strength = world.GetExternalImpactImpulse(*target, nullptr, &contacts);
         }
         Check(!contacts.empty(), "Fallback captures a real kinematic contact");
+        const uint64_t firstHit = contacts.front().projectileContactId;
+        PhysicsProjectileBodyImpulse response;
+        Check(firstHit != 0 && world.ConsumeProjectileContact(firstHit, response) && !world.ConsumeProjectileContact(firstHit, response),
+            "The first projectile contact can be consumed once per receiver");
+        Check(std::abs(response.impulse.magnitude() - 25.0f) < .001f && response.impulse.x > 24.9f && response.torqueMultiplier == .5f,
+            "The whole-body impulse uses the shot direction and configured magnitude");
         PxVec3 impulse(0);
         for (const PhysicsContactImpulse& contact : contacts)
         {
@@ -116,10 +123,68 @@ namespace
             for (const PhysicsContactImpulse& contact : contacts)
             {
                 Check(!contact.newProjectileHit, "A ball held against the body does not restart the gesture");
+                Check(contact.projectileContactId == firstHit && !world.ConsumeProjectileContact(contact.projectileContactId, response),
+                    "A sustained projectile contact cannot repeat the whole-body impulse");
             }
         }
         Check(sustained, "The pressed ball continues transferring impulse");
+        source->setGlobalPose(PxTransform(PxVec3(-.3f, 3, 0)));
+        source->setLinearVelocity(PxVec3(0));
+        world.Step();
+        source->setLinearVelocity(PxVec3(7.5f, 0, 0));
+        strength = 0;
+        for (int step = 0; step < 6 && strength <= 1e-4f; ++step)
+        {
+            world.Step();
+            strength = world.GetExternalImpactImpulse(*target, nullptr, &contacts);
+        }
+        Check(strength > 0 && !contacts.empty() && contacts.front().projectileContactId != firstHit &&
+            world.ConsumeProjectileContact(contacts.front().projectileContactId, response), "A separated ball can hit the same receiver again");
         std::puts("PASS: approaching collision, threshold, departing/missing source, ownership and collision policy");
+    }
+
+    void TestSharedProjectileContact()
+    {
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize shared projectile contact test");
+        int owner = 0;
+        std::array<PxRigidDynamic*, 2> targets{};
+        for (size_t side = 0; side < targets.size(); ++side)
+        {
+            const float x = side == 0 ? -.21f : .21f;
+            targets[side] = world.CreateDynamicBody(PxTransform(PxVec3(x, 3, 0)), PxBoxGeometry(.20f, .2f, .1f), 2, "Receiver part");
+            Check(targets[side] != nullptr, "Create receiver part");
+            targets[side]->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+            targets[side]->userData = &owner;
+        }
+        PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, -.4f)), PxSphereGeometry(.12f), 1, "Shared hit");
+        Check(ball && world.SetProjectileBodyImpulse(*ball, 8, .5f), "Configure one projectile against two parts");
+        ball->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
+        PxShape* shape = nullptr;
+        Check(ball->getShapes(&shape, 1) == 1, "Find shared projectile shape");
+        PxFilterData filter = shape->getSimulationFilterData();
+        filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
+        shape->setSimulationFilterData(filter);
+        ball->setLinearVelocity(PxVec3(0, 0, 4));
+        std::array<std::vector<PhysicsContactImpulse>, 2> contacts;
+        for (int step = 0; step < 10; ++step)
+        {
+            world.Step();
+            const float firstImpulse = world.GetExternalImpactImpulse(*targets[0], &owner, &contacts[0]);
+            const float secondImpulse = world.GetExternalImpactImpulse(*targets[1], &owner, &contacts[1]);
+            if (firstImpulse + secondImpulse > 1e-4f && !contacts[0].empty() && !contacts[1].empty())
+            {
+                break;
+            }
+        }
+        Check(!contacts[0].empty() && !contacts[1].empty(), "The projectile touches both parts");
+        const uint64_t first = contacts[0].front().projectileContactId;
+        const uint64_t second = contacts[1].front().projectileContactId;
+        PhysicsProjectileBodyImpulse response;
+        Check(first != 0 && first == second && world.ConsumeProjectileContact(first, response) &&
+            !world.ConsumeProjectileContact(second, response) && std::abs(response.impulse.z - 8) < .001f,
+            "One projectile delivers its configured impulse once across multiple receiver shapes");
+        std::puts("PASS: one projectile touching two parts of the same receiver");
     }
 
     void TestImpactPalm()
@@ -392,6 +457,7 @@ int main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--impact-hand-only") == 0)
     {
         TestApproachingImpact();
+        TestSharedProjectileContact();
         TestImpactPalm();
         return 0;
     }
@@ -430,6 +496,7 @@ int main(int argc, char** argv)
     }
     TestFootProjectionRaycast();
     TestApproachingImpact();
+    TestSharedProjectileContact();
     TestImpactPalm();
     TestBodyPairContacts();
     TestFootSupportHull();
