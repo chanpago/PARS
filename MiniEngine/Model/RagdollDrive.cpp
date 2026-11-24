@@ -197,7 +197,6 @@ namespace PARS
             ReleaseWoundGrip();
             m_HorizontalSupportForce = physx::PxVec3(0);
             m_ImpactReaction.jointYieldTimes.clear();
-            m_ImpactReaction.spineDriveScale = 1.0f;
             if (m_ImpactReaction.projectilePelvisYieldTime > 0)
             {
                 m_ImpactReaction.projectilePelvisYieldTime = 0;
@@ -241,7 +240,6 @@ namespace PARS
         {
             const PhysicsConstraint& data = m_Asset.constraints[i];
             const float strength = GetJointDriveStrength(i);
-            const float pdScale = GetJointPDScale(i, strength);
             const bool driven = m_DrivesEnabled || (!m_WarmupDynamicBodies.empty() &&
                 IsWarmupDynamicBody(m_Asset.FindBody(data.childBone)));
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
@@ -254,7 +252,7 @@ namespace PARS
                 if (on)
                 {
                     // 강성 배율을 낮추면서 감쇠비는 유지한다.
-                    motor = PxD6JointDrive(drive.GetStiffness() * pdScale, drive.GetDamping() * std::sqrt(pdScale),
+                    motor = PxD6JointDrive(drive.GetStiffness() * strength, drive.GetDamping() * std::sqrt(strength),
                         drive.maxTorque * strength, drive.useAcceleration);
                 }
                 m_Joints[i]->setDrive(data.useSlerpDrive ? PxD6Drive::eSLERP : axes[axis], motor);

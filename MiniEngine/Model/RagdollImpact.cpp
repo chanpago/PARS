@@ -163,7 +163,6 @@ namespace PARS
         constexpr float ImpactHoldTime = .08f;
         constexpr float ImpactRecoveryTime = .24f;
         constexpr float ImpactResponseTime = ImpactHoldTime + ImpactRecoveryTime;
-        constexpr float ImpactSpineDriveScale = .25f;
 
         float ImpactYield(float remaining)
         {
@@ -566,31 +565,6 @@ namespace PARS
         return joint < jointYieldTimes.size() ? 1.0f - .96f * ImpactYield(jointYieldTimes[joint]) : 1.0f;
     }
 
-    float Ragdoll::GetJointPDScale(size_t jointIndex, float driveStrength) const
-    {
-        if (m_ImpactReaction.spineDriveScale < driveStrength && IsSpine(m_Asset.constraints[jointIndex].childBone))
-        {
-            return m_ImpactReaction.spineDriveScale;
-        }
-        return driveStrength;
-    }
-
-    void Ragdoll::UpdateSpineDriveRecovery(bool recovering, float deltaTime, float blendDuration)
-    {
-        if (!m_DrivesEnabled || m_ImpactReaction.spineDriveScale >= 1.0f || !std::isfinite(deltaTime) ||
-            deltaTime <= 0 || !std::isfinite(blendDuration) || blendDuration <= 0)
-        {
-            return;
-        }
-        const float previous = m_ImpactReaction.spineDriveScale;
-        m_ImpactReaction.spineDriveScale = recovering ? ImpactSpineDriveScale :
-            PxMin(1.0f, previous + (1.0f - ImpactSpineDriveScale) * deltaTime / blendDuration);
-        if (m_ImpactReaction.spineDriveScale != previous && !m_Articulation)
-        {
-            ConfigureD6JointDrives();
-        }
-    }
-
     float Ragdoll::GetProjectilePelvisDriveScale() const
     {
         return 1.0f - .85f * ImpactYield(m_ImpactReaction.projectilePelvisYieldTime);
@@ -615,8 +589,7 @@ namespace PARS
         }
         const uint64_t clock = m_World->GetClockRevision();
         const uint64_t step = m_World->GetStepCount();
-        const bool localDrivesChanged = !reaction.jointYieldTimes.empty() || reaction.projectilePelvisYieldTime > 0;
-        const float previousSpineScale = reaction.spineDriveScale;
+        const bool wasYielding = reaction.IsYielding();
         if (reaction.clock != clock)
         {
             reaction = {};
@@ -640,8 +613,7 @@ namespace PARS
         {
             reaction.jointYieldTimes.clear();
         }
-        return localDrivesChanged || !reaction.jointYieldTimes.empty() || reaction.projectilePelvisYieldTime > 0 ||
-            reaction.spineDriveScale != previousSpineScale;
+        return wasYielding || reaction.IsYielding();
     }
 
     void Ragdoll::RecordImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts) const
@@ -653,7 +625,7 @@ namespace PARS
         int root = -1;
         for (const RagdollBodyImpulse& hit : impacts)
         {
-            if ((!hit.fromProjectile && !hit.newCapsuleHit) || hit.body >= m_Bodies.size() ||
+            if (!hit.fromProjectile || hit.body >= m_Bodies.size() ||
                 !hit.position.isFinite() || !hit.impulse.isFinite() || hit.impulse.magnitudeSquared() < 1e-8f)
             {
                 continue;
@@ -669,15 +641,8 @@ namespace PARS
                 pelvisCenter = (pelvis.getGlobalPose() * pelvis.getCMassLocalPose()).p;
                 impulses.resize(m_Bodies.size(), PxVec3(0));
             }
-            if (hit.newCapsuleHit && IsCharacterImpactBody(hit.body))
-            {
-                reaction.spineDriveScale = ImpactSpineDriveScale;
-            }
             impulses[hit.body] += hit.impulse;
-            if (hit.fromProjectile)
-            {
-                angularImpulse += (hit.position - pelvisCenter).cross(hit.impulse);
-            }
+            angularImpulse += (hit.position - pelvisCenter).cross(hit.impulse);
         }
         if (impulses.empty())
         {
@@ -688,7 +653,7 @@ namespace PARS
         {
             totalMass += body->getMass();
         }
-        // 투사체의 각충격량만 골반의 회전 보조를 줄인다. 캡슐은 피격 관절의 구동에만 반영한다.
+        // 투사체가 골반을 중심으로 가한 각충격량에 따라 회전 보조를 잠시 줄인다.
         const float rotation = angularImpulse.magnitude() / (.3f * totalMass);
         reaction.projectilePelvisYieldTime = PxMax(reaction.projectilePelvisYieldTime,
             ImpactResponseTime * PxClamp((rotation - .1f) / .65f, 0.0f, 1.0f));

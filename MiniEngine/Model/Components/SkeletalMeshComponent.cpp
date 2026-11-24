@@ -296,7 +296,7 @@ namespace PARS
         if (IsActiveRagdoll())
         {
             std::vector<Math::Matrix4> target;
-            UpdateImpactFlail(longitudinalImpact, deltaTime);
+            UpdateImpactFlail(capsuleImpact || longitudinalImpact, deltaTime);
 
             // 이 부분에서 액티브 래그돌 물리처리를한다(pd구동 및 추가보상토크계산)
             // EvaluateAnimationPhysicsPose부분에서 이번 프레임의 애니메이션의 목표 본 자세를 월드 기준으로 계산하고 target에 저장한다.
@@ -323,11 +323,6 @@ namespace PARS
             {
                 ApplyArmTargets(target);
             }
-            const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
-            const bool recoveringFromImpact = !IsFalling() && !IsGroundFallActive() && m_StandingUpState == StandingUpState::None &&
-                (capsuleImpact || m_BalanceState == CharacterBalanceState::Unbalanced ||
-                m_Recovery.GetSnapshot().state == RecoveryState::Recovery || step.needsStep || step.IsInProgress());
-            m_Ragdoll.UpdateSpineDriveRecovery(recoveringFromImpact, deltaTime, m_RecoverySettings.blendDuration);
             if (!evaluated || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {
                 // 목표 갱신에 실패하면 전신 패시브 물리 시뮬레이션으로 전환한다.

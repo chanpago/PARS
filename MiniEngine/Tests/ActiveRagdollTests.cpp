@@ -191,20 +191,20 @@ void RunSupportAnkleDriveTests()
     ragdoll.UpdateImpactReaction({hit}, dt);
     check(ragdoll.UpdateDriveTargets(pose, 0, error), "Apply the first capsule impact");
     const PxArticulationDrive capsuleDrive = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
-    check(capsuleDrive.stiffness == struck && capsuleDrive.damping > 0 && capsuleDrive.damping < fullLeftDamping &&
+    check(capsuleDrive.stiffness == fullLeft && capsuleDrive.damping == fullLeftDamping &&
             joints[1]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == fullRight &&
-            ragdoll.GetImpactReaction().projectilePelvisYieldTime == 0,
-        "A capsule yields the struck joint's stiffness and damping without releasing pelvis support");
+            !ragdoll.GetImpactReaction().IsYielding(),
+        "The first capsule hit preserves the configured joint drives and pelvis support");
     hit.newCapsuleHit = false;
     for (unsigned step = 0; step < 21; ++step)
     {
         world.Step();
         ragdoll.UpdateImpactReaction({hit}, dt);
-        check(ragdoll.UpdateDriveTargets(pose, dt, error), "Recover during a sustained capsule push");
+        check(ragdoll.UpdateDriveTargets(pose, dt, error), "Track the animation during a sustained capsule push");
+        const PxArticulationDrive drive = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
+        check(drive.stiffness == fullLeft && drive.damping == fullLeftDamping,
+            "Sustained capsule contact preserves both drive gains");
     }
-    const PxArticulationDrive restored = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
-    check(restored.stiffness == fullLeft && restored.damping == fullLeftDamping && world.GetErrorCount() == 0,
-        "Holding capsule contact lets both gains return to their baseline");
 
     ragdoll.SetDrivesEnabled(false);
     RagdollImpactReaction warmup;
@@ -217,16 +217,14 @@ void RunSupportAnkleDriveTests()
         world.Step();
         ragdoll.AdvanceImpactReaction(warmup, {hit}, dt);
     }
-    const float remainingScale = warmup.GetJointDriveScale(0);
+    check(!warmup.IsYielding(), "Capsule warmup preserves the baseline joint drives");
     ragdoll.SetDrivesEnabled(true, &warmup);
     ragdoll.UpdateImpactReaction({}, 1.0f);
     check(ragdoll.UpdateDriveTargets(pose, 0, error), "Resume joint drives in the warmup handoff step");
     const PxArticulationDrive resumed = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
-    check(resumed.stiffness > struck && resumed.stiffness < fullLeft &&
-            std::abs(resumed.stiffness / fullLeft - remainingScale) < 1e-5f &&
-            std::abs(resumed.damping / fullLeftDamping - std::sqrt(remainingScale)) < 1e-5f,
-        "The first dynamic step inherits the partly recovered stiffness and damping");
-    std::puts("PASS: capsule joint stiffness, damping, sustained contact recovery and warmup handoff");
+    check(resumed.stiffness == fullLeft && resumed.damping == fullLeftDamping && world.GetErrorCount() == 0,
+        "The first dynamic step after a capsule hit uses the baseline stiffness and damping");
+    std::puts("PASS: capsule impacts preserve joint stiffness and damping through the warmup handoff");
 }
 
 namespace

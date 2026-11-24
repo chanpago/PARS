@@ -57,7 +57,7 @@ namespace PARS
         float GetJointDriveScale(size_t joint) const;
         bool IsYielding() const
         {
-            return !jointYieldTimes.empty() || projectilePelvisYieldTime > 0 || spineDriveScale < 1.0f;
+            return !jointYieldTimes.empty() || projectilePelvisYieldTime > 0;
         }
 
     public:
@@ -65,7 +65,6 @@ namespace PARS
         uint64_t clock = UINT64_MAX;
         std::vector<float> jointYieldTimes;
         float projectilePelvisYieldTime = 0;
-        float spineDriveScale = 1.0f;
     };
 
     struct RagdollBodyMotion
@@ -149,7 +148,6 @@ namespace PARS
             const physx::PxVec3& target, float weight);
         void ReleaseWoundGrip();
         void UpdateImpactReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
-        void UpdateSpineDriveRecovery(bool recovering, float deltaTime, float blendDuration);
         void BeginWarmupUpperBody(const std::vector<RagdollBodyMotion>& motion, RagdollImpactReaction reaction);
         void EndWarmupUpperBody();
         bool AdvanceImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts,
@@ -352,7 +350,6 @@ namespace PARS
 
     private:
         float GetJointDriveStrength(size_t jointIndex) const;
-        float GetJointPDScale(size_t jointIndex, float driveStrength) const;
         float GetProjectilePelvisDriveScale() const;
 
     private:

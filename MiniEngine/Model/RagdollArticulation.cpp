@@ -865,7 +865,6 @@ namespace PARS
             const PhysicsConstraint& data = m_Asset.constraints[i];
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             const float strength = GetJointDriveStrength(i);
-            const float pdScale = GetJointPDScale(i, strength);
             const float woundStrength = GetWoundStrength(i);
             float ankleDriveScale = 1.0f;
             float inverseLandingTime = 0.0f;
@@ -921,8 +920,8 @@ namespace PARS
                 // 관성으로 Kp=I*omegaN^2, Kd=2*zeta*I*omegaN을 만들고 암시적 토크 드라이브에 전달한다.
                 const float inertia = enabled && drive.useAcceleration ? inertias[6 + dof] : 1.0f;
                 // 발목은 지지 하중에 맞춰 강성과 감쇠에 같은 배율을 적용해 회전 추종과 제동을 함께 높인다.
-                float stiffness = enabled ? inertia * drive.GetStiffness() * ankleDriveScale * pdScale : 0.0f;
-                float damping = enabled ? inertia * drive.GetDamping() * ankleDriveScale * std::sqrt(pdScale) : 0.0f;
+                float stiffness = enabled ? inertia * drive.GetStiffness() * ankleDriveScale * strength : 0.0f;
+                float damping = enabled ? inertia * drive.GetDamping() * ankleDriveScale * std::sqrt(strength) : 0.0f;
                 if (inverseLandingTime > 0 && stiffness > 0)
                 {
                     // 남은 시간에 위치·속도 오차를 함께 0으로 보내는 3차 궤적의 피드백 계수다.

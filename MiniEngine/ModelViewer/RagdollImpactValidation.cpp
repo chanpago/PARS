@@ -916,7 +916,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         float firstStepHandTravel = 0;
         float previousUpperBodyTime = 0;
         float peakChestDeflection = 0;
-        bool chestYieldsDuringWarmup = true;
         float startPelvisY = 0;
         std::array<float, 2> startSoleY{};
         std::array<int, 2> swingFeet{-1, -1};
@@ -1096,8 +1095,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             if (checkWarmup && dummyMesh.IsImpactWarmupActive())
             {
                 const Ragdoll& body = dummyMesh.GetRagdoll();
-                chestYieldsDuringWarmup = chestYieldsDuringWarmup && body.IsWarmupDynamicBody(chestBody) &&
-                    body.GetImpactReaction().spineDriveScale < 1.0f;
+                check(body.IsWarmupDynamicBody(chestBody) && !body.GetImpactReaction().IsYielding() &&
+                    dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Slow Jog Backwards",
+                    "The dynamic upper body tracks Slow Jog Backwards at full drive strength during capsule warmup");
                 const Vector3 pelvis(body.GetBoneWorld(body.GetImpactRootBody()).GetW());
                 const float pelvisY = pelvis.GetY();
                 const Vector3 root = dummy->GetActorLocation();
@@ -1177,6 +1177,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                     const PxVec3 velocity(dummySupport.centerOfMassVelocity.x, 0, dummySupport.centerOfMassVelocity.z);
                     check(dummyMesh.IsActiveRagdoll() && warmupLandings == 2 && swingFeet[0] >= 0 &&
                         swingFeet[1] == 1 - swingFeet[0], "Two opposite feet swing and land before the physical handoff");
+                    check(!dummyMesh.GetRagdoll().GetImpactReaction().IsYielding() &&
+                        dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Slow Jog Backwards",
+                        "The first active step continues the upper-body clip at full drive strength");
                     check(slideVelocity.magnitude() > .25f && (velocity - slideVelocity).magnitude() < .025f,
                         "The active body inherits the last horizontal slide velocity");
                     handedOff = true;
@@ -1324,8 +1327,6 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             check(firstStepHandTravel > .05f, "The upper body reacts relative to the pelvis during the first step");
             if (centeredWarmup)
             {
-                check(chestYieldsDuringWarmup && peakChestDeflection > .005f,
-                    "Chest moves relative to the animation with reduced physical drives throughout the warmup steps");
                 // 기본 20 kg 플레이어로 측정한 예열 전 골반 변위는 각각 0.20 m, 1.65 m다.
                 check(earlyPushDistance >= .15f && earlyPushDistance <= .27f &&
                     halfSecondPushDistance >= 1.40f && halfSecondPushDistance <= 1.90f,
