@@ -389,6 +389,16 @@ namespace PARS
         return rigid.getLinearVelocity() + rigid.getAngularVelocity().cross(point - center);
     }
 
+    float Ragdoll::GetImpactRootYawSpeed() const
+    {
+        const int root = GetImpactRootBody();
+        if (root < 0)
+        {
+            return 0;
+        }
+        return m_Bodies[root]->getAngularVelocity().y;
+    }
+
     bool Ragdoll::GetCharacterImpactCapsule(float radiusScale, PxTransform& pose, float& radius,
         float& halfLength, PxVec3& targetOffset, float heightScale) const
     {

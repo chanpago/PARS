@@ -21,6 +21,9 @@ namespace PARS
 
     ImpactWarmupStep PlanImpactWarmupStep(const FootstepPolygon& hull, const physx::PxVec3& com,
         const physx::PxVec3& velocity, float maximumStride, float fixedDeltaTime);
+    // 두 발의 시작 위치는 루트 회전축 기준 월드 오프셋이다. 회전각은 월드 Y축 기준 라디안이다.
+    float SelectImpactWarmupYaw(const physx::PxVec3& forward, const physx::PxVec3& velocity, float turnPreference,
+        const physx::PxVec3& swingOffset, const physx::PxVec3& supportOffset, const physx::PxVec3& firstStride);
 
     struct FootstepSettings
     {

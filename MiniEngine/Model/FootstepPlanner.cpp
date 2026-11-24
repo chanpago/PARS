@@ -1,6 +1,7 @@
 ﻿#include "FootstepPlanner.h"
 
 #include "FramePerformance.h"
+#include <foundation/PxQuat.h>
 #include <cmath>
 #include <limits>
 
@@ -688,6 +689,49 @@ ImpactWarmupStep PARS::PlanImpactWarmupStep(const FootstepPolygon& hull, const P
     const PxVec3 correction = travel * .35f + overrun;
     step.stride = correction * (maximumStride / (maximumStride + correction.magnitude()));
     return step;
+}
+
+float PARS::SelectImpactWarmupYaw(const PxVec3& forward, const PxVec3& velocity, float turnPreference,
+    const PxVec3& swingOffset, const PxVec3& supportOffset, const PxVec3& firstStride)
+{
+    const PxVec3 up(0, 1, 0);
+    PxVec3 heading(forward.x, 0, forward.z);
+    PxVec3 travel(velocity.x, 0, velocity.z);
+    if (!heading.isFinite() || !travel.isFinite() || heading.normalize() < 1e-5f || travel.normalize() < .05f)
+    {
+        return 0;
+    }
+    const float axial = heading.dot(travel);
+    const float lateral = heading.cross(travel).y;
+    if (PxAbs(lateral) <= PxAbs(axial))
+    {
+        return 0;
+    }
+    const float forwardYaw = std::atan2(lateral, axial);
+    const float backwardYaw = std::atan2(-lateral, -axial);
+    if (PxAbs(axial) > .05f)
+    {
+        return axial > 0 ? forwardYaw : backwardYaw;
+    }
+    // 정측면에서 약 3도 이내면 기존 골반 회전 방향을 우선한다.
+    if (std::isfinite(turnPreference) && turnPreference != 0)
+    {
+        return lateral * turnPreference > 0 ? forwardYaw : backwardYaw;
+    }
+    // 첫 착지 때 한 발만 새 방향으로 돈다. 두 후보 중 다음 이동발과의 좌우 간격이 더 넓게 남는 쪽을 택한다.
+    PxVec3 outward = up.cross(heading);
+    if ((swingOffset - supportOffset).dot(outward) < 0)
+    {
+        outward = -outward;
+    }
+    const PxVec3 support = supportOffset - firstStride;
+    const PxQuat forwardTurn(forwardYaw, up);
+    const PxQuat backwardTurn(backwardYaw, up);
+    const PxVec3 forwardSeparation = forwardTurn.rotate(swingOffset) + firstStride - support;
+    const PxVec3 backwardSeparation = backwardTurn.rotate(swingOffset) + firstStride - support;
+    const float forwardWidth = forwardSeparation.dot(forwardTurn.rotate(outward));
+    const float backwardWidth = backwardSeparation.dot(backwardTurn.rotate(outward));
+    return forwardWidth + 1e-5f >= backwardWidth ? forwardYaw : backwardYaw;
 }
 
 FootstepLandingRegion PARS::BuildFootstepLandingRegion(const PxVec3& origin,

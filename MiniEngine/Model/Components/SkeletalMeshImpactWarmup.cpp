@@ -12,6 +12,7 @@ using namespace physx;
 namespace
 {
     constexpr float MaximumRestSpeed = .25f;
+    constexpr float FirstLandingTurnFraction = .6f;
 
     PxTransform RigidFrame(const Matrix4& matrix)
     {
@@ -48,11 +49,22 @@ bool SkeletalMeshComponent::ImpactWarmup::ApplyCapsuleImpacts(const std::vector<
     return pushed;
 }
 
-ImpactWarmupStep SkeletalMeshComponent::ImpactWarmup::PlanStep(const FootstepPolygon& hull, const PxVec3& com, const PxVec3& velocity) const
+ImpactWarmupStep SkeletalMeshComponent::ImpactWarmup::PlanStep(const FootstepPolygon& hull, const PxVec3& com,
+    const PxVec3& velocity, bool secondStep) const
 {
     const float legLength = PxMin(legs[0].thighLength + legs[0].calfLength, legs[1].thighLength + legs[1].calfLength);
     ImpactWarmupStep step = PlanImpactWarmupStep(hull, com, velocity, legLength * .22f,
         static_cast<float>(PhysicsWorld::FixedDeltaTime));
+    if (secondStep && turnYaw != 0)
+    {
+        // 두 번째 보폭은 돌아선 몸의 전후축에 놓고, COM 계획에서 얻은 제동 거리와 부호를 따른다.
+        const PxQuat turn(turnYaw, PxVec3(0, 1, 0));
+        PxVec3 forward = turn.rotate(componentRotation.rotate(PxVec3(0, 0, 1)));
+        forward.y = 0;
+        forward.normalize();
+        step.stride = forward * forward.dot(step.stride);
+        return step;
+    }
     // 양발이 반대 방향으로 움직여도 원래 좌우 간격의 20%는 남긴다.
     const float lateral = PxAbs(componentRotation.rotateInv(step.stride).x);
     const float width = PxAbs(legs[0].targetSole.p.x - legs[1].targetSole.p.x);
@@ -110,7 +122,7 @@ bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime)
             const PxVec3 velocity = sample.hasCenterOfMassVelocity ?
                 sample.centerOfMassVelocity + (m_ImpactWarmup.momentum - previousMomentum) / m_ImpactWarmup.mass :
                 m_ImpactWarmup.momentum / m_ImpactWarmup.mass;
-            const ImpactWarmupStep corrected = m_ImpactWarmup.PlanStep(sample.hull, sample.projectedCenterOfMass, velocity);
+            const ImpactWarmupStep corrected = m_ImpactWarmup.PlanStep(sample.hull, sample.projectedCenterOfMass, velocity, true);
             if (corrected.duration > 0)
             {
                 m_ImpactWarmup.steps[1] = corrected;
@@ -194,8 +206,16 @@ bool SkeletalMeshComponent::BeginImpactWarmup()
     next.mass = sample.totalMass;
     next.momentum = m_ImpactWarmup.restVelocity * next.mass;
     const std::vector<RagdollBodyImpulse>& impacts = m_Ragdoll.GetExternalImpacts();
+    float yawImpulse = 0;
+    float horizontalImpulse = 0;
     for (const RagdollBodyImpulse& contact : impacts)
     {
+        if (contact.fromCharacterCapsule)
+        {
+            const PxVec3 push(contact.impulse.x, 0, contact.impulse.z);
+            yawImpulse += (contact.position - sample.centerOfMass).cross(push).y;
+            horizontalImpulse += push.magnitude();
+        }
         const PxVec3 approach(contact.capsuleVelocity.x, 0, contact.capsuleVelocity.z);
         if (contact.fromAnimatedCapsule && approach.magnitudeSquared() > next.approachVelocity.magnitudeSquared())
         {
@@ -205,7 +225,13 @@ bool SkeletalMeshComponent::BeginImpactWarmup()
     }
     next.ApplyCapsuleImpacts(impacts);
     next.actorAtStart = character->GetActorTransform();
-    next.componentRotation = RigidFrame(Matrix4(GetComponentTransform())).q;
+    const Matrix4 componentTransform(GetComponentTransform());
+    next.componentRotation = RigidFrame(componentTransform).q;
+    const Vector3 actorPosition = next.actorAtStart.GetTranslation();
+    const PxVec3 turnPivot(actorPosition.GetX(), actorPosition.GetY(), actorPosition.GetZ());
+    const Vector3 localPivot(Invert(componentTransform) * actorPosition);
+    next.turnPivotInComponent = PxVec3(localPivot.GetX(), localPivot.GetY(), localPivot.GetZ());
+    std::array<PxVec3, 2> soleOffsets;
     for (size_t side = 0; side < next.legs.size(); ++side)
     {
         const FootSoleSample& foot = sample.feet[side];
@@ -216,18 +242,29 @@ bool SkeletalMeshComponent::BeginImpactWarmup()
         leg.ankle = RigidFrame(next.sourceBones[setup.ankleNode]);
         leg.soleInBone = RigidFrame(foot.soleInBone);
         leg.targetSole = leg.ankle * leg.soleInBone;
+        const Vector3 soleOffset = Vector3(foot.soleWorld.GetW()) - actorPosition;
+        soleOffsets[side] = PxVec3(soleOffset.GetX(), soleOffset.GetY(), soleOffset.GetZ());
         leg.thighLength = (leg.knee.p - leg.hip.p).magnitude();
         leg.calfLength = (leg.ankle.p - leg.knee.p).magnitude();
         leg.referenceBend = leg.hip.q.rotate(setup.referenceBendInHip);
     }
     const PxVec3 velocity = next.momentum / next.mass;
-    next.steps[0] = next.PlanStep(sample.hull, sample.projectedCenterOfMass, velocity);
+    next.steps[0] = next.PlanStep(sample.hull, sample.projectedCenterOfMass, velocity, false);
     if (next.steps[0].duration <= 0)
     {
         return false;
     }
     const PxVec3 spacing = next.componentRotation.rotate(next.legs[0].targetSole.p - next.legs[1].targetSole.p);
     next.firstFoot = spacing.dot(next.steps[0].stride) >= 0 ? 0u : 1u;
+    // 동적 골반은 실제 회전을 따르고, 정지한 몸은 COM에서 벗어난 접촉의 각충격량을 사용한다.
+    float turnPreference = IsRagdoll() ? m_Ragdoll.GetImpactRootYawSpeed() : 0;
+    if (PxAbs(turnPreference) < .1f)
+    {
+        turnPreference = PxAbs(yawImpulse) > .01f * horizontalImpulse ? yawImpulse : 0;
+    }
+    next.turnYaw = SelectImpactWarmupYaw(next.componentRotation.rotate(PxVec3(0, 0, 1)), velocity, turnPreference,
+        soleOffsets[next.firstFoot], soleOffsets[1 - next.firstFoot], next.steps[0].stride);
+    const PxQuat landingTurn(next.turnYaw, PxVec3(0, 1, 0));
     // 첫 착지를 미리 배치한다. 루트의 예상 평행이동은 COM과 양발에 공통이므로 함께 생략한다.
     FootstepPolygon nextCorners;
     nextCorners.reserve(8);
@@ -239,11 +276,16 @@ bool SkeletalMeshComponent::BeginImpactWarmup()
         {
             if (foot.projected[corner])
             {
-                nextCorners.push_back(foot.projections[corner] + offset);
+                PxVec3 point = foot.projections[corner];
+                if (side == next.firstFoot && next.turnYaw != 0)
+                {
+                    point = turnPivot + landingTurn.rotate(point - turnPivot);
+                }
+                nextCorners.push_back(point + offset);
             }
         }
     }
-    next.steps[1] = next.PlanStep(BuildFootSupportHull(std::move(nextCorners)), sample.projectedCenterOfMass, velocity);
+    next.steps[1] = next.PlanStep(BuildFootSupportHull(std::move(nextCorners)), sample.projectedCenterOfMass, velocity, true);
     const CapsuleComponent& capsule = character->GetCapsuleComponent();
     PhysicsQueryCapsule sweep;
     sweep.owner = character;
@@ -304,18 +346,24 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
     }
     warmup.sweepCenter = sweep.centre;
     const PxVec3 offset = sweep.centre - warmup.sweepStart;
-    AffineTransform actor = warmup.actorAtStart;
-    actor.SetTranslation(actor.GetTranslation() + Vector3(offset.x, offset.y, offset.z));
-    character.SetActorTransform(actor);
-
     const bool first = warmup.landings == 0;
     const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
     const ImpactWarmupStep& step = warmup.steps[warmup.landings];
     warmup.stepTime += deltaTime;
     const float t = warmup.stepTime + 1e-6f >= step.duration ? 1.0f : warmup.stepTime / step.duration;
     const float smooth = t * t * (3.0f - 2.0f * t);
-    const PxVec3 firstStride = warmup.componentRotation.rotateInv(warmup.steps[0].stride);
-    const PxVec3 stride = warmup.componentRotation.rotateInv(step.stride);
+    const float turnProgress = first ? FirstLandingTurnFraction * smooth :
+        FirstLandingTurnFraction + (1.0f - FirstLandingTurnFraction) * smooth;
+    const float rootYaw = warmup.turnYaw * turnProgress;
+    const PxVec3 worldUp(0, 1, 0);
+    const PxVec3 localUp = warmup.componentRotation.rotateInv(worldUp);
+    const PxQuat componentRotation = PxQuat(rootYaw, worldUp) * warmup.componentRotation;
+    AffineTransform actor = warmup.actorAtStart;
+    actor.SetBasis(Matrix3::MakeYRotation(rootYaw) * actor.GetBasis());
+    actor.SetTranslation(actor.GetTranslation() + Vector3(offset.x, offset.y, offset.z));
+    character.SetActorTransform(actor);
+    const PxVec3 firstStride = componentRotation.rotateInv(warmup.steps[0].stride);
+    const PxVec3 stride = componentRotation.rotateInv(step.stride);
     // 첫 착지 전후의 골반 기준 발 속도를 연결한다. 보폭이나 착지 시간이 바뀌어도 발이 튀지 않는다.
     const PxVec3 startTangent = first ? PxVec3(0) : firstStride * (-2.0f * step.duration / warmup.steps[0].duration);
     const PxVec3 endTangent = -2.0f * stride;
@@ -330,6 +378,14 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
         const FootLegSetup& setup = support.feet[side].leg;
         TwoBoneIKInput leg = warmup.legs[side];
         const bool swing = side == movingFoot;
+        if (warmup.turnYaw != 0)
+        {
+            // 이동발만 새 발자리로 돌린다. 지지발은 슬라이드와 기존 보폭만 따르고 골반을 따라 휘돌지 않는다.
+            const float soleYaw = swing ? warmup.turnYaw * smooth : (first ? 0 : warmup.turnYaw);
+            const PxQuat relativeTurn(soleYaw - rootYaw, localUp);
+            leg.targetSole.p = warmup.turnPivotInComponent + relativeTurn.rotate(leg.targetSole.p - warmup.turnPivotInComponent);
+            leg.targetSole.q = relativeTurn * leg.targetSole.q;
+        }
         const PxVec3 start = first ? PxVec3(0) : (swing ? -firstStride : firstStride);
         const PxVec3 end = swing ? stride : -stride;
         leg.targetSole.p += start * (1.0f - smooth) + end * smooth + tangent;

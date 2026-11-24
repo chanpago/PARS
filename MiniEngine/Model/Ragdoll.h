@@ -244,6 +244,7 @@ namespace PARS
         bool IsCharacterImpactBody(size_t body) const;
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;
         physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
+        float GetImpactRootYawSpeed() const;
         float GetImpactRootMass() const;
         float GetCharacterCapsuleMass() const;
         void GetCharacterCapsuleContacts(std::vector<PhysicsCapsuleContact>& contacts) const;

@@ -99,7 +99,8 @@ namespace PARS
         {
         public:
             bool ApplyCapsuleImpacts(const std::vector<RagdollBodyImpulse>& impacts);
-            ImpactWarmupStep PlanStep(const FootstepPolygon& hull, const physx::PxVec3& com, const physx::PxVec3& velocity) const;
+            ImpactWarmupStep PlanStep(const FootstepPolygon& hull, const physx::PxVec3& com, const physx::PxVec3& velocity,
+                bool secondStep) const;
 
         public:
             static constexpr float MinimumImpactSpeedChange = .25f;
@@ -117,10 +118,12 @@ namespace PARS
             physx::PxVec3 approachVelocity{0};
             physx::PxVec3 sweepStart{0};
             physx::PxVec3 sweepCenter{0};
+            physx::PxVec3 turnPivotInComponent{0};
             float mass = 0;
             float torsoMass = 0;
             float slideDeceleration = 0;
             float stepTime = 0;
+            float turnYaw = 0;
             uint32_t approachGroup = 0;
             uint32_t firstFoot = 0;
             uint32_t landings = 0;
