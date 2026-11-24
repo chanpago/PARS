@@ -1,14 +1,14 @@
 {
     "arrow": {
-        "bodyImpulseNs": 0.0,
-        "bodyTorqueMultiplier": 0.0,
-        "lengthMeters": 0.6,
+        "bodyImpulseNs": 75.0,
+        "bodyTorqueMultiplier": 0.5,
+        "lengthMeters": 0.6000000238418579,
         "massKg": 0.5,
-        "partImpulseNs": 0.0,
-        "radiusMeters": 0.01,
+        "partImpulseNs": 30.0,
+        "radiusMeters": 0.009999999776482582,
         "speedMetersPerSecond": 30.0
     },
-    "selected": "sphere",
+    "selected": "arrow",
     "sphere": {
         "bodyImpulseNs": 100.0,
         "bodyTorqueMultiplier": 0.5,
