@@ -111,7 +111,8 @@ namespace PARS
             flail = {};
             return;
         }
-        flail.time = std::fmod(flail.time + deltaTime, m_AnimInstance->GetAnimationDuration(flail.clip));
+        constexpr float playbackRate = 0.5f;
+        flail.time = std::fmod(flail.time + deltaTime * playbackRate, m_AnimInstance->GetAnimationDuration(flail.clip));
     }
 
     MotionMatchResult SkeletalMeshComponent::SelectFallingAnimation() const
