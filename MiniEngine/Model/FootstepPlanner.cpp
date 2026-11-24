@@ -432,6 +432,7 @@ namespace
                 FootstepRecoveryInput::ModeSelection::GroundedNormal : FootstepRecoveryInput::ModeSelection::KeepCurrent;
         }
         request.stepping = needsStep || inProgress;
+        request.tryShorterFirstStep = input.resumingWarmup && !inProgress && input.requestedFoot == static_cast<int>(side);
         request.backwardFall = state.backwardFallStepsRemaining > 0;
         request.locked = inProgress && command.motion.landingTargetLocked;
         request.lockedTarget = command.target.position;

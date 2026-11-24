@@ -918,12 +918,23 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         float peakChestDeflection = 0;
         float lastChestDeflection = 0;
         float startPelvisY = 0;
+        float landingPelvisDrop = 0;
+        float landingCounterlean = 0;
+        Vector3 pelvisUpInBone(kYUnitVector);
         std::array<float, 2> startSoleY{};
         std::array<int, 2> swingFeet{-1, -1};
         Vector3 lastRoot(kZero);
         PxVec3 slideVelocity(0);
         bool handedOff = false;
         bool physicalStep = false;
+        bool newHitDuringSwing = false;
+        bool interruptedSwing = false;
+        bool settledAfterRehit = false;
+        int handoffSupportFoot = -1;
+        uint32_t firstSupportFrame = UINT32_MAX;
+        uint32_t firstSwingFrame = UINT32_MAX;
+        bool swungUnderLoad = false;
+        bool receivedFirstStep = false;
         bool expectSecondStepContact = kinematicPlayer != 0;
         bool contactDuringSecondStep = false;
         bool contactAfterHandoff = false;
@@ -1084,7 +1095,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                         "The second target is fixed during its swing");
                 }
             }
-            if (checkWarmup && (dummyMesh.IsImpactWarmupActive() || (warmupTicks > 0 && !physicalStep)))
+            if (checkWarmup && (dummyMesh.IsImpactWarmupActive() || (warmupTicks > 0 && !physicalStep && !settledAfterRehit)))
             {
                 // 관통한 캡슐도 입구에서 한 번은 충격을 기록하므로 두 몸통의 순서까지 확인한다.
                 const Ragdoll& receiver = dummyMesh.GetRagdoll();
@@ -1121,6 +1132,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 if (warmupTicks == 0)
                 {
                     startPelvisY = pelvisY;
+                    pelvisUpInBone = ~Quaternion(body.GetBoneWorld(body.GetImpactRootBody())) * Vector3(kYUnitVector);
                     firstHandOffset = handOffset;
                     for (size_t side = 0; side < startSoleY.size(); ++side)
                     {
@@ -1158,8 +1170,16 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 {
                     firstStepHandTravel = Max(firstStepHandTravel, float(Length(handOffset - firstHandOffset)));
                 }
-                check(!dummyMesh.IsRagdoll() && dummySupport.footstep.startCount == 0 && std::abs(pelvisY - startPelvisY) < .002f,
-                    "Pelvis stays level while only the visual steps run");
+                check(!dummyMesh.IsRagdoll() && dummySupport.footstep.startCount == 0,
+                    "Both warmup steps use the kinematic pose");
+                landingPelvisDrop = startPelvisY - pelvisY;
+                const Vector3 up = Quaternion(body.GetBoneWorld(body.GetImpactRootBody())) * pelvisUpInBone;
+                landingCounterlean = -Dot(up, direction);
+                const std::vector<RagdollBodyImpulse>& impacts = body.GetExternalImpacts();
+                newHitDuringSwing = landings == 1 && std::any_of(impacts.begin(), impacts.end(), [](const RagdollBodyImpulse& hit) -> bool
+                {
+                    return hit.fromCharacterCapsule && hit.newCapsuleHit;
+                });
                 for (size_t side = 0; side < startSoleY.size() && landings < swingFeet.size(); ++side)
                 {
                     if (float(dummySupport.feet[side].soleWorld.GetW().GetY()) > startSoleY[side] + .035f)
@@ -1171,25 +1191,59 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 lastRoot = root;
                 ++warmupTicks;
             }
-            else if (checkWarmup && warmupTicks > 0 && !physicalStep)
+            else if (checkWarmup && warmupTicks > 0 && !physicalStep && !settledAfterRehit)
             {
                 if (!handedOff)
                 {
                     const PxVec3 velocity(dummySupport.centerOfMassVelocity.x, 0, dummySupport.centerOfMassVelocity.z);
-                    check(dummyMesh.IsActiveRagdoll() && warmupLandings == 2 && swingFeet[0] >= 0 &&
-                        swingFeet[1] == 1 - swingFeet[0], "Two opposite feet swing and land before the physical handoff");
+                    interruptedSwing = newHitDuringSwing && warmupLandings == 1;
+                    check(dummyMesh.IsActiveRagdoll() && swingFeet[0] >= 0 && swingFeet[1] == 1 - swingFeet[0] &&
+                        (warmupLandings == 2 || interruptedSwing),
+                        "Two opposite feet swing, with early handoff only on a new impact during the second swing");
+                    handoffSupportFoot = swingFeet[warmupLandings - 1];
                     check(!dummyMesh.GetRagdoll().GetImpactReaction().IsYielding() &&
                         dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Slow Jog Backwards",
                         "The first active step continues tracking Slow Jog Backwards at full drive strength");
-                    check(slideVelocity.magnitude() > .25f && (velocity - slideVelocity).magnitude() < .025f,
-                        "The active body inherits the last horizontal slide velocity");
+                    if (!interruptedSwing)
+                    {
+                        check(slideVelocity.magnitude() > .25f && (velocity - slideVelocity).magnitude() < .025f,
+                            "The active body inherits the last horizontal slide velocity");
+                    }
                     handedOff = true;
                 }
                 if (dummySupport.footstep.startCount > 0)
                 {
-                    check(dummySupport.footstep.feet[swingFeet[0]].justStarted,
+                    check(dummySupport.footstep.feet[1 - handoffSupportFoot].justStarted,
                         "The first physical step uses the foot opposite the last warmup landing");
                     physicalStep = true;
+                    firstSwingFrame = frame;
+                }
+                else if (interruptedSwing)
+                {
+                    // 재충돌로 이미 균형을 되찾았으면 양발의 실제 접지와 저속을 확인하고 인계를 마친다.
+                    const PxVec3 velocity(dummySupport.centerOfMassVelocity.x, 0, dummySupport.centerOfMassVelocity.z);
+                    settledAfterRehit = dummySupport.feet[0].contact.grounded && dummySupport.feet[1].contact.grounded &&
+                        dummySupport.footstep.hasPrediction && !dummySupport.footstep.needsStep &&
+                        velocity.magnitude() <= dummyMesh.GetRecoverySettings().maximumReturnSpeed;
+                }
+            }
+            if (handedOff && !receivedFirstStep && kinematicPlayer && !interruptedSwing)
+            {
+                const FootContactSample& stance = dummySupport.feet[handoffSupportFoot].contact;
+                const FootSoleSample& swing = dummySupport.feet[1 - handoffSupportFoot];
+                if (firstSupportFrame == UINT32_MAX && stance.grounded && stance.normalImpulse > 0)
+                {
+                    firstSupportFrame = frame;
+                }
+                if (physicalStep && !swing.contact.grounded &&
+                    float(swing.soleWorld.GetW().GetY()) > startSoleY[1 - handoffSupportFoot] + .035f)
+                {
+                    swungUnderLoad = swungUnderLoad || (stance.grounded && stance.normalImpulse > 0);
+                }
+                if (swungUnderLoad)
+                {
+                    receivedFirstStep = swing.contact.grounded;
+                    check(receivedFirstStep || stance.grounded, "The last warmup foot supports the opposite foot through its first swing");
                 }
             }
             if (releaseOnContact && dummyMesh.IsImpactWarmupActive())
@@ -1306,10 +1360,11 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         if (checkWarmup || releaseOnContact)
         {
             const float dt = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+            const float secondElapsed = dt * (warmupTicks - firstLandingTicks);
             check(firstLandingTicks > 0 && secondStep.duration > 0 &&
                 std::abs(dt * firstLandingTicks - initialSteps[0].duration) < .001f &&
-                std::abs(dt * (warmupTicks - firstLandingTicks) - secondStep.duration) < .001f,
-                "Each foot lands on its planned physics tick");
+                (interruptedSwing ? secondElapsed < secondStep.duration : std::abs(secondElapsed - secondStep.duration) < .001f),
+                "Completed warmup steps land on their planned tick and a new impact can interrupt the second swing");
             if (lateralOffset == 0 && std::abs(impactSettings.collisionMass - 20.0f) < .001f)
             {
                 check((secondStep.stride - initialSteps[1].stride).magnitude() > .005f ||
@@ -1324,7 +1379,20 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         if (checkWarmup)
         {
             report << "push_0.1s_m=" << earlyPushDistance << " push_0.5s_m=" << halfSecondPushDistance
-                << " first_step_hand_travel_m=" << firstStepHandTravel << " peak_chest_deflection_m=" << peakChestDeflection << std::endl;
+                << " first_step_hand_travel_m=" << firstStepHandTravel << " peak_chest_deflection_m=" << peakChestDeflection
+                << " landing_pelvis_drop_m=" << landingPelvisDrop << " landing_counterlean_sine=" << landingCounterlean << std::endl;
+            if (kinematicPlayer && lateralOffset == 0)
+            {
+                check(landingPelvisDrop > .04f && landingCounterlean > .04f,
+                    "A sustained frontal shove reaches handoff with bent legs and a counterleaning pelvis");
+            }
+            if (kinematicPlayer && !interruptedSwing)
+            {
+                report << "loaded_support_frame=" << firstSupportFrame << " first_swing_frame=" << firstSwingFrame << std::endl;
+                check(firstSupportFrame != UINT32_MAX && firstSwingFrame >= firstSupportFrame &&
+                    firstSwingFrame - firstSupportFrame <= 2 && receivedFirstStep,
+                    "The opposite foot starts within two loaded ticks and lands while the warmup foot still supports it");
+            }
             check(firstStepHandTravel > .05f, "The upper body reacts relative to the pelvis during the first step");
             if (centeredWarmup)
             {
@@ -1335,7 +1403,8 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                     halfSecondPushDistance >= 1.40f && halfSecondPushDistance <= 1.90f,
                     "The animated player's running shove preserves the original onset and half-second travel");
             }
-            check(handedOff && physicalStep, "A running player produces two warmup steps followed by a physical step");
+            check(handedOff && (physicalStep || settledAfterRehit),
+                "Warmup hands off to an opposite physical step or verified two-foot balance after a new hit");
             check(!expectSecondStepContact || contactDuringSecondStep,
                 "The animated shove or a simulated capsule overlapping the torso produces contact during the second step");
             check(contactAfterHandoff, "Continued input produces physical capsule contact after the handoff");

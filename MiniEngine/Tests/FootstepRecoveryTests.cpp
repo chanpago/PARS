@@ -273,6 +273,15 @@ namespace
                 "all normal candidates are tested in order of distance to capture");
             previousGap = gap;
         }
+        input.tryShorterFirstStep = true;
+        checked.clear();
+        const FootstepRecoverySnapshot handoff = SelectFootstepRecovery(input, settings);
+        const PxVec3 start = ClosestFootstepPoint(handoff.reachable[0], input.feet[input.movingFoot].stepOrigin);
+        Check(checked.size() == 3 && handoff.poseChecks == 3 && handoff.hasTarget && handoff.target == checked.back() &&
+            (checked.front() - edgeMidpoint).magnitude() < 1e-5f && IsInsideFootSupportHull(handoff.reachable[0], handoff.target) &&
+            (checked[2] - start).magnitude() < (checked[1] - start).magnitude() &&
+            (checked[1] - start).magnitude() < (checked[0] - start).magnitude(),
+            "A warmup handoff tests progressively shorter reachable strides after the nearest landing is rejected");
     }
 
     void TestCaptureAndTiming()
@@ -514,22 +523,24 @@ namespace
             InAny(first.recovery.intersections[0], first.raw) && (first.position - first.raw).magnitudeSquared() < 1e-8f,
             "a normal step keeps the stance target when it lies inside the overlap");
 
-        input.feet[0].timeToReachLimit = .3f;
+        const float reachableTime = (MinimumFootstepDuration + MaximumFootstepDuration) * .5f;
+        input.feet[0].timeToReachLimit = reachableTime;
         planner.Reset();
         planner.Update(input, settings);
-        Check(std::abs(planner.GetSnapshot().candidates[1].recovery.predictionTime - .3f) < 1e-5f &&
-            std::abs(GetFootstepRemainingTime(planner.GetSnapshot().feet[1]) - .3f) < 1e-5f,
+        Check(std::abs(planner.GetSnapshot().candidates[1].recovery.predictionTime - reachableTime) < 1e-5f &&
+            std::abs(GetFootstepRemainingTime(planner.GetSnapshot().feet[1]) - reachableTime) < 1e-5f,
             "Capture region and swing use the same time from the step decision to touchdown");
         input.feet[0].timeToReachLimit = 10.0f;
         planner.Reset();
         planner.Update(input, settings);
         const FootstepTarget& capped = planner.GetSnapshot().candidates[1];
         Check(planner.GetSnapshot().feet[1].justStarted && capped.recovery.hasTarget &&
-            std::abs(capped.recovery.predictionTime - .3f) < 1e-5f &&
-            std::abs(GetFootstepRemainingTime(planner.GetSnapshot().feet[1]) - .3f) < 1e-5f,
-            "A long support forecast selects a validated target using the 0.3 second landing deadline");
+            std::abs(capped.recovery.predictionTime - MaximumFootstepDuration) < 1e-5f &&
+            std::abs(GetFootstepRemainingTime(planner.GetSnapshot().feet[1]) - MaximumFootstepDuration) < 1e-5f,
+            "A long support forecast selects a validated target using the maximum step duration");
         input.feet[0].timeToReachLimit = std::numeric_limits<float>::infinity();
-        input.feet[1].stanceOffset.x += .6f;
+        // 기본 보폭 한도 안에서 선호점만 회복 영역 밖으로 옮긴다.
+        input.feet[1].stanceOffset.x += .3f;
         FootstepPolygon checked;
         input.acceptsLanding = [&checked, &input](size_t side, const PxVec3& point, const PxVec3& normal,
             const PxVec3& displacement) -> bool

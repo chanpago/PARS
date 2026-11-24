@@ -107,6 +107,7 @@ namespace PARS
 
         public:
             float GetLandingSoleYaw(size_t stepIndex) const;
+            physx::PxTransform GetPelvisBrace(const physx::PxQuat& rotation, float elapsed, float maximumLowering) const;
 
         public:
             static constexpr float MinimumImpactSpeedChange = .25f;
@@ -128,11 +129,13 @@ namespace PARS
             physx::PxVec3 sweepCenter{0};
             physx::PxVec3 turnPivotInComponent{0};
             physx::PxVec3 peakTorsoLean{0};
+            physx::PxVec3 impactDirection{0};
             float mass = 0;
             float torsoMass = 0;
             float slideDeceleration = 0;
             float stepTime = 0;
             float turnYaw = 0;
+            int pelvisNode = -1;
             uint32_t approachGroup = 0;
             uint32_t firstFoot = 0;
             uint32_t landings = 0;
@@ -195,7 +198,7 @@ namespace PARS
         bool UpdateAutomaticRagdoll(float deltaTime, bool firstHit);
         void ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         bool UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses);
-        bool BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses, float deltaTime);
+        bool BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses, const physx::PxVec3& impulse, float deltaTime);
         bool AdvanceImpactWarmup(float deltaTime);
         bool FinishImpactWarmup(bool lostFloor, bool replayCapsuleImpacts = false);
         bool UpdateBalanceState(float deltaTime);

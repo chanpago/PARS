@@ -407,6 +407,15 @@ namespace
         if (!hasOverlap)
         {
             std::stable_sort(candidates.begin(), candidates.end());
+            if (input.tryShorterFirstStep && !candidates.empty())
+            {
+                // 예열 지지발이 닿으면 보폭 끝을 먼저 시도하고, 같은 영역 안에서 무릎을 더 굽힐 수 있는 짧은 첫발도 검사한다.
+                const LandingCandidate best = candidates.front();
+                const PxVec3 start = ClosestFootstepPoint(result.reachable[best.mode], input.feet[input.movingFoot].stepOrigin);
+                const PxVec3 stride = best.position - start;
+                candidates.insert(candidates.begin() + 1, {{best.mode, start + stride * .75f, best.score},
+                    {best.mode, start + stride * .5f, best.score}, {best.mode, start + stride * .25f, best.score}});
+            }
         }
         if (input.backwardFall && input.previousMode == FootstepMode::Normal && !result.reachable[0].empty())
         {

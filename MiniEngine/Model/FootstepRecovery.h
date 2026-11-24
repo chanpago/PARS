@@ -88,6 +88,7 @@ namespace PARS
         FootstepMode previousMode = FootstepMode::Normal;
         ModeSelection modeSelection = ModeSelection::NewStep;
         bool stepping = false;
+        bool tryShorterFirstStep = false;
         bool locked = false;
         bool hasRejectedTarget = false;
         bool backwardFall = false;

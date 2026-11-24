@@ -135,6 +135,7 @@ namespace PARS
         bool hasVelocity = false;
         bool hasReference = false;
         bool hasImpact = false;
+        bool resumingWarmup = false;
     };
 
     enum class FootstepLandingDirection

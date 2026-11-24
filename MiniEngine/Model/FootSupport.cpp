@@ -578,6 +578,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     4. 발마다 실제 이동·접촉을 확인하면서 각자의 목표와 이륙·공중·착지 상태를 갱신
     */
     input.requestedFoot = m_NextWarmupFoot;
+    input.resumingWarmup = m_NextWarmupFoot >= 0;
     m_FootstepPlanner.Update(input, m_FootstepSettings);
     m_Snapshot.footstep = m_FootstepPlanner.GetSnapshot();
     if (m_NextWarmupFoot >= 0 && (!input.active || m_Snapshot.footstep.aborted ||
