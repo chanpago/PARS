@@ -8,7 +8,7 @@
 
 namespace PARS
 {
-    constexpr float MinimumFootstepDuration = .13f;
+    constexpr float MinimumFootstepDuration = .16f;
     constexpr float MaximumFootstepDuration = .27f;
 
     struct ImpactWarmupStep
@@ -31,7 +31,7 @@ namespace PARS
         FootstepRecoverySettings recovery;
         float startPredictionTime = .6f;
         float landingPredictionTime = .4f;
-        float stanceScale = 1.0f;
+        float stanceScale = 1.7f;
         float minimumStanceWidthRatio = .0f;
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
         float crossingOffset = .1f;
