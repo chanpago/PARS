@@ -2,6 +2,7 @@
 
 #include <PxPhysicsAPI.h>
 #include "PhysicsMaterial.h"
+#include "ImpactImpulseSettings.h"
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -57,7 +58,7 @@ public:
 struct PhysicsContactImpulse
 {
 public:
-    uint64_t projectileContactId = 0;
+    uint64_t impactContactId = 0;
     physx::PxVec3 position{0};
     physx::PxVec3 impulse{0};
     physx::PxVec3 outwardNormal{0};
@@ -67,15 +68,6 @@ public:
     bool newProjectileHit = false;
     bool fromCharacterCapsule = false;
     bool fromAnimatedCapsule = false;
-};
-
-struct PhysicsProjectileBodyImpulse
-{
-public:
-    physx::PxVec3 position{0};
-    physx::PxVec3 impulse{0};
-    physx::PxVec3 partImpulse{0};
-    float torqueMultiplier = 0;
 };
 
 // 최초 접촉점과 진입 방향을 상대 바디의 로컬 좌표로 보관한다.
@@ -113,21 +105,20 @@ private:
         uint64_t completedStep = 0;
         uint64_t clockRevision = 0;
         uint64_t firstImpulseStep = 0;
-        uint64_t projectileContactId = 0;
+        uint64_t impactContactId = 0;
         physx::PxVec3 capsuleVelocity{0};
+        bool hasInitialResponse = false;
     };
-    struct ProjectileSettings
+    struct ImpactSource
     {
     public:
         const physx::PxRigidDynamic* actor = nullptr;
-        float bodyMagnitude = 0;
-        float torqueMultiplier = 0;
-        float partMagnitude = 0;
+        ImpactImpulseSettings settings;
     };
-    struct ProjectileContact
+    struct ImpactContact
     {
     public:
-        const physx::PxActor* projectile = nullptr;
+        const void* source = nullptr;
         const void* receiver = nullptr;
         uint64_t id = 0;
         uint64_t firstImpulseStep = 0;
@@ -135,9 +126,7 @@ private:
         physx::PxVec3 contactImpulse{0};
         physx::PxVec3 weightedPosition{0};
         float weight = 0;
-        float bodyMagnitude = 0;
-        float torqueMultiplier = 0;
-        float partMagnitude = 0;
+        ImpactImpulseSettings settings;
         bool consumed = false;
     };
     struct StoppedProjectile
@@ -192,7 +181,7 @@ public:
         physx::PxRaycastHit& hit, const void* ignoredOwner = nullptr) const;
     // 순간이동하거나 씬에서 분리하기 전에 이전 접촉을 무효화한다.
     void InvalidateContacts(const physx::PxRigidActor& body);
-    bool ConsumeProjectileContact(uint64_t id, PhysicsProjectileBodyImpulse& response);
+    bool ConsumeImpactContact(uint64_t id);
     physx::PxRigidDynamic* CreateDynamicBody(const physx::PxTransform& pose,
         const physx::PxGeometry& geometry, float mass, const char* name,
         const PARS::PhysicsMaterialSettings& material = {});
@@ -209,7 +198,7 @@ public:
     bool ConnectPvd(bool reconnect = false);
 
 private:
-    void RecordProjectileContact(ContactPair& pair, int projectileSide, const physx::PxContactPairVelocity* beforeContact);
+    void RecordImpactContact(ContactPair& pair, int sourceSide, bool capsule, const physx::PxContactPairVelocity* beforeContact);
     void RecordProjectileAttachment(physx::PxRigidDynamic& projectile, const physx::PxRigidActor& target, const ContactPair& pair,
         int side, const physx::PxContactPairVelocity* velocity, const physx::PxContactPairPose* pose);
     void onContact(const physx::PxContactPairHeader& header, const physx::PxContactPair* pairs,
@@ -229,6 +218,8 @@ public:
 public:
     // 같은 소유자의 바디도 포함해 PhysX가 보고한 실제 접촉을 조회한다.
     bool HasContact(const physx::PxRigidActor& first, const physx::PxRigidActor& second) const;
+    bool GetImpactResponse(uint64_t id, PhysicsImpactResponse& response) const;
+    bool SetImpactImpulseSettings(const physx::PxRigidDynamic& source, const ImpactImpulseSettings& settings);
     bool SetProjectileBodyImpulse(const physx::PxRigidDynamic& projectile, float bodyMagnitude,
         float torqueMultiplier, float partMagnitude = 0);
     const PhysicsProjectileAttachment* GetProjectileAttachment(const physx::PxRigidDynamic& projectile) const;
@@ -306,10 +297,10 @@ public:
 
 private:
     std::vector<ContactPair> m_Contacts;
-    std::vector<ProjectileSettings> m_ProjectileSettings;
-    std::vector<ProjectileContact> m_ProjectileContacts;
+    std::vector<ImpactSource> m_ImpactSources;
+    std::vector<ImpactContact> m_ImpactContacts;
     std::vector<StoppedProjectile> m_StoppedProjectiles;
-    uint64_t m_NextProjectileContactId = 1;
+    uint64_t m_NextImpactContactId = 1;
     std::vector<physx::PxRigidDynamic*> m_ImpactedAimedProjectiles;
     uint64_t m_ClockRevision = 0;
     PhysicsWorld* m_ServiceOwner = nullptr;

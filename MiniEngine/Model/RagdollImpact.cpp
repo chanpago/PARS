@@ -52,7 +52,7 @@ namespace PARS
             {
                 RagdollBodyImpulse impact;
                 impact.body = index;
-                impact.projectileContactId = contact.projectileContactId;
+                impact.impactContactId = contact.impactContactId;
                 impact.position = contact.position;
                 impact.impulse = contact.impulse;
                 impact.outwardNormal = contact.outwardNormal;
@@ -85,14 +85,14 @@ namespace PARS
             }
         }
 
-        const RagdollBodyImpulse* FindStrongestProjectileContact(const std::vector<RagdollBodyImpulse>& impacts,
+        const RagdollBodyImpulse* FindStrongestImpactContact(const std::vector<RagdollBodyImpulse>& impacts,
             uint64_t contactId, size_t bodyCount)
         {
             const RagdollBodyImpulse* strongest = nullptr;
             float largestSquaredImpulse = 0;
             for (const RagdollBodyImpulse& hit : impacts)
             {
-                if (hit.projectileContactId != contactId || !hit.newProjectileHit || hit.body >= bodyCount || !hit.position.isFinite())
+                if (hit.impactContactId != contactId || hit.body >= bodyCount || !hit.position.isFinite())
                 {
                     continue;
                 }
@@ -123,28 +123,28 @@ namespace PARS
         }
     }
 
+    PxVec3 Ragdoll::GetImpactAngularVelocity(const PxVec3& center, const PxVec3& angularImpulse) const
+    {
+        PxMat33 inertia(PxZero);
+        for (const PxRigidBody* body : m_Bodies)
+        {
+            const PxTransform massFrame = body->getGlobalPose() * body->getCMassLocalPose();
+            const PxMat33 rotation(massFrame.q);
+            const PxVec3 offset = massFrame.p - center;
+            // 각 바디의 관성을 월드 축으로 회전하고 평행축 정리로 전신 질량중심에 모은다.
+            inertia += rotation * PxMat33::createDiagonal(body->getMassSpaceInertiaTensor()) * rotation.getTranspose();
+            inertia += (PxMat33(PxIdentity) * offset.magnitudeSquared() - PxMat33::outer(offset, offset)) * body->getMass();
+        }
+        const float determinant = inertia.getDeterminant();
+        if (!std::isfinite(determinant) || determinant <= 0)
+        {
+            return PxVec3(0);
+        }
+        return inertia.getInverse() * angularImpulse;
+    }
+
     namespace
     {
-        PxVec3 GetImpactAngularVelocity(const std::vector<PxRigidBody*>& bodies, const PxVec3& center, const PxVec3& angularImpulse)
-        {
-            PxMat33 inertia(PxZero);
-            for (const PxRigidBody* body : bodies)
-            {
-                const PxTransform massFrame = body->getGlobalPose() * body->getCMassLocalPose();
-                const PxMat33 rotation(massFrame.q);
-                const PxVec3 offset = massFrame.p - center;
-                // 각 바디의 관성을 월드 축으로 회전하고 평행축 정리로 전신 질량중심에 모은다.
-                inertia += rotation * PxMat33::createDiagonal(body->getMassSpaceInertiaTensor()) * rotation.getTranspose();
-                inertia += (PxMat33(PxIdentity) * offset.magnitudeSquared() - PxMat33::outer(offset, offset)) * body->getMass();
-            }
-            const float determinant = inertia.getDeterminant();
-            if (!std::isfinite(determinant) || determinant <= 0)
-            {
-                return PxVec3(0);
-            }
-            return inertia.getInverse() * angularImpulse;
-        }
-
         constexpr float ProjectileHoldTime = .08f;
         constexpr float ProjectileRecoveryTime = .24f;
         constexpr float ProjectileResponseTime = ProjectileHoldTime + ProjectileRecoveryTime;
@@ -179,7 +179,34 @@ namespace PARS
         }
     }
 
-    void Ragdoll::ApplyProjectileBodyImpulses(const std::vector<RagdollBodyImpulse>& impacts)
+    std::vector<RagdollImpactResponse> Ragdoll::GetImpactResponses(const std::vector<RagdollBodyImpulse>& impacts) const
+    {
+        std::vector<RagdollImpactResponse> responses;
+        for (const RagdollBodyImpulse& hit : impacts)
+        {
+            RagdollImpactResponse response;
+            if (hit.impactContactId == 0 || !m_World || !m_World->GetImpactResponse(hit.impactContactId, response) ||
+                std::any_of(responses.begin(), responses.end(), [&hit](const RagdollImpactResponse& entry) -> bool
+                {
+                    return entry.contactId == hit.impactContactId;
+                }))
+            {
+                continue;
+            }
+            const RagdollBodyImpulse* struck = FindStrongestImpactContact(impacts, hit.impactContactId, m_Bodies.size());
+            if (struck)
+            {
+                response.contactId = hit.impactContactId;
+                response.body = struck->body;
+                response.partPosition = struck->position;
+                response.fromCharacterCapsule = struck->fromCharacterCapsule;
+                responses.push_back(response);
+            }
+        }
+        return responses;
+    }
+
+    void Ragdoll::ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses)
     {
         if (!m_World || !IsSimulating())
         {
@@ -189,21 +216,16 @@ namespace PARS
         float mass = 0;
         PxVec3 linearImpulse(0);
         PxVec3 angularImpulse(0);
-        for (const RagdollBodyImpulse& hit : impacts)
+        for (const RagdollImpactResponse& response : responses)
         {
-            PhysicsProjectileBodyImpulse response;
-            if (!hit.newProjectileHit || hit.projectileContactId == 0 || !m_World->ConsumeProjectileContact(hit.projectileContactId, response))
+            if (response.body >= m_Bodies.size() || !m_World->ConsumeImpactContact(response.contactId))
             {
                 continue;
             }
             if (!response.partImpulse.isZero())
             {
                 // 머리와 목처럼 여러 부위가 동시에 맞아도 실제 충격이 가장 컸던 접촉점에 한 번만 가한다.
-                const RagdollBodyImpulse* struck = FindStrongestProjectileContact(impacts, hit.projectileContactId, m_Bodies.size());
-                if (struck)
-                {
-                    ApplyImpulseAtPoint(*m_Bodies[struck->body], response.partImpulse, struck->position);
-                }
+                ApplyImpulseAtPoint(*m_Bodies[response.body], response.partImpulse, response.partPosition);
             }
             if (response.impulse.isZero())
             {
@@ -219,7 +241,7 @@ namespace PARS
                 center = PxVec3(position.GetX(), position.GetY(), position.GetZ());
             }
             linearImpulse += response.impulse;
-            angularImpulse += (response.position - center).cross(response.impulse) * response.torqueMultiplier;
+            angularImpulse += response.GetAngularImpulse(center);
         }
         if (mass == 0 || !linearImpulse.isFinite() || !angularImpulse.isFinite())
         {
@@ -228,7 +250,7 @@ namespace PARS
         PxVec3 linear = linearImpulse / mass;
         if (!angularImpulse.isZero())
         {
-            const PxVec3 angular = GetImpactAngularVelocity(m_Bodies, center, angularImpulse);
+            const PxVec3 angular = GetImpactAngularVelocity(center, angularImpulse);
             if (!angular.isFinite() || !linear.isFinite())
             {
                 return;
@@ -663,7 +685,7 @@ namespace PARS
     }
 
     bool Ragdoll::ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
-        float heightScale)
+        float heightScale, const ImpactImpulseSettings& response)
     {
         if (!enabled)
         {
@@ -674,7 +696,7 @@ namespace PARS
         const int root = GetImpactRootBody();
         if (!m_World || !IsActive() || !m_CollisionEnabled || root < 0 || !std::isfinite(mass) || mass < .01f || mass > 10000 ||
             !std::isfinite(radiusScale) || radiusScale <= 0 || !std::isfinite(heightScale) || heightScale <= 0 ||
-            !std::isfinite(skin) || skin < 0 || skin > .1f)
+            !std::isfinite(skin) || skin < 0 || skin > .1f || !response.IsValid())
         {
             error = u8"몸통 캡슐에는 PA 바디와 유효한 충돌 질량·형상 설정이 필요합니다.";
             return false;
@@ -733,6 +755,7 @@ namespace PARS
             m_World->InvalidateContacts(*m_CharacterCapsuleBody);
             m_CharacterCapsuleBody->wakeUp();
         }
+        m_World->SetImpactImpulseSettings(*m_CharacterCapsuleBody, response);
         error.clear();
         return true;
     }

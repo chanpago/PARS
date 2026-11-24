@@ -1,5 +1,6 @@
 ﻿#include "SkeletalMeshComponent.h"
 #include "FramePerformance.h"
+#include <algorithm>
 
 namespace PARS
 {
@@ -192,14 +193,29 @@ namespace PARS
 
         // 여기서 발 움직임을 계산하고 지지영역을 조사해 가중치를 구한다
         m_Ragdoll.SetHorizontalSupportForce(physx::PxVec3(0));
-        if (m_Ragdoll.IsSimulating())
+        std::vector<RagdollImpactResponse> responses;
+        if (m_Ragdoll.IsSimulating() || m_AutomaticRagdoll || IsImpactWarmupActive())
         {
-            m_Ragdoll.ApplyProjectileBodyImpulses(m_Ragdoll.GetExternalImpacts());
+            responses = m_Ragdoll.GetImpactResponses(m_Ragdoll.GetExternalImpacts());
+        }
+        // 예열이 시작되면 같은 충격을 키네마틱 자세가 이어받으므로 동적 바디 적용을 그 결정 뒤로 미룬다.
+        const bool capsuleWarmup = (m_ImpactWarmup.wasResting || IsImpactWarmupActive()) &&
+            std::any_of(responses.begin(), responses.end(), [](const RagdollImpactResponse& response) -> bool
+            {
+                return response.fromCharacterCapsule;
+            });
+        if (!capsuleWarmup)
+        {
+            m_Ragdoll.ApplyImpactResponses(responses);
         }
         UpdateFootSupport();
-        if (UpdateImpactWarmup(deltaTime))
+        if (UpdateImpactWarmup(deltaTime, responses))
         {
             return;
+        }
+        if (capsuleWarmup)
+        {
+            m_Ragdoll.ApplyImpactResponses(responses);
         }
         ImpactHandReach hit;
         bool longitudinalImpact = false;
@@ -226,7 +242,7 @@ namespace PARS
             }
         }
 
-        if (!UpdateAutomaticRagdoll(deltaTime, hit.body >= 0))
+        if (!UpdateAutomaticRagdoll(deltaTime, hit.body >= 0 || !responses.empty()))
         {
             return;
         }

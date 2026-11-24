@@ -845,6 +845,28 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         CommandLineArgs::GetInteger(L"bodyimpactenabled", enabled);
         impactSettings.enabled = enabled != 0;
         check(player.GetCharacterImpact().SetSettings(impactSettings, error), "Configure independent capsule mass, geometry and enable state");
+        std::wstring impactPreset;
+        if (CommandLineArgs::GetString(L"bodyimpactsettings", impactPreset))
+        {
+            // 검증용 복사본에서 실제 UI의 저장과 재로딩을 거친 값으로 충돌을 재현한다.
+            const std::wstring saved = path + L".impact-settings.json";
+            const int length = static_cast<int>(saved.size());
+            const int bytes = WideCharToMultiByte(CP_UTF8, 0, saved.data(), length, nullptr, 0, nullptr, nullptr);
+            check(bytes > 0, "Encode the validation preset path");
+            std::string settingsPath(bytes, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, saved.data(), length, &settingsPath[0], bytes, nullptr, nullptr);
+            check(CopyFileW(impactPreset.c_str(), saved.c_str(), FALSE) && test.LoadImpactSettings(player, settingsPath),
+                "Load the supplied impact preset");
+            CharacterImpactComponent& source = player.GetCharacterImpact();
+            const ImpactImpulseSettings expected = source.GetImpactImpulseSettings();
+            check(test.SaveImpactSettings(player) && source.SetImpactImpulseSettings({}) && test.LoadImpactSettings(player, settingsPath),
+                "Round-trip all impact presets through the same settings file as the editor");
+            const ImpactImpulseSettings& actual = source.GetImpactImpulseSettings();
+            check(actual.partImpulse == expected.partImpulse && actual.bodyImpulse == expected.bodyImpulse &&
+                actual.torqueMultiplier == expected.torqueMultiplier, "Restore capsule impulse settings on the player");
+            report << "part_impulse_ns=" << actual.partImpulse << " body_impulse_ns=" << actual.bodyImpulse
+                << " torque_multiplier=" << actual.torqueMultiplier << std::endl;
+        }
         float expectedTotalMass = 0;
         for (const PhysicsBody& body : player.GetMesh().GetPhysicsAsset()->bodies)
         {
@@ -881,14 +903,20 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         ImpactWarmupStep secondStep;
         uint32_t firstLandingTicks = 0;
         const int handBody = dummy->GetMesh().GetPhysicsAsset()->FindBody("mixamorig1:LeftHand");
+        const int chestBody = dummy->GetMesh().GetPhysicsAsset()->FindBody("mixamorig1:Spine2");
+        const bool centeredWarmup = checkWarmup && kinematicPlayer && lateralOffset == 0 &&
+            std::abs(impactSettings.collisionMass - 20.0f) < .001f;
         if (checkWarmup)
         {
-            check(handBody >= 0, "Locate the hand for the upper-body response measurement");
+            check(handBody >= 0 && chestBody >= 0, "Locate the hand and chest for the upper-body response measurement");
         }
         Vector3 firstHandOffset(kZero);
         float earlyPushDistance = 0;
         float halfSecondPushDistance = 0;
         float firstStepHandTravel = 0;
+        float previousUpperBodyTime = 0;
+        float peakChestDeflection = 0;
+        float lastChestDeflection = 0;
         float startPelvisY = 0;
         std::array<float, 2> startSoleY{};
         std::array<int, 2> swingFeet{-1, -1};
@@ -1072,6 +1100,21 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 const float pelvisY = pelvis.GetY();
                 const Vector3 root = dummy->GetActorLocation();
                 const Vector3 handOffset = Vector3(body.GetBoneWorld(handBody).GetW()) - pelvis;
+                if (centeredWarmup && warmupTicks * PhysicsWorld::FixedDeltaTime >= .1)
+                {
+                    // 블렌딩이 끝난 같은 시각의 원본 상체와 비교해 골반 이동과 조깅 애니메이션을 측정에서 제외한다.
+                    std::vector<GraphNode> authored;
+                    std::vector<Matrix4> authoredWorld;
+                    check(dummyMesh.GetAnimInstance().SampleUpperBodyPose(dummyMesh.GetImpactFlailClip(),
+                        previousUpperBodyTime, 1.0f, authored, &dummyMesh.GetFinalPose()) &&
+                        EvaluatePhysicsPose(dummySkeleton, authored, Matrix4(dummyMesh.GetComponentTransform()), authoredWorld, error),
+                        "Sample the matching upper-body frame with the same pelvis");
+                    const int chestNode = body.GetBoneNodes()[chestBody];
+                    const Vector3 chest(body.GetBoneWorld(chestBody).GetW());
+                    lastChestDeflection = Dot(chest - Vector3(authoredWorld[chestNode].GetW()), direction);
+                    peakChestDeflection = Max(peakChestDeflection, lastChestDeflection);
+                }
+                previousUpperBodyTime = dummyMesh.GetImpactFlailTime();
                 if (warmupTicks == 0)
                 {
                     startPelvisY = pelvisY;
@@ -1275,10 +1318,12 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         if (checkWarmup)
         {
             report << "push_0.1s_m=" << earlyPushDistance << " push_0.5s_m=" << halfSecondPushDistance
-                << " first_step_hand_travel_m=" << firstStepHandTravel << std::endl;
+                << " first_step_hand_travel_m=" << firstStepHandTravel << " peak_chest_deflection_m=" << peakChestDeflection << std::endl;
             check(firstStepHandTravel > .05f, "The upper body reacts relative to the pelvis during the first step");
-            if (kinematicPlayer && lateralOffset == 0 && std::abs(impactSettings.collisionMass - 20.0f) < .001f)
+            if (centeredWarmup)
             {
+                check(peakChestDeflection > .005f && lastChestDeflection < peakChestDeflection * .8f,
+                    "Chest bends with the shove and relaxes during continued contact");
                 // 기본 20 kg 플레이어로 측정한 예열 전 골반 변위는 각각 0.20 m, 1.65 m다.
                 check(earlyPushDistance >= .15f && earlyPushDistance <= .27f &&
                     halfSecondPushDistance >= 1.40f && halfSecondPushDistance <= 1.90f,

@@ -34,8 +34,26 @@ namespace
             std::isfinite(settings.speed) && settings.speed >= 1 && settings.speed <= 100 &&
             std::isfinite(settings.radius) && settings.radius >= minRadius && settings.radius <= maxRadius &&
             (!arrow || (std::isfinite(settings.length) && settings.length >= MinimumArrowLength && settings.length <= MaximumArrowLength)) &&
-            std::isfinite(settings.partImpulse) && settings.partImpulse >= 0 && std::isfinite(settings.bodyImpulse) && settings.bodyImpulse >= 0 &&
-            std::isfinite(settings.torqueMultiplier) && settings.torqueMultiplier >= 0;
+            settings.IsValid();
+    }
+
+    ImpactImpulseSettings ReadImpulseSettings(const nlohmann::json& data)
+    {
+        ImpactImpulseSettings settings;
+        settings.partImpulse = data.at("partImpulseNs").get<float>();
+        settings.bodyImpulse = data.at("bodyImpulseNs").get<float>();
+        settings.torqueMultiplier = data.at("bodyTorqueMultiplier").get<float>();
+        if (!settings.IsValid())
+        {
+            throw std::runtime_error(u8"충격량과 회전 배율은 유한한 0 이상의 값이어야 합니다.");
+        }
+        return settings;
+    }
+
+    nlohmann::json WriteImpulseSettings(const ImpactImpulseSettings& settings)
+    {
+        return {{"partImpulseNs", settings.partImpulse}, {"bodyImpulseNs", settings.bodyImpulse},
+            {"bodyTorqueMultiplier", settings.torqueMultiplier}};
     }
 
     ImpactProjectileSettings ReadProjectileSettings(const nlohmann::json& data, int version, ImpactProjectileType type)
@@ -43,14 +61,14 @@ namespace
         ImpactProjectileSettings settings;
         settings.mass = data.at("massKg").get<float>();
         settings.speed = data.at("speedMetersPerSecond").get<float>();
-        if (version >= 2)
+        if (version >= 3)
+        {
+            static_cast<ImpactImpulseSettings&>(settings) = ReadImpulseSettings(data);
+        }
+        else if (version == 2)
         {
             settings.bodyImpulse = data.at("bodyImpulseNs").get<float>();
             settings.torqueMultiplier = data.at("bodyTorqueMultiplier").get<float>();
-        }
-        if (version >= 3)
-        {
-            settings.partImpulse = data.at("partImpulseNs").get<float>();
         }
         if (version >= 4)
         {
@@ -73,8 +91,10 @@ namespace
         {
             throw std::runtime_error(u8"발사체 설정값이 허용 범위를 벗어났습니다.");
         }
-        nlohmann::json data = {{"massKg", settings.mass}, {"speedMetersPerSecond", settings.speed}, {"radiusMeters", settings.radius},
-            {"partImpulseNs", settings.partImpulse}, {"bodyImpulseNs", settings.bodyImpulse}, {"bodyTorqueMultiplier", settings.torqueMultiplier}};
+        nlohmann::json data = WriteImpulseSettings(settings);
+        data["massKg"] = settings.mass;
+        data["speedMetersPerSecond"] = settings.speed;
+        data["radiusMeters"] = settings.radius;
         if (type == ImpactProjectileType::Arrow)
         {
             data["lengthMeters"] = settings.length;
@@ -289,27 +309,29 @@ bool RagdollImpactTest::SetProjectileSettings(ImpactProjectileType type, const I
     return true;
 }
 
-bool RagdollImpactTest::LoadProjectileSettings(const std::string& path)
+bool RagdollImpactTest::LoadImpactSettings(Character& player, const std::string& path)
 {
-    m_ProjectileSettingsPath = path;
+    m_ImpactSettingsPath = path;
     try
     {
         std::ifstream file(ImpactSettingsPath(path));
         if (!file)
         {
-            throw std::runtime_error(u8"발사체 설정 파일을 열 수 없습니다.");
+            throw std::runtime_error(u8"충격 설정 파일을 열 수 없습니다.");
         }
         nlohmann::json data;
         file >> data;
         const int version = data.at("version").get<int>();
-        if (version < 1 || version > 5)
+        if (version < 1 || version > 6)
         {
-            throw std::runtime_error(u8"지원하지 않는 발사체 설정 파일 버전입니다.");
+            throw std::runtime_error(u8"지원하지 않는 충격 설정 파일 버전입니다.");
         }
-        const ImpactProjectileSettings sphere = ReadProjectileSettings(version == 5 ? data.at("sphere") : data, version, ImpactProjectileType::Sphere);
-        const ImpactProjectileSettings arrow = version == 5 ? ReadProjectileSettings(data.at("arrow"), version, ImpactProjectileType::Arrow) :
+        const ImpactProjectileSettings sphere = ReadProjectileSettings(version >= 5 ? data.at("sphere") : data, version, ImpactProjectileType::Sphere);
+        const ImpactProjectileSettings arrow = version >= 5 ? ReadProjectileSettings(data.at("arrow"), version, ImpactProjectileType::Arrow) :
             ImpactProjectileSettings::ArrowDefaults();
-        const std::string selected = version == 5 ? data.at("selected").get<std::string>() : "sphere";
+        const std::string selected = version >= 5 ? data.at("selected").get<std::string>() : "sphere";
+        const bool editCapsule = version >= 6 && data.value("editingCapsule", false);
+        const ImpactImpulseSettings capsule = version >= 6 ? ReadImpulseSettings(data.at("playerCapsule")) : ImpactImpulseSettings{};
         if (selected != "sphere" && selected != "arrow")
         {
             throw std::runtime_error(u8"알 수 없는 발사체 종류입니다.");
@@ -317,34 +339,37 @@ bool RagdollImpactTest::LoadProjectileSettings(const std::string& path)
         m_SphereSettings = sphere;
         m_ArrowSettings = arrow;
         m_ProjectileType = selected == "arrow" ? ImpactProjectileType::Arrow : ImpactProjectileType::Sphere;
-        m_ProjectileSettingsMessage = u8"발사체 설정을 불러왔습니다.";
+        m_EditingCapsuleImpact = editCapsule;
+        player.GetCharacterImpact().SetImpactImpulseSettings(capsule);
+        m_ImpactSettingsMessage = u8"충격 설정을 불러왔습니다.";
         return true;
     }
     catch (const std::exception& exception)
     {
-        m_ProjectileSettingsMessage = u8"발사체 설정 불러오기 실패: " + std::string(exception.what());
+        m_ImpactSettingsMessage = u8"충격 설정을 불러오지 못했습니다. " + std::string(exception.what());
         return false;
     }
 }
 
-bool RagdollImpactTest::SaveProjectileSettings()
+bool RagdollImpactTest::SaveImpactSettings(const Character& player)
 {
     std::wstring temporary;
     try
     {
-        const nlohmann::json data = {{"version", 5}, {"selected", m_ProjectileType == ImpactProjectileType::Arrow ? "arrow" : "sphere"},
+        const nlohmann::json data = {{"version", 6}, {"selected", m_ProjectileType == ImpactProjectileType::Arrow ? "arrow" : "sphere"},
+            {"editingCapsule", m_EditingCapsuleImpact}, {"playerCapsule", WriteImpulseSettings(player.GetCharacterImpact().GetImpactImpulseSettings())},
             {"sphere", WriteProjectileSettings(ImpactProjectileType::Sphere, m_SphereSettings)},
             {"arrow", WriteProjectileSettings(ImpactProjectileType::Arrow, m_ArrowSettings)}};
-        const std::wstring destination = ImpactSettingsPath(m_ProjectileSettingsPath);
+        const std::wstring destination = ImpactSettingsPath(m_ImpactSettingsPath);
         temporary = destination + L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetCurrentThreadId());
         std::ofstream file(temporary, std::ios::trunc);
         file << data.dump(4) << '\n';
         file.close();
         if (!file || !MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         {
-            throw std::runtime_error(u8"발사체 설정 파일에 저장할 수 없습니다.");
+            throw std::runtime_error(u8"충격 설정 파일에 저장할 수 없습니다.");
         }
-        m_ProjectileSettingsMessage = u8"구와 화살 설정을 저장했습니다. 다음 실행부터 자동으로 불러옵니다.";
+        m_ImpactSettingsMessage = u8"충격 설정을 저장했습니다. 다음 실행부터 자동으로 불러옵니다.";
         return true;
     }
     catch (const std::exception& exception)
@@ -353,7 +378,7 @@ bool RagdollImpactTest::SaveProjectileSettings()
         {
             DeleteFileW(temporary.c_str());
         }
-        m_ProjectileSettingsMessage = u8"발사체 설정 저장 실패: " + std::string(exception.what());
+        m_ImpactSettingsMessage = u8"충격 설정을 저장하지 못했습니다. " + std::string(exception.what());
         return false;
     }
 }
@@ -554,7 +579,7 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool aim
     // 바닥 하중이나 캐릭터의 지속 밀기와 구별해 실제 발사 구의 접촉만 피격 반응에 사용한다.
     physx::PxShape* shape = nullptr;
     if (projectile->getShapes(&shape, 1) != 1 ||
-        !physics->SetProjectileBodyImpulse(*projectile, settings.bodyImpulse, settings.torqueMultiplier, settings.partImpulse))
+        !physics->SetImpactImpulseSettings(*projectile, settings))
     {
         projectile->release();
         return false;
@@ -735,61 +760,102 @@ void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)
     }
 }
 
-void RagdollImpactTest::DrawProjectileUI(Character* player)
+namespace
 {
-    if (!ImGui::CollapsingHeader(u8"발사체 설정", ImGuiTreeNodeFlags_DefaultOpen))
+    void DrawProjectileLaunchSettings(bool arrow, ImpactProjectileSettings& settings)
+    {
+        float radiusCm = settings.radius * 100.0f;
+        const float minRadius = arrow ? MinimumArrowRadius : MinimumProjectileRadius;
+        const float maxRadius = arrow ? MaximumArrowRadius : MaximumProjectileRadius;
+        if (ImGui::DragFloat(arrow ? u8"화살대 반지름" : u8"공 반지름", &radiusCm, arrow ? .1f : .5f,
+            minRadius * 100.0f, maxRadius * 100.0f, "%.1f cm", ImGuiSliderFlags_AlwaysClamp) && std::isfinite(radiusCm))
+        {
+            settings.radius = radiusCm / 100.0f;
+        }
+        if (arrow)
+        {
+            float lengthCm = settings.length * 100.0f;
+            if (ImGui::DragFloat(u8"화살 길이", &lengthCm, .5f, MinimumArrowLength * 100.0f, MaximumArrowLength * 100.0f,
+                "%.1f cm", ImGuiSliderFlags_AlwaysClamp) && std::isfinite(lengthCm))
+            {
+                settings.length = lengthCm / 100.0f;
+            }
+        }
+        ImGui::DragFloat(arrow ? u8"화살 질량" : u8"구 질량", &settings.mass, arrow ? .1f : .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::DragFloat(u8"발사 속도", &settings.speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
+    }
+
+    bool DrawImpulseSettings(ImpactImpulseSettings& settings)
+    {
+        bool changed = ImGui::DragFloat(u8"피격 부위 추가 충격량", &settings.partImpulse, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
+        changed |= ImGui::DragFloat(u8"전신 충격량", &settings.bodyImpulse, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
+        changed |= ImGui::DragFloat(u8"전신 회전 배율", &settings.torqueMultiplier, .01f, 0.0f, PX_MAX_F32, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+        return changed;
+    }
+}
+
+void RagdollImpactTest::DrawImpactSettingsUI(Character* player)
+{
+    if (!ImGui::CollapsingHeader(u8"충격 설정", ImGuiTreeNodeFlags_DefaultOpen))
     {
         return;
     }
-    if (ImGui::RadioButton(u8"구 설정", m_ProjectileType == ImpactProjectileType::Sphere))
+    if (ImGui::RadioButton(u8"구", !m_EditingCapsuleImpact && m_ProjectileType == ImpactProjectileType::Sphere))
     {
         m_ProjectileType = ImpactProjectileType::Sphere;
+        m_EditingCapsuleImpact = false;
     }
     ImGui::SameLine();
-    if (ImGui::RadioButton(u8"화살 설정", m_ProjectileType == ImpactProjectileType::Arrow))
+    if (ImGui::RadioButton(u8"화살", !m_EditingCapsuleImpact && m_ProjectileType == ImpactProjectileType::Arrow))
     {
         m_ProjectileType = ImpactProjectileType::Arrow;
-    }
-    const bool arrow = m_ProjectileType == ImpactProjectileType::Arrow;
-    ImpactProjectileSettings& settings = arrow ? m_ArrowSettings : m_SphereSettings;
-    ImGui::PushID(arrow ? "arrow" : "sphere");
-    float radiusCm = settings.radius * 100.0f;
-    const float minRadius = arrow ? MinimumArrowRadius : MinimumProjectileRadius;
-    const float maxRadius = arrow ? MaximumArrowRadius : MaximumProjectileRadius;
-    if (ImGui::DragFloat(arrow ? u8"화살대 반지름" : u8"공 반지름", &radiusCm, arrow ? .1f : .5f,
-        minRadius * 100.0f, maxRadius * 100.0f, "%.1f cm", ImGuiSliderFlags_AlwaysClamp) && std::isfinite(radiusCm))
-    {
-        settings.radius = radiusCm / 100.0f;
-    }
-    if (arrow)
-    {
-        float lengthCm = settings.length * 100.0f;
-        if (ImGui::DragFloat(u8"화살 길이", &lengthCm, .5f, MinimumArrowLength * 100.0f, MaximumArrowLength * 100.0f,
-            "%.1f cm", ImGuiSliderFlags_AlwaysClamp) && std::isfinite(lengthCm))
-        {
-            settings.length = lengthCm / 100.0f;
-        }
-    }
-    ImGui::DragFloat(arrow ? u8"화살 질량" : u8"구 질량", &settings.mass, arrow ? .1f : .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
-    ImGui::DragFloat(u8"발사 속도", &settings.speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
-    ImGui::DragFloat(u8"피격 부위 추가 충격량", &settings.partImpulse, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
-    ImGui::DragFloat(u8"전신 충격량", &settings.bodyImpulse, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
-    ImGui::DragFloat(u8"전신 회전 배율", &settings.torqueMultiplier, .01f, 0.0f, PX_MAX_F32, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-    ImGui::PopID();
-    ImGui::BeginDisabled(m_ProjectileSettingsPath.empty());
-    if (ImGui::Button(u8"발사체 설정 저장"))
-    {
-        SaveProjectileSettings();
+        m_EditingCapsuleImpact = false;
     }
     ImGui::SameLine();
-    if (ImGui::Button(u8"발사체 설정 불러오기"))
+    if (ImGui::RadioButton(u8"플레이어 캡슐", m_EditingCapsuleImpact))
     {
-        LoadProjectileSettings(m_ProjectileSettingsPath);
+        m_EditingCapsuleImpact = true;
+    }
+    const bool arrow = m_ProjectileType == ImpactProjectileType::Arrow;
+    ImGui::PushID(m_EditingCapsuleImpact ? "playerCapsule" : (arrow ? "arrow" : "sphere"));
+    if (m_EditingCapsuleImpact)
+    {
+        if (player)
+        {
+            CharacterImpactComponent& component = player->GetCharacterImpact();
+            ImpactImpulseSettings settings = component.GetImpactImpulseSettings();
+            if (DrawImpulseSettings(settings))
+            {
+                component.SetImpactImpulseSettings(settings);
+            }
+        }
+        ImGui::TextWrapped("%s", u8"플레이어 몸통이 더미에 처음 부딪힐 때 적용합니다. 떨어졌다 다시 부딪히면 새 충격을 줍니다.");
+    }
+    else
+    {
+        ImpactProjectileSettings& settings = arrow ? m_ArrowSettings : m_SphereSettings;
+        DrawProjectileLaunchSettings(arrow, settings);
+        DrawImpulseSettings(settings);
+    }
+    ImGui::PopID();
+    ImGui::BeginDisabled(m_ImpactSettingsPath.empty() || !player);
+    if (ImGui::Button(u8"충격 설정 저장") && player)
+    {
+        SaveImpactSettings(*player);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(u8"충격 설정 불러오기") && player)
+    {
+        LoadImpactSettings(*player, m_ImpactSettingsPath);
     }
     ImGui::EndDisabled();
-    if (!m_ProjectileSettingsMessage.empty())
+    if (!m_ImpactSettingsMessage.empty())
     {
-        ImGui::TextWrapped("%s", m_ProjectileSettingsMessage.c_str());
+        ImGui::TextWrapped("%s", m_ImpactSettingsMessage.c_str());
+    }
+    if (m_EditingCapsuleImpact)
+    {
+        return;
     }
     ImGui::TextWrapped("%s", u8"우클릭으로 조준하고 좌클릭 또는 R로 발사합니다. 조준하지 않고 R을 누르면 더미 골반을 향해 발사합니다.");
     ImGui::BeginDisabled(!player);
@@ -814,7 +880,7 @@ void RagdollImpactTest::DrawUI(Character* player)
     if (ImGui::Begin(u8"PARS - 더미 충격 테스트"))
     {
         DrawBodyImpactUI(player);
-        DrawProjectileUI(player);
+        DrawImpactSettingsUI(player);
         PARS::Character* dummy = GetDummy();
         if (ImGui::CollapsingHeader(u8"더미 상태 및 초기화"))
         {

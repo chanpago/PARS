@@ -444,12 +444,12 @@ namespace PARS
     void SkeletalMeshComponent::ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
     {
         m_Ragdoll.ApplyExternalImpacts(impacts);
-        m_Ragdoll.ApplyProjectileBodyImpulses(impacts);
+        m_Ragdoll.ApplyImpactResponses(m_Ragdoll.GetImpactResponses(impacts));
         // 모드 교체로 소멸한 접촉도 이번 틱의 관절 반응에는 그대로 넘긴다.
         m_Ragdoll.UpdateProjectileReaction(impacts, deltaTime);
     }
 
-    bool SkeletalMeshComponent::UpdateAutomaticRagdoll(float deltaTime, bool projectileHit)
+    bool SkeletalMeshComponent::UpdateAutomaticRagdoll(float deltaTime, bool firstHit)
     {
         if (!m_AutomaticRagdoll)
         {
@@ -471,7 +471,7 @@ namespace PARS
                 m_StandingUpState == StandingUpState::None && m_AirborneFallAnimations.front() != UINT32_MAX &&
                 sample.projectedPointCount == 0 && sample.feet[0].contact.hasSample && sample.feet[1].contact.hasSample &&
                 !sample.feet[0].contact.grounded && !sample.feet[1].contact.grounded;
-            if (!impact && !approaching && !lostFloor && !projectileHit)
+            if (!impact && !approaching && !lostFloor && !firstHit)
             {
                 return true;
             }
@@ -532,7 +532,7 @@ namespace PARS
             sample.feet[1].contact.hasSample && sample.feet[1].contact.grounded;
         // A영역 유지 시간은 그대로 누적하되, 실제 양발 접지가 확인될 때만 전환한다.
         if (m_KinematicRecoveryTimer.Update(sample.contactRevision, sample.completedPhysicsStep,
-            deltaTime, insideA, bothGrounded, impact, m_KinematicStableDuration) && !projectileHit && m_ImpactHandReach.body < 0)
+            deltaTime, insideA, bothGrounded, impact, m_KinematicStableDuration) && !firstHit && m_ImpactHandReach.body < 0)
         {
             return BeginKinematicRecovery();
         }

@@ -44,8 +44,8 @@ public:
     void ResumeSimulation();
     void DrawUI(PARS::Character* player);
     void DrawContactOverlay(float topInset) const;
-    bool LoadProjectileSettings(const std::string& path);
-    bool SaveProjectileSettings();
+    bool LoadImpactSettings(PARS::Character& player, const std::string& path);
+    bool SaveImpactSettings(const PARS::Character& player);
     void LoadBodyImpactSettings(PARS::Character& player, const std::string& path);
     bool LoadDummySupportSettings(const std::string& path);
     bool SaveDummySupportSettings();
@@ -54,7 +54,7 @@ public:
 private:
     void ClearContactCheck();
     void DrawBodyImpactUI(PARS::Character* player);
-    void DrawProjectileUI(PARS::Character* player);
+    void DrawImpactSettingsUI(PARS::Character* player);
     void DrawDummySupportSettingsUI();
     void BuildBodyImpactLines(std::vector<physx::PxDebugLine>& lines);
     bool FireAt(const PARS::Character& player, Math::Vector3 target, bool aimed = false);
@@ -108,8 +108,8 @@ private:
     FootSoleDebug& m_FootSoles;
     std::vector<Shot> m_Shots;
     std::string m_Message;
-    std::string m_ProjectileSettingsPath;
-    std::string m_ProjectileSettingsMessage;
+    std::string m_ImpactSettingsPath;
+    std::string m_ImpactSettingsMessage;
     std::string m_BodyImpactPath;
     std::string m_BodyImpactMessage;
     std::string m_DummySupportSettingsPath;
@@ -121,6 +121,7 @@ private:
     ImpactProjectileSettings m_ArrowSettings = ImpactProjectileSettings::ArrowDefaults();
     float m_MaxHipsDisplacement = 0;
     ImpactProjectileType m_ProjectileType = ImpactProjectileType::Sphere;
+    bool m_EditingCapsuleImpact = false;
     bool m_AutomaticSupport = true;
     bool m_BodyImpactCapsuleVisible = true;
     bool m_ContactCheckEnabled = false;

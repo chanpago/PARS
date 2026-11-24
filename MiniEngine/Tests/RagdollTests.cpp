@@ -113,13 +113,13 @@ namespace
         std::puts("PASS: whole-body COM, unequal masses and rotated local mass frames on D6/articulation");
     }
 
-    void TestProjectileBodyImpulse(bool articulation, float torqueMultiplier, float hitHeight,
-        float bodyImpulse = 8.0f, float partImpulse = 0)
+    void TestImpactBodyImpulse(bool articulation, float torqueMultiplier, float hitHeight,
+        float bodyImpulse = 8.0f, float partImpulse = 0, bool capsule = false)
     {
         using namespace physx;
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize whole-body projectile test");
-        const std::vector<std::string> names{"hip", "head"};
+        const std::vector<std::string> names{"hip", capsule ? "spine" : "head"};
         const std::vector<Matrix4> pose{
             Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 3, 0))),
             Matrix4(OrthogonalTransform(Quaternion(kIdentity), Vector3(0, 4, 0)))};
@@ -146,13 +146,18 @@ namespace
         std::string error;
         Check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error, false), "Create kinematic hit receiver");
         ragdoll.SetQueryOwner(&ragdoll);
-        PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(-.6f, hitHeight, 0)), PxSphereGeometry(.12f), 1, "Ball");
-        Check(ball && world.SetProjectileBodyImpulse(*ball, bodyImpulse, torqueMultiplier, partImpulse), "Set the projectile's impact response");
+        ragdoll.SetCharacterImpactEnabled(capsule, 2);
+        const PxSphereGeometry sphere(.12f);
+        const PxCapsuleGeometry torso(.12f, .10f);
+        const PxGeometry& geometry = capsule ? static_cast<const PxGeometry&>(torso) : static_cast<const PxGeometry&>(sphere);
+        PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(-.6f, hitHeight, 0)), geometry, 1, "Impact source");
+        Check(ball && world.SetImpactImpulseSettings(*ball, {partImpulse, bodyImpulse, torqueMultiplier}), "Set the source impact response");
         ball->getScene()->setGravity(PxVec3(0));
         PxShape* shape = nullptr;
         Check(ball->getShapes(&shape, 1) == 1, "Find projectile shape");
         PxFilterData filter = shape->getSimulationFilterData();
-        filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
+        filter.word2 = 1;
+        filter.word3 |= capsule ? PhysicsWorld::CharacterCapsuleFilterFlag : PhysicsWorld::ProjectileFilterFlag;
         shape->setSimulationFilterData(filter);
         ball->setLinearVelocity(PxVec3(4, 0, 0));
         std::vector<RagdollBodyImpulse> impacts;
@@ -160,12 +165,12 @@ namespace
         {
             world.Step();
             ragdoll.CaptureExternalImpacts(impacts);
-            if (!impacts.empty() && impacts.front().newProjectileHit)
+            if (!ragdoll.GetImpactResponses(impacts).empty())
             {
                 break;
             }
         }
-        Check(!impacts.empty() && impacts.front().projectileContactId != 0, "Capture contact before changing the physical bodies");
+        Check(!impacts.empty() && impacts.front().impactContactId != 0, "Capture contact before changing the physical bodies");
         const PxVec3 contactPoint = impacts.front().position;
         if (partImpulse > 0)
         {
@@ -183,8 +188,9 @@ namespace
             "Activate the requested receiver backend");
         ragdoll.SetDrivesEnabled(false);
         // 실제 충돌 반작용은 재생하지 않고 설정한 추가분만 측정한다.
-        ragdoll.ApplyProjectileBodyImpulses(impacts);
-        ragdoll.ApplyProjectileBodyImpulses(impacts);
+        const std::vector<RagdollImpactResponse> responses = ragdoll.GetImpactResponses(impacts);
+        ragdoll.ApplyImpactResponses(responses);
+        ragdoll.ApplyImpactResponses(responses);
         world.Step();
         Vector3 velocity(kZero);
         const float expectedSpeed = (bodyImpulse + partImpulse) / 4.0f;
@@ -328,13 +334,14 @@ void RunProjectileBodyImpulseTests()
 {
     for (bool articulation : {false, true})
     {
-        TestProjectileBodyImpulse(articulation, 0.0f, 4.0f);
-        TestProjectileBodyImpulse(articulation, 1.0f, 4.0f);
-        TestProjectileBodyImpulse(articulation, .5f, 3.0f);
-        TestProjectileBodyImpulse(articulation, 0, 4.10f, 0, 2);
-        TestProjectileBodyImpulse(articulation, 0, 4.10f, 8, 2);
+        TestImpactBodyImpulse(articulation, 0.0f, 4.0f);
+        TestImpactBodyImpulse(articulation, 1.0f, 4.0f);
+        TestImpactBodyImpulse(articulation, .5f, 3.0f);
+        TestImpactBodyImpulse(articulation, 0, 4.10f, 0, 2);
+        TestImpactBodyImpulse(articulation, 0, 4.10f, 8, 2);
+        TestImpactBodyImpulse(articulation, .5f, 4.0f, 8, 0, true);
     }
-    std::puts("PASS: projectile part and whole-body impulses, contact-point torque and one hit across the kinematic transition on D6/articulation");
+    std::puts("PASS: projectile and capsule impulses, contact-point torque and one hit across the kinematic transition on D6/articulation");
 }
 
 void RunRagdollTests()

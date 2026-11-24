@@ -98,6 +98,8 @@ namespace PARS
         {
         public:
             bool ApplyCapsuleImpacts(const std::vector<RagdollBodyImpulse>& impacts);
+            bool ApplyTorsoLean(const PhysicsSkeleton& skeleton, const physx::PxQuat& currentRotation,
+                float elapsed, std::string& error);
             ImpactWarmupStep PlanStep(const FootstepPolygon& hull, const physx::PxVec3& com, const physx::PxVec3& velocity,
                 bool secondStep) const;
 
@@ -109,6 +111,7 @@ namespace PARS
             std::vector<GraphNode> sourcePose;
             std::vector<GraphNode> pose;
             std::vector<Math::Matrix4> sourceBones;
+            std::vector<int> spineNodes;
             std::array<TwoBoneIKInput, 2> legs;
             std::array<ImpactWarmupStep, 2> steps;
             physx::PxQuat componentRotation{physx::PxIdentity};
@@ -118,6 +121,7 @@ namespace PARS
             physx::PxVec3 sweepStart{0};
             physx::PxVec3 sweepCenter{0};
             physx::PxVec3 turnPivotInComponent{0};
+            physx::PxVec3 peakTorsoLean{0};
             float mass = 0;
             float torsoMass = 0;
             float slideDeceleration = 0;
@@ -182,12 +186,12 @@ namespace PARS
         bool CaptureRecoveryBlendSource();
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
-        bool UpdateAutomaticRagdoll(float deltaTime, bool projectileHit);
+        bool UpdateAutomaticRagdoll(float deltaTime, bool firstHit);
         void ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
-        bool UpdateImpactWarmup(float deltaTime);
-        bool BeginImpactWarmup();
+        bool UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses);
+        bool BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses);
         bool AdvanceImpactWarmup(float deltaTime);
-        bool FinishImpactWarmup(bool lostFloor);
+        bool FinishImpactWarmup(bool lostFloor, bool replayCapsuleImpacts = false);
         bool UpdateBalanceState(float deltaTime);
         bool BeginAirborneFall();
         void ResetAirborneFall();

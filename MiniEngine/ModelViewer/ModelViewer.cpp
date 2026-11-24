@@ -1133,7 +1133,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         const size_t impactDirectory = m_DefaultPAPath.find_last_of("/\\");
         m_ImpactTest->LoadBodyImpactSettings(*character,
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "CharacterImpact.settings.json");
-        m_ImpactTest->LoadProjectileSettings(
+        m_ImpactTest->LoadImpactSettings(*character,
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "Projectile.settings.json");
         if (!m_ImpactTest->Initialize(models[0], *mesh.GetPhysicsAsset(), motionSource))
         {

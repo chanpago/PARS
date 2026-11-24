@@ -29,6 +29,16 @@ namespace PARS
         return true;
     }
 
+    bool CharacterImpactComponent::SetImpactImpulseSettings(const ImpactImpulseSettings& settings)
+    {
+        if (!settings.IsValid())
+        {
+            return false;
+        }
+        m_ImpactImpulseSettings = settings;
+        return true;
+    }
+
     void CharacterImpactComponent::RefreshCollisionPolicy()
     {
         Character& character = static_cast<Character&>(GetOwner());
@@ -41,7 +51,7 @@ namespace PARS
             static_cast<uint32_t>(character.GetHandle().id), warmup);
         const bool enabled = ragdoll.UsesCharacterImpact() && controlled;
         ragdoll.ConfigureCharacterCapsule(enabled, m_Settings.collisionMass, m_Settings.capsuleRadiusScale,
-            m_Settings.contactSkin, m_PhysicsError, m_Settings.capsuleHeightScale);
+            m_Settings.contactSkin, m_PhysicsError, m_Settings.capsuleHeightScale, m_ImpactImpulseSettings);
         // 키네마틱 본체가 이동 쿼리의 겹침 해소로 밀리지 않도록 캐릭터 접촉은 몸통 캡슐에 맡긴다.
         character.GetCapsuleComponent().SetCharacterBlockingEnabled(!ragdoll.HasCharacterCapsule());
     }

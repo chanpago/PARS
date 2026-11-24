@@ -75,6 +75,7 @@
   <ItemGroup>
     <ClInclude Include="FramePerformance.h" />
     <ClInclude Include="PhysicsWorld.h" />
+    <ClInclude Include="ImpactImpulseSettings.h" />
     <ClInclude Include="PhysicsMaterial.h" />
     <ClInclude Include="BitonicSort.h" />
     <ClInclude Include="BuddyAllocator.h" />

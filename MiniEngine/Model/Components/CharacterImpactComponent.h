@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GameFramework/ActorComponent.h"
+#include "ImpactImpulseSettings.h"
 #include "../CharacterImpact.h"
 
 namespace PARS
@@ -28,6 +29,11 @@ namespace PARS
             return m_Settings;
         }
         bool SetSettings(const CharacterImpactSettings& settings, std::string& error);
+        const ImpactImpulseSettings& GetImpactImpulseSettings() const
+        {
+            return m_ImpactImpulseSettings;
+        }
+        bool SetImpactImpulseSettings(const ImpactImpulseSettings& settings);
         const CharacterImpactSnapshot& GetSnapshot();
         const CharacterImpactSnapshot& GetLastImpact();
         const std::vector<CharacterImpactSnapshot>& GetAppliedImpacts();
@@ -45,6 +51,7 @@ namespace PARS
         uint64_t m_RecordedStep = UINT64_MAX;
         uint64_t m_SourceRevision = 0;
         CharacterImpactSettings m_Settings;
+        ImpactImpulseSettings m_ImpactImpulseSettings;
         physx::PxVec3 m_PushVelocity{0};
         physx::PxVec3 m_PreviousPushDirection{0};
     };

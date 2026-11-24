@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "PhysicsAsset.h"
+#include "ImpactImpulseSettings.h"
 #include <foundation/PxVec3.h>
 #include <foundation/PxTransform.h>
 #include <array>
@@ -28,7 +29,7 @@ namespace PARS
     {
     public:
         size_t body = 0;
-        uint64_t projectileContactId = 0;
+        uint64_t impactContactId = 0;
         physx::PxVec3 position{0};
         physx::PxVec3 impulse{0};
         physx::PxVec3 outwardNormal{0};
@@ -38,6 +39,15 @@ namespace PARS
         bool newProjectileHit = false;
         bool fromCharacterCapsule = false;
         bool fromAnimatedCapsule = false;
+    };
+
+    struct RagdollImpactResponse : public PhysicsImpactResponse
+    {
+    public:
+        size_t body = 0;
+        uint64_t contactId = 0;
+        physx::PxVec3 partPosition{0};
+        bool fromCharacterCapsule = false;
     };
 
     struct RagdollSupportContact
@@ -95,11 +105,11 @@ namespace PARS
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
-        void ApplyProjectileBodyImpulses(const std::vector<RagdollBodyImpulse>& impacts);
+        void ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
         void UpdateProjectileReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
-            float heightScale = 1.0f);
+            float heightScale = 1.0f, const ImpactImpulseSettings& response = {});
         // simulate() 직전에 몸통에서 캡슐로 자세·속도를 복사한다. 반작용은 몸통에 되돌리지 않는다.
         void SyncCharacterCapsule(const physx::PxVec3& pushVelocity = physx::PxVec3(0));
         void RemoveCharacterCapsule();
@@ -240,6 +250,8 @@ namespace PARS
         bool AreBodiesInContact(size_t first, size_t second) const;
         float GetExternalImpactImpulse() const;
         const std::vector<RagdollBodyImpulse>& GetExternalImpacts() const;
+        std::vector<RagdollImpactResponse> GetImpactResponses(const std::vector<RagdollBodyImpulse>& impacts) const;
+        physx::PxVec3 GetImpactAngularVelocity(const physx::PxVec3& center, const physx::PxVec3& angularImpulse) const;
         void CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const;
         bool IsTopplingFromProjectile() const;
         bool HasApproachingImpact(float minimumDeltaVelocity, float deferCapsuleDeltaVelocity = PX_MAX_F32) const;

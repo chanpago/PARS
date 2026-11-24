@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "ImpactImpulseSettings.h"
 #include <PxPhysicsAPI.h>
 #include <cstdint>
 
@@ -9,7 +10,7 @@ enum class ImpactProjectileType : uint8_t
     Arrow
 };
 
-struct ImpactProjectileSettings
+struct ImpactProjectileSettings : public ImpactImpulseSettings
 {
 public:
     static ImpactProjectileSettings ArrowDefaults()
@@ -26,9 +27,6 @@ public:
     float speed = 7.5f;
     float radius = .15f;
     float length = .6f;
-    float partImpulse = 0;
-    float bodyImpulse = 0;
-    float torqueMultiplier = 0;
 };
 
 // 메쉬 중심의 월드 자세다. 화살 원기둥의 앞쪽은 로컬 +X축이다.

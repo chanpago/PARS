@@ -99,9 +99,10 @@ namespace
             strength = world.GetExternalImpactImpulse(*target, nullptr, &contacts);
         }
         Check(!contacts.empty(), "Fallback captures a real kinematic contact");
-        const uint64_t firstHit = contacts.front().projectileContactId;
-        PhysicsProjectileBodyImpulse response;
-        Check(firstHit != 0 && world.ConsumeProjectileContact(firstHit, response) && !world.ConsumeProjectileContact(firstHit, response),
+        const uint64_t firstHit = contacts.front().impactContactId;
+        PhysicsImpactResponse response;
+        Check(firstHit != 0 && world.GetImpactResponse(firstHit, response) && world.ConsumeImpactContact(firstHit) &&
+            !world.ConsumeImpactContact(firstHit),
             "The first projectile contact can be consumed once per receiver");
         Check(std::abs(response.impulse.magnitude() - 25.0f) < .001f && response.impulse.x > 24.9f && response.torqueMultiplier == .5f,
             "The whole-body impulse uses the shot direction and configured magnitude");
@@ -126,7 +127,7 @@ namespace
             for (const PhysicsContactImpulse& contact : contacts)
             {
                 Check(!contact.newProjectileHit, "A ball held against the body does not restart the gesture");
-                Check(contact.projectileContactId == firstHit && !world.ConsumeProjectileContact(contact.projectileContactId, response),
+                Check(contact.impactContactId == firstHit && !world.ConsumeImpactContact(contact.impactContactId),
                     "A sustained projectile contact cannot repeat the whole-body impulse");
             }
         }
@@ -141,12 +142,12 @@ namespace
             world.Step();
             strength = world.GetExternalImpactImpulse(*target, nullptr, &contacts);
         }
-        Check(strength > 0 && !contacts.empty() && contacts.front().projectileContactId != firstHit &&
-            world.ConsumeProjectileContact(contacts.front().projectileContactId, response), "A separated ball can hit the same receiver again");
+        Check(strength > 0 && !contacts.empty() && contacts.front().impactContactId != firstHit &&
+            world.GetImpactResponse(contacts.front().impactContactId, response), "A separated ball can hit the same receiver again");
         std::puts("PASS: approaching collision, threshold, departing/missing source, ownership and collision policy");
     }
 
-    void TestSharedProjectileContact()
+    void TestSharedImpactContact(bool capsule)
     {
         PhysicsWorld world;
         Check(world.Initialize(false), "Initialize shared projectile contact test");
@@ -159,14 +160,21 @@ namespace
             Check(targets[side] != nullptr, "Create receiver part");
             targets[side]->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
             targets[side]->userData = &owner;
+            PxShape* targetShape = nullptr;
+            targets[side]->getShapes(&targetShape, 1);
+            targetShape->setSimulationFilterData(PxFilterData(0, 0, 2, PhysicsWorld::CharacterImpactTargetFilterFlag));
         }
-        PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, -.4f)), PxSphereGeometry(.12f), 1, "Shared hit");
-        Check(ball && world.SetProjectileBodyImpulse(*ball, 0, 0, 8), "Configure a part-only projectile against two parts");
+        const PxSphereGeometry sphere(.12f);
+        const PxCapsuleGeometry torso(.12f, .08f);
+        const PxGeometry& geometry = capsule ? static_cast<const PxGeometry&>(torso) : static_cast<const PxGeometry&>(sphere);
+        PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, -.4f)), geometry, 1, "Shared hit");
+        Check(ball && world.SetImpactImpulseSettings(*ball, {8, 0, 0}), "Configure one local impulse against two parts");
         ball->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
         PxShape* shape = nullptr;
         Check(ball->getShapes(&shape, 1) == 1, "Find shared projectile shape");
         PxFilterData filter = shape->getSimulationFilterData();
-        filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
+        filter.word2 = 1;
+        filter.word3 |= capsule ? PhysicsWorld::CharacterCapsuleFilterFlag : PhysicsWorld::ProjectileFilterFlag;
         shape->setSimulationFilterData(filter);
         ball->setLinearVelocity(PxVec3(0, 0, 4));
         std::array<std::vector<PhysicsContactImpulse>, 2> contacts;
@@ -181,13 +189,51 @@ namespace
             }
         }
         Check(!contacts[0].empty() && !contacts[1].empty(), "The projectile touches both parts");
-        const uint64_t first = contacts[0].front().projectileContactId;
-        const uint64_t second = contacts[1].front().projectileContactId;
-        PhysicsProjectileBodyImpulse response;
-        Check(first != 0 && first == second && world.ConsumeProjectileContact(first, response) &&
-            !world.ConsumeProjectileContact(second, response) && response.impulse.isZero() && std::abs(response.partImpulse.z - 8) < .001f,
-            "One projectile delivers a part-only impulse once across multiple receiver shapes");
-        std::puts("PASS: one projectile touching two parts of the same receiver");
+        const uint64_t first = contacts[0].front().impactContactId;
+        const uint64_t second = contacts[1].front().impactContactId;
+        PhysicsImpactResponse response;
+        Check(first != 0 && first == second && world.GetImpactResponse(first, response) && world.ConsumeImpactContact(first) &&
+            !world.ConsumeImpactContact(second) && response.impulse.isZero() && std::abs(response.partImpulse.z - 8) < .001f,
+            "Deliver one local impulse across multiple receiver shapes");
+        if (capsule)
+        {
+            Check(contacts[0].front().fromCharacterCapsule && !contacts[0].front().newProjectileHit,
+                "A capsule impact keeps its source type");
+            targets[0]->setGlobalPose(PxTransform(PxVec3(-2, 3, 0)));
+            Check(world.SetImpactImpulseSettings(*ball, {3, 12, .5f}), "Edit the capsule preset during a push");
+            for (int step = 0; step < 4; ++step)
+            {
+                // 실제 몸통 동기화처럼 매 스텝 위치와 속도를 갱신하고 다른 본만 계속 누른다.
+                world.InvalidateContacts(*ball);
+                ball->setGlobalPose(PxTransform(PxVec3(.21f, 3, -.215f)));
+                ball->setLinearVelocity(PxVec3(0, 0, 2));
+                world.Step();
+                Check(world.GetExternalImpactImpulse(*targets[1], &owner, &contacts[1]) > 0 && !contacts[1].empty() &&
+                    contacts[1].front().impactContactId == first && !world.GetImpactResponse(first, response),
+                    "Continuing the push on one spine cannot restart the configured impulse");
+            }
+            // 한 스텝에 이전 본의 접촉이 끝나고 다른 본에서 새 형상 쌍이 생긴다.
+            targets[1]->setGlobalPose(PxTransform(PxVec3(2, 3, 0)));
+            targets[0]->setGlobalPose(PxTransform(PxVec3(.21f, 3, 0)));
+            world.InvalidateContacts(*ball);
+            ball->setGlobalPose(PxTransform(PxVec3(.21f, 3, -.215f)));
+            ball->setLinearVelocity(PxVec3(0, 0, 2));
+            world.Step();
+            Check(world.GetExternalImpactImpulse(*targets[0], &owner, &contacts[0]) > 0 && !contacts[0].empty() &&
+                contacts[0].front().impactContactId == first && !world.GetImpactResponse(first, response),
+                "Changing the only touching spine in one step keeps the same encounter");
+            ball->setGlobalPose(PxTransform(PxVec3(.21f, 3, -2)));
+            ball->setLinearVelocity(PxVec3(0));
+            world.Step();
+            ball->setGlobalPose(PxTransform(PxVec3(.21f, 3, -.215f)));
+            ball->setLinearVelocity(PxVec3(0, 0, 2));
+            world.Step();
+            Check(world.GetExternalImpactImpulse(*targets[0], &owner, &contacts[0]) > 0 && !contacts[0].empty() &&
+                contacts[0].front().impactContactId != first && world.GetImpactResponse(contacts[0].front().impactContactId, response) &&
+                std::abs(response.partImpulse.z - 3) < .01f && std::abs(response.impulse.z - 12) < .01f && response.torqueMultiplier == .5f,
+                "A new contact after separation uses the edited capsule settings");
+        }
+        std::puts(capsule ? "PASS: capsule impact, continuous push and recontact" : "PASS: shared projectile impact");
     }
 
     void TestProjectileAttachment()
@@ -221,9 +267,9 @@ namespace
         world.Step([&world, target, &owner](float) -> void
         {
             std::vector<PhysicsContactImpulse> contacts;
-            PhysicsProjectileBodyImpulse response;
+            PhysicsImpactResponse response;
             Check(world.GetExternalImpactImpulse(*target, &owner, &contacts) > 0 && !contacts.empty() && contacts.front().newProjectileHit &&
-                world.ConsumeProjectileContact(contacts.front().projectileContactId, response) && std::abs(response.partImpulse.z - 4) < .01f,
+                world.GetImpactResponse(contacts.front().impactContactId, response) && std::abs(response.partImpulse.z - 4) < .01f,
                 "The receiver processes the original hit before the arrow stops simulating");
         });
         Check(arrow->getActorFlags().isSet(PxActorFlag::eDISABLE_SIMULATION) && !shape->getFlags().isSet(PxShapeFlag::eSCENE_QUERY_SHAPE),
@@ -506,7 +552,8 @@ int main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--impact-hand-only") == 0)
     {
         TestApproachingImpact();
-        TestSharedProjectileContact();
+        TestSharedImpactContact(false);
+        TestSharedImpactContact(true);
         TestProjectileAttachment();
         TestImpactPalm();
         return 0;
@@ -546,7 +593,8 @@ int main(int argc, char** argv)
     }
     TestFootProjectionRaycast();
     TestApproachingImpact();
-    TestSharedProjectileContact();
+    TestSharedImpactContact(false);
+    TestSharedImpactContact(true);
     TestProjectileAttachment();
     TestImpactPalm();
     TestBodyPairContacts();
