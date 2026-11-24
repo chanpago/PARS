@@ -190,6 +190,8 @@ namespace PARS
         m_TorsoTorqueLimits.clear();
         RemoveCharacterCapsule();
         InvalidateContactState();
+        m_ArmWounds.clear();
+        m_ArmWoundClock = UINT64_MAX;
         m_Standby.reset();
 #if defined(_M_X64)
         if (m_SupportJoint)
@@ -254,6 +256,8 @@ namespace PARS
     {
         SwapConfiguration(other);
         m_Standby.swap(other.m_Standby);
+        m_ArmWounds.swap(other.m_ArmWounds);
+        std::swap(m_ArmWoundClock, other.m_ArmWoundClock);
     }
 
     void Ragdoll::SwapConfiguration(Ragdoll& other) noexcept

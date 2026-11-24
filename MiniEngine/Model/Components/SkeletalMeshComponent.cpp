@@ -195,10 +195,18 @@ namespace PARS
 
         // 여기서 발 움직임을 계산하고 지지영역을 조사해 가중치를 구한다
         m_Ragdoll.SetHorizontalSupportForce(physx::PxVec3(0));
+        ImpactHandReach hit;
         std::vector<RagdollImpactResponse> responses;
         if (m_Ragdoll.IsSimulating() || m_AutomaticRagdoll || IsImpactWarmupActive())
         {
-            responses = m_Ragdoll.GetImpactResponses(m_Ragdoll.GetExternalImpacts());
+            const std::vector<RagdollBodyImpulse>& impacts = m_Ragdoll.GetExternalImpacts();
+            if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()) || IsImpactWarmupActive())
+            {
+                // 예열이나 물리 모드 전환이 접촉을 비우기 전에 같은 스텝으로 상처와 손 목표를 기록한다.
+                m_Ragdoll.UpdateArmWounds(impacts);
+                hit = FindImpactHandReach(impacts);
+            }
+            responses = m_Ragdoll.GetImpactResponses(impacts);
         }
         // 예열이 시작되면 같은 충격을 키네마틱 자세가 이어받으므로 동적 바디 적용을 그 결정 뒤로 미룬다.
         const bool capsuleWarmup = (m_ImpactWarmup.wasResting || IsImpactWarmupActive()) &&
@@ -224,15 +232,12 @@ namespace PARS
         {
             m_Ragdoll.ApplyImpactResponses(responses);
         }
-        ImpactHandReach hit;
         bool longitudinalImpact = false;
         if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()))
         {
             const std::vector<RagdollBodyImpulse>& impacts = m_Ragdoll.GetExternalImpacts();
-            // 모드 전환이 바디와 접촉 캐시를 교체하기 전에 피격점을 본 로컬 좌표로 보관한다.
             if (!IsFalling() && !IsGroundFallActive() && m_StandingUpState == StandingUpState::None)
             {
-                hit = FindImpactHandReach(impacts);
                 physx::PxVec3 impulse(0);
                 for (const RagdollBodyImpulse& contact : impacts)
                 {
@@ -254,7 +259,8 @@ namespace PARS
         {
             return impact.newCapsuleHit && impact.impulse.magnitudeSquared() > 1e-8f;
         });
-        if (!UpdateAutomaticRagdoll(deltaTime, hit.body >= 0 || !responses.empty() || capsuleImpact))
+        const bool woundNeedsPhysics = !IsRagdoll() && m_Ragdoll.HasArmWound();
+        if (!UpdateAutomaticRagdoll(deltaTime, hit.body >= 0 || !responses.empty() || capsuleImpact || woundNeedsPhysics))
         {
             return;
         }
@@ -319,8 +325,11 @@ namespace PARS
                         ApplyTorsoBalancePose(target);
                         m_Ragdoll.ApplyTorsoHipTorque(m_TorsoRig, m_TorsoBalance.GetHipTorque());
                     }
-                    ApplyArmTargets(target);
                 }
+            }
+            if (evaluated && (!IsFalling() || m_ImpactHandReach.armWound))
+            {
+                ApplyArmTargets(target);
             }
             if (!evaluated || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {

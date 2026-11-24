@@ -1,5 +1,6 @@
 ﻿#include "Ragdoll.h"
 #include "CharacterImpact.h"
+#include "FallArmBrace.h"
 #include "PhysicsWorld.h"
 #include <algorithm>
 #include <cctype>
@@ -177,6 +178,107 @@ namespace PARS
                 lower.find("calf") != std::string::npos || lower.find("knee") != std::string::npos ||
                 lower.find("foot") != std::string::npos || lower.find("ankle") != std::string::npos ||
                 lower.find("toe") != std::string::npos;
+        }
+    }
+
+    bool Ragdoll::IsPrimaryProjectileHit(const RagdollBodyImpulse& hit, const std::vector<RagdollBodyImpulse>& impacts) const
+    {
+        if (!hit.newProjectileHit || !hit.fromProjectile || hit.body >= m_Bodies.size() || !hit.position.isFinite() ||
+            !hit.impulse.isFinite() || hit.impulse.magnitudeSquared() <= 1e-8f)
+        {
+            return false;
+        }
+        // 한 발이 여러 형상에 걸치면 부위 충격과 같은 접촉점을 상처로 사용한다.
+        return hit.impactContactId == 0 || FindStrongestImpactContact(impacts, hit.impactContactId, m_Bodies.size()) == &hit;
+    }
+
+    float Ragdoll::GetArmWoundStrength(size_t joint) const
+    {
+        for (const ArmWound& wound : m_ArmWounds)
+        {
+            if (wound.joint == joint)
+            {
+                return wound.strength;
+            }
+        }
+        return 1.0f;
+    }
+
+    void Ragdoll::UpdateArmWounds(const std::vector<RagdollBodyImpulse>& impacts)
+    {
+        if (!m_World)
+        {
+            return;
+        }
+        const uint64_t clock = m_World->GetClockRevision();
+        const uint64_t step = m_World->GetStepCount();
+        bool drivesChanged = false;
+        if (clock != m_ArmWoundClock)
+        {
+            drivesChanged = !m_ArmWounds.empty();
+            m_ArmWounds.clear();
+            m_ArmWoundClock = clock;
+        }
+        constexpr float approachEnd = ImpactPalmGoal::FullReachTime;
+        constexpr float holdEnd = ImpactPalmGoal::ArmWoundReleaseStart;
+        for (std::vector<ArmWound>::iterator wound = m_ArmWounds.begin(); wound != m_ArmWounds.end();)
+        {
+            const float age = static_cast<float>((step - wound->hitStep) * PhysicsWorld::FixedDeltaTime);
+            if (age >= holdEnd + ArmWoundRecoveryTime)
+            {
+                wound = m_ArmWounds.erase(wound);
+                drivesChanged = true;
+                continue;
+            }
+            float strength = ArmWoundMinimumStrength;
+            if (age < approachEnd)
+            {
+                const float t = age / approachEnd;
+                strength = wound->initialStrength + (ArmWoundMinimumStrength - wound->initialStrength) * t * t * (3.0f - 2.0f * t);
+            }
+            else if (age > holdEnd)
+            {
+                const float t = (age - holdEnd) / ArmWoundRecoveryTime;
+                strength += (1.0f - ArmWoundMinimumStrength) * t * t * (3.0f - 2.0f * t);
+            }
+            drivesChanged = drivesChanged || strength != wound->strength;
+            wound->strength = strength;
+            ++wound;
+        }
+        for (const RagdollBodyImpulse& hit : impacts)
+        {
+            if (!IsPrimaryProjectileHit(hit, impacts))
+            {
+                continue;
+            }
+            const int joint = FindArmWoundJoint(hit.body);
+            if (joint < 0)
+            {
+                continue;
+            }
+            const size_t index = static_cast<size_t>(joint);
+            std::vector<ArmWound>::iterator wound = std::find_if(m_ArmWounds.begin(), m_ArmWounds.end(),
+                [index](const ArmWound& entry) -> bool
+                {
+                    return entry.joint == index;
+                });
+            if (wound == m_ArmWounds.end())
+            {
+                m_ArmWounds.emplace_back();
+                wound = m_ArmWounds.end() - 1;
+                wound->joint = index;
+            }
+            // 재피격은 남은 힘에서 다시 약화해 관절이 한 스텝 동안 강해지는 것을 막는다.
+            wound->initialStrength = wound->strength;
+            wound->hitStep = step;
+        }
+        if (drivesChanged && m_DrivesEnabled)
+        {
+            if (!m_Articulation)
+            {
+                ConfigureD6JointDrives();
+            }
+            WakeBodies();
         }
     }
 

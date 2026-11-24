@@ -78,6 +78,16 @@ namespace PARS
     // 에셋 복사본은 PhysX/PVD가 참조하는 이름 문자열도 소유한다.
     class Ragdoll
     {
+    private:
+        struct ArmWound
+        {
+        public:
+            uint64_t hitStep = 0;
+            size_t joint = 0;
+            float initialStrength = 1.0f;
+            float strength = 1.0f;
+        };
+
     public:
         Ragdoll() = default;
         ~Ragdoll();
@@ -109,6 +119,7 @@ namespace PARS
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
         void ApplyTorsoHipTorque(const TorsoBalanceRig& rig, const physx::PxVec3& torque);
         void ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
+        void UpdateArmWounds(const std::vector<RagdollBodyImpulse>& impacts);
         bool BuildTorsoBalanceRig(TorsoBalanceRig& rig) const;
         void UpdateProjectileReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
@@ -254,6 +265,13 @@ namespace PARS
         bool AreBodiesInContact(size_t first, size_t second) const;
         float GetExternalImpactImpulse() const;
         const std::vector<RagdollBodyImpulse>& GetExternalImpacts() const;
+        bool IsPrimaryProjectileHit(const RagdollBodyImpulse& hit, const std::vector<RagdollBodyImpulse>& impacts) const;
+        int FindArmWoundJoint(size_t body) const;
+        float GetArmWoundStrength(size_t joint) const;
+        bool HasArmWound() const
+        {
+            return !m_ArmWounds.empty();
+        }
         std::vector<RagdollImpactResponse> GetImpactResponses(const std::vector<RagdollBodyImpulse>& impacts) const;
         physx::PxVec3 GetImpactAngularVelocity(const physx::PxVec3& center, const physx::PxVec3& angularImpulse) const;
         void CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const;
@@ -299,6 +317,8 @@ namespace PARS
         float GetProjectilePelvisDriveScale() const;
 
     private:
+        static constexpr float ArmWoundMinimumStrength = .10f;
+        static constexpr float ArmWoundRecoveryTime = 1.5f;
         static constexpr float PelvisLinearFrequency = 30.0f;
         static constexpr float PelvisLinearDampingRatio = 1.0f;
         static constexpr float PelvisAngularFrequency = 16.0f;
@@ -309,6 +329,8 @@ namespace PARS
         uint64_t m_HorizontalSupportStep = UINT64_MAX;
         mutable uint64_t m_ImpactSampleStep = UINT64_MAX;
         mutable uint64_t m_ImpactSampleClock = UINT64_MAX;
+        uint64_t m_ArmWoundClock = UINT64_MAX;
+        std::vector<ArmWound> m_ArmWounds;
         uint64_t m_ProjectileReactionStep = UINT64_MAX;
         uint64_t m_ProjectileReactionClock = UINT64_MAX;
         std::vector<physx::PxVec3> m_TorsoTorqueLimits;

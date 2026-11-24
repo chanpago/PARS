@@ -199,7 +199,10 @@ namespace PARS
         }
         m_FootSupport.ResetFootstep();
         ResetRecovery();
-        ResetFallArms();
+        if (!m_ImpactHandReach.armWound)
+        {
+            ResetFallArms();
+        }
         m_Ragdoll.ResetDriveTargetHistory();
         m_KinematicRecoveryTimer.Reset();
         m_StandingUpStableTime = 0;

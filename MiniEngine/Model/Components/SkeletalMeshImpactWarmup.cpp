@@ -163,7 +163,7 @@ bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vecto
         !IsFalling() && !IsGroundFallActive() && (!IsRagdoll() || (IsActiveRagdoll() && m_Ragdoll.IsRootSupported())) &&
         sample.hasComProjection && sample.hasCenterOfMassVelocity && sample.totalMass > 0 &&
         sample.feet[0].available && sample.feet[0].leg.available && sample.feet[1].available && sample.feet[1].leg.available;
-    if (standing && m_ImpactWarmup.wasResting && !projectile &&
+    if (standing && m_ImpactWarmup.wasResting && !projectile && !m_Ragdoll.HasArmWound() &&
         impulse.magnitude() >= ImpactWarmup::MinimumImpactSpeedChange * sample.totalMass && BeginImpactWarmup(responses))
     {
         return AdvanceImpactWarmup(deltaTime);
@@ -529,7 +529,6 @@ bool SkeletalMeshComponent::FinishImpactWarmup(bool lostFloor, bool replayCapsul
             pendingImpacts.push_back(impact);
         }
     }
-    const ImpactHandReach hit = FindImpactHandReach(pendingImpacts);
     Character& character = static_cast<Character&>(GetOwner());
     if (!character.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, m_PhysicsError))
     {
@@ -562,7 +561,6 @@ bool SkeletalMeshComponent::FinishImpactWarmup(bool lostFloor, bool replayCapsul
     {
         ReplayKinematicImpacts(pendingImpacts, static_cast<float>(PhysicsWorld::FixedDeltaTime));
     }
-    m_ImpactHandReach = hit;
     UpdateFootSupport();
     return false;
 }

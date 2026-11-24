@@ -662,7 +662,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
                     contact.impulse = side == 0 ? point.impulse : -point.impulse;
                     contact.outwardNormal = -normal;
                     contact.fromProjectile = projectile;
-                    contact.newProjectileHit = projectile && pair.firstImpulseStep == m_StepCount;
+                    contact.newProjectileHit = projectile && (pair.impactContactId != 0 ? pair.beginsImpact : pair.firstImpulseStep == m_StepCount);
                     contact.fromCharacterCapsule = capsule;
                     contact.newCapsuleHit = capsule && pair.beginsImpact;
                     contact.fromAnimatedCapsule = (sourceFlags & AnimatedCapsuleFilterFlag) != 0;

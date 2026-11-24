@@ -518,7 +518,9 @@ namespace PARS
                 return false;
             }
         }
-        Swap(candidate);
+        // 백엔드만 교체할 때 상처와 시작 스텝은 같은 캐릭터에 남긴다.
+        SwapConfiguration(candidate);
+        m_Standby.swap(candidate.m_Standby);
         error.clear();
         return true;
 #else
@@ -874,6 +876,7 @@ namespace PARS
             const PhysicsConstraint& data = m_Asset.constraints[i];
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             const float strength = GetJointDriveStrength(i);
+            const float woundStrength = GetArmWoundStrength(i);
             float ankleDriveScale = 1.0f;
             float inverseLandingTime = 0.0f;
             if (m_FootDrivenSupport)
@@ -912,17 +915,15 @@ namespace PARS
                     {
                         feedForward += cache.massMatrix[(6 + dof) * count + column] * targetAcceleration[column];
                     }
-                    // 토크 상한의 영향을 비교하기 위해 보상토크 제한을 임시로 해제한다.
-                    // feedForward = PxClamp(feedForward, -drive.maxTorque, drive.maxTorque);
                 }
 
                 float remainingTorque = enabled ? PX_MAX_F32 : 0;
                 const float torsoLimit = GetTorsoTorqueLimit(i, axis);
-                if (enabled && torsoLimit < PX_MAX_F32)
+                if (enabled && (woundStrength < 1.0f || torsoLimit < PX_MAX_F32))
                 {
-                    // 몸통을 받는 동안 허리 근력 한도를 보상 토크와 자세 구동이 공유한다.
-                    const float limit = PxMin(torsoLimit, drive.maxTorque);
-                    feedForward = PxClamp(feedForward, -.5f * limit, .5f * limit);
+                    // 다친 팔은 중력 보상도 약해진다. 남은 토크만 자세 추종에 쓸 수 있다.
+                    const float limit = PxMin(torsoLimit, drive.maxTorque * woundStrength);
+                    feedForward = PxClamp(feedForward * woundStrength, -.5f * limit, .5f * limit);
                     remainingTorque = limit - PxAbs(feedForward);
                 }
                 cache.jointForce[dof] = feedForward;

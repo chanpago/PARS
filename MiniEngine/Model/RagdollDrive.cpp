@@ -12,6 +12,47 @@ using namespace Math;
 
 namespace PARS
 {
+    namespace
+    {
+        enum class ArmPart
+        {
+            None,
+            ShoulderGirdle,
+            UpperArm,
+            Forearm,
+            Hand
+        };
+
+        std::string LowerBoneName(const std::string& bone)
+        {
+            const size_t separator = bone.find_last_of(':');
+            std::string name = bone.substr(separator == std::string::npos ? 0 : separator + 1);
+            std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) -> char
+            {
+                return static_cast<char>(std::tolower(value));
+            });
+            return name;
+        }
+
+        ArmPart GetArmPart(const std::string& name)
+        {
+            if (name.find("shoulder") != std::string::npos || name.find("clavicle") != std::string::npos)
+            {
+                return ArmPart::ShoulderGirdle;
+            }
+            if (name.find("hand") != std::string::npos || name.find("wrist") != std::string::npos)
+            {
+                return ArmPart::Hand;
+            }
+            if (name.find("forearm") != std::string::npos || name.find("lowerarm") != std::string::npos ||
+                name.find("elbow") != std::string::npos)
+            {
+                return ArmPart::Forearm;
+            }
+            return name.find("arm") != std::string::npos ? ArmPart::UpperArm : ArmPart::None;
+        }
+    }
+
 #if defined(_M_X64)
     namespace
     {
@@ -106,25 +147,48 @@ namespace PARS
 #endif
     }
 
+    int Ragdoll::FindArmWoundJoint(size_t body) const
+    {
+        if (body >= m_Asset.bodies.size())
+        {
+            return -1;
+        }
+        const std::string& bone = m_Asset.bodies[body].bone;
+        const ArmPart part = GetArmPart(LowerBoneName(bone));
+        if (part == ArmPart::None)
+        {
+            return -1;
+        }
+        int inbound = -1;
+        for (size_t joint = 0; joint < m_Asset.constraints.size(); ++joint)
+        {
+            const PhysicsConstraint& constraint = m_Asset.constraints[joint];
+            if (constraint.childBone == bone)
+            {
+                inbound = static_cast<int>(joint);
+            }
+            // 쇄골 형상을 맞혀도 위팔을 들어 올리는 어깨 관절에 약화를 적용한다.
+            if (part == ArmPart::ShoulderGirdle && constraint.parentBone == bone &&
+                GetArmPart(LowerBoneName(constraint.childBone)) == ArmPart::UpperArm)
+            {
+                return static_cast<int>(joint);
+            }
+        }
+        return inbound;
+    }
+
     float Ragdoll::GetJointDriveStrength(size_t jointIndex) const
     {
         const float impactScale = GetProjectileJointDriveScale(jointIndex);
-        std::string name = m_Asset.constraints[jointIndex].childBone;
-        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) -> char
-        {
-            return static_cast<char>(std::tolower(value));
-        });
-        const bool arm = name.find("shoulder") != std::string::npos || name.find("clavicle") != std::string::npos ||
-            name.find("arm") != std::string::npos || name.find("hand") != std::string::npos ||
-            name.find("wrist") != std::string::npos || name.find("elbow") != std::string::npos;
-        if (!arm)
+        const std::string name = LowerBoneName(m_Asset.constraints[jointIndex].childBone);
+        if (GetArmPart(name) == ArmPart::None)
         {
             return impactScale;
         }
         const float scale = name.find("left") != std::string::npos ? m_ArmDriveScales[0] :
             name.find("right") != std::string::npos ? m_ArmDriveScales[1] : 1.0f;
         const float strength = m_ArmDriveOverride >= 0 ? m_ArmDriveOverride : m_ArmDriveStrength;
-        return strength * scale * impactScale;
+        return strength * scale * impactScale * GetArmWoundStrength(jointIndex);
     }
 
     bool Ragdoll::SetArmDriveScales(const std::array<float, 2>& scales, float overrideStrength)

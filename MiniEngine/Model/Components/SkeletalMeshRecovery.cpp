@@ -279,7 +279,7 @@ namespace PARS
         }
         const bool ready = settled && grounded;
         m_StandingUpStableTime = ready ? m_StandingUpStableTime + deltaTime : 0;
-        if (m_StandingUpStableTime < m_RecoverySettings.stableDuration)
+        if (m_StandingUpStableTime < m_RecoverySettings.stableDuration || m_Ragdoll.HasArmWound())
         {
             return true;
         }
@@ -534,7 +534,7 @@ namespace PARS
         // A영역 유지 시간은 그대로 누적하되, 실제 양발 접지가 확인될 때만 전환한다.
         if (m_KinematicRecoveryTimer.Update(sample.contactRevision, sample.completedPhysicsStep,
             deltaTime, insideA, bothGrounded, impact, m_KinematicStableDuration) && !firstHit && m_ImpactHandReach.body < 0 &&
-            !m_TorsoBalance.IsActive())
+            !m_TorsoBalance.IsActive() && !m_Ragdoll.HasArmWound())
         {
             return BeginKinematicRecovery();
         }

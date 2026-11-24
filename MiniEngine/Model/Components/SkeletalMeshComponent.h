@@ -87,11 +87,13 @@ namespace PARS
         {
         public:
             uint64_t step = 0;
+            uint64_t approachStep = 0;
             uint64_t clock = 0;
             physx::PxVec3 pointInBone{0};
             physx::PxVec3 normalInBone{0};
             int body = -1;
             int hand = -1;
+            bool armWound = false;
         };
 
         struct ImpactWarmup

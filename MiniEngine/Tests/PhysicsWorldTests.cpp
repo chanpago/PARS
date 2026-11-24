@@ -303,6 +303,18 @@ namespace
             setup.palmInHand = PxTransform(PxVec3(0, 0, .02f));
         }
         PARS::ImpactPalmGoal goal;
+        Check(goal.SampleTiming(.05f, .05f, true) && goal.weight == 0, "Hand waits for the initial recoil");
+        Check(goal.SampleTiming(.22f, .22f, true) && std::abs(goal.weight - .5f) < 1e-5f, "Hand approaches as the arm weakens");
+        for (unsigned step = 21; step <= 320; ++step)
+        {
+            const float age = static_cast<float>(step * PhysicsWorld::FixedDeltaTime);
+            Check(goal.SampleTiming(age, age, true) && goal.approach == 1.0f && goal.weight == 1.0f,
+                "Hand holds the moving arm for five full seconds");
+        }
+        Check(goal.SampleTiming(0, 2, true) && goal.weight == 1, "Renew a wound without retracting a hand already there");
+        Check(goal.SampleTiming(5.465f, 5.465f, true) && std::abs(goal.weight - .5f) < 1e-5f &&
+            !goal.SampleTiming(5.6f, 5.6f, true) && goal.weight == 0, "Release the arm over a quarter second");
+        Check(!goal.SampleTiming(1.15f, 1.15f, false), "Other body hits keep their short gesture");
         goal.weight = 1;
         goal.approach = 1;
         for (int side = 0; side < 2; ++side)
