@@ -72,7 +72,8 @@ public:
     {
         return m_AutomaticSupport;
     }
-    bool SetProjectileSettings(float mass, float speed, float bodyImpulse = 0, float torqueMultiplier = 0);
+    bool SetProjectileSettings(float mass, float speed, float bodyImpulse = 0, float torqueMultiplier = 0,
+        float partImpulse = 0, float radius = DefaultProjectileRadius);
     PARS::Character* GetDummy() const;
     std::vector<physx::PxRigidDynamic*> GetProjectiles() const;
     float GetMaxHipsDisplacement() const
@@ -85,7 +86,7 @@ public:
     }
 
 public:
-    static constexpr float SphereRadius = .15f;
+    static constexpr float DefaultProjectileRadius = .15f;
 
 private:
     Math::Vector3 m_HipsReference{Math::kZero};
@@ -108,6 +109,8 @@ private:
     uint32_t m_PreviousLegContacts = 0;
     float m_Mass = 2.0f;
     float m_Speed = 7.5f;
+    float m_ProjectileRadius = DefaultProjectileRadius;
+    float m_PartImpulseMagnitude = 0;
     float m_BodyImpulseMagnitude = 0;
     float m_BodyTorqueMultiplier = 0;
     float m_MaxHipsDisplacement = 0;

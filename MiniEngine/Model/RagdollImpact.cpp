@@ -73,6 +73,40 @@ namespace PARS
         impacts = GetExternalImpacts();
     }
 
+    namespace
+    {
+        void ApplyImpulseAtPoint(PxRigidBody& body, const PxVec3& impulse, const PxVec3& position)
+        {
+            // 관절 링크도 같은 충격량을 받도록 한 고정 스텝 동안 힘으로 적분한다.
+            const PxVec3 force = impulse / static_cast<float>(PhysicsWorld::FixedDeltaTime);
+            if (force.isFinite())
+            {
+                PxRigidBodyExt::addForceAtPos(body, force, position, PxForceMode::eFORCE);
+            }
+        }
+
+        const RagdollBodyImpulse* FindStrongestProjectileContact(const std::vector<RagdollBodyImpulse>& impacts,
+            uint64_t contactId, size_t bodyCount)
+        {
+            const RagdollBodyImpulse* strongest = nullptr;
+            float largestSquaredImpulse = 0;
+            for (const RagdollBodyImpulse& hit : impacts)
+            {
+                if (hit.projectileContactId != contactId || !hit.newProjectileHit || hit.body >= bodyCount || !hit.position.isFinite())
+                {
+                    continue;
+                }
+                const float squaredImpulse = hit.impulse.magnitudeSquared();
+                if (std::isfinite(squaredImpulse) && squaredImpulse > largestSquaredImpulse)
+                {
+                    strongest = &hit;
+                    largestSquaredImpulse = squaredImpulse;
+                }
+            }
+            return strongest;
+        }
+    }
+
     void Ragdoll::ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts)
     {
         if (!IsSimulating())
@@ -84,9 +118,7 @@ namespace PARS
         {
             if (impact.body < m_Bodies.size() && impact.position.isFinite() && impact.impulse.isFinite())
             {
-                // 관절 링크는 충격 모드를 지원하지 않으므로 한 고정 스텝의 힘으로 적분한다.
-                const PxVec3 force = impact.impulse / static_cast<float>(PhysicsWorld::FixedDeltaTime);
-                PxRigidBodyExt::addForceAtPos(*m_Bodies[impact.body], force, impact.position, PxForceMode::eFORCE);
+                ApplyImpulseAtPoint(*m_Bodies[impact.body], impact.impulse, impact.position);
             }
         }
     }
@@ -161,6 +193,19 @@ namespace PARS
         {
             PhysicsProjectileBodyImpulse response;
             if (!hit.newProjectileHit || hit.projectileContactId == 0 || !m_World->ConsumeProjectileContact(hit.projectileContactId, response))
+            {
+                continue;
+            }
+            if (!response.partImpulse.isZero())
+            {
+                // 머리와 목처럼 여러 부위가 동시에 맞아도 실제 충격이 가장 컸던 접촉점에 한 번만 가한다.
+                const RagdollBodyImpulse* struck = FindStrongestProjectileContact(impacts, hit.projectileContactId, m_Bodies.size());
+                if (struck)
+                {
+                    ApplyImpulseAtPoint(*m_Bodies[struck->body], response.partImpulse, struck->position);
+                }
+            }
+            if (response.impulse.isZero())
             {
                 continue;
             }

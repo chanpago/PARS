@@ -238,9 +238,11 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
     // 잠든 바디에는 PERSISTS가 오지 않으므로 LOST 또는 명시적인 무효화 전까지 보존한다.
 }
 
-bool PhysicsWorld::SetProjectileBodyImpulse(const PxRigidDynamic& projectile, float magnitude, float torqueMultiplier)
+bool PhysicsWorld::SetProjectileBodyImpulse(const PxRigidDynamic& projectile, float bodyMagnitude,
+    float torqueMultiplier, float partMagnitude)
 {
-    if (!m_Scene || projectile.getScene() != m_Scene || !std::isfinite(magnitude) || magnitude < 0 ||
+    if (!m_Scene || projectile.getScene() != m_Scene || !std::isfinite(bodyMagnitude) || bodyMagnitude < 0 ||
+        !std::isfinite(partMagnitude) || partMagnitude < 0 ||
         !std::isfinite(torqueMultiplier) || torqueMultiplier < 0)
     {
         return false;
@@ -256,8 +258,9 @@ bool PhysicsWorld::SetProjectileBodyImpulse(const PxRigidDynamic& projectile, fl
         settings = m_ProjectileSettings.end() - 1;
         settings->actor = &projectile;
     }
-    settings->magnitude = magnitude;
+    settings->bodyMagnitude = bodyMagnitude;
     settings->torqueMultiplier = torqueMultiplier;
+    settings->partMagnitude = partMagnitude;
     return true;
 }
 
@@ -288,7 +291,7 @@ void PhysicsWorld::RecordProjectileContact(ContactPair& pair, int projectileSide
             {
                 return entry.actor == projectile;
             });
-        if (settings == m_ProjectileSettings.end() || settings->magnitude == 0)
+        if (settings == m_ProjectileSettings.end() || (settings->bodyMagnitude == 0 && settings->partMagnitude == 0))
         {
             return;
         }
@@ -297,8 +300,9 @@ void PhysicsWorld::RecordProjectileContact(ContactPair& pair, int projectileSide
         contact->projectile = projectile;
         contact->receiver = receiver;
         contact->id = m_NextProjectileContactId++;
-        contact->magnitude = settings->magnitude;
+        contact->bodyMagnitude = settings->bodyMagnitude;
         contact->torqueMultiplier = settings->torqueMultiplier;
+        contact->partMagnitude = settings->partMagnitude;
     }
     pair.projectileContactId = contact->id;
     if (contact->firstImpulseStep == 0 && pair.firstImpulseStep == pair.completedStep)
@@ -343,9 +347,11 @@ bool PhysicsWorld::ConsumeProjectileContact(uint64_t id, PhysicsProjectileBodyIm
             }
             const PxVec3 direction = contact.incomingDirection.isZero() ? contact.contactImpulse.getNormalized() : contact.incomingDirection;
             response.position = contact.weightedPosition / contact.weight;
-            response.impulse = direction * contact.magnitude;
+            response.impulse = direction * contact.bodyMagnitude;
+            response.partImpulse = direction * contact.partMagnitude;
             response.torqueMultiplier = contact.torqueMultiplier;
-            return response.position.isFinite() && response.impulse.isFinite() && !response.impulse.isZero();
+            return response.position.isFinite() && response.impulse.isFinite() && response.partImpulse.isFinite() &&
+                (!response.impulse.isZero() || !response.partImpulse.isZero());
         }
     }
     return false;

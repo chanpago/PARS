@@ -419,13 +419,18 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
         }
         float projectileMass = scenario == 3 ? 20.0f : 2.0f;
         float projectileSpeed = 7.5f;
+        float projectileRadius = RagdollImpactTest::DefaultProjectileRadius;
+        float partImpulse = 0;
         float bodyImpulse = 0;
         float torqueMultiplier = 0;
         CommandLineArgs::GetFloat(L"impactmass", projectileMass);
         CommandLineArgs::GetFloat(L"impactspeed", projectileSpeed);
+        CommandLineArgs::GetFloat(L"impactradius", projectileRadius);
+        CommandLineArgs::GetFloat(L"impactpartimpulse", partImpulse);
         CommandLineArgs::GetFloat(L"impactbodyimpulse", bodyImpulse);
         CommandLineArgs::GetFloat(L"impacttorque", torqueMultiplier);
-        check(test.SetProjectileSettings(projectileMass, projectileSpeed, bodyImpulse, torqueMultiplier), "Set explicit projectile test input");
+        check(test.SetProjectileSettings(projectileMass, projectileSpeed, bodyImpulse, torqueMultiplier, partImpulse, projectileRadius),
+            "Set explicit projectile test input");
         uint32_t aimBody = 0;
         const bool aimed = CommandLineArgs::GetInteger(L"impactaimbody", aimBody);
         uint32_t physicalContactOnly = 0;
@@ -435,8 +440,8 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             check(aimBody < mesh.GetRagdoll().GetBodyCount(), "Resolve the requested projectile aim body");
             report << "aim_bone=" << mesh.GetPhysicsAsset()->bodies[aimBody].bone << " contact_only=" << physicalContactOnly << std::endl;
         }
-        report << "projectile_mass=" << projectileMass << " projectile_speed=" << projectileSpeed
-            << " body_impulse_ns=" << bodyImpulse << " body_torque_multiplier=" << torqueMultiplier
+        report << "projectile_mass=" << projectileMass << " projectile_speed=" << projectileSpeed << " projectile_radius_m=" << projectileRadius
+            << " part_impulse_ns=" << partImpulse << " body_impulse_ns=" << bodyImpulse << " body_torque_multiplier=" << torqueMultiplier
             << " source_x=" << sourceX << " source_z=" << sourceZ << std::endl;
         PhysicsSkeleton skeleton;
         check(mesh.BuildPhysicsSkeleton(skeleton, error), "Read actual dummy skeleton");
@@ -1526,6 +1531,24 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         PxRaycastHit wallSight;
         check(physics->Raycast(toPx(camera), toPx(aim) * 100, wallSight, &player) && wallSight.actor == aimTarget.get(),
             "Crosshair sees the front surface of the wall fixture");
+        check(test.SetProjectileSettings(.5f, 7.5f, 0, 0, 0, .08f) && test.FireAimed(player, camera, aim),
+            "Fire an aimed sphere with an 8 cm radius");
+        const PxRigidDynamic* smallBall = test.GetProjectiles().back();
+        const PxVec3 expectedDirection = (wallSight.position + wallSight.normal * .08f - toPx(shotOrigin)).getNormalized();
+        check((smallBall->getLinearVelocity().getNormalized() - expectedDirection).magnitude() < 1e-4f,
+            "The camera target offsets the sphere center by its selected radius");
+        check(test.SetProjectileSettings(.5f, 7.5f, 0, 0, 0, .30f) && test.FireFrom(player),
+            "Fire a 30 cm sphere while the smaller shot is still in flight");
+        const PxRigidDynamic* largeBall = test.GetProjectiles().back();
+        PxShape* smallShape = nullptr;
+        PxShape* largeShape = nullptr;
+        check(smallBall->getShapes(&smallShape, 1) == 1 && largeBall->getShapes(&largeShape, 1) == 1 &&
+                smallShape->getGeometry().getType() == PxGeometryType::eSPHERE && largeShape->getGeometry().getType() == PxGeometryType::eSPHERE &&
+                std::abs(static_cast<const PxSphereGeometry&>(smallShape->getGeometry()).radius - .08f) < 1e-5f &&
+                std::abs(static_cast<const PxSphereGeometry&>(largeShape->getGeometry()).radius - .30f) < 1e-5f &&
+                std::abs(largeBall->getMass() - .5f) < 1e-5f,
+            "Live shots keep their individual collision radii and the selected mass");
+        test.ClearProjectiles();
         bool wallAccurate = true;
         bool gravityRestored = true;
         for (const float speed : {7.5f, 100.0f})

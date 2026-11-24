@@ -73,6 +73,7 @@ struct PhysicsProjectileBodyImpulse
 public:
     physx::PxVec3 position{0};
     physx::PxVec3 impulse{0};
+    physx::PxVec3 partImpulse{0};
     float torqueMultiplier = 0;
 };
 
@@ -108,8 +109,9 @@ private:
     {
     public:
         const physx::PxRigidDynamic* actor = nullptr;
-        float magnitude = 0;
+        float bodyMagnitude = 0;
         float torqueMultiplier = 0;
+        float partMagnitude = 0;
     };
     struct ProjectileContact
     {
@@ -122,8 +124,9 @@ private:
         physx::PxVec3 contactImpulse{0};
         physx::PxVec3 weightedPosition{0};
         float weight = 0;
-        float magnitude = 0;
+        float bodyMagnitude = 0;
         float torqueMultiplier = 0;
+        float partMagnitude = 0;
         bool consumed = false;
     };
     class ErrorCallback : public physx::PxDefaultErrorCallback
@@ -205,7 +208,8 @@ public:
 public:
     // 같은 소유자의 바디도 포함해 PhysX가 보고한 실제 접촉을 조회한다.
     bool HasContact(const physx::PxRigidActor& first, const physx::PxRigidActor& second) const;
-    bool SetProjectileBodyImpulse(const physx::PxRigidDynamic& projectile, float magnitude, float torqueMultiplier);
+    bool SetProjectileBodyImpulse(const physx::PxRigidDynamic& projectile, float bodyMagnitude,
+        float torqueMultiplier, float partMagnitude = 0);
     bool GetGroundContact(const physx::PxRigidActor& body, PhysicsGroundContact& contact,
         const void* ignoredOwner = nullptr) const;
     void GetCharacterCapsuleContacts(const physx::PxRigidActor& body,

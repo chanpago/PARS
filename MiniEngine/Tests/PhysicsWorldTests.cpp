@@ -89,7 +89,8 @@ namespace
         PxFilterData filter = shape->getSimulationFilterData();
         filter.word3 |= PhysicsWorld::ProjectileFilterFlag;
         shape->setSimulationFilterData(filter);
-        Check(world.SetProjectileBodyImpulse(*source, 25.0f, .5f), "Set independent body impulse on the projectile");
+        Check(world.SetProjectileBodyImpulse(*source, 25.0f, .5f, 10.0f), "Set independent body and part impulses on the projectile");
+        Check(!world.SetProjectileBodyImpulse(*source, 0, 0, -1), "Reject a negative part impulse without replacing the settings");
         std::vector<PhysicsContactImpulse> contacts;
         float strength = 0;
         for (int step = 0; step < 6 && strength <= 1e-4f; ++step)
@@ -104,6 +105,8 @@ namespace
             "The first projectile contact can be consumed once per receiver");
         Check(std::abs(response.impulse.magnitude() - 25.0f) < .001f && response.impulse.x > 24.9f && response.torqueMultiplier == .5f,
             "The whole-body impulse uses the shot direction and configured magnitude");
+        Check((response.partImpulse - response.impulse * (10.0f / 25.0f)).magnitude() < .001f,
+            "The part impulse uses the incoming direction and its own magnitude");
         PxVec3 impulse(0);
         for (const PhysicsContactImpulse& contact : contacts)
         {
@@ -158,7 +161,7 @@ namespace
             targets[side]->userData = &owner;
         }
         PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, -.4f)), PxSphereGeometry(.12f), 1, "Shared hit");
-        Check(ball && world.SetProjectileBodyImpulse(*ball, 8, .5f), "Configure one projectile against two parts");
+        Check(ball && world.SetProjectileBodyImpulse(*ball, 0, 0, 8), "Configure a part-only projectile against two parts");
         ball->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
         PxShape* shape = nullptr;
         Check(ball->getShapes(&shape, 1) == 1, "Find shared projectile shape");
@@ -182,8 +185,8 @@ namespace
         const uint64_t second = contacts[1].front().projectileContactId;
         PhysicsProjectileBodyImpulse response;
         Check(first != 0 && first == second && world.ConsumeProjectileContact(first, response) &&
-            !world.ConsumeProjectileContact(second, response) && std::abs(response.impulse.z - 8) < .001f,
-            "One projectile delivers its configured impulse once across multiple receiver shapes");
+            !world.ConsumeProjectileContact(second, response) && response.impulse.isZero() && std::abs(response.partImpulse.z - 8) < .001f,
+            "One projectile delivers a part-only impulse once across multiple receiver shapes");
         std::puts("PASS: one projectile touching two parts of the same receiver");
     }
 

@@ -49,7 +49,7 @@ public:
     void RenderUI();
     void RenderSpheres(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
-        const std::vector<physx::PxRigidDynamic*>& spheres, float radius);
+        const std::vector<physx::PxRigidDynamic*>& spheres);
     void RenderCapsules(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor);
     void RenderDebugLines(GraphicsContext& context, const Math::Camera& camera,

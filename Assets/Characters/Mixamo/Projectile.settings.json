@@ -2,6 +2,8 @@
     "bodyImpulseNs": 25.0,
     "bodyTorqueMultiplier": 0.5,
     "massKg": 0.5,
+    "partImpulseNs": 10.0,
+    "radiusMeters": 0.15,
     "speedMetersPerSecond": 100.0,
-    "version": 2
+    "version": 4
 }

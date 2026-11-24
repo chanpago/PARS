@@ -515,13 +515,10 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
 
 void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& camera,
     const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
-    const std::vector<PxRigidDynamic*>& spheres, float radius)
+    const std::vector<PxRigidDynamic*>& spheres)
 {
-    if (spheres.empty())
-    {
-        return;
-    }
-    constexpr int latitudeCount = 12, longitudeCount = 24;
+    constexpr int latitudeCount = 12;
+    constexpr int longitudeCount = 24;
     std::vector<Vertex> vertices;
     vertices.reserve(spheres.size() * latitudeCount * longitudeCount * 6);
     const std::function<physx::PxVec3(int, int)> normal = [=](int latitude, int longitude) -> physx::PxVec3
@@ -532,7 +529,13 @@ void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& ca
     };
     for (const physx::PxRigidDynamic* sphere : spheres)
     {
-        const physx::PxTransform pose = sphere->getGlobalPose();
+        PxShape* shape = nullptr;
+        if (sphere->getShapes(&shape, 1) != 1 || shape->getGeometry().getType() != PxGeometryType::eSPHERE)
+        {
+            continue;
+        }
+        const float radius = static_cast<const PxSphereGeometry&>(shape->getGeometry()).radius;
+        const PxTransform pose = sphere->getGlobalPose() * shape->getLocalPose();
         for (int y = 0; y < latitudeCount; ++y)
         {
             for (int x = 0; x < longitudeCount; ++x)
@@ -545,6 +548,10 @@ void PhysicsDemo::RenderSpheres(GraphicsContext& context, const Math::Camera& ca
                 }
             }
         }
+    }
+    if (vertices.empty())
+    {
+        return;
     }
     context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
     context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);

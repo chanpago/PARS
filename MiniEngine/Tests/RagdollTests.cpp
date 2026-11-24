@@ -113,7 +113,8 @@ namespace
         std::puts("PASS: whole-body COM, unequal masses and rotated local mass frames on D6/articulation");
     }
 
-    void TestProjectileBodyImpulse(bool articulation, float torqueMultiplier, float hitHeight)
+    void TestProjectileBodyImpulse(bool articulation, float torqueMultiplier, float hitHeight,
+        float bodyImpulse = 8.0f, float partImpulse = 0)
     {
         using namespace physx;
         PhysicsWorld world;
@@ -146,7 +147,7 @@ namespace
         Check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error, false), "Create kinematic hit receiver");
         ragdoll.SetQueryOwner(&ragdoll);
         PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(-.6f, hitHeight, 0)), PxSphereGeometry(.12f), 1, "Ball");
-        Check(ball && world.SetProjectileBodyImpulse(*ball, 8.0f, torqueMultiplier), "Set the projectile's full-body response");
+        Check(ball && world.SetProjectileBodyImpulse(*ball, bodyImpulse, torqueMultiplier, partImpulse), "Set the projectile's impact response");
         ball->getScene()->setGravity(PxVec3(0));
         PxShape* shape = nullptr;
         Check(ball->getShapes(&shape, 1) == 1, "Find projectile shape");
@@ -165,23 +166,46 @@ namespace
             }
         }
         Check(!impacts.empty() && impacts.front().projectileContactId != 0, "Capture contact before changing the physical bodies");
+        const PxVec3 contactPoint = impacts.front().position;
+        if (partImpulse > 0)
+        {
+            Check(impacts.front().body == 1 && contactPoint.y > 4.02f, "The ball strikes the head above its center");
+            // 같은 공이 골반에도 약하게 닿은 경우를 앞에 넣어 바디 순서에 의존하는지 확인한다.
+            RagdollBodyImpulse weaker = impacts.front();
+            weaker.body = 0;
+            weaker.position = PxVec3(0, 3, 0);
+            weaker.impulse *= .1f;
+            impacts.insert(impacts.begin(), weaker);
+        }
         ball->setGlobalPose(PxTransform(PxVec3(-10, hitHeight, 0)));
         ball->setLinearVelocity(PxVec3(0));
         Check(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.UsesArticulation() == articulation,
             "Activate the requested receiver backend");
         ragdoll.SetDrivesEnabled(false);
-        // 국소 충격을 재생하지 않고 전신 추가분만 측정한다. 같은 접촉을 다시 전달해도 한 번만 적용돼야 한다.
+        // 실제 충돌 반작용은 재생하지 않고 설정한 추가분만 측정한다.
         ragdoll.ApplyProjectileBodyImpulses(impacts);
         ragdoll.ApplyProjectileBodyImpulses(impacts);
         world.Step();
         Vector3 velocity(kZero);
-        Check(ragdoll.GetCenterOfMassVelocity(velocity) && float(Length(velocity - Vector3(2, 0, 0))) < .02f,
-            "An 8 N s whole-body impulse gives a 4 kg rig a 2 m/s COM velocity");
+        const float expectedSpeed = (bodyImpulse + partImpulse) / 4.0f;
+        Check(ragdoll.GetCenterOfMassVelocity(velocity) && float(Length(velocity - Vector3(expectedSpeed, 0, 0))) < .02f,
+            "The 4 kg rig receives the sum of the configured impulses exactly once");
+        Check(world.GetErrorCount() == 0, "Apply projectile impulses without PhysX errors");
+        if (partImpulse > 0)
+        {
+            const PxVec3 head(0, 4, 0);
+            const PxVec3 spin = ragdoll.GetBodyPointVelocity(1, head + PxVec3(1, 0, 0)) - ragdoll.GetBodyPointVelocity(1, head);
+            // 목 관절이 머리 중심에 있으므로 접촉점의 높이 차와 구의 관성으로 머리의 각속도를 구할 수 있다.
+            const float headInertia = .4f * 2.0f * .20f * .20f;
+            const float expectedHeadSpin = -(contactPoint.y - head.y) * partImpulse / headInertia;
+            Check(std::abs(spin.y - expectedHeadSpin) < .1f, "Apply the local kick at the strongest contact point on the head");
+            return;
+        }
         const PxVec3 base(0, 3, 0);
         const PxVec3 angularSample = ragdoll.GetBodyPointVelocity(0, base + PxVec3(1, 0, 0)) - ragdoll.GetBodyPointVelocity(0, base);
         // 두 구의 중심 관성과 평행축 항의 합은 z축 기준 1.064 kg m²다.
-        const float expectedSpin = -(hitHeight - 3.5f) * 8.0f * torqueMultiplier / 1.064f;
-        Check(std::abs(angularSample.y - expectedSpin) < .08f && world.GetErrorCount() == 0,
+        const float expectedSpin = -(hitHeight - 3.5f) * bodyImpulse * torqueMultiplier / 1.064f;
+        Check(std::abs(angularSample.y - expectedSpin) < .08f,
             "Offset and torque multiplier determine rigid-body spin about the actual COM");
     }
 
@@ -307,8 +331,10 @@ void RunProjectileBodyImpulseTests()
         TestProjectileBodyImpulse(articulation, 0.0f, 4.0f);
         TestProjectileBodyImpulse(articulation, 1.0f, 4.0f);
         TestProjectileBodyImpulse(articulation, .5f, 3.0f);
+        TestProjectileBodyImpulse(articulation, 0, 4.10f, 0, 2);
+        TestProjectileBodyImpulse(articulation, 0, 4.10f, 8, 2);
     }
-    std::puts("PASS: projectile whole-body translation, offset torque and one hit across the kinematic transition on D6/articulation");
+    std::puts("PASS: projectile part and whole-body impulses, contact-point torque and one hit across the kinematic transition on D6/articulation");
 }
 
 void RunRagdollTests()

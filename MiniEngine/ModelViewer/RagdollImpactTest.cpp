@@ -18,10 +18,16 @@ using namespace physx;
 
 namespace
 {
-    bool ValidProjectileSettings(float mass, float speed, float bodyImpulse, float torqueMultiplier)
+    constexpr float MinimumProjectileRadius = .01f;
+    constexpr float MaximumProjectileRadius = 1.0f;
+    constexpr char ProjectileRangeError[] = u8"구 반지름은 1~100cm, 질량은 0.1~100kg, 속도는 1~100m/s, 부위·전신 충격량과 회전 배율은 0 이상이어야 합니다.";
+
+    bool ValidProjectileSettings(float mass, float speed, float bodyImpulse, float torqueMultiplier, float partImpulse, float radius)
     {
         return std::isfinite(mass) && std::isfinite(speed) && mass >= .1f && mass <= 100 && speed >= 1 && speed <= 100 &&
-            std::isfinite(bodyImpulse) && bodyImpulse >= 0 && std::isfinite(torqueMultiplier) && torqueMultiplier >= 0;
+            std::isfinite(bodyImpulse) && bodyImpulse >= 0 && std::isfinite(torqueMultiplier) && torqueMultiplier >= 0 &&
+            std::isfinite(partImpulse) && partImpulse >= 0 &&
+            std::isfinite(radius) && radius >= MinimumProjectileRadius && radius <= MaximumProjectileRadius;
     }
 
     std::wstring ImpactSettingsPath(const std::string& path)
@@ -178,14 +184,17 @@ bool RagdollImpactTest::SetAutomaticSupport(bool enabled)
     return Reset();
 }
 
-bool RagdollImpactTest::SetProjectileSettings(float mass, float speed, float bodyImpulse, float torqueMultiplier)
+bool RagdollImpactTest::SetProjectileSettings(float mass, float speed, float bodyImpulse, float torqueMultiplier,
+    float partImpulse, float radius)
 {
-    if (!ValidProjectileSettings(mass, speed, bodyImpulse, torqueMultiplier))
+    if (!ValidProjectileSettings(mass, speed, bodyImpulse, torqueMultiplier, partImpulse, radius))
     {
         return false;
     }
     m_Mass = mass;
     m_Speed = speed;
+    m_ProjectileRadius = radius;
+    m_PartImpulseMagnitude = partImpulse;
     m_BodyImpulseMagnitude = bodyImpulse;
     m_BodyTorqueMultiplier = torqueMultiplier;
     return true;
@@ -204,17 +213,19 @@ bool RagdollImpactTest::LoadProjectileSettings(const std::string& path)
         nlohmann::json data;
         file >> data;
         const int version = data.at("version").get<int>();
-        if (version != 1 && version != 2)
+        if (version < 1 || version > 4)
         {
             throw std::runtime_error(u8"지원하지 않는 구 설정 파일 버전입니다.");
         }
         const float mass = data.at("massKg").get<float>();
         const float speed = data.at("speedMetersPerSecond").get<float>();
+        const float radius = version < 4 ? DefaultProjectileRadius : data.at("radiusMeters").get<float>();
+        const float partImpulse = version < 3 ? 0.0f : data.at("partImpulseNs").get<float>();
         const float bodyImpulse = version == 1 ? 0.0f : data.at("bodyImpulseNs").get<float>();
         const float torqueMultiplier = version == 1 ? 0.0f : data.at("bodyTorqueMultiplier").get<float>();
-        if (!SetProjectileSettings(mass, speed, bodyImpulse, torqueMultiplier))
+        if (!SetProjectileSettings(mass, speed, bodyImpulse, torqueMultiplier, partImpulse, radius))
         {
-            throw std::runtime_error(u8"구 질량은 0.1~100kg, 속도는 1~100m/s, 전신 충격량과 회전 배율은 0 이상이어야 합니다.");
+            throw std::runtime_error(ProjectileRangeError);
         }
         m_ProjectileSettingsMessage = u8"저장된 구 설정을 불러왔습니다.";
         return true;
@@ -230,12 +241,12 @@ bool RagdollImpactTest::SaveProjectileSettings()
 {
     try
     {
-        if (!ValidProjectileSettings(m_Mass, m_Speed, m_BodyImpulseMagnitude, m_BodyTorqueMultiplier))
+        if (!ValidProjectileSettings(m_Mass, m_Speed, m_BodyImpulseMagnitude, m_BodyTorqueMultiplier, m_PartImpulseMagnitude, m_ProjectileRadius))
         {
-            throw std::runtime_error(u8"구 질량은 0.1~100kg, 발사 속도는 1~100m/s여야 합니다.");
+            throw std::runtime_error(ProjectileRangeError);
         }
-        const nlohmann::json data = {{"version", 2}, {"massKg", m_Mass}, {"speedMetersPerSecond", m_Speed},
-            {"bodyImpulseNs", m_BodyImpulseMagnitude}, {"bodyTorqueMultiplier", m_BodyTorqueMultiplier}};
+        const nlohmann::json data = {{"version", 4}, {"massKg", m_Mass}, {"speedMetersPerSecond", m_Speed}, {"radiusMeters", m_ProjectileRadius},
+            {"partImpulseNs", m_PartImpulseMagnitude}, {"bodyImpulseNs", m_BodyImpulseMagnitude}, {"bodyTorqueMultiplier", m_BodyTorqueMultiplier}};
         std::ofstream file(ImpactSettingsPath(m_ProjectileSettingsPath), std::ios::trunc);
         file << data.dump(4) << '\n';
         file.flush();
@@ -392,7 +403,7 @@ bool RagdollImpactTest::FireAimed(const Character& player, Vector3 cameraPositio
         }
     }
     // 공 표면이 조준점에 닿는 순간의 중심은 피격 표면에서 반지름만큼 떨어져 있다.
-    const PxVec3 target = closest.position + closest.normal * SphereRadius;
+    const PxVec3 target = closest.position + closest.normal * m_ProjectileRadius;
     const PxVec3 origin = toPx(player.GetActorLocation()) + PxVec3(0, .15f, 0);
     if ((target - origin).dot(ray) <= 0)
     {
@@ -412,8 +423,8 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool aim
     }
     const Vector3 origin = player.GetActorLocation() + Vector3(0, .15f, 0);
     const Vector3 delta = target - origin;
-    const float clearance = player.GetCapsuleComponent().GetRadius() + SphereRadius + .15f;
-    if (float(Length(delta)) < clearance + SphereRadius)
+    const float clearance = player.GetCapsuleComponent().GetRadius() + m_ProjectileRadius + .15f;
+    if (float(Length(delta)) < clearance + m_ProjectileRadius)
     {
         m_Message = u8"목표에서 조금 더 떨어져 발사하세요.";
         return false;
@@ -425,12 +436,12 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool aim
         return PxVec3(float(v.GetX()), float(v.GetY()), float(v.GetZ()));
     };
     // 카메라에서 보이는 표적이라도 발사 위치 앞이 막혀 있으면 장애물 너머에 구를 생성하지 않는다.
-    if (aimed && physics->SweepSphereDistance(toPx(origin), toPx(muzzle - origin), SphereRadius, &player) < clearance - .001f)
+    if (aimed && physics->SweepSphereDistance(toPx(origin), toPx(muzzle - origin), m_ProjectileRadius, &player) < clearance - .001f)
     {
         m_Message = u8"발사 위치가 막혀 있습니다. 장애물에서 떨어져 발사하세요.";
         return false;
     }
-    physx::PxRigidDynamic* sphere = physics->CreateDynamicBody(PxTransform(toPx(muzzle)), PxSphereGeometry(SphereRadius),
+    physx::PxRigidDynamic* sphere = physics->CreateDynamicBody(PxTransform(toPx(muzzle)), PxSphereGeometry(m_ProjectileRadius),
         m_Mass, "Impact sphere");
     if (!sphere)
     {
@@ -439,7 +450,8 @@ bool RagdollImpactTest::FireAt(const Character& player, Vector3 target, bool aim
     }
     // 바닥 하중이나 캐릭터의 지속 밀기와 구별해 실제 발사 구의 접촉만 피격 반응에 사용한다.
     physx::PxShape* shape = nullptr;
-    if (sphere->getShapes(&shape, 1) != 1 || !physics->SetProjectileBodyImpulse(*sphere, m_BodyImpulseMagnitude, m_BodyTorqueMultiplier))
+    if (sphere->getShapes(&shape, 1) != 1 ||
+        !physics->SetProjectileBodyImpulse(*sphere, m_BodyImpulseMagnitude, m_BodyTorqueMultiplier, m_PartImpulseMagnitude))
     {
         sphere->release();
         return false;
@@ -575,9 +587,15 @@ void RagdollImpactTest::DrawUI(Character* player)
         DrawBodyImpactUI(player);
         ImGui::TextWrapped("%s", u8"우클릭 유지: 조준 / 조준 중 좌클릭 또는 R: 발사");
         ImGui::TextWrapped("%s", u8"조준하지 않을 때 R: 더미 골반으로 발사");
-        ImGui::TextUnformatted(u8"반지름 15cm / 중력과 실제 충돌 적용");
+        float radiusCm = m_ProjectileRadius * 100.0f;
+        if (ImGui::DragFloat(u8"공 반지름", &radiusCm, .5f, MinimumProjectileRadius * 100.0f, MaximumProjectileRadius * 100.0f,
+            "%.1f cm", ImGuiSliderFlags_AlwaysClamp) && std::isfinite(radiusCm))
+        {
+            m_ProjectileRadius = radiusCm / 100.0f;
+        }
         ImGui::DragFloat(u8"구 질량", &m_Mass, .5f, .1f, 100, "%.1f kg", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"발사 속도", &m_Speed, .5f, 1, 100, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::DragFloat(u8"피격 부위 추가 충격량", &m_PartImpulseMagnitude, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"전신 충격량", &m_BodyImpulseMagnitude, 1.0f, 0.0f, PX_MAX_F32, u8"%.1f N·s", ImGuiSliderFlags_AlwaysClamp);
         ImGui::DragFloat(u8"전신 회전 배율", &m_BodyTorqueMultiplier, .01f, 0.0f, PX_MAX_F32, "%.2f", ImGuiSliderFlags_AlwaysClamp);
         ImGui::BeginDisabled(m_ProjectileSettingsPath.empty());
