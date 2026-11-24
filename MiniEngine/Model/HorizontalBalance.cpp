@@ -147,7 +147,7 @@ bool HorizontalBalance::Update(const HorizontalBalanceInput& input, const Horizo
     const float positionScale = input.stepping ? settings.steppingPositionScale : 1.0f;
     const float stiffness = settings.frequency * settings.frequency;
     const float damping = 2.0f * settings.dampingRatio * settings.frequency;
-    const PxVec3 requested = m_Snapshot.positionError * (stiffness * positionScale) - velocity * damping + input.torsoAcceleration;
+    const PxVec3 requested = m_Snapshot.positionError * (stiffness * positionScale) - velocity * damping;
     if (!requested.isFinite())
     {
         m_Acceleration = PxVec3(0);

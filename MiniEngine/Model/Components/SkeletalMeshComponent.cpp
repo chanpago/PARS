@@ -101,9 +101,8 @@ namespace PARS
                 stretch.push_back(Invert(PhysicsBoneFrame(pose[node])) * pose[node]);
             }
         }
-        ResetTorsoBalance();
         m_Ragdoll.Swap(candidate);
-        m_ImpactWarmup = {};
+        ResetImpactWarmup();
         m_ImpactFlail = {};
         ResetCrossStepPlayback();
         ResetFallArms();
@@ -135,8 +134,7 @@ namespace PARS
             return false;
         }
         instance->Initialize(m_SkeletalMesh);
-        ResetTorsoBalance();
-        m_ImpactWarmup = {};
+        ResetImpactWarmup();
         m_AnimInstance = std::move(instance);
         ResetFallArms();
         ResetAirborneFall();
@@ -218,11 +216,6 @@ namespace PARS
         {
             m_Ragdoll.ApplyImpactResponses(responses);
         }
-        if (IsActiveRagdoll())
-        {
-            StartDynamicTorsoBalance(m_Ragdoll.GetExternalImpacts());
-            UpdateDynamicTorsoBalance(deltaTime);
-        }
         UpdateFootSupport();
         if (UpdateImpactWarmup(deltaTime, responses))
         {
@@ -250,12 +243,12 @@ namespace PARS
             }
             if (IsActiveRagdoll())
             {
-                m_Ragdoll.UpdateProjectileReaction(impacts, deltaTime);
+                m_Ragdoll.UpdateImpactReaction(impacts, deltaTime);
             }
         }
 
         const std::vector<RagdollBodyImpulse>& contacts = m_Ragdoll.GetExternalImpacts();
-        const bool capsuleImpact = m_AutomaticRootSupport && std::any_of(contacts.begin(), contacts.end(), [](const RagdollBodyImpulse& impact) -> bool
+        const bool capsuleImpact = std::any_of(contacts.begin(), contacts.end(), [](const RagdollBodyImpulse& impact) -> bool
         {
             return impact.newCapsuleHit && impact.impulse.magnitudeSquared() > 1e-8f;
         });
@@ -320,17 +313,17 @@ namespace PARS
                 if (evaluated)
                 {
                     UpdateHorizontalBalance(deltaTime);
-                    if (m_TorsoBalance.IsActive())
-                    {
-                        ApplyTorsoBalancePose(target);
-                        m_Ragdoll.ApplyTorsoHipTorque(m_TorsoRig, m_TorsoBalance.GetHipTorque());
-                    }
                 }
             }
             if (evaluated && (!IsFalling() || m_ImpactHandReach.armWound))
             {
                 ApplyArmTargets(target);
             }
+            const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
+            const bool recoveringFromImpact = !IsFalling() && !IsGroundFallActive() && m_StandingUpState == StandingUpState::None &&
+                (capsuleImpact || m_BalanceState == CharacterBalanceState::Unbalanced ||
+                m_Recovery.GetSnapshot().state == RecoveryState::Recovery || step.needsStep || step.IsInProgress());
+            m_Ragdoll.UpdateSpineDriveRecovery(recoveringFromImpact, deltaTime, m_RecoverySettings.blendDuration);
             if (!evaluated || !m_Ragdoll.UpdateDriveTargets(target, deltaTime, m_PhysicsError))
             {
                 // 목표 갱신에 실패하면 전신 패시브 물리 시뮬레이션으로 전환한다.

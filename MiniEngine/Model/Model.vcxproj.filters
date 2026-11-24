@@ -191,11 +191,6 @@
       <Filter>Components</Filter>
     </ClCompile>
     <ClInclude Include="HorizontalBalance.h" />
-    <ClInclude Include="TorsoBalance.h" />
-    <ClCompile Include="TorsoBalance.cpp" />
-    <ClCompile Include="Components\SkeletalMeshTorsoBalance.cpp">
-      <Filter>Components</Filter>
-    </ClCompile>
     <ClCompile Include="HorizontalBalance.cpp" />
     <ClInclude Include="PhysicsAsset.h" />
     <ClCompile Include="AnimInstance.cpp" />

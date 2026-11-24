@@ -151,19 +151,20 @@ void RunSupportAnkleDriveTests()
     check(asset.UsesArticulation() && ragdoll.ApplyDriveSettings(asset, error) && ragdoll.UpdateDriveTargets(pose, 0, error),
         "Configure projectile drive test");
     const float fullLeft = joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
+    const float fullLeftDamping = joints[0]->getDriveParams(PxArticulationAxis::eTWIST).damping;
     const float fullRight = joints[1]->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
     const float dt = static_cast<float>(PhysicsWorld::FixedDeltaTime);
     RagdollBodyImpulse hit;
     hit.body = 1;
     hit.position = PxVec3(-.2f, .05f, 0);
     hit.impulse = PxVec3(0, 0, 20);
-    ragdoll.UpdateProjectileReaction({hit}, dt);
+    ragdoll.UpdateImpactReaction({hit}, dt);
     check(ragdoll.UpdateDriveTargets(pose, 0, error) && joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == fullLeft,
         "Ordinary contact preserves joint stiffness");
     world.Step();
     hit.fromProjectile = true;
-    ragdoll.UpdateProjectileReaction({hit}, dt);
-    ragdoll.UpdateProjectileReaction({}, 1.0f);
+    ragdoll.UpdateImpactReaction({hit}, dt);
+    ragdoll.UpdateImpactReaction({}, 1.0f);
     check(ragdoll.UpdateDriveTargets(pose, 0, error), "Apply projectile drive response");
     const float struck = joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness;
     check(struck > 0 && struck < .1f * fullLeft && joints[1]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == fullRight,
@@ -171,7 +172,7 @@ void RunSupportAnkleDriveTests()
     for (unsigned step = 1; step <= 21; ++step)
     {
         world.Step();
-        ragdoll.UpdateProjectileReaction({}, dt);
+        ragdoll.UpdateImpactReaction({}, dt);
         check(ragdoll.UpdateDriveTargets(pose, dt, error), "Advance projectile drive recovery");
         if (step == 10)
         {
@@ -182,6 +183,50 @@ void RunSupportAnkleDriveTests()
     check(joints[0]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == fullLeft && world.GetErrorCount() == 0,
         "The joint regains full stiffness after the last projectile contact");
     std::puts("PASS: projectile drive isolation, fixed-step deduplication and recovery");
+
+    world.Step();
+    hit.fromProjectile = false;
+    hit.fromCharacterCapsule = true;
+    hit.newCapsuleHit = true;
+    ragdoll.UpdateImpactReaction({hit}, dt);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Apply the first capsule impact");
+    const PxArticulationDrive capsuleDrive = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
+    check(capsuleDrive.stiffness == struck && capsuleDrive.damping > 0 && capsuleDrive.damping < fullLeftDamping &&
+            joints[1]->getDriveParams(PxArticulationAxis::eTWIST).stiffness == fullRight &&
+            ragdoll.GetImpactReaction().projectilePelvisYieldTime == 0,
+        "A capsule yields the struck joint's stiffness and damping without releasing pelvis support");
+    hit.newCapsuleHit = false;
+    for (unsigned step = 0; step < 21; ++step)
+    {
+        world.Step();
+        ragdoll.UpdateImpactReaction({hit}, dt);
+        check(ragdoll.UpdateDriveTargets(pose, dt, error), "Recover during a sustained capsule push");
+    }
+    const PxArticulationDrive restored = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
+    check(restored.stiffness == fullLeft && restored.damping == fullLeftDamping && world.GetErrorCount() == 0,
+        "Holding capsule contact lets both gains return to their baseline");
+
+    ragdoll.SetDrivesEnabled(false);
+    RagdollImpactReaction warmup;
+    world.Step();
+    hit.newCapsuleHit = true;
+    ragdoll.AdvanceImpactReaction(warmup, {hit}, dt);
+    hit.newCapsuleHit = false;
+    for (unsigned step = 0; step < 10; ++step)
+    {
+        world.Step();
+        ragdoll.AdvanceImpactReaction(warmup, {hit}, dt);
+    }
+    const float remainingScale = warmup.GetJointDriveScale(0);
+    ragdoll.SetDrivesEnabled(true, &warmup);
+    ragdoll.UpdateImpactReaction({}, 1.0f);
+    check(ragdoll.UpdateDriveTargets(pose, 0, error), "Resume joint drives in the warmup handoff step");
+    const PxArticulationDrive resumed = joints[0]->getDriveParams(PxArticulationAxis::eTWIST);
+    check(resumed.stiffness > struck && resumed.stiffness < fullLeft &&
+            std::abs(resumed.stiffness / fullLeft - remainingScale) < 1e-5f &&
+            std::abs(resumed.damping / fullLeftDamping - std::sqrt(remainingScale)) < 1e-5f,
+        "The first dynamic step inherits the partly recovered stiffness and damping");
+    std::puts("PASS: capsule joint stiffness, damping, sustained contact recovery and warmup handoff");
 }
 
 namespace
@@ -921,109 +966,6 @@ namespace
         wall->release();
         std::puts("PASS: dynamic pelvis force limits, animated targets, impacts, blocked contact and support lifecycle");
     }
-}
-
-void RunTorsoBalanceRagdollTests()
-{
-    std::array<float, 2> endLean{};
-    for (size_t trial = 0; trial < endLean.size(); ++trial)
-    {
-        PhysicsWorld world;
-        Check(world.Initialize(false), "Initialize torso balance world");
-        PhysicsBody pelvis;
-        pelvis.bone = "Hips";
-        pelvis.shape = PhysicsShapeType::Box;
-        pelvis.halfExtents = XMFLOAT3(.08f, .08f, .08f);
-        pelvis.mass = 12;
-        PhysicsBody chest = pelvis;
-        chest.bone = "Spine2";
-        chest.halfExtents = XMFLOAT3(.08f, .25f, .08f);
-        chest.offset.y = .25f;
-        chest.mass = 20;
-        PhysicsAsset asset;
-        asset.bodies = {pelvis, chest};
-        const std::vector<std::string> names{pelvis.bone, chest.bone};
-        std::vector<Matrix4> pose{Pose(Vector3(0, 2, 0)), Pose(Vector3(0, 2.1f, 0))};
-        PhysicsConstraint joint;
-        joint.parentBone = pelvis.bone;
-        joint.childBone = chest.bone;
-        joint.twist = PhysicsJointMotion::Limited;
-        joint.twistMin = -1.0f;
-        joint.twistMax = 1.0f;
-        joint.swingY = PhysicsJointMotion::Free;
-        joint.swingZ = PhysicsJointMotion::Free;
-        joint.SetWorldFrame(pose[0], pose[1] * chest.GetLocalTransform(), pose[1]);
-        asset.constraints.push_back(joint);
-        ConfigureDefaultDrives(asset);
-        Ragdoll ragdoll;
-        std::string error;
-        Check(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error), "Create torso articulation");
-        const PxRigidStatic* marker = world.CreateStaticBox(PxTransform(PxVec3(0, -5, 0)), PxVec3(1), "floor");
-        PxArticulationReducedCoordinate* articulation = nullptr;
-        Check(marker && marker->getScene()->getArticulations(&articulation, 1) == 1, "Find torso articulation");
-        PxArticulationLink* links[2]{};
-        Check(articulation->getLinks(links, 2) == 2, "Find pelvis and spine");
-        PxArticulationLink* root = links[0]->getInboundJoint() ? links[1] : links[0];
-        PxArticulationJointReducedCoordinate* motor = links[0] == root ? links[1]->getInboundJoint() : links[0]->getInboundJoint();
-        PxScene& scene = *marker->getScene();
-        PxRigidDynamic* driver = scene.getPhysics().createRigidDynamic(root->getGlobalPose());
-        Check(driver != nullptr, "Create controlled pelvis support");
-        driver->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-        scene.addActor(*driver);
-        PxFixedJoint* support = PxFixedJointCreate(scene.getPhysics(), driver, PxTransform(PxIdentity), root, PxTransform(PxIdentity));
-        Check(support != nullptr, "Constrain the actual pelvis to the support");
-        TorsoBalanceRig rig;
-        TorsoBalanceSample sample;
-        Check(ragdoll.BuildTorsoBalanceRig(rig) && rig.links.size() == 1 && ragdoll.GetTorsoBalanceSample(rig, sample) &&
-            std::abs(sample.height - .25f) < .001f && sample.mass == 20, "Measure the torso above the physical joint anchor");
-        TorsoBalance balance;
-        balance.Begin(sample, sample.lean);
-        ragdoll.SetDrivesEnabled(true);
-        ragdoll.SetTorsoTorqueLimits(rig, balance.GetHipTorqueLimit());
-        Check(ragdoll.UpdateDriveTargets(pose, 0, error) &&
-            motor->getDriveParams(PxArticulationAxis::eTWIST).maxForce <= balance.GetHipTorqueLimit() &&
-            motor->getDriveParams(PxArticulationAxis::eSWING1).maxForce > balance.GetHipTorqueLimit(),
-            "Spine bending is torque-limited and vertical twist keeps its drive");
-        RagdollBodyImpulse hit;
-        hit.body = 1;
-        hit.position = sample.pivot + PxVec3(0, .30f, 0);
-        hit.impulse = PxVec3(0, 0, -12);
-        hit.fromCharacterCapsule = true;
-        hit.newCapsuleHit = true;
-        ragdoll.ApplyExternalImpacts({hit});
-        const float dt = static_cast<float>(PhysicsWorld::FixedDeltaTime);
-        float speed = 0;
-        float travel = 0;
-        float peak = 0;
-        PxVec3 previousVelocity = sample.pivotVelocity;
-        for (int tick = 0; tick < 75; ++tick)
-        {
-            world.Step();
-            Check(ragdoll.GetTorsoBalanceSample(rig, sample), "Measure tilt from simulated links");
-            peak = PxMax(peak, -sample.lean.z);
-            balance.Observe(sample);
-            balance.Advance(dt, sample.pivotVelocity - previousVelocity);
-            previousVelocity = sample.pivotVelocity;
-            if (trial == 0)
-            {
-                speed += PxClamp(balance.GetRequestedAcceleration().z, -6.0f, 6.0f) * dt;
-                travel += speed * dt;
-            }
-            driver->setKinematicTarget(PxTransform(PxVec3(0, 2, travel)));
-            pose[0] = Pose(Vector3(0, 2, travel));
-            pose[1] = Pose(Vector3(0, 2.1f, travel), Quaternion(Vector3(kXUnitVector), balance.lean.z));
-            ragdoll.ApplyTorsoHipTorque(rig, balance.GetHipTorque());
-            Check(ragdoll.UpdateDriveTargets(pose, dt, error), "Drive the measured torso through the physical joint");
-        }
-        endLean[trial] = -sample.lean.z;
-        std::printf("PhysX torso moving_support=%d peak_deg=%.2f end_deg=%.2f pelvis_z=%.3f\n",
-            trial == 0, peak * 180 / PxPi, endLean[trial] * 180 / PxPi, sample.pivot.z);
-        Check(peak > .04f && world.GetErrorCount() == 0 && ragdoll.IsFinite(), "Physical torso bends toward the shove");
-        support->release();
-        driver->release();
-    }
-    Check(std::abs(endLean[0]) < .15f && endLean[1] > .50f,
-        "Under equal impulses the moving physical pelvis catches the chest and the blocked pelvis cannot");
 }
 
 void RunPelvisDriveTests()

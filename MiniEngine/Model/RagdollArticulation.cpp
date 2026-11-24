@@ -451,7 +451,7 @@ namespace PARS
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
             pose[m_BoneNodes[i]] = GetBoneWorld(i);
-            if (IsSimulating())
+            if (IsSimulating() || IsWarmupDynamicBody(i))
             {
                 const physx::PxVec3 v = m_Bodies[i]->getLinearVelocity();
                 const physx::PxVec3 w = m_Bodies[i]->getAngularVelocity();
@@ -492,6 +492,7 @@ namespace PARS
             }
             // 대기 구성은 골반 지지와 모터 이력을 남기지 않고 씬 밖에 보관한다.
             SetRootSupported(false, error);
+            EndWarmupUpperBody();
             SetDrivesEnabled(false);
             SetSceneActive(false, error);
             SwapConfiguration(*m_Standby);
@@ -732,7 +733,6 @@ namespace PARS
         // 각 관절 축을 돌리는데 필요한 "유효 관성"을 계산하는 부분. 이후 관절 PD의 강성,감쇠를 관성에 맞춰 정할 때 사용
         std::vector<float> inertias;
         std::vector<unsigned> freeAxes;
-        std::vector<unsigned> torqueLimitedAxes;
         if (m_DrivesEnabled)
         {
             // 각 관절에 필요한 토크가 함께 계산됨 이게 바로 관성행렬(질량 행렬 M). 현재 물리자세, 질량, 관성,연결 구조로 행렬을 계산
@@ -771,19 +771,9 @@ namespace PARS
                     const PhysicsAngularDrive& drive = data.drives[data.useSlerpDrive ? 0 : axis];
                     const bool driven = GetJointDriveStrength(i) > 0 && drive.enabled && drive.maxTorque > 0 &&
                         (drive.GetStiffness() > 0 || drive.GetDamping() > 0);
-                    if (motions[axis] == PhysicsJointMotion::Locked)
+                    if (motions[axis] != PhysicsJointMotion::Locked && !driven)
                     {
-                        continue;
-                    }
-                    const float torsoLimit = GetTorsoTorqueLimit(i, axis);
-                    const unsigned dof = 6 + m_ArticulationDofOffsets[i] + axis;
-                    if (!driven || torsoLimit == 0)
-                    {
-                        freeAxes.push_back(dof);
-                    }
-                    else if (torsoLimit < PX_MAX_F32)
-                    {
-                        torqueLimitedAxes.push_back(dof);
+                        freeAxes.push_back(6 + m_ArticulationDofOffsets[i] + axis);
                     }
                 }
             }
@@ -820,8 +810,6 @@ namespace PARS
             {
                 contactForce[axis] += horizontalForce[axis];
             }
-            // 힘이 제한된 척추의 자세 목표 가속도를 이웃 관절에 명령하지 않는다. 모터 게인은 실제 관성을 유지한다.
-            freeAxes.insert(freeAxes.end(), torqueLimitedAxes.begin(), torqueLimitedAxes.end());
             ResolveFreeAcceleration(cache, count, freeAxes, gravityWeight, contactForce, targetAcceleration);
 
             // 이 부분에서 아티큘레이션의 루트 즉, 골반만 먼저 중력보상, 코리올리 원심력보상을 addTorque()로 적용한다.
@@ -876,6 +864,7 @@ namespace PARS
             const PhysicsConstraint& data = m_Asset.constraints[i];
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             const float strength = GetJointDriveStrength(i);
+            const float pdScale = GetJointPDScale(i, strength);
             const float woundStrength = GetArmWoundStrength(i);
             float ankleDriveScale = 1.0f;
             float inverseLandingTime = 0.0f;
@@ -918,11 +907,10 @@ namespace PARS
                 }
 
                 float remainingTorque = enabled ? PX_MAX_F32 : 0;
-                const float torsoLimit = GetTorsoTorqueLimit(i, axis);
-                if (enabled && (woundStrength < 1.0f || torsoLimit < PX_MAX_F32))
+                if (enabled && woundStrength < 1.0f)
                 {
                     // 다친 팔은 중력 보상도 약해진다. 남은 토크만 자세 추종에 쓸 수 있다.
-                    const float limit = PxMin(torsoLimit, drive.maxTorque * woundStrength);
+                    const float limit = drive.maxTorque * woundStrength;
                     feedForward = PxClamp(feedForward * woundStrength, -.5f * limit, .5f * limit);
                     remainingTorque = limit - PxAbs(feedForward);
                 }
@@ -932,8 +920,8 @@ namespace PARS
                 // 관성으로 Kp=I*omegaN^2, Kd=2*zeta*I*omegaN을 만들고 암시적 토크 드라이브에 전달한다.
                 const float inertia = enabled && drive.useAcceleration ? inertias[6 + dof] : 1.0f;
                 // 발목은 지지 하중에 맞춰 강성과 감쇠에 같은 배율을 적용해 회전 추종과 제동을 함께 높인다.
-                float stiffness = enabled ? inertia * drive.GetStiffness() * ankleDriveScale * strength : 0.0f;
-                float damping = enabled ? inertia * drive.GetDamping() * ankleDriveScale * std::sqrt(strength) : 0.0f;
+                float stiffness = enabled ? inertia * drive.GetStiffness() * ankleDriveScale * pdScale : 0.0f;
+                float damping = enabled ? inertia * drive.GetDamping() * ankleDriveScale * std::sqrt(pdScale) : 0.0f;
                 if (inverseLandingTime > 0 && stiffness > 0)
                 {
                     // 남은 시간에 위치·속도 오차를 함께 0으로 보내는 3차 궤적의 피드백 계수다.

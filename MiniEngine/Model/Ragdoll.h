@@ -1,6 +1,5 @@
 ﻿#pragma once
 #include "PhysicsAsset.h"
-#include "TorsoBalance.h"
 #include "ImpactImpulseSettings.h"
 #include <foundation/PxVec3.h>
 #include <foundation/PxTransform.h>
@@ -52,6 +51,31 @@ namespace PARS
         bool fromCharacterCapsule = false;
     };
 
+    struct RagdollImpactReaction
+    {
+    public:
+        float GetJointDriveScale(size_t joint) const;
+        bool IsYielding() const
+        {
+            return !jointYieldTimes.empty() || projectilePelvisYieldTime > 0 || spineDriveScale < 1.0f;
+        }
+
+    public:
+        uint64_t step = UINT64_MAX;
+        uint64_t clock = UINT64_MAX;
+        std::vector<float> jointYieldTimes;
+        float projectilePelvisYieldTime = 0;
+        float spineDriveScale = 1.0f;
+    };
+
+    struct RagdollBodyMotion
+    {
+    public:
+        size_t body = 0;
+        physx::PxVec3 linear{0};
+        physx::PxVec3 angular{0};
+    };
+
     struct RagdollSupportContact
     {
     public:
@@ -101,6 +125,7 @@ namespace PARS
         bool SetSimulating(bool simulate, Math::Vector3 velocity, std::string& error, bool inheritAnimationVelocity = false);
         // 애니메이션에서 새로 진입할 때와 달리, 드라이브 전환 시에는 동적 포즈와 속도를 유지한다.
         void SetDrivesEnabled(bool enabled);
+        void SetDrivesEnabled(bool enabled, RagdollImpactReaction* warmupReaction);
         bool ApplyDriveSettings(const PhysicsAsset& asset, std::string& error);
         bool UpdateDriveTargets(const std::vector<Math::Matrix4>& boneWorld, float deltaTime, std::string& error);
         // 월드 공간의 힘/토크 드라이브로 동적 골반을 지지한다.
@@ -117,11 +142,14 @@ namespace PARS
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
-        void ApplyTorsoHipTorque(const TorsoBalanceRig& rig, const physx::PxVec3& torque);
         void ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
         void UpdateArmWounds(const std::vector<RagdollBodyImpulse>& impacts);
-        bool BuildTorsoBalanceRig(TorsoBalanceRig& rig) const;
-        void UpdateProjectileReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
+        void UpdateImpactReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
+        void UpdateSpineDriveRecovery(bool recovering, float deltaTime, float blendDuration);
+        void BeginWarmupUpperBody(const std::vector<RagdollBodyMotion>& motion, RagdollImpactReaction reaction);
+        void EndWarmupUpperBody();
+        bool AdvanceImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts,
+            float deltaTime) const;
         // 독립 동적 바디의 질량은 충돌 솔버에만 사용한다. PA의 질량과 PD 관절에는 연결하지 않는다.
         bool ConfigureCharacterCapsule(bool enabled, float mass, float radiusScale, float skin, std::string& error,
             float heightScale = 1.0f, const ImpactImpulseSettings& response = {});
@@ -151,10 +179,10 @@ namespace PARS
         void WakeBodies();
         void ConfigureD6JointDrives();
         void ConfigureRootSupportDrives();
-        void RecordProjectileImpacts(const std::vector<RagdollBodyImpulse>& impacts);
-        void YieldImpactJoints(size_t body, bool isRoot, float amount);
+        void RecordImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts) const;
+        void YieldImpactJoints(std::vector<float>& jointYieldTimes, size_t body, bool isRoot, float amount) const;
         std::vector<float> ComputeSupportGeneralizedForce();
-        void InvalidateContactState();
+        void InvalidateContactState(bool resetReaction = true);
         void RefreshCharacterImpactFilters(bool updateSimulationFilters = true);
 
     public:
@@ -240,6 +268,11 @@ namespace PARS
             return m_MaxTargetClampAngle;
         }
         size_t GetKinematicBodyCount() const;
+        std::vector<RagdollBodyMotion> GetUpperBodyMotion(const physx::PxVec3& center, const physx::PxVec3& addedSpin) const;
+        bool IsWarmupDynamicBody(size_t body) const
+        {
+            return body < m_WarmupDynamicBodies.size() && m_WarmupDynamicBodies[body] != 0;
+        }
         size_t GetBodyCount() const
         {
             return m_Bodies.size();
@@ -272,6 +305,10 @@ namespace PARS
         {
             return !m_ArmWounds.empty();
         }
+        const RagdollImpactReaction& GetImpactReaction() const
+        {
+            return m_ImpactReaction;
+        }
         std::vector<RagdollImpactResponse> GetImpactResponses(const std::vector<RagdollBodyImpulse>& impacts) const;
         physx::PxVec3 GetImpactAngularVelocity(const physx::PxVec3& center, const physx::PxVec3& angularImpulse) const;
         void CaptureExternalImpacts(std::vector<RagdollBodyImpulse>& impacts) const;
@@ -279,8 +316,6 @@ namespace PARS
         bool HasApproachingImpact(float minimumDeltaVelocity, float deferCapsuleDeltaVelocity = PX_MAX_F32) const;
         int GetImpactRootBody() const;
         bool IsCharacterImpactBody(size_t body) const;
-        bool GetTorsoBalanceSample(const TorsoBalanceRig& rig, TorsoBalanceSample& sample) const;
-        void SetTorsoTorqueLimits(const TorsoBalanceRig& rig, float torque);
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;
         physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
         float GetImpactRootYawSpeed() const;
@@ -312,8 +347,7 @@ namespace PARS
 
     private:
         float GetJointDriveStrength(size_t jointIndex) const;
-        float GetProjectileJointDriveScale(size_t jointIndex) const;
-        float GetTorsoTorqueLimit(size_t joint, int axis) const;
+        float GetJointPDScale(size_t jointIndex, float driveStrength) const;
         float GetProjectilePelvisDriveScale() const;
 
     private:
@@ -331,11 +365,9 @@ namespace PARS
         mutable uint64_t m_ImpactSampleClock = UINT64_MAX;
         uint64_t m_ArmWoundClock = UINT64_MAX;
         std::vector<ArmWound> m_ArmWounds;
-        uint64_t m_ProjectileReactionStep = UINT64_MAX;
-        uint64_t m_ProjectileReactionClock = UINT64_MAX;
-        std::vector<physx::PxVec3> m_TorsoTorqueLimits;
+        RagdollImpactReaction m_ImpactReaction;
+        std::vector<uint8_t> m_WarmupDynamicBodies;
         mutable std::vector<RagdollBodyImpulse> m_ExternalImpacts;
-        std::vector<float> m_JointYieldTimes;
         PhysicsAsset m_Asset;
         PhysicsWorld* m_World = nullptr;
         std::vector<std::string> m_BoneNames;
@@ -359,7 +391,6 @@ namespace PARS
         int m_ArticulationRoot = -1;
         int m_SupportBody = -1;
         float m_RootSupportWeight = 0;
-        float m_PelvisYieldTime = 0;
         float m_ArmDriveStrength = 1.0f;
         float m_ArmDriveOverride = -1.0f;
         std::array<float, 2> m_ArmDriveScales{1.0f, 1.0f};

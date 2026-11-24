@@ -101,7 +101,7 @@ namespace PARS
         public:
             bool ApplyCapsuleImpacts(const std::vector<RagdollBodyImpulse>& impacts);
             ImpactWarmupStep PlanStep(const FootstepPolygon& hull, const physx::PxVec3& com, const physx::PxVec3& velocity,
-                const TorsoBalance& torso, bool secondStep) const;
+                bool secondStep) const;
 
         public:
             float GetLandingSoleYaw(size_t stepIndex) const;
@@ -113,6 +113,7 @@ namespace PARS
             Math::AffineTransform actorAtStart{Math::kIdentity};
             std::vector<GraphNode> sourcePose;
             std::vector<GraphNode> pose;
+            std::vector<GraphNode> drivePose;
             std::vector<Math::Matrix4> sourceBones;
             std::array<TwoBoneIKInput, 2> legs;
             std::array<ImpactWarmupStep, 2> steps;
@@ -123,9 +124,6 @@ namespace PARS
             physx::PxVec3 sweepStart{0};
             physx::PxVec3 sweepCenter{0};
             physx::PxVec3 turnPivotInComponent{0};
-            physx::PxVec3 catchVelocity{0};
-            physx::PxVec3 catchOffset{0};
-            physx::PxVec3 previousPivot{0};
             float mass = 0;
             float torsoMass = 0;
             float slideDeceleration = 0;
@@ -175,17 +173,10 @@ namespace PARS
         bool EvaluateAnimationPhysicsPose(const PhysicsSkeleton& skeleton, std::vector<Math::Matrix4>& worldPose,
             std::string& error, const std::vector<GraphNode>* poseOverride = nullptr) const;
         void DestroyPhysicsState();
-        void UpdateKinematicPose(bool teleport);
+        bool UpdateKinematicPose(bool teleport);
         void UpdatePhysicsPose();
         void UpdateFootSupport();
         void UpdateHorizontalBalance(float deltaTime);
-        bool InitializeTorsoBalance(TorsoBalanceRig& rig, TorsoBalance& balance, TorsoBalanceSample& sample);
-        bool IsAboveTorsoPivot(const TorsoBalanceRig& rig, size_t body) const;
-        void StartDynamicTorsoBalance(const std::vector<RagdollBodyImpulse>& impacts);
-        void UpdateDynamicTorsoBalance(float deltaTime);
-        void ResetTorsoBalance();
-        void ApplyTorsoBalancePose(std::vector<Math::Matrix4>& worldPose) const;
-        bool UpdateWarmupTorsoPose(float deltaTime);
         void ApplyCrossStepDrivePose(const FootSupportSnapshot& support, float deltaTime, std::vector<Math::Matrix4>& target);
         void ResetCrossStepPlayback();
         void UpdateImpactFlail(bool triggerReaction, float deltaTime);
@@ -198,9 +189,11 @@ namespace PARS
         void UpdateFootCandidateDebugColors();
         bool UpdateAutomaticRootSupport(std::string& error);
         bool UpdateAutomaticRagdoll(float deltaTime, bool firstHit);
-        void ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
+        void ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts,
+            const std::vector<RagdollBodyImpulse>& kinematicImpacts, float deltaTime);
+        void ResetImpactWarmup();
         bool UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses);
-        bool BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses);
+        bool BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses, float deltaTime);
         bool AdvanceImpactWarmup(float deltaTime);
         bool FinishImpactWarmup(bool lostFloor, bool replayCapsuleImpacts = false);
         bool UpdateBalanceState(float deltaTime);
@@ -353,10 +346,6 @@ namespace PARS
         {
             return m_HorizontalBalance.GetSnapshot();
         }
-        const TorsoBalance& GetTorsoBalance() const
-        {
-            return m_TorsoBalance;
-        }
         HorizontalBalanceSettings& GetHorizontalBalanceSettings()
         {
             return m_HorizontalBalanceSettings;
@@ -431,8 +420,6 @@ namespace PARS
         ModelInstance m_ModelInstance;
         FootSupport m_FootSupport;
         ImpactWarmup m_ImpactWarmup;
-        TorsoBalanceRig m_TorsoRig;
-        uint64_t m_TorsoClock = UINT64_MAX;
         std::unique_ptr<AnimInstance> m_AnimInstance;
         std::unique_ptr<const PhysicsAsset> m_PhysicsAsset;
         Ragdoll m_Ragdoll;
@@ -461,8 +448,6 @@ namespace PARS
         RecoverySettings m_RecoverySettings;
         StandingSupportSettings m_StandingSupportSettings;
         HorizontalBalanceSettings m_HorizontalBalanceSettings;
-        TorsoBalance m_TorsoBalance;
-        physx::PxVec3 m_PreviousPivotVelocity{0};
         std::array<FallArmSetup, 2> m_FallArmSetups;
         std::array<physx::PxTransform, 2> m_RecoverySoles{
             physx::PxTransform(physx::PxIdentity), physx::PxTransform(physx::PxIdentity)};

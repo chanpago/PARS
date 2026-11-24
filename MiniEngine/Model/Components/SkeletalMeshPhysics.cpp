@@ -2,6 +2,7 @@
 #include "FramePerformance.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/World.h"
+#include "PhysicsWorld.h"
 #include "../FootstepPoseValidation.h"
 #include <algorithm>
 #include <chrono>
@@ -506,8 +507,7 @@ namespace PARS
         }
         if (enabled != m_AutomaticRootSupport)
         {
-            ResetTorsoBalance();
-            m_ImpactWarmup = {};
+            ResetImpactWarmup();
             m_RootSupportRelease = RootSupportRelease::None;
             m_FootSupport.ResetFootstep();
             ResetRecovery();
@@ -582,7 +582,6 @@ namespace PARS
 
     void SkeletalMeshComponent::DestroyPhysicsState()
     {
-        ResetTorsoBalance();
         ResetAirborneFall();
         ResetFallArms();
         m_FallArmsInitialized = false;
@@ -603,20 +602,48 @@ namespace PARS
         m_PendingDriveSettings.reset();
     }
 
-    void SkeletalMeshComponent::UpdateKinematicPose(bool teleport)
+    bool SkeletalMeshComponent::UpdateKinematicPose(bool teleport)
     {
         if (!m_Ragdoll.IsActive() || IsRagdoll())
         {
-            return;
+            return false;
         }
+        const bool warmup = IsImpactWarmupActive();
+        const Matrix4 component(GetComponentTransform());
         std::vector<Matrix4> worldPose;
-        const bool evaluated = IsBlendingToKinematic() || IsImpactWarmupActive() ?
-            EvaluatePhysicsPose(m_PhysicsSkeleton, GetFinalPose(), Matrix4(GetComponentTransform()), worldPose, m_PhysicsError) :
+        const bool evaluated = warmup || IsBlendingToKinematic() ?
+            EvaluatePhysicsPose(m_PhysicsSkeleton, warmup ? m_ImpactWarmup.drivePose : GetFinalPose(), component, worldPose, m_PhysicsError) :
             EvaluateAnimationPhysicsPose(m_PhysicsSkeleton, worldPose, m_PhysicsError);
-        if (evaluated)
+        if (!evaluated || !m_Ragdoll.UpdateKinematicPose(worldPose, teleport, m_PhysicsError))
         {
-            m_Ragdoll.UpdateKinematicPose(worldPose, teleport, m_PhysicsError);
+            return false;
         }
+        if (!warmup)
+        {
+            return true;
+        }
+        if (!teleport && !m_Ragdoll.UpdateDriveTargets(worldPose, static_cast<float>(PhysicsWorld::FixedDeltaTime), m_PhysicsError))
+        {
+            return false;
+        }
+        // 화면에는 솔버가 구한 상체를 쓰고, 다음 스텝의 PD 목표는 애니메이션에서 독립적으로 읽는다.
+        std::vector<int> nodes;
+        std::vector<Matrix4> targets;
+        for (size_t body = 0; body < m_Ragdoll.GetBodyCount(); ++body)
+        {
+            if (m_Ragdoll.IsWarmupDynamicBody(body))
+            {
+                const int node = m_Ragdoll.GetBoneNodes()[body];
+                nodes.push_back(node);
+                targets.push_back(m_Ragdoll.GetBoneWorld(body) * Invert(PhysicsBoneFrame(worldPose[node])) * worldPose[node]);
+            }
+        }
+        if (!OverridePhysicsPose(m_PhysicsSkeleton, m_ImpactWarmup.drivePose, component, nodes, targets, m_ImpactWarmup.pose))
+        {
+            m_PhysicsError = "Invalid upper-body warmup pose.";
+            return false;
+        }
+        return true;
     }
 
     bool SkeletalMeshComponent::BuildPhysicsSkeleton(PhysicsSkeleton& skeleton, std::string& error) const
@@ -744,6 +771,12 @@ namespace PARS
         {
             return false;
         }
+        const bool wasInWarmup = IsImpactWarmupActive();
+        RagdollImpactReaction warmupReaction;
+        if (wasInWarmup)
+        {
+            warmupReaction = m_Ragdoll.GetImpactReaction();
+        }
         if (active && !m_Ragdoll.UpdateDriveTargets(worldPose, 0, error))
         {
             return false;
@@ -775,16 +808,13 @@ namespace PARS
         m_PhysicsMode = mode;
         if (!active)
         {
-            ResetTorsoBalance();
             ResetAirborneFall();
         }
         ResetFallArms();
-        const bool wasInWarmup = IsImpactWarmupActive();
-        m_Ragdoll.SetDrivesEnabled(active);
+        m_Ragdoll.SetDrivesEnabled(active, wasInWarmup ? &warmupReaction : nullptr);
         if (wasInWarmup)
         {
-            m_Ragdoll.SetTorsoTorqueLimits(m_TorsoRig, m_TorsoBalance.GetHipTorqueLimit());
-            m_ImpactWarmup = {};
+            ResetImpactWarmup();
         }
         UpdatePhysicsPose();
         UpdateFootSupport();
@@ -866,8 +896,7 @@ namespace PARS
 
     void SkeletalMeshComponent::StopRagdoll()
     {
-        ResetTorsoBalance();
-        m_ImpactWarmup = {};
+        ResetImpactWarmup();
         ResetFallArms();
         if (!IsRagdoll())
         {

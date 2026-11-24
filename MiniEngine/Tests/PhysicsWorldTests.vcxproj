@@ -59,7 +59,6 @@
     <ClCompile Include="..\Model\FootstepAvoidance.cpp" />
     <ClCompile Include="StandingSupportTests.cpp" />
     <ClCompile Include="HorizontalBalanceTests.cpp" />
-    <ClCompile Include="..\Model\TorsoBalance.cpp" />
     <ClCompile Include="..\Model\HorizontalBalance.cpp" />
     <ClCompile Include="..\Model\StandingSupport.cpp" />
     <ClCompile Include="..\Core\PhysicsWorld.cpp" />

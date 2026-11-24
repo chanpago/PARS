@@ -1,5 +1,4 @@
 ﻿#include "../Model/HorizontalBalance.h"
-#include "../Model/TorsoBalance.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -39,49 +38,6 @@ namespace
         }
         return input;
     }
-}
-
-void TestTorsoBalance()
-{
-    TorsoBalanceSample body;
-    body.mass = 20;
-    body.height = .25f;
-    body.inertia = 1.8f;
-    body.gravity = 9.81f;
-    const float dt = 1.0f / 60.0f;
-    for (const PxVec3& direction : {PxVec3(0, 0, -1), PxVec3(1, 0, 0)})
-    {
-        TorsoBalance free;
-        free.Begin(body, PxVec3(0));
-        const PxVec3 impulse = direction * 12.0f;
-        free.AddAngularImpulse(PxVec3(0, .30f, 0).cross(impulse));
-        TorsoBalance blocked = free;
-        TorsoBalance light;
-        light.Begin(body, PxVec3(0));
-        light.AddAngularImpulse(PxVec3(0, .30f, 0).cross(impulse * .05f));
-        CheckBalance(free.rate.dot(direction) > 1.9f && free.GetLandingOffset(.2f).dot(direction) > 0,
-            "The chest impact requests a catch in the direction the torso is falling");
-        float peakFree = 0;
-        float peakLight = 0;
-        for (int tick = 0; tick < 100; ++tick)
-        {
-            const PxVec3 request = free.GetRequestedAcceleration();
-            const float applied = PxClamp(request.dot(direction), -4.0f, 4.0f);
-            free.Advance(dt, direction * (applied * dt));
-            blocked.Advance(dt, PxVec3(0));
-            light.Advance(dt, PxVec3(0));
-            peakFree = PxMax(peakFree, free.lean.dot(direction));
-            peakLight = PxMax(peakLight, light.lean.dot(direction));
-        }
-        CheckBalance(peakFree > .05f && free.lean.magnitude() < .02f && blocked.lean.dot(direction) > .65f,
-            "With identical impacts only the moving pelvis catches the strong shove");
-        CheckBalance(peakLight > .001f && light.lean.magnitude() < .01f,
-            "Limited hip torque can catch a small shove with the feet and pelvis stationary");
-        std::printf("torso axis=(%.0f,%.0f) free_peak_deg=%.2f free_end_deg=%.2f blocked_end_deg=%.2f weak_peak_deg=%.2f\n",
-            direction.x, direction.z, peakFree * 180 / PxPi, free.lean.magnitude() * 180 / PxPi,
-            blocked.lean.magnitude() * 180 / PxPi, peakLight * 180 / PxPi);
-    }
-    std::puts("PASS: torso pendulum, equal impacts with free and constrained pelvis, weak impact and lateral symmetry");
 }
 
 void TestHorizontalBalance()

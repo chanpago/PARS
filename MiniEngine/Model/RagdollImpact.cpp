@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <utility>
 
 using namespace physx;
 
@@ -111,14 +112,26 @@ namespace PARS
 
     void Ragdoll::ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts)
     {
-        if (!IsSimulating())
-        {
-            return;
-        }
         // 키네마틱 바디가 받지 못했던 충격만 전환 직후 동일한 접촉점에 한 번 적용한다.
         for (const RagdollBodyImpulse& impact : impacts)
         {
-            if (impact.body < m_Bodies.size() && impact.position.isFinite() && impact.impulse.isFinite())
+            if (impact.body >= m_Bodies.size() || !impact.position.isFinite() || !impact.impulse.isFinite())
+            {
+                continue;
+            }
+            if (IsWarmupDynamicBody(impact.body))
+            {
+                // 첫 발을 내딛기 전에 예열이 끝나도 접촉으로 얻은 속도가 새 솔버에 인계되도록 한다.
+                PxRigidDynamic& body = *m_Bodies[impact.body]->is<PxRigidDynamic>();
+                const PxVec3 center = (body.getGlobalPose() * body.getCMassLocalPose()).p;
+                const PxVec3 angularImpulse = (impact.position - center).cross(impact.impulse);
+                PxVec3 linearChange(0);
+                PxVec3 angularChange(0);
+                PxRigidBodyExt::computeVelocityDeltaFromImpulse(body, impact.impulse, angularImpulse, linearChange, angularChange);
+                body.setLinearVelocity(body.getLinearVelocity() + linearChange);
+                body.setAngularVelocity(body.getAngularVelocity() + angularChange);
+            }
+            else if (IsSimulating())
             {
                 ApplyImpulseAtPoint(*m_Bodies[impact.body], impact.impulse, impact.position);
             }
@@ -147,13 +160,14 @@ namespace PARS
 
     namespace
     {
-        constexpr float ProjectileHoldTime = .08f;
-        constexpr float ProjectileRecoveryTime = .24f;
-        constexpr float ProjectileResponseTime = ProjectileHoldTime + ProjectileRecoveryTime;
+        constexpr float ImpactHoldTime = .08f;
+        constexpr float ImpactRecoveryTime = .24f;
+        constexpr float ImpactResponseTime = ImpactHoldTime + ImpactRecoveryTime;
+        constexpr float ImpactSpineDriveScale = .25f;
 
-        float ProjectileYield(float remaining)
+        float ImpactYield(float remaining)
         {
-            const float t = PxClamp(remaining / ProjectileRecoveryTime, 0.0f, 1.0f);
+            const float t = PxClamp(remaining / ImpactRecoveryTime, 0.0f, 1.0f);
             return t * t * (3.0f - 2.0f * t);
         }
 
@@ -179,6 +193,81 @@ namespace PARS
                 lower.find("foot") != std::string::npos || lower.find("ankle") != std::string::npos ||
                 lower.find("toe") != std::string::npos;
         }
+    }
+
+    std::vector<RagdollBodyMotion> Ragdoll::GetUpperBodyMotion(const PxVec3& center, const PxVec3& addedSpin) const
+    {
+        std::vector<RagdollBodyMotion> motion;
+        const int root = GetImpactRootBody();
+        for (size_t body = 0; body < m_Bodies.size(); ++body)
+        {
+            // 척추의 자손인 팔과 머리도 풀어야 키네마틱 자식이 가슴을 고정하지 않는다.
+            int ancestor = static_cast<int>(body);
+            for (size_t depth = 0; depth < m_Bodies.size() && ancestor >= 0 && ancestor != root; ++depth)
+            {
+                const std::string& bone = m_Asset.bodies[ancestor].bone;
+                if (IsSpine(bone))
+                {
+                    const PxRigidBody& rigid = *m_Bodies[body];
+                    const PxVec3 offset = (rigid.getGlobalPose() * rigid.getCMassLocalPose()).p - center;
+                    motion.push_back({body, rigid.getLinearVelocity() + addedSpin.cross(offset), rigid.getAngularVelocity() + addedSpin});
+                    break;
+                }
+                const std::vector<PhysicsConstraint>::const_iterator parent = std::find_if(m_Asset.constraints.begin(),
+                    m_Asset.constraints.end(), [&bone](const PhysicsConstraint& joint) -> bool
+                    {
+                        return joint.childBone == bone;
+                    });
+                ancestor = parent == m_Asset.constraints.end() ? -1 : m_Asset.FindBody(parent->parentBone);
+            }
+        }
+        return motion;
+    }
+
+    void Ragdoll::BeginWarmupUpperBody(const std::vector<RagdollBodyMotion>& motion, RagdollImpactReaction reaction)
+    {
+        if (IsSimulating() || !m_WarmupDynamicBodies.empty())
+        {
+            return;
+        }
+        m_WarmupDynamicBodies.assign(m_Bodies.size(), 0);
+        for (const RagdollBodyMotion& entry : motion)
+        {
+            if (entry.body >= m_Bodies.size() || !entry.linear.isFinite() || !entry.angular.isFinite())
+            {
+                continue;
+            }
+            PxRigidDynamic* body = m_Bodies[entry.body]->is<PxRigidDynamic>();
+            body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, false);
+            body->setLinearVelocity(entry.linear);
+            body->setAngularVelocity(entry.angular);
+            body->wakeUp();
+            m_WarmupDynamicBodies[entry.body] = 1;
+        }
+        m_ImpactReaction = std::move(reaction);
+        RefreshCharacterImpactFilters(false);
+        ResetDriveTargetHistory();
+        ConfigureD6JointDrives();
+    }
+
+    void Ragdoll::EndWarmupUpperBody()
+    {
+        if (m_WarmupDynamicBodies.empty())
+        {
+            return;
+        }
+        for (size_t i = 0; i < m_Bodies.size(); ++i)
+        {
+            if (IsWarmupDynamicBody(i))
+            {
+                m_Bodies[i]->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+            }
+        }
+        m_WarmupDynamicBodies.clear();
+        m_ImpactReaction = {};
+        RefreshCharacterImpactFilters(false);
+        ConfigureD6JointDrives();
+        ResetDriveTargetHistory();
     }
 
     bool Ragdoll::IsPrimaryProjectileHit(const RagdollBodyImpulse& hit, const std::vector<RagdollBodyImpulse>& impacts) const
@@ -383,57 +472,90 @@ namespace PARS
         AddVelocity(Math::Vector3(linear.x, linear.y, linear.z));
     }
 
-    float Ragdoll::GetProjectileJointDriveScale(size_t jointIndex) const
+    float RagdollImpactReaction::GetJointDriveScale(size_t joint) const
     {
-        return jointIndex < m_JointYieldTimes.size() ? 1.0f - .96f * ProjectileYield(m_JointYieldTimes[jointIndex]) : 1.0f;
+        return joint < jointYieldTimes.size() ? 1.0f - .96f * ImpactYield(jointYieldTimes[joint]) : 1.0f;
+    }
+
+    float Ragdoll::GetJointPDScale(size_t jointIndex, float driveStrength) const
+    {
+        if (m_ImpactReaction.spineDriveScale < driveStrength && IsSpine(m_Asset.constraints[jointIndex].childBone))
+        {
+            return m_ImpactReaction.spineDriveScale;
+        }
+        return driveStrength;
+    }
+
+    void Ragdoll::UpdateSpineDriveRecovery(bool recovering, float deltaTime, float blendDuration)
+    {
+        if (!m_DrivesEnabled || m_ImpactReaction.spineDriveScale >= 1.0f || !std::isfinite(deltaTime) ||
+            deltaTime <= 0 || !std::isfinite(blendDuration) || blendDuration <= 0)
+        {
+            return;
+        }
+        const float previous = m_ImpactReaction.spineDriveScale;
+        m_ImpactReaction.spineDriveScale = recovering ? ImpactSpineDriveScale :
+            PxMin(1.0f, previous + (1.0f - ImpactSpineDriveScale) * deltaTime / blendDuration);
+        if (m_ImpactReaction.spineDriveScale != previous && !m_Articulation)
+        {
+            ConfigureD6JointDrives();
+        }
     }
 
     float Ragdoll::GetProjectilePelvisDriveScale() const
     {
-        return 1.0f - .85f * ProjectileYield(m_PelvisYieldTime);
+        return 1.0f - .85f * ImpactYield(m_ImpactReaction.projectilePelvisYieldTime);
     }
 
-    void Ragdoll::UpdateProjectileReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
+    void Ragdoll::UpdateImpactReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
     {
-        if (!m_World || !m_DrivesEnabled || !std::isfinite(deltaTime) || deltaTime <= 0)
-        {
-            return;
-        }
-        const uint64_t clock = m_World->GetClockRevision();
-        const uint64_t step = m_World->GetStepCount();
-        const bool hadReaction = !m_JointYieldTimes.empty() || m_PelvisYieldTime > 0;
-        if (m_ProjectileReactionClock != clock)
-        {
-            m_JointYieldTimes.clear();
-            m_PelvisYieldTime = 0;
-        }
-        else if (m_ProjectileReactionStep == step)
-        {
-            return;
-        }
-        m_ProjectileReactionClock = clock;
-        m_ProjectileReactionStep = step;
-        m_PelvisYieldTime = PxMax(0.0f, m_PelvisYieldTime - deltaTime);
-        for (float& remaining : m_JointYieldTimes)
-        {
-            remaining = PxMax(0.0f, remaining - deltaTime);
-        }
-        RecordProjectileImpacts(impacts);
-        if (std::none_of(m_JointYieldTimes.begin(), m_JointYieldTimes.end(), [](float time) -> bool
-            {
-                return time > 0;
-            }))
-        {
-            m_JointYieldTimes.clear();
-        }
-        if (!m_Articulation && (hadReaction || !m_JointYieldTimes.empty() || m_PelvisYieldTime > 0))
+        if ((m_DrivesEnabled || !m_WarmupDynamicBodies.empty()) &&
+            AdvanceImpactReaction(m_ImpactReaction, impacts, deltaTime) && !m_Articulation)
         {
             ConfigureD6JointDrives();
             ConfigureRootSupportDrives();
         }
     }
 
-    void Ragdoll::RecordProjectileImpacts(const std::vector<RagdollBodyImpulse>& impacts)
+    bool Ragdoll::AdvanceImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts,
+        float deltaTime) const
+    {
+        if (!m_World || !std::isfinite(deltaTime) || deltaTime <= 0)
+        {
+            return false;
+        }
+        const uint64_t clock = m_World->GetClockRevision();
+        const uint64_t step = m_World->GetStepCount();
+        const bool localDrivesChanged = !reaction.jointYieldTimes.empty() || reaction.projectilePelvisYieldTime > 0;
+        const float previousSpineScale = reaction.spineDriveScale;
+        if (reaction.clock != clock)
+        {
+            reaction = {};
+        }
+        else if (reaction.step == step)
+        {
+            return false;
+        }
+        reaction.clock = clock;
+        reaction.step = step;
+        reaction.projectilePelvisYieldTime = PxMax(0.0f, reaction.projectilePelvisYieldTime - deltaTime);
+        for (float& remaining : reaction.jointYieldTimes)
+        {
+            remaining = PxMax(0.0f, remaining - deltaTime);
+        }
+        RecordImpactReaction(reaction, impacts);
+        if (std::none_of(reaction.jointYieldTimes.begin(), reaction.jointYieldTimes.end(), [](float time) -> bool
+            {
+                return time > 0;
+            }))
+        {
+            reaction.jointYieldTimes.clear();
+        }
+        return localDrivesChanged || !reaction.jointYieldTimes.empty() || reaction.projectilePelvisYieldTime > 0 ||
+            reaction.spineDriveScale != previousSpineScale;
+    }
+
+    void Ragdoll::RecordImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts) const
     {
         // 한 번의 접촉이 여러 점으로 나뉘어도 같은 바디의 충격량과 골반 기준 각충격량을 합친다.
         std::vector<PxVec3> impulses;
@@ -442,7 +564,7 @@ namespace PARS
         int root = -1;
         for (const RagdollBodyImpulse& hit : impacts)
         {
-            if (!hit.fromProjectile || hit.body >= m_Bodies.size() ||
+            if ((!hit.fromProjectile && !hit.newCapsuleHit) || hit.body >= m_Bodies.size() ||
                 !hit.position.isFinite() || !hit.impulse.isFinite() || hit.impulse.magnitudeSquared() < 1e-8f)
             {
                 continue;
@@ -458,8 +580,15 @@ namespace PARS
                 pelvisCenter = (pelvis.getGlobalPose() * pelvis.getCMassLocalPose()).p;
                 impulses.resize(m_Bodies.size(), PxVec3(0));
             }
+            if (hit.newCapsuleHit && IsCharacterImpactBody(hit.body))
+            {
+                reaction.spineDriveScale = ImpactSpineDriveScale;
+            }
             impulses[hit.body] += hit.impulse;
-            angularImpulse += (hit.position - pelvisCenter).cross(hit.impulse);
+            if (hit.fromProjectile)
+            {
+                angularImpulse += (hit.position - pelvisCenter).cross(hit.impulse);
+            }
         }
         if (impulses.empty())
         {
@@ -470,9 +599,10 @@ namespace PARS
         {
             totalMass += body->getMass();
         }
-        // 지렛팔 30cm를 기준으로 전신을 돌릴 만큼 큰 충격일 때만 골반의 회전 보조도 잠시 줄인다.
+        // 투사체의 각충격량만 골반의 회전 보조를 줄인다. 캡슐은 피격 관절의 구동에만 반영한다.
         const float rotation = angularImpulse.magnitude() / (.3f * totalMass);
-        m_PelvisYieldTime = PxMax(m_PelvisYieldTime, ProjectileResponseTime * PxClamp((rotation - .1f) / .65f, 0.0f, 1.0f));
+        reaction.projectilePelvisYieldTime = PxMax(reaction.projectilePelvisYieldTime,
+            ImpactResponseTime * PxClamp((rotation - .1f) / .65f, 0.0f, 1.0f));
         for (size_t body = 0; body < impulses.size(); ++body)
         {
             const float mass = PxMax(m_Bodies[body]->getMass(), .06f * totalMass);
@@ -480,14 +610,14 @@ namespace PARS
             const float amount = PxClamp((speedChange - .4f) / 3.5f, 0.0f, 1.0f);
             if (amount > 0)
             {
-                YieldImpactJoints(body, body == static_cast<size_t>(root), amount);
+                YieldImpactJoints(reaction.jointYieldTimes, body, body == static_cast<size_t>(root), amount);
             }
         }
     }
 
-    void Ragdoll::YieldImpactJoints(size_t body, bool isRoot, float amount)
+    void Ragdoll::YieldImpactJoints(std::vector<float>& jointYieldTimes, size_t body, bool isRoot, float amount) const
     {
-        m_JointYieldTimes.resize(m_Asset.constraints.size(), 0);
+        jointYieldTimes.resize(m_Asset.constraints.size(), 0);
         const std::string& hitBone = m_Asset.bodies[body].bone;
         if (isRoot || IsSpine(hitBone))
         {
@@ -496,7 +626,7 @@ namespace PARS
                 const PhysicsConstraint& child = m_Asset.constraints[joint];
                 if (child.parentBone == hitBone && IsSpine(child.childBone))
                 {
-                    m_JointYieldTimes[joint] = PxMax(m_JointYieldTimes[joint], ProjectileResponseTime * amount * .84f);
+                    jointYieldTimes[joint] = PxMax(jointYieldTimes[joint], ImpactResponseTime * amount * .84f);
                 }
             }
         }
@@ -514,7 +644,7 @@ namespace PARS
                 break;
             }
             const size_t index = static_cast<size_t>(joint - m_Asset.constraints.begin());
-            m_JointYieldTimes[index] = PxMax(m_JointYieldTimes[index], ProjectileResponseTime * amount);
+            jointYieldTimes[index] = PxMax(jointYieldTimes[index], ImpactResponseTime * amount);
             bone = &joint->parentBone;
             amount *= .80f;
         }
@@ -522,7 +652,7 @@ namespace PARS
 
     bool Ragdoll::IsTopplingFromProjectile() const
     {
-        if (m_PelvisYieldTime <= 0)
+        if (m_ImpactReaction.projectilePelvisYieldTime <= 0)
         {
             return false;
         }
@@ -646,103 +776,6 @@ namespace PARS
         return rigid.getLinearVelocity() + rigid.getAngularVelocity().cross(point - center);
     }
 
-    bool Ragdoll::BuildTorsoBalanceRig(TorsoBalanceRig& rig) const
-    {
-        rig = {};
-        const int root = GetImpactRootBody();
-        if (root < 0)
-        {
-            return false;
-        }
-        rig.pelvis = static_cast<size_t>(root);
-        rig.pelvisNode = m_BoneNodes[root];
-        int parent = root;
-        // 물리 에셋의 연결 순서를 따라가므로 척추 이름의 번호나 바디 배열 순서에 의존하지 않는다.
-        for (size_t depth = 0; depth < m_Bodies.size(); ++depth)
-        {
-            const std::vector<PhysicsConstraint>::const_iterator joint = std::find_if(m_Asset.constraints.begin(),
-                m_Asset.constraints.end(), [this, parent](const PhysicsConstraint& entry) -> bool
-                {
-                    return entry.parentBone == m_Asset.bodies[parent].bone && IsSpine(entry.childBone);
-                });
-            if (joint == m_Asset.constraints.end())
-            {
-                break;
-            }
-            const int child = m_Asset.FindBody(joint->childBone);
-            if (child < 0)
-            {
-                return false;
-            }
-            if (parent == root)
-            {
-                rig.anchorInPelvis = PxVec3(joint->parentFrame.offset.x, joint->parentFrame.offset.y, joint->parentFrame.offset.z);
-                const Math::Vector3 anchor(m_Asset.bodies[root].GetLocalTransform() *
-                    Math::Vector3(rig.anchorInPelvis.x, rig.anchorInPelvis.y, rig.anchorInPelvis.z));
-                rig.anchorInPelvisBone = PxVec3(anchor.GetX(), anchor.GetY(), anchor.GetZ());
-            }
-            TorsoBalanceLink link;
-            link.body = static_cast<size_t>(child);
-            link.joint = static_cast<size_t>(joint - m_Asset.constraints.begin());
-            link.node = m_BoneNodes[child];
-            link.mass = m_Bodies[child]->getMass();
-            const PxVec3 localCenter = m_Bodies[child]->getCMassLocalPose().p;
-            const Math::Matrix4 shape = m_Asset.bodies[child].GetLocalTransform();
-            const Math::Vector3 center(shape * Math::Vector3(localCenter.x, localCenter.y, localCenter.z));
-            const Math::Vector3 anchor(shape * Math::Vector3(joint->childFrame.offset));
-            link.centerInBone = PxVec3(center.GetX(), center.GetY(), center.GetZ());
-            link.anchorInBone = PxVec3(anchor.GetX(), anchor.GetY(), anchor.GetZ());
-            rig.links.push_back(link);
-            parent = child;
-        }
-        return !rig.links.empty();
-    }
-
-    bool Ragdoll::GetTorsoBalanceSample(const TorsoBalanceRig& rig, TorsoBalanceSample& sample) const
-    {
-        sample = {};
-        if (rig.links.empty() || rig.pelvis >= m_Bodies.size() || !m_Bodies[rig.pelvis]->getScene())
-        {
-            return false;
-        }
-        sample.pivot = m_Bodies[rig.pelvis]->getGlobalPose().transform(rig.anchorInPelvis);
-        sample.pivotVelocity = GetBodyPointVelocity(rig.pelvis, sample.pivot);
-        sample.gravity = -m_Bodies[rig.pelvis]->getScene()->getGravity().y;
-        PxVec3 arm(0);
-        PxVec3 velocity(0);
-        for (const TorsoBalanceLink& link : rig.links)
-        {
-            if (link.body >= m_Bodies.size())
-            {
-                return false;
-            }
-            const PxRigidBody& body = *m_Bodies[link.body];
-            const PxTransform center = body.getGlobalPose() * body.getCMassLocalPose();
-            const PxVec3 displacement = center.p - sample.pivot;
-            const float mass = body.getMass();
-            sample.mass += mass;
-            arm += displacement * mass;
-            velocity += (body.getLinearVelocity() - sample.pivotVelocity) * mass;
-            // 좌우와 전후 굽힘에 쓰는 수평 두 축의 평균 관성이다. 각 바디의 고유 관성과 평행축 항을 모두 더한다.
-            const PxVec3 moments = body.getMassSpaceInertiaTensor();
-            const PxVec3 up = center.q.rotateInv(PxVec3(0, 1, 0));
-            const float verticalInertia = moments.dot(up.multiply(up));
-            sample.inertia += .5f * (moments.x + moments.y + moments.z - verticalInertia +
-                mass * (displacement.magnitudeSquared() + displacement.y * displacement.y));
-        }
-        arm /= sample.mass;
-        velocity /= sample.mass;
-        const float radiusSquared = arm.magnitudeSquared();
-        if (radiusSquared < .0004f || !arm.isFinite() || !velocity.isFinite() || !std::isfinite(sample.inertia))
-        {
-            return false;
-        }
-        sample.height = arm.y;
-        sample.lean = TorsoBalance::GetLean(arm);
-        sample.rate = arm.cross(velocity).cross(PxVec3(0, 1, 0)) / radiusSquared;
-        return true;
-    }
-
     float Ragdoll::GetImpactRootYawSpeed() const
     {
         const int root = GetImpactRootBody();
@@ -822,7 +855,8 @@ namespace PARS
         // 이동 스윕만 켜는 예열 첫 틱에도 이미 성립한 실제 접촉은 유지한다.
         if (policyChanged)
         {
-            InvalidateContactState();
+            // 같은 캐릭터의 충돌 필터를 갱신해도 이미 시작한 관절 회복은 계속한다.
+            InvalidateContactState(false);
         }
         m_CharacterImpactEnabled = enabled;
         m_SweepKinematicTorso = sweepKinematicTorso;
@@ -859,7 +893,7 @@ namespace PARS
                 {
                     shape->setSimulationFilterData(data);
                 }
-                shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, IsSimulating() ||
+                shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, IsSimulating() || IsWarmupDynamicBody(i) ||
                     (m_SweepKinematicTorso && (data.word3 & PhysicsWorld::CharacterImpactTargetFilterFlag) != 0));
             }
             if (updateSimulationFilters && body->getScene())
@@ -941,7 +975,7 @@ namespace PARS
             m_CapsuleSkin = skin;
             m_CharacterCapsuleShape->setContactOffset(PxMax(.001f, skin));
             m_CharacterCapsuleShape->setRestOffset(0);
-            InvalidateContactState();
+            InvalidateContactState(false);
             RefreshCharacterImpactFilters();
             SyncCharacterCapsule();
         }
@@ -1016,7 +1050,7 @@ namespace PARS
         {
             return;
         }
-        InvalidateContactState();
+        InvalidateContactState(false);
         m_CharacterCapsuleBody->release();
         m_CharacterCapsuleBody = nullptr;
         m_CharacterCapsuleShape = nullptr;

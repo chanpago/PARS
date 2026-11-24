@@ -440,7 +440,6 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.hasVelocity = m_Snapshot.hasCenterOfMassVelocity;
     input.com = m_Snapshot.centerOfMass;
     input.velocity = m_Snapshot.centerOfMassVelocity;
-    input.torsoAcceleration = mesh.GetTorsoBalance().GetRequestedAcceleration();
     input.hull = m_Snapshot.hull;
     input.bufferHull = m_Snapshot.balance.bufferHull;
     input.zone = m_Snapshot.balance.zone;

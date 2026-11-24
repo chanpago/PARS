@@ -18,7 +18,6 @@ void TestFootstepIK();
 void TestFootstepCollision();
 void TestStandingSupport();
 void TestHorizontalBalance();
-void TestTorsoBalance();
 
 namespace
 {
@@ -198,7 +197,8 @@ namespace
             "Deliver one local impulse across multiple receiver shapes");
         if (capsule)
         {
-            Check(contacts[0].front().fromCharacterCapsule && !contacts[0].front().newProjectileHit,
+            Check(contacts[0].front().fromCharacterCapsule && !contacts[0].front().newProjectileHit &&
+                contacts[0].front().newCapsuleHit && contacts[1].front().newCapsuleHit,
                 "A capsule impact keeps its source type");
             targets[0]->setGlobalPose(PxTransform(PxVec3(-2, 3, 0)));
             Check(world.SetImpactImpulseSettings(*ball, {3, 12, .5f}), "Edit the capsule preset during a push");
@@ -210,7 +210,7 @@ namespace
                 ball->setLinearVelocity(PxVec3(0, 0, 2));
                 world.Step();
                 Check(world.GetExternalImpactImpulse(*targets[1], &owner, &contacts[1]) > 0 && !contacts[1].empty() &&
-                    contacts[1].front().impactContactId == first && !world.GetImpactResponse(first, response),
+                    contacts[1].front().impactContactId == first && !contacts[1].front().newCapsuleHit && !world.GetImpactResponse(first, response),
                     "Continuing the push on one spine cannot restart the configured impulse");
             }
             // 한 스텝에 이전 본의 접촉이 끝나고 다른 본에서 새 형상 쌍이 생긴다.
@@ -221,7 +221,7 @@ namespace
             ball->setLinearVelocity(PxVec3(0, 0, 2));
             world.Step();
             Check(world.GetExternalImpactImpulse(*targets[0], &owner, &contacts[0]) > 0 && !contacts[0].empty() &&
-                contacts[0].front().impactContactId == first && !world.GetImpactResponse(first, response),
+                contacts[0].front().impactContactId == first && !contacts[0].front().newCapsuleHit && !world.GetImpactResponse(first, response),
                 "Changing the only touching spine in one step keeps the same encounter");
             ball->setGlobalPose(PxTransform(PxVec3(.21f, 3, -2)));
             ball->setLinearVelocity(PxVec3(0));
@@ -230,9 +230,20 @@ namespace
             ball->setLinearVelocity(PxVec3(0, 0, 2));
             world.Step();
             Check(world.GetExternalImpactImpulse(*targets[0], &owner, &contacts[0]) > 0 && !contacts[0].empty() &&
-                contacts[0].front().impactContactId != first && world.GetImpactResponse(contacts[0].front().impactContactId, response) &&
+                contacts[0].front().impactContactId != first && contacts[0].front().newCapsuleHit &&
+                world.GetImpactResponse(contacts[0].front().impactContactId, response) &&
                 std::abs(response.partImpulse.z - 3) < .01f && std::abs(response.impulse.z - 12) < .01f && response.torqueMultiplier == .5f,
                 "A new contact after separation uses the edited capsule settings");
+            Check(world.SetImpactImpulseSettings(*ball, {}), "Disable additional capsule impulses");
+            ball->setGlobalPose(PxTransform(PxVec3(.21f, 3, -2)));
+            ball->setLinearVelocity(PxVec3(0));
+            world.Step();
+            ball->setGlobalPose(PxTransform(PxVec3(.21f, 3, -.215f)));
+            ball->setLinearVelocity(PxVec3(0, 0, 2));
+            world.Step();
+            Check(world.GetExternalImpactImpulse(*targets[0], &owner, &contacts[0]) > 0 && !contacts[0].empty() &&
+                contacts[0].front().newCapsuleHit && !world.GetImpactResponse(contacts[0].front().impactContactId, response),
+                "A capsule's first solver impulse signals a hit even with both extra impulses disabled");
         }
         std::puts(capsule ? "PASS: capsule impact, continuous push and recontact" : "PASS: shared projectile impact");
     }
@@ -584,7 +595,6 @@ int main(int argc, char** argv)
     if (argc == 2 && std::strcmp(argv[1], "--impact-warmup-only") == 0)
     {
         TestImpactWarmupPlanning();
-        TestTorsoBalance();
         return 0;
     }
     if (argc == 2 && std::strcmp(argv[1], "--footstep-only") == 0)
@@ -615,7 +625,6 @@ int main(int argc, char** argv)
     TestFootSupportHull();
     TestFootSupportBalance();
     TestHorizontalBalance();
-    TestTorsoBalance();
     TestFootstepPlanner();
     TestFootstepIK();
     TestFootstepCollision();

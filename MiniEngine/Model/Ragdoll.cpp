@@ -187,7 +187,6 @@ namespace PARS
     }
     void Ragdoll::Destroy()
     {
-        m_TorsoTorqueLimits.clear();
         RemoveCharacterCapsule();
         InvalidateContactState();
         m_ArmWounds.clear();
@@ -233,6 +232,7 @@ namespace PARS
         m_CharacterImpactGroup = 0;
         m_Joints.clear();
         m_Bodies.clear();
+        m_WarmupDynamicBodies.clear();
         m_BoneNodes.clear();
         m_Asset = {};
         m_Simulating = false;
@@ -270,8 +270,8 @@ namespace PARS
         m_Asset.constraints.swap(other.m_Asset.constraints);
         m_BoneNodes.swap(other.m_BoneNodes);
         m_Bodies.swap(other.m_Bodies);
+        m_WarmupDynamicBodies.swap(other.m_WarmupDynamicBodies);
         m_Joints.swap(other.m_Joints);
-        m_TorsoTorqueLimits.swap(other.m_TorsoTorqueLimits);
         std::swap(m_World, other.m_World);
         m_BoneNames.swap(other.m_BoneNames);
         std::swap(m_QueryOwner, other.m_QueryOwner);
@@ -497,6 +497,7 @@ namespace PARS
         }
         if (!simulate)
         {
+            EndWarmupUpperBody();
             SetDrivesEnabled(false);
             SetRootSupported(false, error);
             m_LastKinematicTargets.clear();
@@ -515,7 +516,7 @@ namespace PARS
                 const bool impactTarget = (shape->getSimulationFilterData().word3 & PhysicsWorld::CharacterImpactTargetFilterFlag) != 0;
                 shape->setFlag(PxShapeFlag::eSCENE_QUERY_SHAPE, simulate || (m_SweepKinematicTorso && impactTarget));
             }
-            if (simulate)
+            if (simulate && !IsWarmupDynamicBody(i))
             {
                 physx::PxVec3 (*const toPx)(Math::Vector3) = [](Vector3 v) -> physx::PxVec3
                 {
@@ -526,6 +527,7 @@ namespace PARS
                 body->wakeUp();
             }
         }
+        m_WarmupDynamicBodies.clear();
         m_Simulating = simulate;
         error.clear();
         return true;
@@ -569,17 +571,25 @@ namespace PARS
         {
             for (size_t i = 0; i < poses.size(); ++i)
             {
+                if (IsWarmupDynamicBody(i))
+                {
+                    continue;
+                }
                 const PxTransform current = m_Bodies[i]->getGlobalPose();
                 if ((poses[i].p - current.p).magnitudeSquared() > 1e-8f || PxAbs(poses[i].q.dot(current.q)) < .999999f)
                 {
                     poseChanged = true;
-                    InvalidateContactState();
+                    InvalidateContactState(m_WarmupDynamicBodies.empty());
                     break;
                 }
             }
         }
         for (size_t i = 0; i < m_Bodies.size(); ++i)
         {
+            if (IsWarmupDynamicBody(i))
+            {
+                continue;
+            }
             if (teleport && m_LastKinematicTargets.size() == m_Bodies.size())
             {
                 const physx::PxTransform previous = ToPx(m_LastKinematicTargets[i]);
@@ -834,17 +844,18 @@ namespace PARS
         return impulse;
     }
 
-    void Ragdoll::InvalidateContactState()
+    void Ragdoll::InvalidateContactState(bool resetReaction)
     {
-        const bool restoreDrives = !m_Articulation && m_DrivesEnabled && (!m_JointYieldTimes.empty() || m_PelvisYieldTime > 0);
+        const bool restoreDrives = resetReaction && !m_Articulation && (m_DrivesEnabled || !m_WarmupDynamicBodies.empty()) &&
+            m_ImpactReaction.IsYielding();
         ++m_ContactRevision;
         m_ImpactSampleStep = UINT64_MAX;
         m_ImpactSampleClock = UINT64_MAX;
-        m_ProjectileReactionStep = UINT64_MAX;
-        m_ProjectileReactionClock = UINT64_MAX;
         m_ExternalImpacts.clear();
-        m_JointYieldTimes.clear();
-        m_PelvisYieldTime = 0;
+        if (resetReaction)
+        {
+            m_ImpactReaction = {};
+        }
         if (restoreDrives)
         {
             ConfigureD6JointDrives();

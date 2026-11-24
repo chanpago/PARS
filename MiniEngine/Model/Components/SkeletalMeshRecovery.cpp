@@ -420,7 +420,7 @@ namespace PARS
     {
         if (!enabled)
         {
-            m_ImpactWarmup = {};
+            ResetImpactWarmup();
         }
         m_AutomaticRagdoll = enabled;
         m_KinematicRecoveryTimer.Reset();
@@ -441,13 +441,13 @@ namespace PARS
         }
     }
 
-    void SkeletalMeshComponent::ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime)
+    void SkeletalMeshComponent::ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts,
+        const std::vector<RagdollBodyImpulse>& kinematicImpacts, float deltaTime)
     {
-        m_Ragdoll.ApplyExternalImpacts(impacts);
+        m_Ragdoll.ApplyExternalImpacts(kinematicImpacts);
         m_Ragdoll.ApplyImpactResponses(m_Ragdoll.GetImpactResponses(impacts));
         // 모드 교체로 소멸한 접촉도 이번 틱의 관절 반응에는 그대로 넘긴다.
-        m_Ragdoll.UpdateProjectileReaction(impacts, deltaTime);
-        StartDynamicTorsoBalance(impacts);
+        m_Ragdoll.UpdateImpactReaction(impacts, deltaTime);
     }
 
     bool SkeletalMeshComponent::UpdateAutomaticRagdoll(float deltaTime, bool firstHit)
@@ -513,7 +513,7 @@ namespace PARS
             ResetRecovery();
             m_KinematicRecoveryTimer.Reset();
             m_PendingRecoveryImpact = !interruptedStandingUp && (impact || approaching);
-            ReplayKinematicImpacts(impacts, deltaTime);
+            ReplayKinematicImpacts(impacts, impacts, deltaTime);
             if (impactWeight > 0)
             {
                 m_FootSupport.RecordImpact(impactPosition / impactWeight);
@@ -534,7 +534,7 @@ namespace PARS
         // A영역 유지 시간은 그대로 누적하되, 실제 양발 접지가 확인될 때만 전환한다.
         if (m_KinematicRecoveryTimer.Update(sample.contactRevision, sample.completedPhysicsStep,
             deltaTime, insideA, bothGrounded, impact, m_KinematicStableDuration) && !firstHit && m_ImpactHandReach.body < 0 &&
-            !m_TorsoBalance.IsActive() && !m_Ragdoll.HasArmWound())
+            !m_Ragdoll.HasArmWound() && m_Ragdoll.GetImpactReaction().spineDriveScale >= 1.0f)
         {
             return BeginKinematicRecovery();
         }
