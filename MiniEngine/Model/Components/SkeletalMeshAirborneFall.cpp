@@ -199,7 +199,7 @@ namespace PARS
         }
         m_FootSupport.ResetFootstep();
         ResetRecovery();
-        if (!m_ImpactHandReach.armWound)
+        if (m_ImpactHandReach.woundJoint < 0)
         {
             ResetFallArms();
         }

@@ -93,7 +93,7 @@ namespace PARS
             physx::PxVec3 normalInBone{0};
             int body = -1;
             int hand = -1;
-            bool armWound = false;
+            int woundJoint = -1;
         };
 
         struct ImpactWarmup
@@ -256,6 +256,7 @@ namespace PARS
         {
             return m_Ragdoll;
         }
+        bool GetImpactPalmDistance(int& hitBody, float& meters) const;
         FootSupport& GetFootSupport()
         {
             return m_FootSupport;

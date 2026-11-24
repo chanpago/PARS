@@ -281,9 +281,9 @@ namespace PARS
         return hit.impactContactId == 0 || FindStrongestImpactContact(impacts, hit.impactContactId, m_Bodies.size()) == &hit;
     }
 
-    float Ragdoll::GetArmWoundStrength(size_t joint) const
+    float Ragdoll::GetWoundStrength(size_t joint) const
     {
-        for (const ArmWound& wound : m_ArmWounds)
+        for (const JointWound& wound : m_JointWounds)
         {
             if (wound.joint == joint)
             {
@@ -293,7 +293,94 @@ namespace PARS
         return 1.0f;
     }
 
-    void Ragdoll::UpdateArmWounds(const std::vector<RagdollBodyImpulse>& impacts)
+    float Ragdoll::GetWoundGripAge(size_t joint) const
+    {
+        for (const JointWound& wound : m_JointWounds)
+        {
+            if (wound.joint == joint)
+            {
+                return wound.gripAge;
+            }
+        }
+        return -1.0f;
+    }
+
+    void Ragdoll::ReleaseWoundGrip()
+    {
+        if (m_WoundGrip)
+        {
+            m_WoundGrip->release();
+            m_WoundGrip = nullptr;
+        }
+    }
+
+    void Ragdoll::DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const PxVec3& palm,
+        const PxVec3& target, float weight)
+    {
+        if (!m_DrivesEnabled || !m_World || handBody >= m_Bodies.size() || hitBody >= m_Bodies.size() || handBody == hitBody)
+        {
+            ReleaseWoundGrip();
+            return;
+        }
+        PxRigidBody& hit = *m_Bodies[hitBody];
+        PxRigidBody& hand = *m_Bodies[handBody];
+        const PxTransform hitAnchor(hit.getGlobalPose().transformInv(target));
+        if (!m_WoundGrip)
+        {
+            const PxTransform palmAnchor(hand.getGlobalPose().transformInv(palm));
+            m_WoundGrip = m_World->CreateJoint(hit, hitAnchor, hand, palmAnchor);
+            if (!m_WoundGrip)
+            {
+                return;
+            }
+            for (unsigned axis = 0; axis < PxD6Axis::eCOUNT; ++axis)
+            {
+                m_WoundGrip->setMotion(static_cast<PxD6Axis::Enum>(axis), PxD6Motion::eFREE);
+            }
+            m_WoundGrip->setConstraintFlag(PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
+            m_WoundGrip->setConstraintFlag(PxConstraintFlag::eCOLLISION_ENABLED, true);
+        }
+        else if ((m_WoundGrip->getLocalPose(PxJointActorIndex::eACTOR0).p - hitAnchor.p).magnitudeSquared() > 1e-8f)
+        {
+            m_WoundGrip->setLocalPose(PxJointActorIndex::eACTOR0, hitAnchor);
+        }
+
+        // 실제 손바닥이 접근한 뒤에만 위치를 고정한다. 두 바디가 함께 움직이고 손목은 자유롭게 회전한다.
+        const bool wasHolding = m_WoundGrip->getMotion(PxD6Axis::eX) == PxD6Motion::eLOCKED;
+        const bool holding = weight >= 1.0f && (wasHolding || (palm - target).magnitudeSquared() <= .04f * .04f);
+        if (holding != wasHolding)
+        {
+            const PxD6Motion::Enum motion = holding ? PxD6Motion::eLOCKED : PxD6Motion::eFREE;
+            m_WoundGrip->setMotion(PxD6Axis::eX, motion);
+            m_WoundGrip->setMotion(PxD6Axis::eY, motion);
+            m_WoundGrip->setMotion(PxD6Axis::eZ, motion);
+            m_WoundGrip->setConstraintFlag(PxConstraintFlag::eCOLLISION_ENABLED, !holding);
+        }
+        if (holding)
+        {
+            for (JointWound& wound : m_JointWounds)
+            {
+                if (wound.joint == joint && wound.gripAge < 0)
+                {
+                    wound.gripAge = static_cast<float>((m_World->GetStepCount() - wound.hitStep) * PhysicsWorld::FixedDeltaTime);
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // 반대편 위팔까지 몸을 가로질러 닿을 수 있게 접근력을 제한하면서 접촉 직전의 오차도 줄인다.
+            const PxD6JointDrive drive(9000.0f * weight, 150.0f * weight, 360.0f * weight);
+            if (drive.forceLimit != m_WoundGrip->getDrive(PxD6Drive::eX).forceLimit)
+            {
+                m_WoundGrip->setDrive(PxD6Drive::eX, drive);
+                m_WoundGrip->setDrive(PxD6Drive::eY, drive);
+                m_WoundGrip->setDrive(PxD6Drive::eZ, drive);
+            }
+        }
+    }
+
+    void Ragdoll::UpdateWounds(const std::vector<RagdollBodyImpulse>& impacts)
     {
         if (!m_World)
         {
@@ -302,33 +389,34 @@ namespace PARS
         const uint64_t clock = m_World->GetClockRevision();
         const uint64_t step = m_World->GetStepCount();
         bool drivesChanged = false;
-        if (clock != m_ArmWoundClock)
+        if (clock != m_WoundClock)
         {
-            drivesChanged = !m_ArmWounds.empty();
-            m_ArmWounds.clear();
-            m_ArmWoundClock = clock;
+            ReleaseWoundGrip();
+            drivesChanged = !m_JointWounds.empty();
+            m_JointWounds.clear();
+            m_WoundClock = clock;
         }
         constexpr float approachEnd = ImpactPalmGoal::FullReachTime;
-        constexpr float holdEnd = ImpactPalmGoal::ArmWoundReleaseStart;
-        for (std::vector<ArmWound>::iterator wound = m_ArmWounds.begin(); wound != m_ArmWounds.end();)
+        for (std::vector<JointWound>::iterator wound = m_JointWounds.begin(); wound != m_JointWounds.end();)
         {
             const float age = static_cast<float>((step - wound->hitStep) * PhysicsWorld::FixedDeltaTime);
-            if (age >= holdEnd + ArmWoundRecoveryTime)
+            const float holdEnd = ImpactPalmGoal::GetWoundReleaseStart(wound->gripAge);
+            if (age >= holdEnd + WoundRecoveryTime)
             {
-                wound = m_ArmWounds.erase(wound);
+                wound = m_JointWounds.erase(wound);
                 drivesChanged = true;
                 continue;
             }
-            float strength = ArmWoundMinimumStrength;
+            float strength = WoundMinimumStrength;
             if (age < approachEnd)
             {
                 const float t = age / approachEnd;
-                strength = wound->initialStrength + (ArmWoundMinimumStrength - wound->initialStrength) * t * t * (3.0f - 2.0f * t);
+                strength = wound->initialStrength + (WoundMinimumStrength - wound->initialStrength) * t * t * (3.0f - 2.0f * t);
             }
             else if (age > holdEnd)
             {
-                const float t = (age - holdEnd) / ArmWoundRecoveryTime;
-                strength += (1.0f - ArmWoundMinimumStrength) * t * t * (3.0f - 2.0f * t);
+                const float t = (age - holdEnd) / WoundRecoveryTime;
+                strength += (1.0f - WoundMinimumStrength) * t * t * (3.0f - 2.0f * t);
             }
             drivesChanged = drivesChanged || strength != wound->strength;
             wound->strength = strength;
@@ -340,26 +428,27 @@ namespace PARS
             {
                 continue;
             }
-            const int joint = FindArmWoundJoint(hit.body);
+            const int joint = FindWoundJoint(hit.body);
             if (joint < 0)
             {
                 continue;
             }
             const size_t index = static_cast<size_t>(joint);
-            std::vector<ArmWound>::iterator wound = std::find_if(m_ArmWounds.begin(), m_ArmWounds.end(),
-                [index](const ArmWound& entry) -> bool
+            std::vector<JointWound>::iterator wound = std::find_if(m_JointWounds.begin(), m_JointWounds.end(),
+                [index](const JointWound& entry) -> bool
                 {
                     return entry.joint == index;
                 });
-            if (wound == m_ArmWounds.end())
+            if (wound == m_JointWounds.end())
             {
-                m_ArmWounds.emplace_back();
-                wound = m_ArmWounds.end() - 1;
+                m_JointWounds.emplace_back();
+                wound = m_JointWounds.end() - 1;
                 wound->joint = index;
             }
             // 재피격은 남은 힘에서 다시 약화해 관절이 한 스텝 동안 강해지는 것을 막는다.
             wound->initialStrength = wound->strength;
             wound->hitStep = step;
+            wound->gripAge = -1.0f;
         }
         if (drivesChanged && m_DrivesEnabled)
         {

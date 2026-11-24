@@ -201,7 +201,7 @@ namespace PARS
             if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()) || IsImpactWarmupActive())
             {
                 // 예열이나 물리 모드 전환이 접촉을 비우기 전에 같은 스텝으로 상처와 손 목표를 기록한다.
-                m_Ragdoll.UpdateArmWounds(impacts);
+                m_Ragdoll.UpdateWounds(impacts);
                 hit = FindImpactHandReach(impacts);
             }
             responses = m_Ragdoll.GetImpactResponses(impacts);
@@ -252,13 +252,17 @@ namespace PARS
         {
             return impact.newCapsuleHit && impact.impulse.magnitudeSquared() > 1e-8f;
         });
-        const bool woundNeedsPhysics = !IsRagdoll() && m_Ragdoll.HasArmWound();
+        const bool woundNeedsPhysics = !IsRagdoll() && m_Ragdoll.HasWound();
         if (!UpdateAutomaticRagdoll(deltaTime, hit.body >= 0 || !responses.empty() || capsuleImpact || woundNeedsPhysics))
         {
             return;
         }
         if (hit.body >= 0 && IsActiveRagdoll())
         {
+            if (hit.hand < 0)
+            {
+                m_Ragdoll.ReleaseWoundGrip();
+            }
             m_ImpactHandReach = hit;
         }
         if (!UpdateAutomaticRootSupport(m_PhysicsError))
@@ -315,7 +319,7 @@ namespace PARS
                     UpdateHorizontalBalance(deltaTime);
                 }
             }
-            if (evaluated && (!IsFalling() || m_ImpactHandReach.armWound))
+            if (evaluated && (!IsFalling() || m_ImpactHandReach.woundJoint >= 0))
             {
                 ApplyArmTargets(target);
             }

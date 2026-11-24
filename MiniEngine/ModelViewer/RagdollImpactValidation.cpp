@@ -1370,6 +1370,101 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
     };
     try
     {
+        uint32_t woundBody = 0;
+        if (CommandLineArgs::GetInteger(L"woundholdbone", woundBody))
+        {
+            std::string error;
+            check(test.SetAutomaticSupport(true) && player.StopRagdoll(error), "Prepare the idle impact dummy");
+            SkeletalMeshComponent& mesh = test.GetDummy()->GetMesh();
+            check(woundBody < mesh.GetRagdoll().GetBodyCount(), "Resolve the upper-body hit shape");
+            player.GetCharacterMovement().SetTickEnabled(false);
+            test.SetContactCheckEnabled(false);
+            world.SetPhysicsPaused(false);
+            world.SetPhysicsTimeScale(1.0f);
+            for (unsigned frame = 0; frame < 30; ++frame)
+            {
+                world.Tick(static_cast<float>(PhysicsWorld::FixedDeltaTime));
+                test.Update();
+            }
+            PxGeometryHolder geometry;
+            PxTransform inBone;
+            PxTransform shape;
+            check(mesh.GetRagdoll().GetBodyCollisionShape(woundBody, geometry, inBone, shape), "Measure the physical target");
+            const PhysicsAsset& asset = *mesh.GetPhysicsAsset();
+            const std::string& bone = asset.bodies[woundBody].bone;
+            const int joint = mesh.GetRagdoll().FindWoundJoint(woundBody);
+            check(joint >= 0, "Resolve the local wound joint");
+            const int left = asset.FindBody("mixamorig1:LeftArm");
+            const int right = asset.FindBody("mixamorig1:RightArm");
+            check(left >= 0 && right >= 0, "Find the dummy's shoulders");
+            Vector3 across = Vector3(mesh.GetRagdoll().GetBoneWorld(right).GetW()) - Vector3(mesh.GetRagdoll().GetBoneWorld(left).GetW());
+            across = Normalize(Vector3(across.GetX(), 0, across.GetZ()));
+            const Vector3 front = Cross(Vector3(kYUnitVector), across);
+            const float side = bone.find("Right") != std::string::npos ? .6f : bone.find("Left") != std::string::npos ? -.6f : 0;
+            const Vector3 target(shape.p.x, shape.p.y, shape.p.z);
+            const Vector3 eye = target + (front + across * side) * 2.0f;
+            player.SetActorLocation(eye - Vector3(0, .15f, 0));
+            uint32_t arrow = 0;
+            CommandLineArgs::GetInteger(L"woundarrow", arrow);
+            ImpactProjectileSettings projectile = ImpactProjectileSettings::ArrowDefaults();
+            projectile.radius = arrow ? .01f : .018f;
+            projectile.bodyImpulse = 0;
+            projectile.partImpulse = 0;
+            projectile.torqueMultiplier = 0;
+            const ImpactProjectileType type = arrow ? ImpactProjectileType::Arrow : ImpactProjectileType::Sphere;
+            check(test.SetProjectileSettings(type, projectile) && test.FireAimed(player, eye, target - eye),
+                "Fire a projectile through the normal aim path");
+            unsigned longest = 0;
+            unsigned consecutive = 0;
+            int lastHit = -1;
+            float nearest = PX_MAX_F32;
+            float gripAge = -1;
+            float fiveSecondMaximum = 0;
+            unsigned heldSteps = 0;
+            bool missingContact = false;
+            bool weakened = true;
+            for (unsigned frame = 0; frame < 690; ++frame)
+            {
+                world.Tick(static_cast<float>(PhysicsWorld::FixedDeltaTime));
+                test.Update();
+                int hit = -1;
+                float distance = 0;
+                const bool sampled = mesh.GetImpactPalmDistance(hit, distance);
+                if (sampled)
+                {
+                    lastHit = hit;
+                    nearest = PxMin(nearest, distance);
+                }
+                if (sampled && hit == static_cast<int>(woundBody) && distance <= .05f)
+                {
+                    ++consecutive;
+                    longest = (std::max)(longest, consecutive);
+                }
+                else
+                {
+                    consecutive = 0;
+                }
+                if (gripAge < 0)
+                {
+                    gripAge = mesh.GetRagdoll().GetWoundGripAge(joint);
+                }
+                if (gripAge >= 0 && heldSteps < 300)
+                {
+                    missingContact = missingContact || !sampled || hit != static_cast<int>(woundBody);
+                    weakened = weakened && mesh.GetRagdoll().GetWoundStrength(joint) <= .101f;
+                    fiveSecondMaximum = PxMax(fiveSecondMaximum, distance);
+                    ++heldSteps;
+                }
+            }
+            report << "aim=" << bone << " hit=" << lastHit << " closest_m=" << nearest
+                << " grip_age_s=" << gripAge << " continuous_steps=" << longest
+                << " first_five_seconds_max_m=" << fiveSecondMaximum << std::endl;
+            check(heldSteps == 300 && !missingContact && fiveSecondMaximum <= .05f && longest >= 300,
+                "Actual palm stays at the moving wound for five seconds from physical contact");
+            check(weakened && !mesh.GetRagdoll().HasWound(), "Only release and recover after the full hold");
+            check(mesh.GetPhysicsError().empty(), "Wound hold finishes without controller errors");
+            return true;
+        }
         // 저장된 사용자 설정과 관계없이 기존 충격 시험의 초기 조건을 유지한다.
         check(test.SetProjectileSettings(2.0f, 7.5f), "Use the original 2 kg / 7.5 m/s fixture independently of saved UI settings");
         check(test.SetAutomaticSupport(false), "Use manual support for the existing projection and projectile baseline");

@@ -325,7 +325,10 @@ namespace
         Check(goal.SampleTiming(0, 2, true) && goal.weight == 1, "Renew a wound without retracting a hand already there");
         Check(goal.SampleTiming(5.465f, 5.465f, true) && std::abs(goal.weight - .5f) < 1e-5f &&
             !goal.SampleTiming(5.6f, 5.6f, true) && goal.weight == 0, "Release the arm over a quarter second");
-        Check(!goal.SampleTiming(1.15f, 1.15f, false), "Other body hits keep their short gesture");
+        Check(goal.SampleTiming(6.20f, 6.20f, true, 1.20f) && goal.weight == 1.0f &&
+            goal.SampleTiming(6.325f, 6.325f, true, 1.20f) && std::abs(goal.weight - .5f) < 1e-5f,
+            "A palm that arrives late holds for five seconds from contact");
+        Check(!goal.SampleTiming(1.15f, 1.15f, false), "Lower-body hits keep their short gesture");
         goal.weight = 1;
         goal.approach = 1;
         for (int side = 0; side < 2; ++side)

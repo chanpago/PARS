@@ -103,13 +103,14 @@ namespace PARS
     class Ragdoll
     {
     private:
-        struct ArmWound
+        struct JointWound
         {
         public:
             uint64_t hitStep = 0;
             size_t joint = 0;
             float initialStrength = 1.0f;
             float strength = 1.0f;
+            float gripAge = -1.0f;
         };
 
     public:
@@ -143,7 +144,10 @@ namespace PARS
         void AddVelocity(Math::Vector3 velocity);
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
         void ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
-        void UpdateArmWounds(const std::vector<RagdollBodyImpulse>& impacts);
+        void UpdateWounds(const std::vector<RagdollBodyImpulse>& impacts);
+        void DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const physx::PxVec3& palm,
+            const physx::PxVec3& target, float weight);
+        void ReleaseWoundGrip();
         void UpdateImpactReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         void UpdateSpineDriveRecovery(bool recovering, float deltaTime, float blendDuration);
         void BeginWarmupUpperBody(const std::vector<RagdollBodyMotion>& motion, RagdollImpactReaction reaction);
@@ -299,11 +303,12 @@ namespace PARS
         float GetExternalImpactImpulse() const;
         const std::vector<RagdollBodyImpulse>& GetExternalImpacts() const;
         bool IsPrimaryProjectileHit(const RagdollBodyImpulse& hit, const std::vector<RagdollBodyImpulse>& impacts) const;
-        int FindArmWoundJoint(size_t body) const;
-        float GetArmWoundStrength(size_t joint) const;
-        bool HasArmWound() const
+        int FindWoundJoint(size_t body) const;
+        float GetWoundStrength(size_t joint) const;
+        float GetWoundGripAge(size_t joint) const;
+        bool HasWound() const
         {
-            return !m_ArmWounds.empty();
+            return !m_JointWounds.empty();
         }
         const RagdollImpactReaction& GetImpactReaction() const
         {
@@ -351,8 +356,8 @@ namespace PARS
         float GetProjectilePelvisDriveScale() const;
 
     private:
-        static constexpr float ArmWoundMinimumStrength = .10f;
-        static constexpr float ArmWoundRecoveryTime = 1.5f;
+        static constexpr float WoundMinimumStrength = .10f;
+        static constexpr float WoundRecoveryTime = 1.5f;
         static constexpr float PelvisLinearFrequency = 30.0f;
         static constexpr float PelvisLinearDampingRatio = 1.0f;
         static constexpr float PelvisAngularFrequency = 16.0f;
@@ -363,8 +368,8 @@ namespace PARS
         uint64_t m_HorizontalSupportStep = UINT64_MAX;
         mutable uint64_t m_ImpactSampleStep = UINT64_MAX;
         mutable uint64_t m_ImpactSampleClock = UINT64_MAX;
-        uint64_t m_ArmWoundClock = UINT64_MAX;
-        std::vector<ArmWound> m_ArmWounds;
+        uint64_t m_WoundClock = UINT64_MAX;
+        std::vector<JointWound> m_JointWounds;
         RagdollImpactReaction m_ImpactReaction;
         std::vector<uint8_t> m_WarmupDynamicBodies;
         mutable std::vector<RagdollBodyImpulse> m_ExternalImpacts;
@@ -381,6 +386,7 @@ namespace PARS
         std::vector<unsigned> m_ArticulationDofOffsets;
         std::vector<float> m_PreviousArticulationTargetVelocity;
         physx::PxD6Joint* m_SupportJoint = nullptr;
+        physx::PxD6Joint* m_WoundGrip = nullptr;
         std::vector<Math::Quaternion> m_DriveTargets;
         std::vector<Math::Matrix4> m_LastKinematicTargets;
         std::vector<Math::Vector3> m_AnimatedLinearVelocity;

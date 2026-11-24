@@ -176,7 +176,7 @@ bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vecto
         !IsFalling() && !IsGroundFallActive() && (!IsRagdoll() || (IsActiveRagdoll() && m_Ragdoll.IsRootSupported())) &&
         sample.hasComProjection && sample.hasCenterOfMassVelocity && sample.totalMass > 0 &&
         sample.feet[0].available && sample.feet[0].leg.available && sample.feet[1].available && sample.feet[1].leg.available;
-    if (standing && m_ImpactWarmup.wasResting && !projectile && !m_Ragdoll.HasArmWound() &&
+    if (standing && m_ImpactWarmup.wasResting && !projectile && !m_Ragdoll.HasWound() &&
         impulse.magnitude() >= ImpactWarmup::MinimumImpactSpeedChange * sample.totalMass && BeginImpactWarmup(responses, deltaTime))
     {
         return AdvanceImpactWarmup(deltaTime);

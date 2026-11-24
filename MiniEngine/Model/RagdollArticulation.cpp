@@ -331,6 +331,7 @@ namespace PARS
 #if defined(_M_X64)
         if (!active)
         {
+            ReleaseWoundGrip();
             RemoveCharacterCapsule();
             InvalidateContactState();
         }
@@ -865,7 +866,7 @@ namespace PARS
             const PhysicsJointMotion motions[] = {data.twist, data.swingY, data.swingZ};
             const float strength = GetJointDriveStrength(i);
             const float pdScale = GetJointPDScale(i, strength);
-            const float woundStrength = GetArmWoundStrength(i);
+            const float woundStrength = GetWoundStrength(i);
             float ankleDriveScale = 1.0f;
             float inverseLandingTime = 0.0f;
             if (m_FootDrivenSupport)
@@ -909,7 +910,7 @@ namespace PARS
                 float remainingTorque = enabled ? PX_MAX_F32 : 0;
                 if (enabled && woundStrength < 1.0f)
                 {
-                    // 다친 팔은 중력 보상도 약해진다. 남은 토크만 자세 추종에 쓸 수 있다.
+                    // 다친 관절은 중력 보상도 약해진다. 남은 토크만 자세 추종에 쓸 수 있다.
                     const float limit = drive.maxTorque * woundStrength;
                     feedForward = PxClamp(feedForward * woundStrength, -.5f * limit, .5f * limit);
                     remainingTorque = limit - PxAbs(feedForward);

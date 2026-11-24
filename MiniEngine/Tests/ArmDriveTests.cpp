@@ -32,7 +32,7 @@ namespace
         return std::asin(PxClamp(vertical, -1.0f, 1.0f)) * 180.0f / PxPi;
     }
 
-    void TestArmWounds(bool articulated)
+    void TestJointWounds(bool articulated)
     {
         PhysicsWorld world;
         CheckArmDrive(world.Initialize(false), "Create arm wound scene with gravity");
@@ -78,8 +78,8 @@ namespace
         Ragdoll ragdoll;
         std::string error;
         CheckArmDrive(ragdoll.Create(world, asset, names, pose, Vector3(kZero), error, false), "Create standing wound test rig");
-        CheckArmDrive(ragdoll.FindArmWoundJoint(0) < 0 && ragdoll.FindArmWoundJoint(1) == 1 &&
-            ragdoll.FindArmWoundJoint(2) == 1 && ragdoll.FindArmWoundJoint(3) == 2 && ragdoll.FindArmWoundJoint(4) == 3,
+        CheckArmDrive(ragdoll.FindWoundJoint(0) < 0 && ragdoll.FindWoundJoint(1) == 1 &&
+            ragdoll.FindWoundJoint(2) == 1 && ragdoll.FindWoundJoint(3) == 2 && ragdoll.FindWoundJoint(4) == 3,
             "Map the shoulder and upper arm, forearm and hand to the lift, elbow and wrist joints");
         std::vector<RagdollBodyImpulse> contacts(1);
         RagdollBodyImpulse& hit = contacts.front();
@@ -88,34 +88,34 @@ namespace
         hit.newProjectileHit = true;
         hit.impulse = PxVec3(0, 0, 1);
         hit.impactContactId = 42;
-        ragdoll.UpdateArmWounds(contacts);
+        ragdoll.UpdateWounds(contacts);
         CheckArmDrive(ragdoll.SetSimulating(true, Vector3(kZero), error) && ragdoll.UsesArticulation() == articulated &&
-            ragdoll.HasArmWound(), "The first kinematic hit survives the switch to the dynamic rig");
+            ragdoll.HasWound(), "The first kinematic hit survives the switch to the dynamic rig");
         ragdoll.SetDrivesEnabled(true);
         CheckArmDrive(ragdoll.SetRootSupported(true, error), "Support the torso with both arms held horizontally");
         const std::function<void(unsigned)> advance = [&](unsigned steps) -> void
         {
             for (unsigned i = 0; i < steps; ++i)
             {
-                ragdoll.UpdateArmWounds(contacts);
+                ragdoll.UpdateWounds(contacts);
                 hit.newProjectileHit = false;
                 CheckArmDrive(ragdoll.UpdateDriveTargets(pose, static_cast<float>(PhysicsWorld::FixedDeltaTime), error), "Drive raised arms");
                 world.Update(PhysicsWorld::FixedDeltaTime);
             }
-            ragdoll.UpdateArmWounds(contacts);
+            ragdoll.UpdateWounds(contacts);
         };
         advance(21);
-        CheckArmDrive(ragdoll.GetArmWoundStrength(1) == .10f && ragdoll.GetArmWoundStrength(2) == 1.0f &&
-            ragdoll.GetArmWoundStrength(4) == 1.0f, "Only the struck shoulder is weak at full hand reach");
+        CheckArmDrive(ragdoll.GetWoundStrength(1) == .10f && ragdoll.GetWoundStrength(2) == 1.0f &&
+            ragdoll.GetWoundStrength(4) == 1.0f, "Only the struck shoulder is weak at full hand reach");
         advance(299);
-        CheckArmDrive(ragdoll.GetArmWoundStrength(1) == .10f, "Five-second hold includes the last full fixed step");
+        CheckArmDrive(ragdoll.GetWoundStrength(1) == .10f, "Five-second hold includes the last full fixed step");
         const float upperHitShoulder = ArmElevationDegrees(ragdoll, names[1], names[2]);
         const float upperHitElbow = ArmElevationDegrees(ragdoll, names[2], names[3]);
         advance(46);
-        const float recovering = ragdoll.GetArmWoundStrength(1);
+        const float recovering = ragdoll.GetWoundStrength(1);
         CheckArmDrive(recovering > .45f && recovering < .65f, "Recover strength smoothly after the five-second hold");
         advance(105);
-        CheckArmDrive(!ragdoll.HasArmWound(), "Continued projectile contact cannot renew the original wound");
+        CheckArmDrive(!ragdoll.HasWound(), "Continued projectile contact cannot renew the original wound");
         const float healthyShoulder = ArmElevationDegrees(ragdoll, names[1], names[2]);
         const float healthyElbow = ArmElevationDegrees(ragdoll, names[2], names[3]);
         hit.body = 3;
@@ -129,15 +129,37 @@ namespace
             std::abs(forearmHitShoulder - healthyShoulder) < 5.0f, "Upper-arm and forearm hits droop at different joints under gravity");
         hit.newProjectileHit = true;
         advance(200);
-        CheckArmDrive(ragdoll.GetArmWoundStrength(2) == .10f, "A fresh hit on the same forearm renews its hold");
+        CheckArmDrive(ragdoll.GetWoundStrength(2) == .10f, "A fresh hit on the same forearm renews its hold");
         hit.body = 5;
         hit.newProjectileHit = true;
         advance(212);
-        CheckArmDrive(ragdoll.GetArmWoundStrength(2) == 1.0f && ragdoll.GetArmWoundStrength(4) == .10f,
+        CheckArmDrive(ragdoll.GetWoundStrength(2) == 1.0f && ragdoll.GetWoundStrength(4) == .10f,
             "The other arm has an independent recovery timer");
         world.ResetClock();
-        ragdoll.UpdateArmWounds({});
-        CheckArmDrive(!ragdoll.HasArmWound() && ragdoll.IsFinite() && world.GetErrorCount() == 0, "Reset wounds with the simulation clock");
+        ragdoll.UpdateWounds({});
+        CheckArmDrive(!ragdoll.HasWound() && ragdoll.IsFinite() && world.GetErrorCount() == 0, "Reset wounds with the simulation clock");
+
+        ragdoll.Destroy();
+        const std::vector<std::string> torso{"Hips", "Spine", "Chest", "Neck", "Head", "RightUpLeg"};
+        for (size_t i = 0; i < torso.size(); ++i)
+        {
+            asset.bodies[i].bone = torso[i];
+            if (parents[i] >= 0)
+            {
+                asset.constraints[i - 1].parentBone = torso[parents[i]];
+                asset.constraints[i - 1].childBone = torso[i];
+            }
+        }
+        CheckArmDrive(ragdoll.Create(world, asset, torso, pose, Vector3(kZero), error), "Create a torso with a leg on the pelvis");
+        CheckArmDrive(ragdoll.FindWoundJoint(0) == 0 && ragdoll.FindWoundJoint(1) == 0 &&
+            ragdoll.FindWoundJoint(2) == 1 && ragdoll.FindWoundJoint(3) == 2 && ragdoll.FindWoundJoint(4) == 3 &&
+            ragdoll.FindWoundJoint(5) < 0, "Map hips, spine, chest, neck and head wounds to their local joints");
+        ragdoll.SetDrivesEnabled(true);
+        hit.body = 2;
+        hit.newProjectileHit = true;
+        advance(21);
+        CheckArmDrive(ragdoll.GetWoundStrength(1) == .10f && ragdoll.GetWoundStrength(0) == 1.0f &&
+            ragdoll.GetWoundStrength(2) == 1.0f, "A chest hit weakens only the struck spine joint");
     }
 
     float MeasureArmDeflection(bool articulated, float strength)
@@ -258,7 +280,7 @@ void RunArmDriveTests()
 {
     for (bool articulated : {false, true})
     {
-        TestArmWounds(articulated);
+        TestJointWounds(articulated);
         const float full = MeasureArmDeflection(articulated, 1);
         const float weak = MeasureArmDeflection(articulated, .3f);
         const float passive = MeasureArmDeflection(articulated, 0);

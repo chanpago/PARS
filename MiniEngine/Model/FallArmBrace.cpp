@@ -159,10 +159,10 @@ namespace
     }
 }
 
-bool PARS::ImpactPalmGoal::SampleTiming(float hitAge, float approachAge, bool armWound)
+bool PARS::ImpactPalmGoal::SampleTiming(float hitAge, float approachAge, bool sustainedWound, float gripAge)
 {
     constexpr float releaseTime = .25f;
-    const float releaseStart = armWound ? ArmWoundReleaseStart : FullReachTime + .55f;
+    const float releaseStart = sustainedWound ? GetWoundReleaseStart(gripAge) : FullReachTime + .55f;
     approach = PxClamp((approachAge - RecoilTime) / ReachTime, 0.0f, 1.0f);
     weight = PxMin(approach, PxClamp(1.0f - (hitAge - releaseStart) / releaseTime, 0.0f, 1.0f));
     return hitAge < releaseStart + releaseTime;

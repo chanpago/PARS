@@ -51,6 +51,12 @@ namespace PARS
             }
             return name.find("arm") != std::string::npos ? ArmPart::UpperArm : ArmPart::None;
         }
+
+        bool IsSpine(const std::string& name)
+        {
+            return name.find("spine") != std::string::npos || name.find("chest") != std::string::npos ||
+                name.find("torso") != std::string::npos || name.find("abdomen") != std::string::npos;
+        }
     }
 
 #if defined(_M_X64)
@@ -79,15 +85,18 @@ namespace PARS
     }
 #endif
 
-    int Ragdoll::FindArmWoundJoint(size_t body) const
+    int Ragdoll::FindWoundJoint(size_t body) const
     {
         if (body >= m_Asset.bodies.size())
         {
             return -1;
         }
         const std::string& bone = m_Asset.bodies[body].bone;
-        const ArmPart part = GetArmPart(LowerBoneName(bone));
-        if (part == ArmPart::None)
+        const std::string name = LowerBoneName(bone);
+        const ArmPart part = GetArmPart(name);
+        const bool pelvis = name == "hips" || name == "pelvis";
+        if (part == ArmPart::None && !pelvis && !IsSpine(name) &&
+            name.find("neck") == std::string::npos && name.find("head") == std::string::npos)
         {
             return -1;
         }
@@ -95,6 +104,11 @@ namespace PARS
         for (size_t joint = 0; joint < m_Asset.constraints.size(); ++joint)
         {
             const PhysicsConstraint& constraint = m_Asset.constraints[joint];
+            // 골반은 루트이므로 다리 대신 허리를 굽히는 첫 척추 관절을 약화한다.
+            if (pelvis && constraint.parentBone == bone && IsSpine(LowerBoneName(constraint.childBone)))
+            {
+                return static_cast<int>(joint);
+            }
             if (constraint.childBone == bone)
             {
                 inbound = static_cast<int>(joint);
@@ -111,7 +125,7 @@ namespace PARS
 
     float Ragdoll::GetJointDriveStrength(size_t jointIndex) const
     {
-        const float impactScale = m_ImpactReaction.GetJointDriveScale(jointIndex);
+        const float impactScale = m_ImpactReaction.GetJointDriveScale(jointIndex) * GetWoundStrength(jointIndex);
         const std::string name = LowerBoneName(m_Asset.constraints[jointIndex].childBone);
         if (GetArmPart(name) == ArmPart::None)
         {
@@ -120,7 +134,7 @@ namespace PARS
         const float scale = name.find("left") != std::string::npos ? m_ArmDriveScales[0] :
             name.find("right") != std::string::npos ? m_ArmDriveScales[1] : 1.0f;
         const float strength = m_ArmDriveOverride >= 0 ? m_ArmDriveOverride : m_ArmDriveStrength;
-        return strength * scale * impactScale * GetArmWoundStrength(jointIndex);
+        return strength * scale * impactScale;
     }
 
     bool Ragdoll::SetArmDriveScales(const std::array<float, 2>& scales, float overrideStrength)
@@ -180,6 +194,7 @@ namespace PARS
         m_DrivesEnabled = enabled && IsSimulating();
         if (!m_DrivesEnabled && m_WarmupDynamicBodies.empty())
         {
+            ReleaseWoundGrip();
             m_HorizontalSupportForce = physx::PxVec3(0);
             m_ImpactReaction.jointYieldTimes.clear();
             m_ImpactReaction.spineDriveScale = 1.0f;

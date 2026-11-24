@@ -187,10 +187,11 @@ namespace PARS
     }
     void Ragdoll::Destroy()
     {
+        ReleaseWoundGrip();
         RemoveCharacterCapsule();
         InvalidateContactState();
-        m_ArmWounds.clear();
-        m_ArmWoundClock = UINT64_MAX;
+        m_JointWounds.clear();
+        m_WoundClock = UINT64_MAX;
         m_Standby.reset();
 #if defined(_M_X64)
         if (m_SupportJoint)
@@ -256,12 +257,14 @@ namespace PARS
     {
         SwapConfiguration(other);
         m_Standby.swap(other.m_Standby);
-        m_ArmWounds.swap(other.m_ArmWounds);
-        std::swap(m_ArmWoundClock, other.m_ArmWoundClock);
+        m_JointWounds.swap(other.m_JointWounds);
+        std::swap(m_WoundClock, other.m_WoundClock);
     }
 
     void Ragdoll::SwapConfiguration(Ragdoll& other) noexcept
     {
+        ReleaseWoundGrip();
+        other.ReleaseWoundGrip();
         // 이 객체를 읽던 발 접촉 이력은 바디 구성이 바뀔 때 이어받지 않는다.
         InvalidateContactState();
         other.InvalidateContactState();

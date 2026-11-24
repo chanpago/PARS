@@ -54,14 +54,19 @@ namespace PARS
     struct ImpactPalmGoal
     {
     public:
-        bool SampleTiming(float hitAge, float approachAge, bool armWound);
+        bool SampleTiming(float hitAge, float approachAge, bool sustainedWound, float gripAge = -1.0f);
+
+    public:
+        static constexpr float GetWoundReleaseStart(float gripAge)
+        {
+            return (gripAge >= 0 ? gripAge : FullReachTime) + WoundHoldTime;
+        }
 
     public:
         static constexpr float RecoilTime = .10f;
         static constexpr float ReachTime = .24f;
         static constexpr float FullReachTime = RecoilTime + ReachTime;
-        static constexpr float ArmWoundHoldTime = 5.0f;
-        static constexpr float ArmWoundReleaseStart = FullReachTime + ArmWoundHoldTime;
+        static constexpr float WoundHoldTime = 5.0f;
 
     public:
         physx::PxVec3 point{0};
