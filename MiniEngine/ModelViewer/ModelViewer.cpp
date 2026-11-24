@@ -1918,6 +1918,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         DrawMapSelection();
         return;
     }
+    if (m_ContactOverlayVisible && m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
+    {
+        m_ImpactTest->DrawContactOverlay(m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
+    }
     if (m_IsAiming)
     {
         ImGui::SetMouseCursor(ImGuiMouseCursor_None);
@@ -1935,12 +1939,8 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         }
         draw->AddCircleFilled(center, 3 * scale, IM_COL32(0, 0, 0, 220));
         draw->AddCircleFilled(center, 1.5f * scale, IM_COL32(255, 255, 255, 255));
-        // 조준 중에는 표적을 가리는 디버그 패널을 잠시 숨긴다.
+        // 조준 중에는 상단 디버그와 조준점만 표시한다.
         return;
-    }
-    if (m_ContactOverlayVisible && m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
-    {
-        m_ImpactTest->DrawContactOverlay(m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
     }
     if (m_PhysicsDemo)
     {
