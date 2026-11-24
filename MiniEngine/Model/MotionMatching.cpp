@@ -97,7 +97,7 @@ namespace PARS
 
         bool IsImpactUsage(MotionFrameUsage usage)
         {
-            return usage == MotionFrameUsage::FlailFront || usage == MotionFrameUsage::FlailBack || usage == MotionFrameUsage::ShoveFall;
+            return usage == MotionFrameUsage::BalanceUpperBody || usage == MotionFrameUsage::ShoveFall;
         }
 
         bool SampleClip(const AnimInstance& animation, const MotionClipSelection& clip, const PhysicsSkeleton& skeleton,
@@ -392,8 +392,10 @@ namespace PARS
             const MotionFrame& frame = frames[range.firstFrameIndex + offset];
             if (IsImpactUsage(usage))
             {
-                if ((requiredClip != UINT32_MAX && frame.clipIndex != requiredClip) ||
-                    frame.clipTimeSeconds > (std::max)(0.0f, GetAnimationDuration(frame.clipIndex) - MotionFeatures::PredictionTimeSeconds))
+                const float duration = GetAnimationDuration(frame.clipIndex);
+                const bool playable = usage == MotionFrameUsage::BalanceUpperBody ? frame.clipTimeSeconds < duration :
+                    frame.clipTimeSeconds <= (std::max)(0.0f, duration - MotionFeatures::PredictionTimeSeconds);
+                if (!playable || (requiredClip != UINT32_MAX && frame.clipIndex != requiredClip))
                 {
                     continue;
                 }

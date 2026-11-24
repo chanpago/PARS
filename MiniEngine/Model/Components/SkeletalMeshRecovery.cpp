@@ -89,38 +89,15 @@ namespace PARS
             return;
         }
         ImpactFlailPlayback& flail = m_ImpactFlail;
-        // 동적 바디로 전환한 직후에는 실제 COM 속도가 다음 물리 샘플에 나타날 수 있다.
+        // 충격 직후 균형 상태가 갱신될 때까지 상체 반응을 이어 간다.
         flail.impactTimeRemaining = triggerReaction ? MotionFeatures::PredictionTimeSeconds :
             (std::max)(0.0f, flail.impactTimeRemaining - deltaTime);
-        const bool recovering = flail.impactTimeRemaining > 0 ||
-            (flail.clip != UINT32_MAX && m_BalanceState == CharacterBalanceState::Unbalanced);
-        const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
-        const bool warmingUp = IsImpactWarmupActive();
-        const PxVec3 velocity = warmingUp ? m_ImpactWarmup.momentum / m_ImpactWarmup.mass : support.centerOfMassVelocity;
-        const Vector3 forward(GetComponentTransform().GetZ());
-        const float travel = float(forward.GetX()) * velocity.x + float(forward.GetZ()) * velocity.z;
-        const float lateral = float(forward.GetZ()) * velocity.x - float(forward.GetX()) * velocity.z;
-        uint32_t sideClip = UINT32_MAX;
-        if ((warmingUp || flail.usage == MotionFrameUsage::ShoveFall) && std::abs(lateral) > std::abs(travel) && std::abs(lateral) >= .05f)
+        const bool recovering = flail.impactTimeRemaining > 0 || m_BalanceState == CharacterBalanceState::Unbalanced;
+        if (recovering && flail.clip == UINT32_MAX)
         {
-            const FallDirection side = lateral > 0 ? FallDirection::Left : FallDirection::Right;
-            sideClip = m_DirectionalFallingAnimations[static_cast<size_t>(side)];
-        }
-        if (recovering && (warmingUp || support.hasCenterOfMassVelocity) && (sideClip != UINT32_MAX || std::abs(travel) >= .05f))
-        {
-            // 옆 충격은 해당 방향 밀침 클립의 척추 위쪽만 사용한다. 골반과 두 다리는 예열 자세를 유지한다.
-            const MotionFrameUsage usage = sideClip != UINT32_MAX ? MotionFrameUsage::ShoveFall :
-                (travel > 0 ? MotionFrameUsage::FlailFront : MotionFrameUsage::FlailBack);
-            if (flail.usage != usage || (sideClip != UINT32_MAX && flail.clip != sideClip))
-            {
-                const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(usage, sideClip);
-                if (match.clipIndex != UINT32_MAX)
-                {
-                    flail.usage = usage;
-                    flail.clip = match.clipIndex;
-                    flail.time = match.clipTimeSeconds;
-                }
-            }
+            const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(MotionFrameUsage::BalanceUpperBody);
+            flail.clip = match.clipIndex;
+            flail.time = match.clipTimeSeconds;
         }
         if (flail.clip == UINT32_MAX)
         {
@@ -128,13 +105,13 @@ namespace PARS
         }
         constexpr float blendDuration = .1f;
         flail.weight = Clamp(flail.weight + (recovering ? deltaTime : -deltaTime) / blendDuration, 0.0f, 1.0f);
-        const std::vector<GraphNode>* basePose = warmingUp ? &m_ImpactWarmup.sourcePose : nullptr;
+        const std::vector<GraphNode>* basePose = IsImpactWarmupActive() ? &m_ImpactWarmup.sourcePose : nullptr;
         if (flail.weight <= 0 || !m_AnimInstance->SampleUpperBodyPose(flail.clip, flail.time, flail.weight, flail.pose, basePose))
         {
             flail = {};
             return;
         }
-        flail.time = (std::min)(flail.time + deltaTime, m_AnimInstance->GetAnimationDuration(flail.clip));
+        flail.time = std::fmod(flail.time + deltaTime, m_AnimInstance->GetAnimationDuration(flail.clip));
     }
 
     MotionMatchResult SkeletalMeshComponent::SelectFallingAnimation() const

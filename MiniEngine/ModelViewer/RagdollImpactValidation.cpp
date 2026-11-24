@@ -50,8 +50,7 @@ namespace
             walkingFrameCount += clip.frameCount;
         }
         size_t total = kIdleClip.frameCount + walkingFrameCount;
-        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::FlailFront, PARS::MotionFrameUsage::FlailBack,
-            PARS::MotionFrameUsage::ShoveFall})
+        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::BalanceUpperBody, PARS::MotionFrameUsage::ShoveFall})
         {
             const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
             check(range.firstFrameIndex == total, "Impact frames follow the previous usage without a gap");
@@ -195,11 +194,15 @@ namespace
         PARS::PhysicsSkeleton skeleton;
         std::string error;
         check(mesh.BuildPhysicsSkeleton(skeleton, error), "Resolve the live dummy skeleton for the upper-body mask");
-        const std::array<const char*, 6> names = {"FlailFront", "FlailBack", "ShoveFallForward", "ShoveFallBackward", "ShoveFallLeft", "ShoveFallRight"};
+        const std::array<const char*, 5> names = {"Slow Jog Backwards", "ShoveFallForward", "ShoveFallBackward", "ShoveFallLeft", "ShoveFallRight"};
         size_t slot = 0;
-        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::FlailFront, PARS::MotionFrameUsage::FlailBack, PARS::MotionFrameUsage::ShoveFall})
+        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::BalanceUpperBody, PARS::MotionFrameUsage::ShoveFall})
         {
             const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
+            if (usage == PARS::MotionFrameUsage::BalanceUpperBody)
+            {
+                check(range.frameCount == 44, "All 44 backward jog samples are indexed for upper-body balance recovery");
+            }
             uint32_t previous = UINT32_MAX;
             for (size_t index = range.firstFrameIndex; index < range.firstFrameIndex + range.frameCount; ++index)
             {
@@ -209,11 +212,11 @@ namespace
                     continue;
                 }
                 previous = frame.clipIndex;
-                check(slot < names.size() && animation.GetAnimationName(previous) == names[slot], "Registered impact clip has the requested direction");
+                check(slot < names.size() && animation.GetAnimationName(previous) == names[slot], "Registered clip matches its balance or fall usage");
                 ++slot;
                 const PARS::MotionMatchResult match = animation.FindImpactPoseMatch(usage, previous);
                 check(match.clipIndex == previous && std::isfinite(match.score) && match.clipTimeSeconds < animation.GetAnimationDuration(previous),
-                    "Live physical pose matches a playable frame of the directional clip");
+                    "Live physical pose matches a playable frame of the registered clip");
                 if (usage == PARS::MotionFrameUsage::ShoveFall)
                 {
                     continue;
@@ -238,10 +241,10 @@ namespace
                         std::memcmp(&layer[node].scale, &expected.scale, sizeof(expected.scale)) == 0 &&
                         Math::LengthSquare(Math::Vector3(layer[node].xform.GetW()) - Math::Vector3(expected.xform.GetW())) < 1e-10f;
                 }
-                check(matchesMask && movesUpperBody, "Spine and descendants follow Flail while the pelvis and legs keep the base pose");
+                check(matchesMask && movesUpperBody, "Spine and descendants follow Slow Jog Backwards while the pelvis and legs keep the base pose");
             }
         }
-        check(slot == names.size(), "Both flails and all four shove falls are indexed on the shared dummy database");
+        check(slot == names.size(), "The balance clip and all four shove falls are indexed on the shared dummy database");
     }
 
     void WriteLandingComHeader(std::ostream& stream)

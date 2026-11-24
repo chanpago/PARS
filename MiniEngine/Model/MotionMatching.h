@@ -13,8 +13,7 @@ namespace PARS
     {
         Idle,
         Walking,
-        FlailFront,
-        FlailBack,
+        BalanceUpperBody,
         ShoveFall,
         Count
     };

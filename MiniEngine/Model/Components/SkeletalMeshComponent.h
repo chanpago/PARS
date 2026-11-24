@@ -81,7 +81,6 @@ namespace PARS
             float time = 0;
             float weight = 0;
             float impactTimeRemaining = 0;
-            MotionFrameUsage usage = MotionFrameUsage::Idle;
         };
 
         struct ImpactHandReach

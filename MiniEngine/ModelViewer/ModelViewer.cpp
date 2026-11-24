@@ -996,19 +996,15 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
         motionClips.push_back({index, PARS::MotionFrameUsage::Walking});
     }
-    for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::FlailFront, PARS::MotionFrameUsage::FlailBack})
+    const uint32_t backwardJog = static_cast<uint32_t>(motionSource.GetAnimationCount());
+    const std::wstring backwardJogPath = convertedDirectory + L"SlowJogBackwards/SlowJogBackwards.gltf";
+    if (!motionSource.AddAnimation("Slow Jog Backwards", LoadAnimationModel(backwardJogPath, forceRebuild, animationModels)))
     {
-        const std::string name = usage == PARS::MotionFrameUsage::FlailFront ? "FlailFront" : "FlailBack";
-        const std::wstring file = Utility::UTF8ToWideString(name);
-        const uint32_t index = static_cast<uint32_t>(motionSource.GetAnimationCount());
-        if (!motionSource.AddAnimation(name, LoadAnimationModel(convertedDirectory + file + L"/" + file + L".gltf", forceRebuild, animationModels)))
-        {
-            m_PreviewError = std::string(u8"상체 충격 클립을 등록하지 못했습니다. ") + name;
-            character->Destroy();
-            return;
-        }
-        motionClips.push_back({index, usage});
+        m_PreviewError = u8"균형 회복용 상체 클립 Slow Jog Backwards를 등록하지 못했습니다.";
+        character->Destroy();
+        return;
     }
+    motionClips.push_back({backwardJog, PARS::MotionFrameUsage::BalanceUpperBody});
     const std::array<const char*, 4> shoveNames = {"ShoveFallForward", "ShoveFallBackward", "ShoveFallLeft", "ShoveFallRight"};
     std::array<uint32_t, 4> shoveClips;
     for (size_t direction = 0; direction < shoveNames.size(); ++direction)
