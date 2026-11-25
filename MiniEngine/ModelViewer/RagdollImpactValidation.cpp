@@ -1869,7 +1869,41 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
         check(wallAccurate, "First physical wall contact lands within 2.5 cm of the crosshair at both speeds");
         check(gravityRestored, "Gravity acts on the ball after impact at both speeds");
         check(hitBody == headIndex && headError < .025f, "First physical dummy contact hits the sighted head surface within 2.5 cm");
-        check(test.SetProjectileSettings(.5f, 7.5f), "Restore the support-controller projectile fixture");
+        check(test.Reset() && dummy->SetActorLocation(dummy->GetActorLocation() + Vector3(0, .10f, 0)),
+            "Place the idle dummy 10 cm above the floor");
+        tick();
+        tick();
+        check(support.GetSnapshot().projectedPointCount > 0 && !support.GetSnapshot().hasGroundedFoot,
+            "Seeing the nearby floor from airborne feet does not mark the dummy as grounded");
+        check(test.Reset(), "Reset the standing dummy for an upward arrow hit");
+        check(ragdoll.GetBodyCollisionShape(headIndex, headGeometry, inBone, headPose), "Locate the standing dummy's head after reset");
+        const Vector3 playerPosition = player.GetActorLocation();
+        const Vector3 headTarget(headPose.p.x, headPose.p.y - .05f, headPose.p.z);
+        const Vector3 arrowOrigin(playerPosition.GetX(), headPose.p.y - .65f, playerPosition.GetZ());
+        ImpactProjectileSettings arrow = ImpactProjectileSettings::ArrowDefaults();
+        arrow.bodyImpulse = 75.0f;
+        arrow.partImpulse = 30.0f;
+        arrow.torqueMultiplier = .5f;
+        check(player.SetActorLocation(arrowOrigin - Vector3(0, .15f, 0)) &&
+            test.SetProjectileSettings(ImpactProjectileType::Arrow, arrow) &&
+            test.FireAimed(player, arrowOrigin, headTarget - arrowOrigin) && test.GetProjectiles().back()->getLinearVelocity().y > 0,
+            "Aim an arrow upward at the standing dummy's head");
+        bool groundedHeadHit = false;
+        for (unsigned frame = 0; frame < 30 && !groundedHeadHit; ++frame)
+        {
+            world.Tick(fixedStep);
+            const std::vector<RagdollImpactResponse> responses = ragdoll.GetImpactResponses(ragdoll.GetExternalImpacts());
+            for (const RagdollImpactResponse& response : responses)
+            {
+                const PxVec3 linearImpulse = response.GetLinearImpulse();
+                report << "head_arrow_body=" << response.body << " raw_y_ns=" << response.impulse.y
+                    << " linear_y_ns=" << linearImpulse.y << " part_y_ns=" << response.partImpulse.y << std::endl;
+                groundedHeadHit = groundedHeadHit || (response.body == headIndex && response.groundedArrowHit &&
+                    response.impulse.y > 0 && linearImpulse.y == 0 && response.partImpulse.y > 0);
+            }
+        }
+        check(groundedHeadHit, "An upward head shot uses the dummy's pre-hit foot support");
+        check(player.SetActorLocation(playerPosition) && test.SetProjectileSettings(.5f, 7.5f), "Restore the support-controller projectile fixture");
         // 아래 기존 검증은 항상 동적인 다리 지지 제어의 계약을 같은 입력으로 검사한다.
         // 새 자동 모드의 기본 동작과 복귀는 별도의 실제 캐릭터 전환 검증에서 확인한다.
         const std::function<bool()> resetActive = [&]() -> bool

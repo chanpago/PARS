@@ -433,7 +433,8 @@ namespace PARS
                 }
                 center = PxVec3(position.GetX(), position.GetY(), position.GetZ());
             }
-            linearImpulse += response.impulse;
+            // 지상 화살 피격의 전신 이동에서만 상승분을 뺀다. 회전에는 원래 충격량을 사용한다.
+            linearImpulse += response.GetLinearImpulse();
             angularImpulse += response.GetAngularImpulse(center);
         }
         if (mass == 0 || !linearImpulse.isFinite() || !angularImpulse.isFinite())

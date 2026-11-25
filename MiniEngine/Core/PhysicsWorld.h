@@ -128,6 +128,7 @@ private:
         physx::PxVec3 weightedPosition{0};
         float weight = 0;
         ImpactImpulseSettings settings;
+        bool groundedArrowHit = false;
         bool consumed = false;
     };
     struct StoppedProjectile
@@ -182,6 +183,8 @@ public:
         physx::PxRaycastHit& hit, const void* ignoredOwner = nullptr) const;
     // 순간이동하거나 씬에서 분리하기 전에 이전 접촉을 무효화한다.
     void InvalidateContacts(const physx::PxRigidActor& body);
+    // 고정 스텝의 시뮬레이션 직전에 한 발 이상 지면을 딛고 있는 피격자를 기록한다.
+    void RecordGroundedImpactReceiver(const void* owner);
     bool ConsumeImpactContact(uint64_t id);
     physx::PxRigidDynamic* CreateDynamicBody(const physx::PxTransform& pose,
         const physx::PxGeometry& geometry, float mass, const char* name,
@@ -300,6 +303,7 @@ private:
     std::vector<ContactPair> m_Contacts;
     std::vector<ImpactSource> m_ImpactSources;
     std::vector<ImpactContact> m_ImpactContacts;
+    std::vector<const void*> m_GroundedImpactReceivers;
     std::vector<StoppedProjectile> m_StoppedProjectiles;
     uint64_t m_NextImpactContactId = 1;
     std::vector<physx::PxRigidDynamic*> m_ImpactedAimedProjectiles;

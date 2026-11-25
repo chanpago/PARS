@@ -21,6 +21,15 @@ public:
 struct PhysicsImpactResponse
 {
 public:
+    physx::PxVec3 GetLinearImpulse() const
+    {
+        if (groundedArrowHit && impulse.y > 0.0f)
+        {
+            return physx::PxVec3(impulse.x, 0.0f, impulse.z);
+        }
+        return impulse;
+    }
+
     physx::PxVec3 GetAngularImpulse(const physx::PxVec3& center) const
     {
         return (position - center).cross(impulse) * torqueMultiplier;
@@ -31,4 +40,5 @@ public:
     physx::PxVec3 impulse{0};
     physx::PxVec3 partImpulse{0};
     float torqueMultiplier = 0;
+    bool groundedArrowHit = false;
 };

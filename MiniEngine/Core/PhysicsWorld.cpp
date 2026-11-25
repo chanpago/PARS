@@ -341,6 +341,14 @@ bool PhysicsWorld::SetImpactImpulseSettings(const PxRigidDynamic& source, const 
     return true;
 }
 
+void PhysicsWorld::RecordGroundedImpactReceiver(const void* owner)
+{
+    if (owner && std::find(m_GroundedImpactReceivers.begin(), m_GroundedImpactReceivers.end(), owner) == m_GroundedImpactReceivers.end())
+    {
+        m_GroundedImpactReceivers.push_back(owner);
+    }
+}
+
 void PhysicsWorld::RecordImpactContact(ContactPair& pair, int sourceSide, bool capsule, const PxContactPairVelocity* beforeContact)
 {
     const PxActor* source = pair.actors[sourceSide];
@@ -387,6 +395,10 @@ void PhysicsWorld::RecordImpactContact(ContactPair& pair, int sourceSide, bool c
         {
             contact->firstImpulseStep = pair.completedStep;
             contact->settings = registered->settings;
+            const PxU32 flags = pair.shapes[sourceSide]->getSimulationFilterData().word3;
+            const bool arrow = (flags & ProjectileFilterFlag) != 0 && (flags & AttachOnContactFilterFlag) != 0;
+            contact->groundedArrowHit = arrow && std::find(m_GroundedImpactReceivers.begin(),
+                m_GroundedImpactReceivers.end(), receiver) != m_GroundedImpactReceivers.end();
         }
     }
     pair.impactContactId = contact->id;
@@ -435,6 +447,7 @@ bool PhysicsWorld::GetImpactResponse(uint64_t id, PhysicsImpactResponse& respons
             response.impulse = direction * contact.settings.bodyImpulse;
             response.partImpulse = direction * contact.settings.partImpulse;
             response.torqueMultiplier = contact.settings.torqueMultiplier;
+            response.groundedArrowHit = contact.groundedArrowHit;
             return response.position.isFinite() && response.impulse.isFinite() && response.partImpulse.isFinite() &&
                 (!response.impulse.isZero() || !response.partImpulse.isZero());
         }
@@ -981,6 +994,7 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
     // World -> 어떤 액터를 어떻게 갱신할지 결정해서 콜백으로 전달
     // PhysicWorld -> 물리 스텝 직전에 콜백을 실행하고 PhysX 계산진행
     // 여기서 줄이는건 PhysicWorld가 World나 Actor의 내부 구조를 알아야 하는 의존성을 줄이기 위해서다. 콜백을 전달해도 액터의 소유권이나 관리책임은 그대로 World가 담당한다.
+    m_GroundedImpactReceivers.clear();
     if (beforeStep)
     {
         beforeStep(static_cast<float>(FixedDeltaTime));

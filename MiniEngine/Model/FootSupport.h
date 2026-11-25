@@ -101,6 +101,7 @@ namespace PARS
         bool hasComProjection = false;          // COM투영값을 계산했는지. 유효한 COM과 바닥을 맞힌 레이 점이 있어서 projectedCenterOfMass를 계산할 수 있었는지
         bool comInsideHull = false;             // 현재 COM이 지지 영역 안에 있는지
         bool hasCenterOfMassVelocity = false;   // COM 속도 계산의 성공 여부
+        bool hasGroundedFoot = false;
     };
 
     // Samples actual bodies before simulate(), independently of rendering/debug visibility.

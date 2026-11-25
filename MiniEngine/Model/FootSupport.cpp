@@ -662,6 +662,7 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
         foot.boneNode = ragdoll.GetBoneNodes()[sole.bodyIndex];
         foot.leg = sole.leg;
         foot.contact = m_Contacts[side];
+        m_Snapshot.hasGroundedFoot = m_Snapshot.hasGroundedFoot || foot.contact.grounded;
         const Matrix4 bodyWorld = ragdoll.GetBoneWorld(sole.bodyIndex) * sole.source.GetLocalTransform();
         const Quaternion rotation = Quaternion(Vector3(kZUnitVector), XMConvertToRadians(settings.rotation.z)) *
             Quaternion(Vector3(kYUnitVector), XMConvertToRadians(settings.rotation.y)) *
@@ -685,6 +686,12 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
             foot.projections[i] = foot.projected[i] ? hit.position : foot.corners[i] + down;
             if (foot.projected[i])
             {
+                // 키네마틱 발과 정적 바닥은 솔버 접촉이 없어 발바닥이 지면에 닿은 경우를 투영점으로 확인한다.
+                constexpr float kinematicGroundTolerance = .002f;
+                if (!ragdoll.IsSimulating() && hit.distance <= kinematicGroundTolerance && hit.normal.y >= .70710678f)
+                {
+                    m_Snapshot.hasGroundedFoot = true;
+                }
                 supportPoints.push_back(hit.position);
                 supportHeight += hit.position.y;
             }

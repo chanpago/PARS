@@ -1,5 +1,7 @@
 ﻿#include "SkeletalMeshComponent.h"
 #include "FramePerformance.h"
+#include "GameFramework/World.h"
+#include "PhysicsWorld.h"
 #include <algorithm>
 
 namespace PARS
@@ -217,6 +219,10 @@ namespace PARS
             m_Ragdoll.ApplyImpactResponses(responses);
         }
         UpdateFootSupport();
+        if (m_FootSupport.GetSnapshot().hasGroundedFoot)
+        {
+            GetOwner().GetWorld()->GetPhysicsWorld()->RecordGroundedImpactReceiver(&GetOwner());
+        }
         if (UpdateImpactWarmup(deltaTime, responses))
         {
             return;
