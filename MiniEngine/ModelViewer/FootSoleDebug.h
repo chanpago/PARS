@@ -17,6 +17,7 @@ public:
     void DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings = {});
     void DrawContactOverlay(const std::string& text, bool touching, float topInset) const;
     void BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
+    static void BuildLandingCandidateLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines);
     void BuildRegionTriangles(const PARS::SkeletalMeshComponent& mesh,
         std::vector<physx::PxDebugTriangle>& triangles) const;
 

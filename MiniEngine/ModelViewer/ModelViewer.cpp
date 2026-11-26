@@ -393,6 +393,7 @@ private:
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
     bool m_ContactOverlayVisible = false;
+    bool m_ShowLandingCandidates = false;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
     bool m_MapSelectionVisible = false;
@@ -1993,6 +1994,11 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         if (ImGui::Begin(u8"캐릭터 애니메이션", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
 #if defined(_M_X64)
+            if (ImGui::Button(m_ShowLandingCandidates ? u8"착지 후보 X 표시 끄기###LandingCandidateToggle" :
+                u8"착지 후보 X 표시 켜기###LandingCandidateToggle"))
+            {
+                m_ShowLandingCandidates = !m_ShowLandingCandidates;
+            }
             if (ImGui::Button(m_ContactOverlayVisible ? u8"상단 디버그 끄기###ContactOverlayToggle" :
                 u8"상단 디버그 켜기###ContactOverlayToggle"))
             {
@@ -2418,15 +2424,23 @@ void ModelViewer::RenderScene(void)
         if (m_ImpactTest)
         {
             m_PhysicsDemo->RenderProjectiles(gfxContext, m_Camera, viewport, scissor, m_ImpactTest->GetProjectileVisuals());
+            m_ImpactTest->BuildLines(lines);
             if (PARS::Character* dummy = m_ImpactTest->GetDummy())
             {
                 m_DummyFootSoles.BuildRegionTriangles(dummy->GetMesh(), regions);
+                if (m_ShowLandingCandidates)
+                {
+                    FootSoleDebug::BuildLandingCandidateLines(dummy->GetMesh(), lines);
+                }
             }
-            m_ImpactTest->BuildLines(lines);
         }
         if (PARS::Character* character = GetPreviewCharacter())
         {
             m_PlayerFootSoles.BuildLines(character->GetMesh(), lines);
+            if (m_ShowLandingCandidates)
+            {
+                FootSoleDebug::BuildLandingCandidateLines(character->GetMesh(), lines);
+            }
         }
         m_PhysicsDemo->RenderDebugTriangles(gfxContext, m_Camera, viewport, scissor, regions);
         m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);

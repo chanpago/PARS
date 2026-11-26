@@ -1,5 +1,6 @@
 ﻿#include "../Model/FootstepPlanner.h"
 #include "foundation/PxQuat.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -409,15 +410,17 @@ namespace
             locked.targetInCaptureMargin && !locked.modelFeasible && locked.poseChecks == 0,
             "a locked margin target stays fixed and retains its classification");
         input = Input();
-        uint32_t checksRun = 0;
-        input.acceptsTarget = [&checksRun](const PxVec3&) -> bool
+        FootstepPolygon checked;
+        input.acceptsTarget = [&checked](const PxVec3& point) -> bool
         {
-            ++checksRun;
+            checked.push_back(point);
             return false;
         };
         const FootstepRecoverySnapshot rejected = SelectFootstepRecovery(input, settings);
-        Check(!rejected.hasTarget && rejected.poseRejected && checksRun == rejected.poseChecks &&
-            checksRun <= settings.maximumPoseChecks, "both regions share a single pose-check budget");
+        Check(!rejected.hasTarget && rejected.poseRejected && checked.size() == rejected.poseChecks &&
+            checked.size() <= settings.maximumPoseChecks, "both regions share a single pose-check budget");
+        Check(std::equal(checked.begin(), checked.end(), rejected.poseCheckPositions.begin()),
+            "the snapshot retains every rejected landing position in pose-check order");
     }
 
     FootstepInput PlannerInput()
@@ -556,6 +559,9 @@ namespace
         Check(planner.GetSnapshot().feet[1].justStarted && second.recovery.mode == FootstepMode::Normal &&
             second.recovery.intersections[0].size() == 1 && !InAny(second.recovery.intersections[0], second.raw) &&
             checked.size() == 2, "a wider stance moves the reference outside the overlap and a second pose is accepted");
+        Check(second.recovery.poseChecks == checked.size() &&
+            std::equal(checked.begin(), checked.end(), second.recovery.poseCheckPositions.begin()),
+            "the snapshot retains the checked positions through the first accepted landing");
         const PxVec3 closest = ClosestFootstepPoint(second.recovery.intersections[0].front(), second.raw);
         Check((checked.front() - closest).magnitudeSquared() < 1e-8f && second.position == checked.back() &&
             InAny(second.recovery.intersections[0], second.position),

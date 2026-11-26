@@ -348,7 +348,7 @@ namespace
     }
 
     void SelectTarget(const FootstepRecoveryInput& input, const FootstepRecoverySettings& settings,
-        bool hasOverlap, bool allowGroundedSwitch, FootstepPolygon& tested, FootstepRecoverySnapshot& result)
+        bool hasOverlap, bool allowGroundedSwitch, FootstepRecoverySnapshot& result)
     {
         std::vector<LandingCandidate> candidates;
         std::array<size_t, 3> order{{0, 1, 2}};
@@ -433,9 +433,13 @@ namespace
                 continue;
             }
             bool duplicate = false;
-            for (const PxVec3& point : tested)
+            for (uint32_t index = 0; index < result.poseChecks; ++index)
             {
-                duplicate = duplicate || DistanceSquared(point, candidate.position) < 1e-8f;
+                if (DistanceSquared(result.poseCheckPositions[index], candidate.position) < 1e-8f)
+                {
+                    duplicate = true;
+                    break;
+                }
             }
             if (duplicate)
             {
@@ -446,7 +450,7 @@ namespace
                 result.budgetExhausted = true;
                 break;
             }
-            tested.push_back(candidate.position);
+            result.poseCheckPositions[result.poseChecks] = candidate.position;
             ++result.poseChecks;
             if (input.acceptsTarget && !input.acceptsTarget(candidate.position))
             {
@@ -650,7 +654,8 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     if (!input.com.isFinite() || !input.velocity.isFinite() || !std::isfinite(height) || height < .05f ||
         !std::isfinite(input.firstStepTime) || input.firstStepTime <= 0 ||
         !std::isfinite(input.followingStepTime) || input.followingStepTime <= 0 ||
-        settings.maximumSteps < 1 || settings.maximumSteps > 3 || settings.maximumPoseChecks == 0 || settings.maximumPoseChecks > 6 ||
+        settings.maximumSteps < 1 || settings.maximumSteps > 3 || settings.maximumPoseChecks == 0 ||
+        settings.maximumPoseChecks > FootstepRecoverySettings::MaximumPoseChecks ||
         !std::isfinite(settings.frontAngleDegrees) || settings.frontAngleDegrees < 0 || settings.frontAngleDegrees >= 80 ||
         !std::isfinite(settings.backAngleDegrees) || settings.backAngleDegrees < 0 || settings.backAngleDegrees >= 80 ||
         !std::isfinite(settings.switchAreaRatio) || settings.switchAreaRatio < 0 ||
@@ -746,13 +751,12 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         input.previousMode == FootstepMode::Normal && (result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0);
     const bool expand = settings.maximumSteps == 1 && settings.oneStepCaptureScale > 1.0f &&
         !result.capture.empty() && result.capture.front().size() >= 3;
-    FootstepPolygon tested;
     if (expand)
     {
         // 원래 영역의 자세 후보를 먼저 검사한다. 확장 영역도 같은 틱의 검사 예산을 공유한다.
         if (input.stepping && !input.locked && hasOverlap)
         {
-            SelectTarget(input, settings, hasOverlap, allowGroundedSwitch, tested, result);
+            SelectTarget(input, settings, hasOverlap, allowGroundedSwitch, result);
         }
         ExpandOneStepCapture(result.capture.front(), settings.oneStepCaptureScale);
         hasOverlap = EvaluateIntersections(result);
@@ -776,7 +780,7 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         const bool keepNormal = input.previousMode == FootstepMode::Normal &&
             input.modeSelection != FootstepRecoveryInput::ModeSelection::NewStep && !allowSwitch;
         const bool usableOverlap = keepNormal ? !result.intersections[0].empty() : hasOverlap;
-        SelectTarget(input, settings, usableOverlap, allowSwitch, tested, result);
+        SelectTarget(input, settings, usableOverlap, allowSwitch, result);
     }
     if (result.hasTarget && result.modelFeasible)
     {

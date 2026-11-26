@@ -35,6 +35,9 @@ namespace PARS
     struct FootstepRecoverySettings
     {
     public:
+        static constexpr uint32_t MaximumPoseChecks = 6;
+
+    public:
         float transferTime = .05f;
         float frontAngleDegrees = 20.0f;
         float backAngleDegrees = 30.0f;
@@ -42,7 +45,7 @@ namespace PARS
         float switchAreaRatio = .15f;
         float oneStepCaptureScale = 1.25f;
         uint32_t maximumSteps = 3;
-        uint32_t maximumPoseChecks = 6;
+        uint32_t maximumPoseChecks = MaximumPoseChecks;
         bool enabled = true;
     };
 
@@ -119,6 +122,9 @@ namespace PARS
         physx::PxVec3 icp{0};
         physx::PxVec3 target{0};
         physx::PxVec3 preferred{0};
+        std::array<physx::PxVec3, FootstepRecoverySettings::MaximumPoseChecks> poseCheckPositions{
+            physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0),
+            physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0)};
         std::array<float, 3> overlapAreas{};
         FootstepMode mode = FootstepMode::Normal;
         FootstepRecoveryStatus status = FootstepRecoveryStatus::Unavailable;

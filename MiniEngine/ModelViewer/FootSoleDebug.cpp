@@ -28,6 +28,7 @@ namespace
     constexpr PxU32 RecoveryModeColors[] = {0xff000000, 0xffff9933, 0xffbb66ff};
     constexpr PxU32 RecoveryCaptureColor = 0xff33dd77;
     constexpr PxU32 RecoveryTargetColor = 0xffeeffff;
+    constexpr PxU32 LandingCandidateColor = 0xffff0000;
     constexpr size_t NormalModeIndex = static_cast<size_t>(PARS::FootstepMode::Normal);
 
     const PARS::FootstepRecoverySnapshot* VisibleRecovery(const PARS::SkeletalMeshComponent& mesh)
@@ -873,6 +874,24 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
                 Line(lines, ToMath(leg.hip.p), ToMath(leg.hip.p + leg.bendDirection * .18f), KneeHintColor);
             }
         }
+    }
+}
+
+void FootSoleDebug::BuildLandingCandidateLines(const PARS::SkeletalMeshComponent& mesh, std::vector<PxDebugLine>& lines)
+{
+    const PARS::FootstepRecoverySnapshot* recovery = VisibleRecovery(mesh);
+    if (!recovery)
+    {
+        return;
+    }
+    const PxVec3 heightOffset(0, .03f, 0);
+    const PxVec3 firstDiagonal(.025f, 0, .025f);
+    const PxVec3 secondDiagonal(.025f, 0, -.025f);
+    for (uint32_t index = 0; index < recovery->poseChecks; ++index)
+    {
+        const PxVec3 center = recovery->poseCheckPositions[index] + heightOffset;
+        lines.emplace_back(center - firstDiagonal, center + firstDiagonal, LandingCandidateColor);
+        lines.emplace_back(center - secondDiagonal, center + secondDiagonal, LandingCandidateColor);
     }
 }
 
