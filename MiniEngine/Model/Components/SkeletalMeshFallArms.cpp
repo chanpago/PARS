@@ -166,6 +166,21 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
     goal.normal = bone.q.rotate(m_ImpactHandReach.normalInBone);
     goal.hitNode = m_Ragdoll.GetBoneNodes()[m_ImpactHandReach.body];
     goal.hand = m_ImpactHandReach.hand;
+    if (woundJoint >= 0)
+    {
+        goal.limitClavicleRotation = [this](const FallArmSetup& setup, const PxQuat& rotationInChest) -> PxQuat
+        {
+            const PhysicsConstraint& joint = m_PhysicsAsset->constraints[setup.clavicleJoint];
+            const PxQuat raw = setup.jointInChest.getConjugate() * rotationInChest * setup.jointInClavicle;
+            const Quaternion rotation(DirectX::XMVectorSet(raw.x, raw.y, raw.z, raw.w));
+            const Quaternion limited = m_Ragdoll.UsesArticulation() ?
+                ClampArticulationDriveTarget(joint, rotation) : ClampD6DriveTarget(joint, rotation);
+            DirectX::XMFLOAT4 value;
+            DirectX::XMStoreFloat4(&value, limited);
+            return (setup.jointInChest * PxQuat(value.x, value.y, value.z, value.w) *
+                setup.jointInClavicle.getConjugate()).getNormalized();
+        };
+    }
     if (!ApplyImpactPalmTarget(goal, arms, m_PhysicsSkeleton.parents, frames, corrected))
     {
         if (woundJoint >= 0)
@@ -274,6 +289,30 @@ void SkeletalMeshComponent::InitializeFallArms()
         {
             continue;
         }
+        if (setup.anchorNode == setup.clavicleNode)
+        {
+            const std::vector<PhysicsConstraint>& joints = m_PhysicsAsset->constraints;
+            const std::vector<PhysicsConstraint>::const_iterator joint = std::find_if(joints.begin(), joints.end(),
+                [&](const PhysicsConstraint& entry) -> bool
+                {
+                    return entry.childBone == m_PhysicsSkeleton.names[setup.clavicleNode];
+                });
+            if (joint != joints.end())
+            {
+                setup.chestBody = m_PhysicsAsset->FindBody(joint->parentBone);
+                if (setup.chestBody >= 0)
+                {
+                    setup.chestNode = bodies[setup.chestBody];
+                    setup.clavicleJoint = static_cast<int>(joint - joints.begin());
+                    setup.upInChest = ToFrame(referenceWorld[setup.chestNode]).q.rotateInv(up);
+                    // 바디 오프셋과 조인트 프레임을 합쳐 각 본에서 본 조인트 축을 저장한다.
+                    setup.jointInChest = ToFrame(m_PhysicsAsset->bodies[setup.chestBody].GetLocalTransform() *
+                        joint->parentFrame.GetTransform()).q;
+                    setup.jointInClavicle = ToFrame(m_PhysicsAsset->bodies[setup.anchorBody].GetLocalTransform() *
+                        joint->childFrame.GetTransform()).q;
+                }
+            }
+        }
         const PxTransform anchor = ToFrame(referenceWorld[setup.anchorNode]);
         const PxTransform shoulder = ToFrame(referenceWorld[setup.shoulderNode]);
         const PxTransform elbow = ToFrame(referenceWorld[setup.elbowNode]);
@@ -337,6 +376,10 @@ void SkeletalMeshComponent::ApplyArmTargets(std::vector<Matrix4>& target)
         {
             arm.actualAnchor = ToFrame(m_Ragdoll.GetBoneWorld(arm.setup.anchorBody));
             arm.actualHand = ToFrame(m_Ragdoll.GetBoneWorld(arm.setup.handBody));
+            if (m_ImpactHandReach.woundJoint >= 0 && arm.setup.chestBody >= 0)
+            {
+                arm.actualChest = ToFrame(m_Ragdoll.GetBoneWorld(arm.setup.chestBody));
+            }
         }
     }
     FallArmSnapshot corrected;

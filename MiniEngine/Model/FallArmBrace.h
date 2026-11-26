@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "FootstepIK.h"
+#include <functional>
 
 namespace PARS
 {
@@ -10,6 +11,9 @@ namespace PARS
         physx::PxTransform palmInHand{physx::PxIdentity};
         physx::PxVec3 forwardInAnchor{0, 0, 1};
         physx::PxVec3 rightInAnchor{1, 0, 0};
+        physx::PxVec3 upInChest{0, 1, 0};
+        physx::PxQuat jointInChest{physx::PxIdentity};
+        physx::PxQuat jointInClavicle{physx::PxIdentity};
         float upperLength = 0;
         float lowerLength = 0;
         int anchorNode = -1;
@@ -19,6 +23,9 @@ namespace PARS
         int handNode = -1;
         int anchorBody = -1;
         int handBody = -1;
+        int chestNode = -1;
+        int chestBody = -1;
+        int clavicleJoint = -1;
         bool available = false;
     };
 
@@ -28,6 +35,7 @@ namespace PARS
         FallArmSetup setup;
         physx::PxTransform actualAnchor{physx::PxIdentity};
         physx::PxTransform actualHand{physx::PxIdentity};
+        physx::PxTransform actualChest{physx::PxIdentity};
     };
 
     struct FallArmTarget
@@ -69,10 +77,14 @@ namespace PARS
         static constexpr float WoundHoldTime = 5.0f;
 
     public:
+        // 가슴 본 기준의 쇄골 회전을 현재 물리 관절이 허용하는 회전으로 제한한다.
+        std::function<physx::PxQuat(const FallArmSetup&, const physx::PxQuat&)> limitClavicleRotation;
         physx::PxVec3 point{0};
         physx::PxVec3 normal{0};
         float approach = 0;
         float weight = 0;
+        // 목표 손목으로 가는 이동 중 쇄골이 분담할 비율이다.
+        float clavicleReachFraction = .08f;
         int hitNode = -1;
         int hand = -1;
     };

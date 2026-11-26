@@ -294,6 +294,148 @@ namespace
         std::puts("PASS: fast arrow attachment, impact delivery and body replacement");
     }
 
+    void TestClavicleReach()
+    {
+        const std::vector<int32_t> parents{-1, 0, 1, 2, 3, 0, 5, 6, 7};
+        std::vector<PxTransform> rest(9, PxTransform(PxIdentity));
+        std::array<PARS::FallArmSample, 2> arms;
+        for (int side = 0; side < 2; ++side)
+        {
+            const float sign = side == 0 ? 1.0f : -1.0f;
+            PARS::FallArmSetup& setup = arms[side].setup;
+            setup.available = true;
+            setup.chestNode = 0;
+            setup.clavicleJoint = side;
+            setup.clavicleNode = 1 + 4 * side;
+            setup.anchorNode = setup.clavicleNode;
+            setup.shoulderNode = setup.clavicleNode + 1;
+            setup.elbowNode = setup.clavicleNode + 2;
+            setup.handNode = setup.clavicleNode + 3;
+            setup.rightInAnchor = PxVec3(-1, 0, 0);
+            setup.palmInHand = PxTransform(PxVec3(0, .025f, 0));
+            rest[setup.clavicleNode].p = PxVec3(.04f * sign, 0, 0);
+            rest[setup.shoulderNode].p = PxVec3(.18f * sign, 0, 0);
+            rest[setup.elbowNode].p = PxVec3(.22f * sign, -.28f, .02f);
+            rest[setup.handNode].p = PxVec3(.2f * sign, -.55f, .07f);
+            setup.upperLength = (rest[setup.elbowNode].p - rest[setup.shoulderNode].p).magnitude();
+            setup.lowerLength = (rest[setup.handNode].p - rest[setup.elbowNode].p).magnitude();
+        }
+        const PxTransform tilted(PxVec3(1, -2, 3), PxQuat(.9f, PxVec3(1, 2, 3).getNormalized()));
+        for (int side = 0; side < 2; ++side)
+        {
+            const PARS::FallArmSetup& setup = arms[side].setup;
+            const float sign = side == 0 ? 1.0f : -1.0f;
+            for (const PxVec3& hit : {PxVec3(-sign * .11f, -.12f, .14f), PxVec3(-sign * .18f, -.18f, .01f),
+                PxVec3(sign * .13f, -.12f, -.14f), PxVec3(0, -.9f, -.12f)})
+            {
+                std::vector<PxTransform> uprightPose;
+                for (const PxTransform& body : {PxTransform(PxIdentity), tilted})
+                {
+                    for (PARS::FallArmSample& arm : arms)
+                    {
+                        arm.actualChest = body;
+                        arm.actualAnchor = body * rest[arm.setup.anchorNode];
+                        arm.actualHand = body * rest[arm.setup.handNode];
+                    }
+                    PARS::ImpactPalmGoal goal;
+                    goal.weight = 1;
+                    goal.approach = 1;
+                    goal.hand = side;
+                    goal.hitNode = 0;
+                    goal.point = body.transform(hit);
+                    goal.normal = body.q.rotate(PxVec3(hit.x, 0, hit.z).getNormalized());
+                    goal.limitClavicleRotation = [](const PARS::FallArmSetup&, const PxQuat& requested) -> PxQuat
+                    {
+                        PxVec3 axis;
+                        float angle = 0;
+                        requested.toRadiansAndUnitAxis(angle, axis);
+                        return PxQuat(PxMin(angle, .075f), axis);
+                    };
+                    std::vector<PxTransform> pose = rest;
+                    PARS::FallArmSnapshot result;
+                    Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result), "Solve a clavicle and arm together");
+                    const float angle = pose[setup.clavicleNode].q.getAngle();
+                    const PxVec3 wrist = body.transformInv((result.arms[side].palm * setup.palmInHand.getInverse()).p);
+                    Check(angle > .001f && angle <= .0751f && pose[setup.shoulderNode].p.z * wrist.z > 0,
+                        "The limited clavicle carries the shoulder toward the front or back");
+                    const int opposite = arms[1 - side].setup.clavicleNode;
+                    Check(pose[opposite] == rest[opposite] && !result.arms[1 - side].applied,
+                        "Only the reaching side moves");
+                    const PxVec3 palm = (body * pose[setup.handNode] * setup.palmInHand).p;
+                    Check((palm - result.arms[side].solvedPalm).magnitude() < 1e-5f, "Report the palm in the chest frame");
+                    const bool reachable = hit.y > -.8f;
+                    Check(result.arms[side].reachLimited != reachable &&
+                        (!reachable || (palm - goal.point - goal.normal * .006f).magnitude() < 1e-4f) &&
+                        PxAbs((pose[setup.elbowNode].p - pose[setup.shoulderNode].p).magnitude() - setup.upperLength) < 1e-5f &&
+                        PxAbs((pose[setup.handNode].p - pose[setup.elbowNode].p).magnitude() - setup.lowerLength) < 1e-5f,
+                        "Reach the moving wound or stop at full arm length");
+                    if (uprightPose.empty())
+                    {
+                        uprightPose = pose;
+                    }
+                    else
+                    {
+                        for (size_t node = 0; node < pose.size(); ++node)
+                        {
+                            Check((pose[node].p - uprightPose[node].p).magnitude() < 1e-4f &&
+                                PxAbs(pose[node].q.dot(uprightPose[node].q)) > .99999f, "Follow the tilted chest");
+                        }
+                    }
+                    goal.weight = .5f;
+                    pose = rest;
+                    Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) &&
+                        PxAbs(pose[setup.clavicleNode].q.getAngle() - angle * .5f) < 1e-4f,
+                        "Blend the clavicle once during approach and release");
+                    const float fraction = goal.clavicleReachFraction;
+                    goal.clavicleReachFraction = 0;
+                    pose = rest;
+                    Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result), "Solve with zero clavicle assistance");
+                    goal.clavicleReachFraction = fraction;
+                    std::vector<PxTransform> fallback = rest;
+                    arms[side].setup.clavicleJoint = -1;
+                    Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, fallback, result) && pose == fallback,
+                        "A rig without an independent clavicle joint uses the existing anchor");
+                    arms[side].setup.clavicleJoint = side;
+                    goal.limitClavicleRotation = {};
+                    fallback = rest;
+                    Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, fallback, result) && pose == fallback &&
+                        pose[setup.clavicleNode] == rest[setup.clavicleNode], "Match the original arm solve for a short gesture");
+                }
+            }
+            PARS::ImpactPalmGoal sweep;
+            sweep.hand = side;
+            sweep.hitNode = 0;
+            sweep.approach = 1;
+            sweep.weight = 1;
+            sweep.limitClavicleRotation = [](const PARS::FallArmSetup&, const PxQuat& requested) -> PxQuat
+            {
+                return requested;
+            };
+            PxQuat previousUpper(PxIdentity);
+            PxVec3 previousElbow(0);
+            for (int frame = 0; frame <= 60; ++frame)
+            {
+                const float angle = PxPi * static_cast<float>(frame) / 60.0f;
+                const PxVec3 normal(-sign * std::sin(angle), 0, std::cos(angle));
+                sweep.point = tilted.transform(PxVec3(normal.x * .16f, -.14f, normal.z * .12f));
+                sweep.normal = tilted.q.rotate(normal);
+                std::vector<PxTransform> pose = rest;
+                PARS::FallArmSnapshot result;
+                Check(PARS::ApplyImpactPalmTarget(sweep, arms, parents, pose, result), "Follow a point moving around the torso");
+                const PxQuat upper = pose[setup.shoulderNode].q;
+                const PxVec3 elbow = pose[setup.elbowNode].p;
+                if (frame > 0)
+                {
+                    Check(PxAbs(upper.dot(previousUpper)) > .99f && (elbow - previousElbow).magnitude() < .04f,
+                        "Keep the upper arm and elbow continuous across the side of the torso");
+                }
+                previousUpper = upper;
+                previousElbow = elbow;
+            }
+        }
+        std::puts("PASS: mirrored clavicle reach, joint limit, chest rotation, blending and fallback");
+    }
+
     void TestImpactPalm()
     {
         const std::vector<int32_t> parents{-1, 0, 1, 2, 0, 4, 5};
@@ -365,6 +507,7 @@ namespace
             std::abs((pose[6].p - pose[5].p).magnitude() - arms[1].setup.lowerLength) < 1e-4f,
             "An unreachable body hit selects the closer hand and preserves arm length");
         std::puts("PASS: struck arm, moving surface, palm orientation, hand choice and reach limit");
+        TestClavicleReach();
     }
 
     void TestBodyPairContacts()
