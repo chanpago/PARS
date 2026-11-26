@@ -26,6 +26,7 @@ namespace EngineProfiling
     void EndBlock(CommandContext* Context = nullptr);
 
     void DisplayFrameRate(TextContext& Text);
+    void DrawFrameTimingsPanel();
     void DisplayPerfGraph(GraphicsContext& Text);
     void Display(TextContext& Text, float x, float y, float w, float h);
     bool IsPaused();

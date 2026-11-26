@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -20,6 +20,7 @@
 #include "GameInput.h"
 #include "GpuTimeManager.h"
 #include "CommandContext.h"
+#include "imgui.h"
 #include <vector>
 #include <unordered_map>
 #include <array>
@@ -346,8 +347,8 @@ public:
 
         GpuTimeManager::BeginReadBack();
         sm_RootScope.GatherTimes(FrameIndex);
-        s_FrameDelta.RecordStat(FrameIndex, GpuTimeManager::GetTime(0));
         GpuTimeManager::EndReadBack();
+        s_FrameDelta.RecordStat(FrameIndex, Graphics::GetFrameTime());
 
         float TotalCpuTime, TotalGpuTime;
         sm_RootScope.SumInclusiveTimes(TotalCpuTime, TotalGpuTime);
@@ -420,6 +421,54 @@ NestedTimingTree NestedTimingTree::sm_RootScope(L"");
 NestedTimingTree* NestedTimingTree::sm_CurrentNode = &NestedTimingTree::sm_RootScope;
 NestedTimingTree* NestedTimingTree::sm_SelectedScope = &NestedTimingTree::sm_RootScope;
 bool NestedTimingTree::sm_CursorOnGraph = false;
+
+namespace
+{
+    using FramePerformance::Category;
+
+    struct TimingRow
+    {
+    public:
+        const char* overlayLabel;
+        const char* panelLabel;
+        Category category;
+    };
+
+    constexpr TimingRow kTimingRows[] =
+    {
+        {"PhysX step + wait", u8"PhysX 스텝·대기", Category::PhysXStep},
+        {"PARS CPU total", u8"PARS CPU 합계", Category::ParsTotal},
+        {"  Control / targets", u8"  제어·목표", Category::ControlTotal},
+        {"    Foot support / contacts", u8"    발 지지·접촉", Category::FootSupport},
+        {"    Footstep planning", u8"    발딛기 계획", Category::FootstepPlanning},
+        {"    Landing target search", u8"    착지 목표 탐색", Category::LandingTargetSearch},
+        {"    Foot trajectory", u8"    발 이동 궤적", Category::TrajectoryTotal},
+        {"      Swing target", u8"      스윙 목표", Category::SwingTrajectory},
+        {"      Path setup / apply", u8"      경로 준비·적용", Category::TrajectorySetup},
+        {"      Current path precheck", u8"      현재 경로 사전 검사", Category::CurrentPathSamples},
+        {"      Current midpoints", u8"      현재 경로 중점", Category::CurrentPathMidpoints},
+        {"      Current bounds / split", u8"      현재 경로 경계·분할", Category::CurrentPathIntervals},
+        {"      Detour build / rank", u8"      우회 후보 생성·정렬", Category::DetourRanking},
+        {"      Detour precheck", u8"      우회 경로 사전 검사", Category::DetourSamples},
+        {"      Detour midpoints", u8"      우회 경로 중점", Category::DetourMidpoints},
+        {"      Detour bounds / split", u8"      우회 경로 경계·분할", Category::DetourIntervals},
+        {"    Footstep IK", u8"    발딛기 IK", Category::FootstepIK},
+        {"    Recovery pose targets", u8"    회복 자세 목표", Category::RecoveryTargets},
+        {"    Ragdoll drive targets", u8"    래그돌 드라이브 목표", Category::RagdollDrives},
+        {"    Other control / targets", u8"    기타 제어·목표", Category::ParsControl},
+        {"  Pose / animation", u8"  자세·애니메이션", Category::ParsPose},
+        {"  Other world work", u8"  기타 월드 처리", Category::ParsOther},
+        {"Mesh render prep CPU", u8"메시 렌더 준비 CPU", Category::RenderPreparation}
+    };
+    static_assert(_countof(kTimingRows) == FramePerformance::CategoryCount);
+
+    float GetProfilingFrameRate()
+    {
+        const float delta = NestedTimingTree::GetFrameDelta();
+        return delta > 0.0f ? 1.0f / delta : 0.0f;
+    }
+}
+
 namespace EngineProfiling
 {
     BoolVar DrawFrameRate("Display Frame Rate", true);
@@ -472,12 +521,12 @@ namespace EngineProfiling
         
         float cpuTime = NestedTimingTree::GetTotalCpuTime();
         float gpuTime = NestedTimingTree::GetTotalGpuTime();
-        float frameRate = 1.0f / NestedTimingTree::GetFrameDelta();
+        const float frameRate = GetProfilingFrameRate();
 
         Text.DrawFormattedString( "CPU %7.3f ms, GPU %7.3f ms, %3u Hz\n",
             cpuTime, gpuTime, (uint32_t)(frameRate + 0.5f));
 
-        if (!DrawParsTimings && !GameInput::IsPressed(GameInput::kMouse1))
+        if (!DrawParsTimings)
         {
             return;
         }
@@ -488,32 +537,12 @@ namespace EngineProfiling
         Text.DrawFormattedString("%-29s %8s %8s %8s %8s %6s\n",
             "CPU elapsed time (ms/frame)", "Last", "Avg", "Max", "Peak", "Calls");
         Text.SetColor(Color(1.0f, 1.0f, 1.0f));
-        using FramePerformance::Category;
         const FramePerformance::Recorder& recorder = FramePerformance::GetState().recorder;
         const FramePerformance::Sample& peak = recorder.GetPeakFrame(Category::ParsTotal);
-        DisplayTimingRow(Text, "PhysX step + wait", Category::PhysXStep, peak);
-        DisplayTimingRow(Text, "PARS CPU total", Category::ParsTotal, peak);
-        DisplayTimingRow(Text, "  Control / targets", Category::ControlTotal, peak);
-        DisplayTimingRow(Text, "    Foot support / contacts", Category::FootSupport, peak);
-        DisplayTimingRow(Text, "    Footstep planning", Category::FootstepPlanning, peak);
-        DisplayTimingRow(Text, "    Landing target search", Category::LandingTargetSearch, peak);
-        DisplayTimingRow(Text, "    Foot trajectory", Category::TrajectoryTotal, peak);
-        DisplayTimingRow(Text, "      Swing target", Category::SwingTrajectory, peak);
-        DisplayTimingRow(Text, "      Path setup / apply", Category::TrajectorySetup, peak);
-        DisplayTimingRow(Text, "      Current path precheck", Category::CurrentPathSamples, peak);
-        DisplayTimingRow(Text, "      Current midpoints", Category::CurrentPathMidpoints, peak);
-        DisplayTimingRow(Text, "      Current bounds / split", Category::CurrentPathIntervals, peak);
-        DisplayTimingRow(Text, "      Detour build / rank", Category::DetourRanking, peak);
-        DisplayTimingRow(Text, "      Detour precheck", Category::DetourSamples, peak);
-        DisplayTimingRow(Text, "      Detour midpoints", Category::DetourMidpoints, peak);
-        DisplayTimingRow(Text, "      Detour bounds / split", Category::DetourIntervals, peak);
-        DisplayTimingRow(Text, "    Footstep IK", Category::FootstepIK, peak);
-        DisplayTimingRow(Text, "    Recovery pose targets", Category::RecoveryTargets, peak);
-        DisplayTimingRow(Text, "    Ragdoll drive targets", Category::RagdollDrives, peak);
-        DisplayTimingRow(Text, "    Other control / targets", Category::ParsControl, peak);
-        DisplayTimingRow(Text, "  Pose / animation", Category::ParsPose, peak);
-        DisplayTimingRow(Text, "  Other world work", Category::ParsOther, peak);
-        DisplayTimingRow(Text, "Mesh render prep CPU", Category::RenderPreparation, peak);
+        for (const TimingRow& row : kTimingRows)
+        {
+            DisplayTimingRow(Text, row.overlayLabel, row.category, peak);
+        }
         const FramePerformance::Statistics physics = recorder.GetStatistics(Category::PhysXStep);
         Text.SetCursorX(10.0f);
         Text.DrawFormattedString("Last PhysX steps %u | History %u frames | All worlds\n",
@@ -523,6 +552,51 @@ namespace EngineProfiling
         Text.SetCursorX(10.0f);
         Text.DrawString("PhysX queries and API calls are timed in the calling stage.\n");
         Text.SetTextSize(24.0f);
+    }
+
+    void DrawFrameTimingsPanel()
+    {
+        const FramePerformance::Recorder& recorder = FramePerformance::GetState().recorder;
+        const FramePerformance::Statistics physics = recorder.GetStatistics(Category::PhysXStep);
+        ImGui::Text("CPU %.3f ms   GPU %.3f ms   %.0f FPS",
+            NestedTimingTree::GetTotalCpuTime(), NestedTimingTree::GetTotalGpuTime(), GetProfilingFrameRate());
+        ImGui::TextWrapped(u8"최근 %zu프레임 · 마지막 PhysX 스텝 %u회 · 전체 월드", recorder.GetFrameCount(), physics.calls);
+        ImGui::TextWrapped(u8"피크와 호출 수는 PARS CPU 합계가 가장 컸던 프레임의 값입니다. PhysX 쿼리와 API 호출 시간은 호출한 구간에 포함됩니다.");
+
+        const ImGuiTableFlags flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+            ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY;
+        if (ImGui::BeginTable("ParsFrameTimings", 6, flags, ImVec2(0, 0)))
+        {
+            ImGui::TableSetupColumn(u8"CPU 구간 (ms)");
+            ImGui::TableSetupColumn(u8"최근");
+            ImGui::TableSetupColumn(u8"평균");
+            ImGui::TableSetupColumn(u8"최대");
+            ImGui::TableSetupColumn(u8"피크");
+            ImGui::TableSetupColumn(u8"호출 수");
+            ImGui::TableSetupScrollFreeze(1, 1);
+            ImGui::TableHeadersRow();
+
+            const FramePerformance::Sample& peak = recorder.GetPeakFrame(Category::ParsTotal);
+            for (const TimingRow& row : kTimingRows)
+            {
+                const FramePerformance::Statistics stats = recorder.GetStatistics(row.category);
+                const size_t index = static_cast<size_t>(row.category);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(row.panelLabel);
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%.3f", stats.last);
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%.3f", stats.average);
+                ImGui::TableSetColumnIndex(3);
+                ImGui::Text("%.3f", stats.maximum);
+                ImGui::TableSetColumnIndex(4);
+                ImGui::Text("%.3f", peak.milliseconds[index]);
+                ImGui::TableSetColumnIndex(5);
+                ImGui::Text("%u", peak.calls[index]);
+            }
+            ImGui::EndTable();
+        }
     }
 
     void DisplayPerfGraph( GraphicsContext& Context )

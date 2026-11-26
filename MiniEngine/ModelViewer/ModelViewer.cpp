@@ -12,6 +12,7 @@
 //
 
 #include "GameCore.h"
+#include "EngineProfiling.h"
 #include "CameraController.h"
 #include "BufferManager.h"
 #include "Camera.h"
@@ -2233,6 +2234,15 @@ void ModelViewer::DrawSettingsPanel()
                 if (m_PreviewMode && ImGui::BeginTabItem(u8"캐릭터 애니메이션"))
                 {
                     DrawCharacterAnimationTab();
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem(u8"프로파일링"))
+                {
+                    if (ImGui::BeginChild("ProfilingSettings"))
+                    {
+                        EngineProfiling::DrawFrameTimingsPanel();
+                    }
+                    ImGui::EndChild();
                     ImGui::EndTabItem();
                 }
                 ImGui::EndTabBar();
