@@ -89,8 +89,14 @@ namespace PARS
             uint64_t step = 0;
             uint64_t approachStep = 0;
             uint64_t clock = 0;
+            uint64_t supportStartStep = UINT64_MAX;
+            WoundArmHistory armHistory;
+            WoundArmHistory supportHistory;
             physx::PxVec3 pointInBone{0};
             physx::PxVec3 normalInBone{0};
+            float freeLegWeight = 0;
+            float restingLegWeight = 0;
+            float legLoad = .5f;
             int body = -1;
             int hand = -1;
             int woundJoint = -1;

@@ -408,6 +408,7 @@ namespace PARS
                 entry["radius"] = body.radius;
                 entry["halfLength"] = body.halfLength;
                 entry["mass"] = body.mass;
+                entry["isCriticalWound"] = body.isCriticalWound;
                 nlohmann::json& material = entry["material"];
                 material["staticFriction"] = body.material.staticFriction;
                 material["dynamicFriction"] = body.material.dynamicFriction;
@@ -531,6 +532,7 @@ namespace PARS
                 body.radius = entry.at("radius").get<float>();
                 body.halfLength = entry.at("halfLength").get<float>();
                 body.mass = entry.at("mass").get<float>();
+                body.isCriticalWound = entry.value("isCriticalWound", false);
                 if (version >= 5 && entry.count("material"))
                 {
                     const nlohmann::json& material = entry.at("material");

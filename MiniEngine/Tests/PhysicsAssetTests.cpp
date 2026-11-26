@@ -129,6 +129,7 @@ void RunPhysicsAssetTests()
         body.radius = .12f; body.halfLength = .23f; body.mass = 4.5f;
         if (i == 1)
         {
+            body.isCriticalWound = true;
             body.material.staticFriction = .1f;
             body.material.dynamicFriction = .05f;
             body.material.restitution = 0;
@@ -179,6 +180,7 @@ void RunPhysicsAssetTests()
     {
         const PARS::PhysicsBody& a = original.bodies[i];
         const PARS::PhysicsBody& b = loaded.bodies[i];
+        Check(b.isCriticalWound == (i == 1), "Only the marked rigid body retains the critical wound flag");
         Check(a.bone == b.bone && a.shape == b.shape && a.mass == b.mass && a.radius == b.radius && a.halfLength == b.halfLength &&
             Near(Vector3(a.offset), Vector3(b.offset)) && Near(Vector3(a.halfExtents), Vector3(b.halfExtents)) &&
             Near(Quaternion(DirectX::XMLoadFloat4(&a.rotation)) * Vector3(kXUnitVector), Quaternion(DirectX::XMLoadFloat4(&b.rotation)) * Vector3(kXUnitVector)),
@@ -357,6 +359,7 @@ void RunPhysicsAssetTests()
     writeJson(corruptMaterial);
     Check(!loaded.Load(path, error) && loaded.bodies[1].material.restitution == 0, "Invalid material values reject the whole load");
     nlohmann::json defaultMaterial = saved;
+    defaultMaterial["bodies"][1].erase("isCriticalWound");
     defaultMaterial["bodies"][1].erase("material");
     writeJson(defaultMaterial);
     PhysicsAsset defaultsLoaded;
@@ -364,6 +367,7 @@ void RunPhysicsAssetTests()
         defaultsLoaded.bodies[1].material.dynamicFriction == .5f && defaultsLoaded.bodies[1].material.restitution == .1f &&
         defaultsLoaded.bodies[1].material.frictionCombine == PhysicsFrictionCombine::Average,
         "Omitted material uses the original shared material values");
+    Check(!defaultsLoaded.bodies[1].isCriticalWound, "A PA without a critical wound flag defaults to a one-hand reaction");
     nlohmann::json legacyMaterial = legacyLimits;
     legacyMaterial["version"] = 4;
     for (nlohmann::json& body : legacyMaterial["bodies"])

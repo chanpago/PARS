@@ -9,6 +9,7 @@
         0.09099999815225601
       ],
       "halfLength": 0.02500000037252903,
+      "isCriticalWound": false,
       "mass": 12.0,
       "material": {
         "dynamicFriction": 0.5,
@@ -38,6 +39,7 @@
         0.08049999922513962
       ],
       "halfLength": 0.019999999552965164,
+      "isCriticalWound": true,
       "mass": 5.072176933288574,
       "material": {
         "dynamicFriction": 0.5,
@@ -67,6 +69,7 @@
         0.08749999850988388
       ],
       "halfLength": 0.03999999910593033,
+      "isCriticalWound": true,
       "mass": 6.848722457885742,
       "material": {
         "dynamicFriction": 0.5,
@@ -96,6 +99,7 @@
         0.09099999815225601
       ],
       "halfLength": 0.04500000178813934,
+      "isCriticalWound": true,
       "mass": 8.0,
       "material": {
         "dynamicFriction": 0.5,
@@ -125,6 +129,7 @@
         0.0279999990016222
       ],
       "halfLength": 0.014999999664723873,
+      "isCriticalWound": false,
       "mass": 1.4351351261138916,
       "material": {
         "dynamicFriction": 0.5,
@@ -154,6 +159,7 @@
         0.06300000101327896
       ],
       "halfLength": 0.029999999329447746,
+      "isCriticalWound": true,
       "mass": 3.6310646533966064,
       "material": {
         "dynamicFriction": 0.5,
@@ -183,6 +189,7 @@
         0.02449999935925007
       ],
       "halfLength": 0.03999999910593033,
+      "isCriticalWound": false,
       "mass": 0.6764056086540222,
       "material": {
         "dynamicFriction": 0.5,
@@ -212,6 +219,7 @@
         0.03500000014901161
       ],
       "halfLength": 0.08500000089406967,
+      "isCriticalWound": false,
       "mass": 4.0,
       "material": {
         "dynamicFriction": 0.5,
@@ -241,6 +249,7 @@
         0.0279999990016222
       ],
       "halfLength": 0.0949999988079071,
+      "isCriticalWound": false,
       "mass": 1.1826000213623047,
       "material": {
         "dynamicFriction": 0.5,
@@ -270,6 +279,7 @@
         0.02449999935925007
       ],
       "halfLength": 0.02697005495429039,
+      "isCriticalWound": false,
       "mass": 0.44529998302459717,
       "material": {
         "dynamicFriction": 0.5,
@@ -299,6 +309,7 @@
         0.02449999935925007
       ],
       "halfLength": 0.03999999910593033,
+      "isCriticalWound": false,
       "mass": 0.6764026880264282,
       "material": {
         "dynamicFriction": 0.5,
@@ -328,6 +339,7 @@
         0.03500000014901161
       ],
       "halfLength": 0.08500000089406967,
+      "isCriticalWound": false,
       "mass": 4.0,
       "material": {
         "dynamicFriction": 0.5,
@@ -357,6 +369,7 @@
         0.0279999990016222
       ],
       "halfLength": 0.0949999988079071,
+      "isCriticalWound": false,
       "mass": 1.1826000213623047,
       "material": {
         "dynamicFriction": 0.5,
@@ -386,6 +399,7 @@
         0.02449999935925007
       ],
       "halfLength": 0.02606629580259323,
+      "isCriticalWound": false,
       "mass": 0.44529998302459717,
       "material": {
         "dynamicFriction": 0.5,
@@ -415,6 +429,7 @@
         0.05250000208616257
       ],
       "halfLength": 0.13894933462142944,
+      "isCriticalWound": true,
       "mass": 10.336799621582031,
       "material": {
         "dynamicFriction": 0.5,
@@ -444,6 +459,7 @@
         0.03849999979138374
       ],
       "halfLength": 0.20000000298023224,
+      "isCriticalWound": false,
       "mass": 6.0,
       "material": {
         "dynamicFriction": 0.5,
@@ -473,6 +489,7 @@
         0.027983034029603004
       ],
       "halfLength": 0.05000000074505806,
+      "isCriticalWound": false,
       "mass": 2.0,
       "material": {
         "dynamicFriction": 0.800000011920929,
@@ -502,6 +519,7 @@
         0.05250000208616257
       ],
       "halfLength": 0.1388794630765915,
+      "isCriticalWound": true,
       "mass": 10.336799621582031,
       "material": {
         "dynamicFriction": 0.5,
@@ -531,6 +549,7 @@
         0.03849999979138374
       ],
       "halfLength": 0.20000000298023224,
+      "isCriticalWound": false,
       "mass": 6.0,
       "material": {
         "dynamicFriction": 0.5,
@@ -560,6 +579,7 @@
         0.027304135262966156
       ],
       "halfLength": 0.05000000074505806,
+      "isCriticalWound": false,
       "mass": 2.0,
       "material": {
         "dynamicFriction": 0.800000011920929,
@@ -589,6 +609,7 @@
         0.014999999664723873
       ],
       "halfLength": 0.017000000923871994,
+      "isCriticalWound": false,
       "mass": 0.15000000596046448,
       "material": {
         "dynamicFriction": 0.0,
@@ -618,6 +639,7 @@
         0.014999999664723873
       ],
       "halfLength": 0.017000000923871994,
+      "isCriticalWound": false,
       "mass": 0.15000000596046448,
       "material": {
         "dynamicFriction": 0.0,

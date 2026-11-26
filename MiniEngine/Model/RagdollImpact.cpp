@@ -11,6 +11,35 @@ using namespace physx;
 
 namespace PARS
 {
+    namespace
+    {
+        PxD6Joint* CreateWoundDrive(PhysicsWorld& world, PxRigidBody& target, const PxTransform& targetAnchor,
+            PxRigidBody& hand, const PxTransform& palmAnchor)
+        {
+            PxD6Joint* joint = world.CreateJoint(target, targetAnchor, hand, palmAnchor);
+            if (joint)
+            {
+                for (unsigned axis = 0; axis < PxD6Axis::eCOUNT; ++axis)
+                {
+                    joint->setMotion(static_cast<PxD6Axis::Enum>(axis), PxD6Motion::eFREE);
+                }
+                joint->setConstraintFlag(PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
+                joint->setConstraintFlag(PxConstraintFlag::eCOLLISION_ENABLED, true);
+            }
+            return joint;
+        }
+
+        void UpdateWoundAnchor(PxD6Joint& joint, const PxTransform& anchor)
+        {
+            const PxTransform previous = joint.getLocalPose(PxJointActorIndex::eACTOR0);
+            if ((previous.p - anchor.p).magnitudeSquared() > 1e-8f ||
+                previous.q.getBasisVector0().dot(anchor.q.getBasisVector0()) < .999999f)
+            {
+                joint.setLocalPose(PxJointActorIndex::eACTOR0, anchor);
+            }
+        }
+    }
+
     bool Ragdoll::HasApproachingImpact(float minimumDeltaVelocity, float deferCapsuleDeltaVelocity) const
     {
         Math::Vector3 center(Math::kZero);
@@ -217,8 +246,14 @@ namespace PARS
         return -1.0f;
     }
 
+    bool Ragdoll::IsHoldingWound() const
+    {
+        return m_WoundGrip && m_WoundGrip->getMotion(PxD6Axis::eX) == PxD6Motion::eLOCKED;
+    }
+
     void Ragdoll::ReleaseWoundGrip()
     {
+        ReleaseWoundSupport();
         m_LastRejectedGripStep = UINT64_MAX;
         m_RejectedGripSteps = 0;
         if (m_WoundGrip)
@@ -229,7 +264,7 @@ namespace PARS
     }
 
     void Ragdoll::DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const PxTransform& palm,
-        const PxTransform& target, float weight, bool canDrive)
+        const PxTransform& target, float weight, bool canHold, bool canAssist)
     {
         if (!m_DrivesEnabled || !m_World || handBody >= m_Bodies.size() || hitBody >= m_Bodies.size() || handBody == hitBody ||
             !palm.isSane() || !target.isSane() || !(weight > 0 && weight <= 1.0f))
@@ -240,11 +275,10 @@ namespace PARS
         constexpr float lockDistance = .04f;
         constexpr float holdDistance = .06f;
         constexpr uint32_t releaseSteps = 3;
-        const bool wasHolding = m_WoundGrip && m_WoundGrip->getMotion(PxD6Axis::eX) == PxD6Motion::eLOCKED;
-        const bool close = (palm.p - target.p).magnitudeSquared() <= lockDistance * lockDistance;
+        const bool wasHolding = IsHoldingWound();
+        const float distance = (palm.p - target.p).magnitude();
         const bool atContact = PalmFitsWound(palm, target, lockDistance);
-        if (!canDrive || (wasHolding && !PalmFitsWound(palm, target, holdDistance)) ||
-            (!wasHolding && weight >= 1.0f && close && !atContact))
+        if ((!canHold && !canAssist) || (wasHolding && !PalmFitsWound(palm, target, holdDistance)))
         {
             if (!wasHolding || weight < 1.0f)
             {
@@ -268,31 +302,37 @@ namespace PARS
         m_LastRejectedGripStep = UINT64_MAX;
         PxRigidBody& hit = *m_Bodies[hitBody];
         PxRigidBody& hand = *m_Bodies[handBody];
-        const PxTransform hitAnchor(hit.getGlobalPose().transformInv(target.p));
+        // D6 스윙의 X축을 손등 법선과 맞춰 손가락 방향으로 도는 비틀림은 자유롭게 둔다.
+        const PxTransform normalAxis(PxQuat(PxHalfPi, PxVec3(0, 0, 1)));
+        const PxTransform hitAnchor = hit.getGlobalPose().transformInv(target * normalAxis);
         if (!m_WoundGrip)
         {
-            const PxTransform palmAnchor(hand.getGlobalPose().transformInv(palm.p));
-            m_WoundGrip = m_World->CreateJoint(hit, hitAnchor, hand, palmAnchor);
+            const PxTransform palmAnchor = hand.getGlobalPose().transformInv(palm * normalAxis);
+            m_WoundGrip = CreateWoundDrive(*m_World, hit, hitAnchor, hand, palmAnchor);
             if (!m_WoundGrip)
             {
                 return;
             }
-            for (unsigned axis = 0; axis < PxD6Axis::eCOUNT; ++axis)
-            {
-                m_WoundGrip->setMotion(static_cast<PxD6Axis::Enum>(axis), PxD6Motion::eFREE);
-            }
-            m_WoundGrip->setConstraintFlag(PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
-            m_WoundGrip->setConstraintFlag(PxConstraintFlag::eCOLLISION_ENABLED, true);
         }
-        else if ((m_WoundGrip->getLocalPose(PxJointActorIndex::eACTOR0).p - hitAnchor.p).magnitudeSquared() > 1e-8f)
+        else
         {
-            m_WoundGrip->setLocalPose(PxJointActorIndex::eACTOR0, hitAnchor);
+            UpdateWoundAnchor(*m_WoundGrip, hitAnchor);
         }
 
-        // 실제 손바닥이 접근한 뒤에만 위치를 고정한다. 두 바디가 함께 움직이고 손목은 자유롭게 회전한다.
-        const bool holding = weight >= 1.0f && (wasHolding || atContact);
+        const float alignment = weight * PxClamp((.16f - distance) / .12f, 0.0f, 1.0f);
+        const PxD6JointDrive swingDrive(95.0f * alignment, 4.0f * alignment, 22.0f * alignment);
+        if (swingDrive.forceLimit != m_WoundGrip->getDrive(PxD6Drive::eSWING).forceLimit)
+        {
+            m_WoundGrip->setDrive(PxD6Drive::eSWING, swingDrive);
+        }
+        // 실제 손바닥의 거리와 면 방향이 함께 맞아야 위치를 고정한다.
+        const bool holding = weight >= 1.0f && (wasHolding || (canHold && atContact));
         if (holding != wasHolding)
         {
+            if (!holding)
+            {
+                ReleaseWoundSupport();
+            }
             const PxD6Motion::Enum motion = holding ? PxD6Motion::eLOCKED : PxD6Motion::eFREE;
             m_WoundGrip->setMotion(PxD6Axis::eX, motion);
             m_WoundGrip->setMotion(PxD6Axis::eY, motion);
@@ -321,6 +361,62 @@ namespace PARS
                 m_WoundGrip->setDrive(PxD6Drive::eZ, drive);
             }
         }
+    }
+
+    void Ragdoll::DriveWoundSupport(size_t leadingBody, size_t supportingBody, const PxTransform& palm,
+        const PxTransform& target, float weight)
+    {
+        if (!IsHoldingWound() || !m_World || leadingBody >= m_Bodies.size() || supportingBody >= m_Bodies.size() ||
+            leadingBody == supportingBody || !palm.isSane() || !target.isSane() || !(weight > 0 && weight <= 1.0f))
+        {
+            ReleaseWoundSupport();
+            return;
+        }
+        PxRigidBody& leading = *m_Bodies[leadingBody];
+        PxRigidBody& supporting = *m_Bodies[supportingBody];
+        const PxTransform normalAxis(PxQuat(PxHalfPi, PxVec3(0, 0, 1)));
+        const PxTransform anchor = leading.getGlobalPose().transformInv(target * normalAxis);
+        if (!m_WoundSupport)
+        {
+            const PxTransform palmAnchor = supporting.getGlobalPose().transformInv(palm * normalAxis);
+            m_WoundSupport = CreateWoundDrive(*m_World, leading, anchor, supporting, palmAnchor);
+            if (!m_WoundSupport)
+            {
+                return;
+            }
+        }
+        else
+        {
+            UpdateWoundAnchor(*m_WoundSupport, anchor);
+        }
+        // 두 손 사이에는 힘이 제한된 스프링만 둬 충돌하거나 팔이 밀리면 자연스럽게 벌어지게 한다.
+        const PxD6JointDrive position(2000.0f * weight, 70.0f * weight, 90.0f * weight);
+        if (m_WoundSupport->getDrive(PxD6Drive::eX).forceLimit != position.forceLimit)
+        {
+            m_WoundSupport->setDrive(PxD6Drive::eX, position);
+            m_WoundSupport->setDrive(PxD6Drive::eY, position);
+            m_WoundSupport->setDrive(PxD6Drive::eZ, position);
+            m_WoundSupport->setDrive(PxD6Drive::eSWING, PxD6JointDrive(24.0f * weight, 2.0f * weight, 5.0f * weight));
+        }
+    }
+
+    void Ragdoll::ReleaseWoundSupport()
+    {
+        if (m_WoundSupport)
+        {
+            m_WoundSupport->release();
+            m_WoundSupport = nullptr;
+        }
+    }
+
+    bool Ragdoll::GetWoundSupportDistance(float& meters) const
+    {
+        if (!m_WoundSupport)
+        {
+            return false;
+        }
+        meters = m_WoundSupport->getRelativeTransform().p.magnitude();
+        return true;
     }
 
     void Ragdoll::UpdateWounds(const std::vector<RagdollBodyImpulse>& impacts)

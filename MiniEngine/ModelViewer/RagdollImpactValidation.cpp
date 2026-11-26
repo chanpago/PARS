@@ -1448,7 +1448,14 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             std::string error;
             check(test.SetAutomaticSupport(true) && player.StopRagdoll(error), "Prepare the idle impact dummy");
             SkeletalMeshComponent& mesh = test.GetDummy()->GetMesh();
-            check(woundBody < mesh.GetRagdoll().GetBodyCount(), "Resolve the upper-body hit shape");
+            check(woundBody < mesh.GetRagdoll().GetBodyCount(), "Resolve the wounded body shape");
+            uint32_t critical = 0;
+            if (CommandLineArgs::GetInteger(L"woundcritical", critical))
+            {
+                PhysicsAsset fixture = *mesh.GetPhysicsAsset();
+                fixture.bodies[woundBody].isCriticalWound = critical != 0;
+                check(mesh.SetPhysicsAsset(fixture, error, true), "Apply the per-body critical wound setting to the dummy");
+            }
             player.GetCharacterMovement().SetTickEnabled(false);
             test.SetContactCheckEnabled(false);
             world.SetPhysicsPaused(false);
@@ -1474,7 +1481,22 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             across = Normalize(Vector3(across.GetX(), 0, across.GetZ()));
             const Vector3 front = Cross(Vector3(kYUnitVector), across);
             const float side = bone.find("Right") != std::string::npos ? .6f : bone.find("Left") != std::string::npos ? -.6f : 0;
-            const Vector3 target(shape.p.x, shape.p.y, shape.p.z);
+            Vector3 target(shape.p.x, shape.p.y, shape.p.z);
+            uint32_t aimAtKnee = 0;
+            CommandLineArgs::GetInteger(L"woundknee", aimAtKnee);
+            const int pelvis = asset.FindBody("mixamorig1:Hips");
+            const int chest = asset.FindBody("mixamorig1:Spine2");
+            check(pelvis >= 0 && chest >= 0, "Resolve the trunk to measure forward bend");
+            const Vector3 initialTrunk = Vector3(mesh.GetRagdoll().GetBoneWorld(chest).GetW()) -
+                Vector3(mesh.GetRagdoll().GetBoneWorld(pelvis).GetW());
+            const float initialPitch = std::atan2(static_cast<float>(Dot(initialTrunk, front)), static_cast<float>(initialTrunk.GetY()));
+            float maximumBend = 0;
+            if (aimAtKnee)
+            {
+                check(bone == "mixamorig1:LeftLeg" || bone == "mixamorig1:RightLeg", "Aim at the knee end of a shin");
+                const Vector3 knee(mesh.GetRagdoll().GetBoneWorld(woundBody).GetW());
+                target += (knee - target) * .80f;
+            }
             Vector3 fromTarget = front + across * side;
             float angleDegrees = 0;
             if (CommandLineArgs::GetFloat(L"woundangle", angleDegrees))
@@ -1488,9 +1510,9 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             CommandLineArgs::GetInteger(L"woundarrow", arrow);
             ImpactProjectileSettings projectile = ImpactProjectileSettings::ArrowDefaults();
             projectile.radius = arrow ? .01f : .018f;
-            projectile.bodyImpulse = 0;
-            projectile.partImpulse = 0;
-            projectile.torqueMultiplier = 0;
+            CommandLineArgs::GetFloat(L"woundbodyimpulse", projectile.bodyImpulse);
+            CommandLineArgs::GetFloat(L"woundpartimpulse", projectile.partImpulse);
+            CommandLineArgs::GetFloat(L"woundtorque", projectile.torqueMultiplier);
             const ImpactProjectileType type = arrow ? ImpactProjectileType::Arrow : ImpactProjectileType::Sphere;
             check(test.SetProjectileSettings(type, projectile) && test.FireAimed(player, eye, target - eye),
                 "Fire a projectile through the normal aim path");
@@ -1505,8 +1527,16 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             float gripAge = -1;
             float fiveSecondMaximum = 0;
             unsigned heldSteps = 0;
+            unsigned lockedSteps = 0;
+            unsigned supportSteps = 0;
+            unsigned consecutiveSupport = 0;
+            unsigned longestSupport = 0;
+            float closestSupport = PX_MAX_F32;
+            uint32_t expectedSupport = 0;
+            const bool checkSupport = CommandLineArgs::GetInteger(L"woundexpectedsupport", expectedSupport);
             bool missingContact = false;
             bool heldExpectedStrength = true;
+            bool fellDuringReach = false;
             for (unsigned frame = 0; frame < 690; ++frame)
             {
                 world.Tick(static_cast<float>(PhysicsWorld::FixedDeltaTime));
@@ -1514,8 +1544,24 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 int hit = -1;
                 float distance = 0;
                 const bool sampled = mesh.GetImpactPalmDistance(hit, distance);
+                float supportDistance = 0;
+                const bool supporting = mesh.GetRagdoll().GetWoundSupportDistance(supportDistance);
+                if (supporting)
+                {
+                    ++supportSteps;
+                    closestSupport = PxMin(closestSupport, supportDistance);
+                }
+                consecutiveSupport = supporting && supportDistance <= .05f && sampled && distance <= .05f ? consecutiveSupport + 1 : 0;
+                longestSupport = (std::max)(longestSupport, consecutiveSupport);
                 if (sampled)
                 {
+                    const CharacterBalanceState state = mesh.GetBalanceState();
+                    fellDuringReach = fellDuringReach || state == CharacterBalanceState::Falling ||
+                        state == CharacterBalanceState::GroundFall || state == CharacterBalanceState::Landed;
+                    const Vector3 trunk = Vector3(mesh.GetRagdoll().GetBoneWorld(chest).GetW()) -
+                        Vector3(mesh.GetRagdoll().GetBoneWorld(pelvis).GetW());
+                    const float pitch = std::atan2(static_cast<float>(Dot(trunk, front)), static_cast<float>(trunk.GetY()));
+                    maximumBend = PxMax(maximumBend, DirectX::XMConvertToDegrees(pitch - initialPitch));
                     lastHit = hit;
                     reachingHand = mesh.GetImpactReachingHand();
                     handMatches = handMatches && reachingHand == static_cast<int>(expectedHand);
@@ -1541,11 +1587,29 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                         std::abs(mesh.GetRagdoll().GetWoundStrength(joint) - minimumStrength) <= .001f;
                     fiveSecondMaximum = PxMax(fiveSecondMaximum, distance);
                     ++heldSteps;
+                    if (mesh.GetRagdoll().IsHoldingWound())
+                    {
+                        ++lockedSteps;
+                    }
                 }
             }
             report << "aim=" << bone << " hit=" << lastHit << " hand=" << reachingHand << " closest_m=" << nearest
                 << " grip_age_s=" << gripAge << " continuous_steps=" << longest
-                << " first_five_seconds_max_m=" << fiveSecondMaximum << std::endl;
+                << " first_five_seconds_max_m=" << fiveSecondMaximum << " locked_steps=" << lockedSteps
+                << " support_steps=" << supportSteps << " support_closest_m=" << (supportSteps ? closestSupport : -1.0f)
+                << " two_hand_contact_steps=" << longestSupport
+                << " forward_bend_deg=" << maximumBend << " fell=" << fellDuringReach << std::endl;
+            if (checkSupport)
+            {
+                check(expectedSupport ? longestSupport >= 60 : supportSteps == 0,
+                    "The supporting palm follows the leading hand only for a reachable critical wound");
+                float distance = 0;
+                check(!mesh.GetRagdoll().GetWoundSupportDistance(distance), "Release the supporting hand at the end of the gesture");
+            }
+            if (aimAtKnee)
+            {
+                check(maximumBend >= 20.0f, "The simulated torso bends forward to reach the knee");
+            }
             if (checkHand)
             {
                 check(lastHit == static_cast<int>(woundBody) && reachingHand >= 0 && handMatches,

@@ -59,6 +59,28 @@ namespace
         return joint;
     }
 
+    bool PhysicalArmFits(const Ragdoll& ragdoll, const FallArmSample& arm, const ImpactPalmGoal& goal, const PxTransform& contact)
+    {
+        const FallArmSetup& setup = arm.setup;
+        if (goal.approach < 1.0f || !PalmFitsWound(arm.actualHand * setup.palmInHand, contact, .04f))
+        {
+            return false;
+        }
+        // 두 팔이 물리적으로 서로 다가간 경우에도 실제 관절 각도를 PA에 투영해 접촉을 확인한다.
+        const std::array<PxTransform, 4> bones{arm.actualAnchor, ToFrame(ragdoll.GetBoneWorld(setup.shoulderBody)),
+            ToFrame(ragdoll.GetBoneWorld(setup.elbowBody)), arm.actualHand};
+        PxTransform projected = arm.actualAnchor;
+        for (size_t link = 0; link < setup.armJoints.size(); ++link)
+        {
+            const FallArmJoint& joint = setup.armJoints[link];
+            const PxQuat rotation = ((bones[link] * joint.inParentBone).q.getConjugate() *
+                bones[link + 1].q * joint.inChildBone.q).getNormalized();
+            const PxQuat limited = goal.limitJointRotation(joint.index, rotation);
+            projected = projected * joint.inParentBone * PxTransform(limited) * joint.inChildBone.getInverse();
+        }
+        return PalmFitsWound(projected * setup.palmInHand, contact, .04f);
+    }
+
     void WriteArmPose(const std::vector<PxTransform>& frames, const std::vector<int>& nodes, std::vector<Matrix4>& pose)
     {
         for (int node : nodes)
@@ -108,7 +130,7 @@ SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReac
             continue;
         }
         const int woundJoint = m_Ragdoll.FindWoundJoint(hit.body);
-        // 상체 상처를 감싸는 도중에는 새 상체 상처만 손 목표를 교체한다.
+        // 상처를 감싸는 동안 짧은 피격 반응이 같은 손의 목표를 가로채지 않게 한다.
         if (woundJoint < 0 && (reach.woundJoint >= 0 || (m_ImpactHandReach.woundJoint >= 0 && m_Ragdoll.HasWound()) || IsFalling() ||
             IsGroundFallActive() || m_StandingUpState != StandingUpState::None))
         {
@@ -155,6 +177,12 @@ SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReac
             // 같은 부위의 재피격은 유지 시간을 갱신하되 이미 다가간 손을 떼지 않는다.
             reach.approachStep = m_ImpactHandReach.approachStep;
             reach.hand = m_ImpactHandReach.hand;
+            reach.armHistory = m_ImpactHandReach.armHistory;
+            reach.supportStartStep = m_ImpactHandReach.supportStartStep;
+            reach.supportHistory = m_ImpactHandReach.supportHistory;
+            reach.freeLegWeight = m_ImpactHandReach.freeLegWeight;
+            reach.restingLegWeight = m_ImpactHandReach.restingLegWeight;
+            reach.legLoad = m_ImpactHandReach.legLoad;
             if (reach.selection.hand < 0)
             {
                 reach.selection = m_ImpactHandReach.selection;
@@ -198,6 +226,76 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
     goal.hand = m_ImpactHandReach.hand;
     if (woundJoint >= 0)
     {
+        goal.history = &m_ImpactHandReach.armHistory;
+        goal.clavicleReachFraction = .27f;
+        bool allowSupport = m_PhysicsAsset->bodies[m_ImpactHandReach.body].isCriticalWound;
+        const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
+        for (int side = 0; side < 2; ++side)
+        {
+            const FootLegSetup& leg = support.feet[side].leg;
+            if (!leg.available || (goal.hitNode != leg.hipNode && goal.hitNode != leg.kneeNode))
+            {
+                continue;
+            }
+            goal.selection = {side, false};
+            if (!IsFalling() && !IsGroundFallActive() && m_StandingUpState == StandingUpState::None)
+            {
+                const FootContactSample& injured = support.feet[side].contact;
+                const FootContactSample& opposite = support.feet[1 - side].contact;
+                const float totalImpulse = injured.normalImpulse + opposite.normalImpulse;
+                const float load = totalImpulse > 1e-4f ? injured.normalImpulse / totalImpulse :
+                    injured.grounded == opposite.grounded ? .5f : (injured.grounded ? 1.0f : 0.0f);
+                m_ImpactHandReach.legLoad += .15f * (load - m_ImpactHandReach.legLoad);
+                const bool freeLeg = injured.hasSample && !injured.grounded && opposite.grounded &&
+                    !support.footstep.IsInProgress();
+                m_ImpactHandReach.freeLegWeight = freeLeg ? PxMin(1.0f, m_ImpactHandReach.freeLegWeight + .08f) : 0;
+                goal.freeLegWeight = m_ImpactHandReach.freeLegWeight;
+                const PxVec3 thigh = frames[leg.kneeNode].p - frames[leg.hipNode].p;
+                const PxVec3 offset = frames[goal.hitNode].transform(m_ImpactHandReach.pointInBone) - frames[leg.hipNode].p;
+                const float thighDepth = PxClamp(offset.dot(thigh) / PxMax(1e-6f, thigh.magnitudeSquared()), 0.0f, 1.0f);
+                // 허리를 손보다 천천히 굽혀 발 지지 제어가 체중 이동을 받아낼 시간을 준다.
+                const float phase = PxClamp((approachAge - ImpactPalmGoal::RecoilTime) / .80f, 0.0f, 1.0f);
+                goal.legBendWeight = (.35f + .65f * thighDepth) * (.94f + .12f * m_ImpactHandReach.legLoad) *
+                    (phase * phase * (3.0f - 2.0f * phase));
+                goal.pelvisNode = m_PhysicsSkeleton.parents[leg.hipNode];
+                goal.injuredLeg = &leg;
+                goal.oppositeLeg = &support.feet[1 - side].leg;
+            }
+            else if (IsGroundFallActive() && m_StandingUpState == StandingUpState::None && arms[side].setup.chestBody >= 0)
+            {
+                PhysicsGroundContact ground;
+                const int root = m_Ragdoll.GetImpactRootBody();
+                const bool onTorso = m_Ragdoll.GetBodyGroundContact(arms[side].setup.chestBody, ground) ||
+                    (root >= 0 && m_Ragdoll.GetBodyGroundContact(root, ground));
+                const PxVec3 up = arms[side].actualChest.q.rotate(arms[side].setup.upInChest);
+                const bool resting = onTorso && PxAbs(up.dot(ground.normal)) < .65f && support.hasCenterOfMassVelocity &&
+                    support.centerOfMassVelocity.magnitudeSquared() < .6f * .6f;
+                m_ImpactHandReach.restingLegWeight = PxClamp(m_ImpactHandReach.restingLegWeight + (resting ? .04f : -.05f), 0.0f, 1.0f);
+                goal.restingLegWeight = m_ImpactHandReach.restingLegWeight;
+                goal.injuredLeg = &leg;
+                goal.pelvisNode = m_PhysicsSkeleton.parents[leg.hipNode];
+                goal.legBendWeight = 0;
+            }
+            // 다리를 짚을 때는 발을 옮기거나 넘어지는 동안 다른 팔을 균형 잡는 데 쓴다.
+            allowSupport = allowSupport && goal.injuredLeg && !support.footstep.IsInProgress() &&
+                (!IsGroundFallActive() || goal.restingLegWeight >= .5f);
+            break;
+        }
+        uint64_t& supportStart = m_ImpactHandReach.supportStartStep;
+        if (allowSupport && m_Ragdoll.IsHoldingWound())
+        {
+            supportStart = (std::min)(supportStart, step);
+        }
+        else if (!allowSupport || goal.weight >= 1.0f)
+        {
+            supportStart = UINT64_MAX;
+        }
+        if (supportStart != UINT64_MAX)
+        {
+            const float held = static_cast<float>((step - supportStart) * PhysicsWorld::FixedDeltaTime);
+            goal.supportApproach = PxClamp((held - .10f) / ImpactPalmGoal::ReachTime, 0.0f, 1.0f);
+            goal.supportHistory = &m_ImpactHandReach.supportHistory;
+        }
         goal.limitJointRotation = [this](int index, const PxQuat& raw) -> PxQuat
         {
             const PhysicsConstraint& joint = m_PhysicsAsset->constraints[index];
@@ -228,14 +326,29 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
         const FallArmSample& arm = arms[goal.hand];
         const PxTransform palm = arm.actualHand * arm.setup.palmInHand;
         const FallArmTarget& target = corrected.arms[goal.hand];
+        const bool canHold = target.canDriveWoundGrip || PhysicalArmFits(m_Ragdoll, arm, goal, target.palm);
+        const PxTransform& driveTarget = m_Ragdoll.IsHoldingWound() || canHold ? target.palm : target.assistPalm;
         m_Ragdoll.DriveWoundGrip(woundJoint, arm.setup.handBody, m_ImpactHandReach.body, palm,
-            target.palm, goal.weight, target.canDriveWoundGrip);
+            driveTarget, goal.weight, canHold, target.canAssistWoundReach);
+        const FallArmTarget& support = corrected.arms[1 - goal.hand];
+        if (support.applied && m_Ragdoll.IsHoldingWound())
+        {
+            const FallArmSample& other = arms[1 - goal.hand];
+            m_Ragdoll.DriveWoundSupport(arm.setup.handBody, other.setup.handBody,
+                other.actualHand * other.setup.palmInHand, support.palm, support.weight);
+        }
+        else
+        {
+            m_Ragdoll.ReleaseWoundSupport();
+        }
     }
-    // 선택한 팔만 손 목표를 추종하도록 힘을 올린다. 반대팔은 피격 반동을 유지한다.
+    // 보조손이 참여하면 그 팔의 추종 강도만 주손보다 완만하게 올린다.
     const float base = m_Ragdoll.GetArmDriveStrength();
     const float tracking = PxMax(base, .8f);
     std::array<float, 2> scales{base / tracking, base / tracking};
     scales[goal.hand] += (1.0f - scales[goal.hand]) * goal.weight;
+    const int otherSide = 1 - goal.hand;
+    scales[otherSide] += (1.0f - scales[otherSide]) * .55f * corrected.arms[otherSide].weight;
     m_Ragdoll.SetArmDriveScales(scales, tracking);
 }
 
@@ -297,13 +410,15 @@ void SkeletalMeshComponent::InitializeFallArms()
             }
         }
         const std::vector<int>::const_iterator hand = std::find(bodies.begin(), bodies.end(), setup.handNode);
-        if (setup.anchorNode < 0 || hand == bodies.end() ||
-            std::find(bodies.begin(), bodies.end(), setup.shoulderNode) == bodies.end() ||
-            std::find(bodies.begin(), bodies.end(), setup.elbowNode) == bodies.end())
+        const std::vector<int>::const_iterator shoulderBody = std::find(bodies.begin(), bodies.end(), setup.shoulderNode);
+        const std::vector<int>::const_iterator elbowBody = std::find(bodies.begin(), bodies.end(), setup.elbowNode);
+        if (setup.anchorNode < 0 || hand == bodies.end() || shoulderBody == bodies.end() || elbowBody == bodies.end())
         {
             continue;
         }
         setup.handBody = static_cast<int>(hand - bodies.begin());
+        setup.shoulderBody = static_cast<int>(shoulderBody - bodies.begin());
+        setup.elbowBody = static_cast<int>(elbowBody - bodies.begin());
         const int chain[] = {setup.anchorNode, setup.shoulderNode, setup.elbowNode, setup.handNode};
         bool linked = true;
         for (size_t link = 0; link < setup.armJoints.size(); ++link)

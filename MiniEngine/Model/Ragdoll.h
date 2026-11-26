@@ -138,8 +138,11 @@ namespace PARS
         void ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
         void UpdateWounds(const std::vector<RagdollBodyImpulse>& impacts);
         void DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const physx::PxTransform& palm,
-            const physx::PxTransform& target, float weight, bool canDrive);
+            const physx::PxTransform& target, float weight, bool canHold, bool canAssist = false);
         void ReleaseWoundGrip();
+        void DriveWoundSupport(size_t leadingBody, size_t supportingBody, const physx::PxTransform& palm,
+            const physx::PxTransform& target, float weight);
+        void ReleaseWoundSupport();
         void UpdateImpactReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         bool AdvanceImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts,
             float deltaTime) const;
@@ -291,6 +294,8 @@ namespace PARS
         int FindWoundJoint(size_t body, float* minimumStrength = nullptr) const;
         float GetWoundStrength(size_t joint) const;
         float GetWoundGripAge(size_t joint) const;
+        bool GetWoundSupportDistance(float& meters) const;
+        bool IsHoldingWound() const;
         bool HasWound() const
         {
             return !m_JointWounds.empty();
@@ -371,6 +376,7 @@ namespace PARS
         std::vector<float> m_PreviousArticulationTargetVelocity;
         physx::PxD6Joint* m_SupportJoint = nullptr;
         physx::PxD6Joint* m_WoundGrip = nullptr;
+        physx::PxD6Joint* m_WoundSupport = nullptr;
         std::vector<Math::Quaternion> m_DriveTargets;
         std::vector<Math::Matrix4> m_LastKinematicTargets;
         std::vector<Math::Vector3> m_AnimatedLinearVelocity;

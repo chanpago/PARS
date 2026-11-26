@@ -1,5 +1,6 @@
 ﻿#include "PhysicsWorld.h"
 #include "../Model/FallArmBrace.h"
+#include "../Model/FootSupport.h"
 #include "../Model/FootSupportHull.h"
 
 #include <array>
@@ -521,16 +522,22 @@ namespace
         std::array<PARS::FallArmSample, 2> arms)
     {
         PARS::FallArmSetup& setup = arms[0].setup;
-        const std::array<int, 4> chain{setup.anchorNode, setup.shoulderNode, setup.elbowNode, setup.handNode};
-        for (size_t link = 0; link < setup.armJoints.size(); ++link)
+        for (size_t side = 0; side < arms.size(); ++side)
         {
-            PARS::FallArmJoint& joint = setup.armJoints[link];
-            joint.index = static_cast<int>(link);
-            joint.inChildBone = PxTransform(PxQuat(.3f, PxVec3(1, 0, 0)));
-            joint.inParentBone = rest[chain[link]].transformInv(rest[chain[link + 1]]) * joint.inChildBone;
+            PARS::FallArmSetup& arm = arms[side].setup;
+            const std::array<int, 4> chain{arm.anchorNode, arm.shoulderNode, arm.elbowNode, arm.handNode};
+            for (size_t link = 0; link < arm.armJoints.size(); ++link)
+            {
+                PARS::FallArmJoint& joint = arm.armJoints[link];
+                joint.index = static_cast<int>(side * arm.armJoints.size() + link);
+                joint.inChildBone = PxTransform(PxQuat(.3f, PxVec3(1, 0, 0)));
+                joint.inParentBone = rest[chain[link]].transformInv(rest[chain[link + 1]]) * joint.inChildBone;
+            }
         }
         const PxTransform restingPalm = rest[setup.handNode] * setup.palmInHand;
         PARS::ImpactPalmGoal goal;
+        PARS::WoundArmHistory history;
+        goal.history = &history;
         goal.hitNode = 0;
         goal.hand = 0;
         goal.weight = 1;
@@ -543,8 +550,37 @@ namespace
         };
         std::vector<PxTransform> pose = rest;
         PARS::FallArmSnapshot result;
-        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && result.arms[0].canDriveWoundGrip,
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && result.arms[0].canDriveWoundGrip && history.hand == 0,
             "A reachable contact survives projection through non-identity joint frames");
+        Check(!result.arms[1].applied, "An ordinary torso wound uses a single hand");
+        const PxTransform leadingPose = pose[setup.handNode];
+        arms[0].actualHand = leadingPose;
+        setup.handShape.radius = .025f;
+        PARS::WoundArmHistory supportingHistory;
+        PARS::ImpactPalmGoal critical = goal;
+        critical.supportApproach = 1;
+        critical.supportHistory = &supportingHistory;
+        pose = rest;
+        const PxTransform firstPalm = leadingPose * setup.palmInHand;
+        const PxVec3 back = firstPalm.p + firstPalm.q.getBasisVector1() * .031f;
+        Check(PARS::ApplyImpactPalmTarget(critical, arms, parents, pose, result) && result.arms[1].applied &&
+            supportingHistory.hand == 1 && (result.arms[1].palm.p - back).magnitude() < 1e-4f &&
+            (pose[setup.handNode].p - leadingPose.p).magnitude() < 1e-4f,
+            "The second palm targets the collider back without displacing the first hand");
+        critical.hitNode = arms[1].setup.handNode;
+        pose = rest;
+        Check(PARS::ApplyImpactPalmTarget(critical, arms, parents, pose, result) && !result.arms[1].applied,
+            "A critically struck hand cannot support its own wound");
+        critical.hitNode = goal.hitNode;
+        critical.limitJointRotation = [](int joint, const PxQuat& rotation) -> PxQuat
+        {
+            return joint >= 3 ? PxQuat(PxIdentity) : rotation;
+        };
+        pose = rest;
+        Check(PARS::ApplyImpactPalmTarget(critical, arms, parents, pose, result) && !result.arms[1].applied &&
+            pose[arms[1].setup.handNode] == rest[arms[1].setup.handNode],
+            "An unreachable supporting hand leaves the primary contact and idle arm intact");
+        setup.handShape.radius = 0;
         goal.limitJointRotation = [](int, const PxQuat&) -> PxQuat
         {
             return PxQuat(PxIdentity);
@@ -552,7 +588,7 @@ namespace
         pose = rest;
         Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && !result.arms[0].canDriveWoundGrip &&
             (result.arms[0].solvedPalm - restingPalm.p).magnitude() < 1e-5f,
-            "A locked arm stops at its permitted pose without pulling toward the wound");
+            "A cached arm pose respects the current joint limits when those joints lock");
         goal.point = restingPalm.p - goal.normal * .006f;
         pose = rest;
         Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && !result.arms[0].canDriveWoundGrip &&
@@ -588,6 +624,73 @@ namespace
             setup.handShape.GetHalfExtent(handShape.q.rotateInv(goal.normal));
         Check(clearance > .001f && PxAbs(pose[setup.handNode].q.dot(pose[setup.elbowNode].q)) > .99999f,
             "The hand collider clears the surface instead of pressing its edge into the wound");
+    }
+
+    void TestWoundLegPosture()
+    {
+        const std::vector<int32_t> parents{-1, 0, 1, 2, 3, 0, 5, 6, 0, 8, 9};
+        const std::vector<PxTransform> rest{PxTransform(PxVec3(0, 1, 0)), PxTransform(PxVec3(0, 1.35f, 0)),
+            PxTransform(PxVec3(-.17f, 1.45f, 0)), PxTransform(PxVec3(-.21f, 1.16f, .02f)), PxTransform(PxVec3(-.2f, .9f, .04f)),
+            PxTransform(PxVec3(-.12f, 1, 0)), PxTransform(PxVec3(-.12f, .55f, .02f)), PxTransform(PxVec3(-.12f, .1f, 0)),
+            PxTransform(PxVec3(.12f, 1, 0)), PxTransform(PxVec3(.12f, .55f, .02f)), PxTransform(PxVec3(.12f, .1f, 0))};
+        std::array<PARS::FallArmSample, 2> arms;
+        PARS::FallArmSetup& arm = arms[0].setup;
+        arm.available = true;
+        arm.chestNode = 1;
+        arm.anchorNode = 1;
+        arm.shoulderNode = 2;
+        arm.elbowNode = 3;
+        arm.handNode = 4;
+        arm.upperLength = (rest[3].p - rest[2].p).magnitude();
+        arm.lowerLength = (rest[4].p - rest[3].p).magnitude();
+        arms[0].actualAnchor = rest[1];
+        arms[0].actualHand = rest[4];
+        PARS::ImpactPalmGoal goal;
+        goal.hand = 0;
+        goal.approach = 1;
+        goal.weight = 1;
+        goal.hitNode = 6;
+        goal.pelvisNode = 0;
+        std::array<PARS::FootLegSetup, 2> legs;
+        for (int side = 0; side < 2; ++side)
+        {
+            PARS::FootLegSetup& leg = legs[side];
+            leg.hipNode = 5 + 3 * side;
+            leg.kneeNode = leg.hipNode + 1;
+            leg.ankleNode = leg.kneeNode + 1;
+            leg.thighLength = (rest[leg.kneeNode].p - rest[leg.hipNode].p).magnitude();
+            leg.calfLength = (rest[leg.ankleNode].p - rest[leg.kneeNode].p).magnitude();
+            leg.available = true;
+        }
+        goal.injuredLeg = &legs[0];
+        goal.oppositeLeg = &legs[1];
+        goal.point = rest[6].p;
+        goal.normal = PxVec3(0, 0, 1);
+        goal.limitJointRotation = [](int, const PxQuat& raw) -> PxQuat
+        {
+            return raw;
+        };
+        PARS::FallArmSnapshot result;
+        std::vector<PxTransform> planted = rest;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, planted, result) &&
+            planted[1].p.z > planted[0].p.z + .15f && planted[0].p.y < rest[0].p.y - .01f &&
+            (planted[7].p - rest[7].p).magnitude() < 1e-5f && (planted[10].p - rest[10].p).magnitude() < 1e-5f &&
+            PxAbs(planted[7].q.dot(rest[7].q)) > .99999f && PxAbs(planted[10].q.dot(rest[10].q)) > .99999f,
+            "A knee hit folds the trunk and preserves the world targets of both planted feet");
+        goal.freeLegWeight = 1;
+        std::vector<PxTransform> freeLeg = rest;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, freeLeg, result) &&
+            freeLeg[6].p.y > rest[6].p.y + .1f && freeLeg[1].p.z - freeLeg[0].p.z < planted[1].p.z - planted[0].p.z &&
+            (freeLeg[10].p - rest[10].p).magnitude() < 1e-5f,
+            "An unloaded injured knee can rise while the supporting foot keeps its target");
+        std::puts("PASS: wound posture with planted feet and with an unloaded knee");
+        goal.freeLegWeight = 0;
+        goal.legBendWeight = 0;
+        goal.restingLegWeight = 1;
+        std::vector<PxTransform> resting = rest;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, resting, result) && resting[0] == rest[0] &&
+            resting[6].p.y > rest[6].p.y + .2f && resting[10] == rest[10],
+            "Once the torso rests on the ground only the injured leg folds toward the hand");
     }
 
     void TestImpactPalm()
@@ -666,6 +769,7 @@ namespace
             "An unreachable body hit selects the closer hand and preserves arm length");
         std::puts("PASS: struck arm, moving surface, palm orientation, hand choice and reach limit");
         TestClavicleReach();
+        TestWoundLegPosture();
     }
 
     void TestBodyPairContacts()

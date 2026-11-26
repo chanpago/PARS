@@ -5,6 +5,8 @@
 
 namespace PARS
 {
+    struct FootLegSetup;
+
     struct FallArmJoint
     {
     public:
@@ -47,6 +49,8 @@ namespace PARS
         int elbowNode = -1;
         int handNode = -1;
         int anchorBody = -1;
+        int shoulderBody = -1;
+        int elbowBody = -1;
         int handBody = -1;
         int chestNode = -1;
         int chestBody = -1;
@@ -66,6 +70,7 @@ namespace PARS
     {
     public:
         physx::PxTransform palm{physx::PxIdentity};
+        physx::PxTransform assistPalm{physx::PxIdentity};
         physx::PxVec3 solvedPalm{0};
         physx::PxVec3 elbow{0};
         float weight = 0;
@@ -73,6 +78,7 @@ namespace PARS
         bool hasTarget = false;
         bool applied = false;
         bool reachLimited = false;
+        bool canAssistWoundReach = false;
         bool canDriveWoundGrip = false;
     };
 
@@ -89,6 +95,14 @@ namespace PARS
     public:
         int hand = -1;
         bool onBack = false;
+    };
+
+    struct WoundArmHistory
+    {
+    public:
+        std::array<physx::PxQuat, 3> rotations{physx::PxQuat(physx::PxIdentity),
+            physx::PxQuat(physx::PxIdentity), physx::PxQuat(physx::PxIdentity)};
+        int hand = -1;
     };
 
     struct ImpactPalmGoal
@@ -111,12 +125,21 @@ namespace PARS
     public:
         // 구동기와 같은 관절 좌표계에서 허용되는 회전을 구한다.
         std::function<physx::PxQuat(int, const physx::PxQuat&)> limitJointRotation;
+        WoundArmHistory* history = nullptr;
+        WoundArmHistory* supportHistory = nullptr;
+        const FootLegSetup* injuredLeg = nullptr;
+        const FootLegSetup* oppositeLeg = nullptr;
         physx::PxVec3 point{0};
         physx::PxVec3 normal{0};
         float approach = 0;
         float weight = 0;
+        float supportApproach = 0;
         // 목표 손목으로 가는 이동 중 쇄골이 분담할 비율이다.
         float clavicleReachFraction = .08f;
+        float freeLegWeight = 0;
+        float restingLegWeight = 0;
+        float legBendWeight = 1.0f;
+        int pelvisNode = -1;
         int hitNode = -1;
         int hand = -1;
         WoundHandSelection selection;

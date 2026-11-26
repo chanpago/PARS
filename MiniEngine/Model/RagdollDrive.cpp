@@ -97,7 +97,10 @@ namespace PARS
         const bool pelvis = name == "hips" || name == "pelvis";
         const bool weakensDrive = part != ArmPart::None || name.find("neck") != std::string::npos ||
             name.find("head") != std::string::npos;
-        if (!weakensDrive && !pelvis && !IsSpine(name))
+        const bool leg = name.find("leg") != std::string::npos || name.find("thigh") != std::string::npos ||
+            name.find("calf") != std::string::npos || name.find("shin") != std::string::npos || name.find("knee") != std::string::npos;
+        const bool critical = m_Asset.bodies[body].isCriticalWound;
+        if (!weakensDrive && !pelvis && !IsSpine(name) && !leg && !critical)
         {
             return -1;
         }
@@ -106,9 +109,14 @@ namespace PARS
             *minimumStrength = weakensDrive ? WoundMinimumStrength : 1.0f;
         }
         int inbound = -1;
+        int outbound = -1;
         for (size_t joint = 0; joint < m_Asset.constraints.size(); ++joint)
         {
             const PhysicsConstraint& constraint = m_Asset.constraints[joint];
+            if (critical && outbound < 0 && constraint.parentBone == bone)
+            {
+                outbound = static_cast<int>(joint);
+            }
             // 루트인 골반의 상처는 첫 척추 관절에 기록해 손의 접촉 시간을 추적한다.
             if (pelvis && constraint.parentBone == bone && IsSpine(LowerBoneName(constraint.childBone)))
             {
@@ -125,7 +133,7 @@ namespace PARS
                 return static_cast<int>(joint);
             }
         }
-        return inbound;
+        return inbound >= 0 ? inbound : outbound;
     }
 
     float Ragdoll::GetJointDriveStrength(size_t jointIndex) const

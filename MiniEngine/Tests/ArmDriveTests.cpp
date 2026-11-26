@@ -41,12 +41,17 @@ namespace
         PxTransform palm(PxIdentity);
         CheckArmDrive(ragdoll.GetBodyPose("RightHand", palm), "Read the actual hand for the grip");
         const PxTransform far(palm.p + PxVec3(.15f, 0, 0), palm.q);
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, false, true);
+        CheckArmDrive(!ragdoll.IsHoldingWound() && scene->getNbConstraints() == baseline + 1,
+            "Position assistance at zero distance still requires an attainable contact pose to lock");
         ragdoll.DriveWoundGrip(4, 4, 5, palm, far, .5f, true);
         CheckArmDrive(scene->getNbConstraints() == baseline + 1, "A feasible approach can assist the hand");
         ragdoll.DriveWoundGrip(4, 4, 5, palm, far, .5f, false);
         CheckArmDrive(scene->getNbConstraints() == baseline, "An infeasible approach immediately removes the pulling drive");
         const PxTransform edgeOn(palm.p, palm.q * PxQuat(PxHalfPi, PxVec3(1, 0, 0)));
         ragdoll.DriveWoundGrip(4, 4, 5, edgeOn, palm, 1, true);
+        CheckArmDrive(!ragdoll.IsHoldingWound() && scene->getNbConstraints() == baseline + 1,
+            "Keep orienting the hand near the surface until its actual normal is aligned");
         ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, false);
         CheckArmDrive(scene->getNbConstraints() == baseline, "A close hand cannot lock with the wrong normal or an infeasible pose");
         ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, true);
@@ -66,7 +71,14 @@ namespace
         }
         ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, true);
         CheckArmDrive(scene->getNbConstraints() == baseline + 1, "The hand can grip again when contact is feasible");
+        float supportDistance = 0;
+        ragdoll.DriveWoundSupport(4, 0, palm, far, .5f);
+        CheckArmDrive(scene->getNbConstraints() == baseline + 2 && ragdoll.GetWoundSupportDistance(supportDistance) &&
+            std::abs(supportDistance - .15f) < 1e-4f, "The supporting drive can span a gap while the primary hand holds");
         ragdoll.ReleaseWoundGrip();
+        ragdoll.DriveWoundSupport(4, 0, palm, far, 1);
+        CheckArmDrive(scene->getNbConstraints() == baseline && !ragdoll.GetWoundSupportDistance(supportDistance),
+            "Releasing the primary grip also clears support and prevents it from restarting alone");
         marker->release();
     }
 
@@ -192,7 +204,7 @@ namespace
         CheckArmDrive(ragdoll.Create(world, asset, torso, pose, Vector3(kZero), error), "Create a torso with a leg on the pelvis");
         CheckArmDrive(ragdoll.FindWoundJoint(0) == 0 && ragdoll.FindWoundJoint(1) == 0 &&
             ragdoll.FindWoundJoint(2) == 1 && ragdoll.FindWoundJoint(3) == 2 && ragdoll.FindWoundJoint(4) == 3 &&
-            ragdoll.FindWoundJoint(5) < 0, "Map hips, spine, chest, neck and head wounds to their local joints");
+            ragdoll.FindWoundJoint(5) == 4, "Map hips, spine, chest, neck, head and thigh wounds to their local joints");
         ragdoll.SetDrivesEnabled(true);
         const float deltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
         const unsigned lastImpactStep = static_cast<unsigned>(.32 / PhysicsWorld::FixedDeltaTime);

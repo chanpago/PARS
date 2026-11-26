@@ -417,6 +417,7 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     }
     ImGui::SetNextItemWidth(110);
     changed |= ImGui::DragFloat(u8"질량 (kg)", &body.mass, .1f, .001f, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    changed |= ImGui::Checkbox(u8"치명상 부위", &body.isCriticalWound);
     if (ImGui::CollapsingHeader(u8"물리 머터리얼"))
     {
         ImGui::SetNextItemWidth(110);
