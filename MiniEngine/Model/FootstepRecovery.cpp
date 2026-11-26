@@ -366,7 +366,7 @@ namespace
         // 일반 방향의 회복 영역이 보폭 밖에 있으면 일반 도달 영역 안에서 최선점을 찾는다.
         const bool normalOutOfRange = !hasOverlap && input.previousMode == FootstepMode::Normal &&
             !result.reachable[0].empty() && CaptureReachesNormalSide(result);
-        const bool checkAlternatives = input.acceptsTarget || input.hasRejectedTarget;
+        const bool checkAlternatives = input.checkTargetPose || input.hasRejectedTarget;
         for (size_t mode : order)
         {
             if ((normalOutOfRange && mode != 0) ||
@@ -451,8 +451,10 @@ namespace
                 break;
             }
             result.poseCheckPositions[result.poseChecks] = candidate.position;
+            const FootstepPoseFailures failures = input.checkTargetPose ? input.checkTargetPose(candidate.position) : FootstepPoseFailures{};
+            result.poseCheckFailures[result.poseChecks] = failures;
             ++result.poseChecks;
-            if (input.acceptsTarget && !input.acceptsTarget(candidate.position))
+            if (failures)
             {
                 result.poseRejected = true;
                 continue;

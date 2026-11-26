@@ -465,9 +465,13 @@ namespace
             reach.minimumWidth = MinimumStanceWidth(idleWidth, settings);
         }
         const PxVec3 stepOrigin = request.feet[side].stepOrigin;
-        request.acceptsTarget = [&input, &state, side, stepOrigin](const PxVec3& position) -> bool
+        request.checkTargetPose = [&input, &state, side, stepOrigin](const PxVec3& position) -> FootstepPoseFailures
         {
-            return input.acceptsLanding && input.acceptsLanding(side, position, state.groundNormal, position - stepOrigin);
+            if (!input.checkLandingPose)
+            {
+                return FootstepPoseFailure::InvalidInput;
+            }
+            return input.checkLandingPose(side, position, state.groundNormal, position - stepOrigin);
         };
         normal.recovery = SelectFootstepRecovery(request, settings.recovery);
         normal.recovery.pathRejected = inProgress && command.target.recovery.pathRejected;

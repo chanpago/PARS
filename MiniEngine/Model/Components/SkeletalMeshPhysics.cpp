@@ -445,7 +445,7 @@ namespace PARS
                 }
                 bodies[index] = body;
             }
-            return IsFootstepPoseWithinJointLimits(*m_PhysicsAsset, m_Ragdoll.UsesArticulation(), bodies, frames);
+            return CheckFootstepJointLimits(*m_PhysicsAsset, m_Ragdoll.UsesArticulation(), bodies, frames) == FootstepPoseFailure::None;
         };
         const Vector3 actorForward = GetOwner().GetActorTransform().GetBasis() * Vector3(0, 0, 1);
         const PxVec3 forward(float(actorForward.GetX()), float(actorForward.GetY()), float(actorForward.GetZ()));

@@ -116,9 +116,9 @@ namespace
         settings.oneStepCaptureScale = 1.0f;
         settings.maximumPoseChecks = 2;
         const PxVec3 underHip(.12f, 0, 0);
-        input.acceptsTarget = [underHip](const PxVec3& position) -> bool
+        input.checkTargetPose = [underHip](const PxVec3& position) -> FootstepPoseFailures
         {
-            return (position - underHip).magnitudeSquared() < 1e-6f;
+            return (position - underHip).magnitudeSquared() < 1e-6f ? FootstepPoseFailure::None : FootstepPoseFailure::Reach;
         };
         const FootstepRecoverySnapshot result = SelectFootstepRecovery(input, settings);
         Check(result.hasTarget && result.status == FootstepRecoveryStatus::BestEffort &&
@@ -143,9 +143,9 @@ namespace
 
         input.velocity = PxVec3(0);
         input.feet[input.movingFoot].maximumDistance = .08f;
-        input.acceptsTarget = [](const PxVec3&) -> bool
+        input.checkTargetPose = [](const PxVec3&) -> FootstepPoseFailures
         {
-            return false;
+            return FootstepPoseFailure::Reach;
         };
         const FootstepRecoverySnapshot rejected = SelectFootstepRecovery(input, settings);
         Check(rejected.status == FootstepRecoveryStatus::PoseRejected && rejected.normalReach.BuildPolygon() == geometry &&
@@ -216,9 +216,9 @@ namespace
         input = Input();
         input.velocity = PxVec3(-.8f, 0, 0);
         input.com.z = .15f;
-        input.acceptsTarget = [](const PxVec3&) -> bool
+        input.checkTargetPose = [](const PxVec3&) -> FootstepPoseFailures
         {
-            return false;
+            return FootstepPoseFailure::JointLimit;
         };
         result = SelectFootstepRecovery(input, settings);
         Check(!result.hasTarget && result.poseRejected && result.poseChecks <= settings.maximumPoseChecks,
@@ -257,10 +257,10 @@ namespace
         const float growth = std::exp(std::sqrt(9.81f / input.com.y) * input.firstStepTime);
         input.com += (edgeMidpoint + PxVec3(.25f, 0, .25f) - corner) / growth;
         FootstepPolygon checked;
-        input.acceptsTarget = [&checked](const PxVec3& point) -> bool
+        input.checkTargetPose = [&checked](const PxVec3& point) -> FootstepPoseFailures
         {
             checked.push_back(point);
-            return checked.size() == 3;
+            return checked.size() == 3 ? FootstepPoseFailure::None : FootstepPoseFailure::OppositeLegOverlap;
         };
         const FootstepRecoverySnapshot step = SelectFootstepRecovery(input, settings);
         Check(checked.size() == 3 && step.hasTarget && step.mode == FootstepMode::Normal &&
@@ -411,16 +411,27 @@ namespace
             "a locked margin target stays fixed and retains its classification");
         input = Input();
         FootstepPolygon checked;
-        input.acceptsTarget = [&checked](const PxVec3& point) -> bool
+        input.checkTargetPose = [&checked](const PxVec3& point) -> FootstepPoseFailures
         {
             checked.push_back(point);
-            return false;
+            if (checked.size() == 1)
+            {
+                FootstepPoseFailures failures = FootstepPoseFailure::Reach;
+                failures |= FootstepPoseFailure::JointLimit;
+                return failures;
+            }
+            return FootstepPoseFailure::OppositeLegOverlap;
         };
         const FootstepRecoverySnapshot rejected = SelectFootstepRecovery(input, settings);
         Check(!rejected.hasTarget && rejected.poseRejected && checked.size() == rejected.poseChecks &&
             checked.size() <= settings.maximumPoseChecks, "both regions share a single pose-check budget");
         Check(std::equal(checked.begin(), checked.end(), rejected.poseCheckPositions.begin()),
             "the snapshot retains every rejected landing position in pose-check order");
+        Check(rejected.poseChecks > 1 && rejected.poseCheckFailures[0].isSet(FootstepPoseFailure::Reach) &&
+            rejected.poseCheckFailures[0].isSet(FootstepPoseFailure::JointLimit) &&
+            !rejected.poseCheckFailures[0].isSet(FootstepPoseFailure::OppositeLegOverlap) &&
+            rejected.poseCheckFailures[1] == FootstepPoseFailure::OppositeLegOverlap,
+            "simultaneous and distinct failures stay attached to the correct candidates across the search");
     }
 
     FootstepInput PlannerInput()
@@ -457,9 +468,9 @@ namespace
             foot.calfLength = .5f;
             foot.normalImpulse = input.bodyWeight * input.fixedDeltaTime * .5f;
         }
-        input.acceptsLanding = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> bool
+        input.checkLandingPose = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> FootstepPoseFailures
         {
-            return true;
+            return FootstepPoseFailure::None;
         };
         return input;
     }
@@ -545,13 +556,13 @@ namespace
         // 기본 보폭 한도 안에서 선호점만 회복 영역 밖으로 옮긴다.
         input.feet[1].stanceOffset.x += .3f;
         FootstepPolygon checked;
-        input.acceptsLanding = [&checked, &input](size_t side, const PxVec3& point, const PxVec3& normal,
-            const PxVec3& displacement) -> bool
+        input.checkLandingPose = [&checked, &input](size_t side, const PxVec3& point, const PxVec3& normal,
+            const PxVec3& displacement) -> FootstepPoseFailures
         {
             Check(normal == PxVec3(0, 1, 0) && displacement == point - input.feet[side].position,
                 "Each landing pose is checked with its own stride from the stepping foot");
             checked.push_back(point);
-            return checked.size() == 2;
+            return checked.size() == 2 ? FootstepPoseFailure::None : FootstepPoseFailure::JointLimit;
         };
         planner.Reset();
         planner.Update(input, settings);
@@ -562,15 +573,18 @@ namespace
         Check(second.recovery.poseChecks == checked.size() &&
             std::equal(checked.begin(), checked.end(), second.recovery.poseCheckPositions.begin()),
             "the snapshot retains the checked positions through the first accepted landing");
+        Check(second.recovery.poseCheckFailures[0] == FootstepPoseFailure::JointLimit &&
+            second.recovery.poseCheckFailures[1] == FootstepPoseFailure::None,
+            "the planner forwards each result without carrying a rejected reason into an accepted candidate");
         const PxVec3 closest = ClosestFootstepPoint(second.recovery.intersections[0].front(), second.raw);
         Check((checked.front() - closest).magnitudeSquared() < 1e-8f && second.position == checked.back() &&
             InAny(second.recovery.intersections[0], second.position),
             "an outside stance target tries the closest overlap point first and keeps the alternative inside");
 
         input.velocity.z = -4.0f;
-        input.acceptsLanding = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> bool
+        input.checkLandingPose = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> FootstepPoseFailures
         {
-            return false;
+            return FootstepPoseFailure::Reach;
         };
         planner.Reset();
         planner.Update(input, settings);
@@ -664,17 +678,17 @@ namespace
         Check((replanned.target.position - first.target.position).magnitude() >= .0099f ||
             !planner.GetSnapshot().candidates[1].recovery.hasTarget,
             "a failed path requests an alternative landing instead of repeating the same candidate");
-        input.acceptsLanding = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> bool
+        input.checkLandingPose = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> FootstepPoseFailures
         {
-            return false;
+            return FootstepPoseFailure::JointLimit;
         };
         ++input.completedStep;
         planner.Update(input, settings);
         Check((planner.GetSnapshot().feet[1].target.position - replanned.target.position).magnitude() < 1e-6f,
             "candidate rejection preserves an existing crossover goal instead of applying a normal clamp");
-        input.acceptsLanding = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> bool
+        input.checkLandingPose = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> FootstepPoseFailures
         {
-            return true;
+            return FootstepPoseFailure::None;
         };
         input.feet[1].grounded = false;
         const uint32_t lockTick = static_cast<uint32_t>(std::ceil(

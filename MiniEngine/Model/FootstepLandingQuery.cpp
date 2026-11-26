@@ -86,44 +86,44 @@ void FootstepLandingQuery::Prepare(const SkeletalMeshComponent& mesh, const Foot
     }
 }
 
-bool FootstepLandingQuery::Accept(size_t side, const PxVec3& position, const PxVec3& normal,
+FootstepPoseFailures FootstepLandingQuery::CheckPose(size_t side, const PxVec3& position, const PxVec3& normal,
     const PxVec3& displacement) const
 {
     if (side > 1 || !m_Legs[side].available || !m_Legs[1 - side].available || !m_Asset || !m_Ragdoll)
     {
-        return false;
+        return FootstepPoseFailure::InvalidInput;
     }
     const Leg& leg = m_Legs[side];
     TwoBoneIKInput input = leg.pose;
     if (!MakeFootSoleTarget(position, normal, leg.pose.targetSole, input.targetSole, displacement))
     {
-        return false;
+        return FootstepPoseFailure::InvalidInput;
     }
     const LegIKResult solved = SolveTwoBoneIK(input);
-    if (!solved.valid || solved.reachError > .0001f)
+    if (!solved.valid)
     {
-        return false;
+        return FootstepPoseFailure::Reach;
+    }
+    // 목표에 닿지 못해도 IK가 계산한 자세로 관절 제한과 반대쪽 다리 겹침을 검사할 수 있다.
+    FootstepPoseFailures failures;
+    if (solved.reachError > .0001f)
+    {
+        failures |= FootstepPoseFailure::Reach;
     }
     const std::array<PxTransform, 4> frames{{leg.anchor, solved.hip, solved.knee, solved.ankle}};
-    if (!IsFootstepPoseWithinJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(), leg.bodies, frames))
-    {
-        return false;
-    }
+    failures |= CheckFootstepJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(), leg.bodies, frames);
     for (size_t moving = 0; moving < 3; ++moving)
     {
         const FootstepCollisionShape& shape = leg.shapes[moving];
-        if (!shape.available)
-        {
-            return false;
-        }
         const PxTransform pose = frames[moving + 1] * shape.inBone;
         for (const FootstepCollisionShape& other : m_Legs[1 - side].shapes)
         {
-            if (!other.available || PxGeometryQuery::overlap(shape.geometry.any(), pose, other.geometry.any(), other.actualPose))
+            if (PxGeometryQuery::overlap(shape.geometry.any(), pose, other.geometry.any(), other.actualPose))
             {
-                return false;
+                failures |= FootstepPoseFailure::OppositeLegOverlap;
+                return failures;
             }
         }
     }
-    return true;
+    return failures;
 }

@@ -439,10 +439,10 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     if (m_FootstepSettings.recovery.enabled && planningSteps && mesh.UsesAutomaticRootSupport())
     {
         landingQuery.Prepare(mesh, m_Snapshot, reaches);
-        input.acceptsLanding = [&landingQuery](size_t side, const PxVec3& position, const PxVec3& normal,
-            const PxVec3& displacement) -> bool
+        input.checkLandingPose = [&landingQuery](size_t side, const PxVec3& position, const PxVec3& normal,
+            const PxVec3& displacement) -> FootstepPoseFailures
         {
-            return landingQuery.Accept(side, position, normal, displacement);
+            return landingQuery.CheckPose(side, position, normal, displacement);
         };
     }
     input.active = mesh.IsActiveRagdoll();

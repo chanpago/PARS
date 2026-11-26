@@ -107,6 +107,31 @@ namespace
         return foot == 0 ? u8"왼발" : foot == 1 ? u8"오른발" : u8"없음";
     }
 
+    void AppendPoseFailureCandidates(std::string& text, const PARS::FootstepRecoverySnapshot& decision,
+        PARS::FootstepPoseFailure reason, const char* label)
+    {
+        bool first = true;
+        for (uint32_t index = 0; index < decision.poseChecks; ++index)
+        {
+            if (!decision.poseCheckFailures[index].isSet(reason))
+            {
+                continue;
+            }
+            if (first)
+            {
+                text += "\n  ";
+                text += label;
+                text += u8" · 후보 ";
+                first = false;
+            }
+            else
+            {
+                text += ", ";
+            }
+            text += std::to_string(index + 1);
+        }
+    }
+
     std::string FootstepDecisionText(const PARS::FootstepSnapshot& step, const PARS::FootstepRecoverySnapshot* decision)
     {
         std::string text;
@@ -146,6 +171,13 @@ namespace
         std::snprintf(result, sizeof(result), u8"%s · 최대 %u스텝 · %.3fms",
             PARS::FootstepRecoveryStatusLabel(decision->status), decision->steps, decision->elapsedMilliseconds);
         text += result;
+        if (decision->status == PARS::FootstepRecoveryStatus::PoseRejected)
+        {
+            AppendPoseFailureCandidates(text, *decision, PARS::FootstepPoseFailure::Reach, u8"발 도달 실패");
+            AppendPoseFailureCandidates(text, *decision, PARS::FootstepPoseFailure::JointLimit, u8"관절 각도 제한");
+            AppendPoseFailureCandidates(text, *decision, PARS::FootstepPoseFailure::OppositeLegOverlap, u8"반대쪽 다리와 겹침");
+            AppendPoseFailureCandidates(text, *decision, PARS::FootstepPoseFailure::InvalidInput, u8"자세 검사 데이터 오류");
+        }
         return text;
     }
 

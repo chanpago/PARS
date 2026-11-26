@@ -2,6 +2,7 @@
 
 #include "FootSupportHull.h"
 #include "FootstepMode.h"
+#include "foundation/PxFlags.h"
 #include <cstdint>
 #include <functional>
 
@@ -31,6 +32,17 @@ namespace PARS
         PoseRejected,
         Locked
     };
+
+    enum class FootstepPoseFailure : uint8_t
+    {
+        None = 0,
+        Reach = 1 << 0,
+        JointLimit = 1 << 1,
+        OppositeLegOverlap = 1 << 2,
+        InvalidInput = 1 << 3
+    };
+
+    using FootstepPoseFailures = physx::PxFlags<FootstepPoseFailure, uint8_t>;
 
     struct FootstepRecoverySettings
     {
@@ -75,7 +87,7 @@ namespace PARS
         };
 
     public:
-        std::function<bool(const physx::PxVec3&)> acceptsTarget;
+        std::function<FootstepPoseFailures(const physx::PxVec3&)> checkTargetPose;
         std::array<FootstepReachInput, 2> feet;
         size_t movingFoot = 0;
         physx::PxVec3 com{0};
@@ -133,6 +145,8 @@ namespace PARS
         uint32_t poseChecks = 0;
         float predictionTime = 0;
         uint32_t capturePieceCount = 0;
+        // 같은 번호의 빨간 X에서 확인된 실패 이유를 함께 보관한다.
+        std::array<FootstepPoseFailures, FootstepRecoverySettings::MaximumPoseChecks> poseCheckFailures{};
         bool hasTarget = false;
         bool modelFeasible = false;
         bool poseRejected = false;
