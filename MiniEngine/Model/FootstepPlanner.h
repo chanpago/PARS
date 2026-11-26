@@ -108,7 +108,7 @@ namespace PARS
     struct FootstepInput
     {
     public:
-        std::function<FootstepPoseFailures(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
+        std::function<FootstepPoseCheck(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
             const physx::PxVec3& displacement)> checkLandingPose;
         std::vector<physx::PxVec3> hull;
         std::vector<physx::PxVec3> bufferHull;

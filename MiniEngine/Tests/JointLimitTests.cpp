@@ -1,5 +1,6 @@
 ﻿#include "../Model/Ragdoll.h"
 #include "../Model/PhysicsPose.h"
+#include "../Model/FootstepPoseValidation.h"
 #include "../Model/RagdollComparison.h"
 #include "../Core/PhysicsWorld.h"
 #include <cmath>
@@ -20,6 +21,42 @@ namespace
             std::fprintf(stderr, "FAIL: %s\n", message);
             std::exit(1);
         }
+    }
+
+    void TestLandingJointDetails(bool articulation)
+    {
+        PhysicsAsset asset;
+        for (const char* name : {"pelvis", "thigh", "calf", "foot"})
+        {
+            PhysicsBody body;
+            body.bone = name;
+            asset.bodies.push_back(body);
+        }
+        for (size_t index = 1; index < asset.bodies.size(); ++index)
+        {
+            PhysicsConstraint joint;
+            joint.parentBone = asset.bodies[index - 1].bone;
+            joint.childBone = asset.bodies[index].bone;
+            joint.twist = PhysicsJointMotion::Locked;
+            joint.swingY = PhysicsJointMotion::Locked;
+            joint.swingZ = PhysicsJointMotion::Locked;
+            asset.constraints.push_back(joint);
+        }
+        const std::array<int, 4> indices{0, 1, 2, 3};
+        const PxVec3 axis(1, 0, 0);
+        const std::array<PxTransform, 4> frames{PxTransform(PxIdentity), PxTransform(PxIdentity),
+            PxTransform(PxQuat(.25f, axis)), PxTransform(PxQuat(.38f, axis))};
+        std::array<FootstepJointCheck, 3> details;
+        FootstepPoseFailures failures = CheckFootstepJointLimits(asset, articulation, indices, frames, &details);
+        CheckLimit(failures == FootstepPoseFailure::JointLimit && details[0].correctionRadians == 0 &&
+            std::abs(details[1].correctionRadians - .25f) < 1e-4f && std::abs(details[2].correctionRadians - .13f) < 1e-4f,
+            "A landing records both knee and ankle corrections in joint space and leaves the hip clear");
+        asset.constraints.erase(asset.constraints.begin() + 1);
+        failures = CheckFootstepJointLimits(asset, articulation, indices, frames, &details);
+        CheckLimit(failures.isSet(FootstepPoseFailure::InvalidInput) && failures.isSet(FootstepPoseFailure::JointLimit) &&
+            details[1].inputIssue == FootstepJointInputIssue::Constraint && details[1].correctionRadians == 0 &&
+            std::abs(details[2].correctionRadians - .13f) < 1e-4f,
+            "A missing knee constraint is identified without hiding a measurable ankle correction");
     }
 
     void TestAsymmetricTargets()
@@ -181,6 +218,7 @@ void RunJointLimitTests()
     TestAsymmetricTargets();
     for (bool articulation : {false, true})
     {
+        TestLandingJointDetails(articulation);
         for (bool lockedY : {false, true})
         {
             TestAsymmetricPhysics(articulation, lockedY);

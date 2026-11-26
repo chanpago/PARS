@@ -451,10 +451,10 @@ namespace
                 break;
             }
             result.poseCheckPositions[result.poseChecks] = candidate.position;
-            const FootstepPoseFailures failures = input.checkTargetPose ? input.checkTargetPose(candidate.position) : FootstepPoseFailures{};
-            result.poseCheckFailures[result.poseChecks] = failures;
+            const FootstepPoseCheck check = input.checkTargetPose ? input.checkTargetPose(candidate.position) : FootstepPoseCheck{};
+            result.poseCheckResults[result.poseChecks] = check;
             ++result.poseChecks;
-            if (failures)
+            if (check.failures)
             {
                 result.poseRejected = true;
                 continue;
@@ -637,6 +637,7 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         return result;
     }
     const size_t side = input.movingFoot;
+    result.movingFoot = static_cast<uint8_t>(side);
     for (const FootstepReachInput& foot : input.feet)
     {
         if (foot.sole.size() < 3 || foot.sole.size() > 8 || !foot.position.isFinite())

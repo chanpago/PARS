@@ -411,27 +411,42 @@ namespace
             "a locked margin target stays fixed and retains its classification");
         input = Input();
         FootstepPolygon checked;
-        input.checkTargetPose = [&checked](const PxVec3& point) -> FootstepPoseFailures
+        input.checkTargetPose = [&checked](const PxVec3& point) -> FootstepPoseCheck
         {
             checked.push_back(point);
+            FootstepPoseCheck check;
             if (checked.size() == 1)
             {
-                FootstepPoseFailures failures = FootstepPoseFailure::Reach;
-                failures |= FootstepPoseFailure::JointLimit;
-                return failures;
+                check.failures = FootstepPoseFailure::Reach;
+                check.failures |= FootstepPoseFailure::JointLimit;
+                check.soleError = .015f;
+                check.reachLimited = true;
+                check.joints[1].correctionRadians = .21f;
+                check.joints[2].correctionRadians = .08f;
             }
-            return FootstepPoseFailure::OppositeLegOverlap;
+            else
+            {
+                check.failures = FootstepPoseFailure::OppositeLegOverlap;
+                check.overlapPairs = (1u << 2) | (1u << 7);
+            }
+            return check;
         };
         const FootstepRecoverySnapshot rejected = SelectFootstepRecovery(input, settings);
         Check(!rejected.hasTarget && rejected.poseRejected && checked.size() == rejected.poseChecks &&
             checked.size() <= settings.maximumPoseChecks, "both regions share a single pose-check budget");
         Check(std::equal(checked.begin(), checked.end(), rejected.poseCheckPositions.begin()),
             "the snapshot retains every rejected landing position in pose-check order");
-        Check(rejected.poseChecks > 1 && rejected.poseCheckFailures[0].isSet(FootstepPoseFailure::Reach) &&
-            rejected.poseCheckFailures[0].isSet(FootstepPoseFailure::JointLimit) &&
-            !rejected.poseCheckFailures[0].isSet(FootstepPoseFailure::OppositeLegOverlap) &&
-            rejected.poseCheckFailures[1] == FootstepPoseFailure::OppositeLegOverlap,
+        const FootstepPoseCheck& firstCheck = rejected.poseCheckResults[0];
+        const FootstepPoseCheck& secondCheck = rejected.poseCheckResults[1];
+        Check(rejected.poseChecks > 1 && firstCheck.failures.isSet(FootstepPoseFailure::Reach) &&
+            firstCheck.failures.isSet(FootstepPoseFailure::JointLimit) && !firstCheck.failures.isSet(FootstepPoseFailure::OppositeLegOverlap) &&
+            secondCheck.failures == FootstepPoseFailure::OppositeLegOverlap,
             "simultaneous and distinct failures stay attached to the correct candidates across the search");
+        Check(rejected.movingFoot == input.movingFoot && firstCheck.reachLimited && firstCheck.soleError == .015f &&
+            firstCheck.joints[0].correctionRadians == 0 && firstCheck.joints[1].correctionRadians == .21f &&
+            firstCheck.joints[2].correctionRadians == .08f && firstCheck.overlapPairs == 0 &&
+            secondCheck.overlapPairs == ((1u << 2) | (1u << 7)) && !secondCheck.reachLimited && secondCheck.soleError == 0,
+            "joint corrections, reach error and contact pairs stay with their tested foot and candidate");
     }
 
     FootstepInput PlannerInput()
@@ -573,8 +588,8 @@ namespace
         Check(second.recovery.poseChecks == checked.size() &&
             std::equal(checked.begin(), checked.end(), second.recovery.poseCheckPositions.begin()),
             "the snapshot retains the checked positions through the first accepted landing");
-        Check(second.recovery.poseCheckFailures[0] == FootstepPoseFailure::JointLimit &&
-            second.recovery.poseCheckFailures[1] == FootstepPoseFailure::None,
+        Check(second.recovery.poseCheckResults[0].failures == FootstepPoseFailure::JointLimit &&
+            second.recovery.poseCheckResults[1].failures == FootstepPoseFailure::None,
             "the planner forwards each result without carrying a rejected reason into an accepted candidate");
         const PxVec3 closest = ClosestFootstepPoint(second.recovery.intersections[0].front(), second.raw);
         Check((checked.front() - closest).magnitudeSquared() < 1e-8f && second.position == checked.back() &&

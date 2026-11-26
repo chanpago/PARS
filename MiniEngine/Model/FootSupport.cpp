@@ -440,7 +440,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     {
         landingQuery.Prepare(mesh, m_Snapshot, reaches);
         input.checkLandingPose = [&landingQuery](size_t side, const PxVec3& position, const PxVec3& normal,
-            const PxVec3& displacement) -> FootstepPoseFailures
+            const PxVec3& displacement) -> FootstepPoseCheck
         {
             return landingQuery.CheckPose(side, position, normal, displacement);
         };

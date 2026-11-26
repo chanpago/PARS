@@ -29,6 +29,9 @@ namespace
     constexpr PxU32 RecoveryCaptureColor = 0xff33dd77;
     constexpr PxU32 RecoveryTargetColor = 0xffeeffff;
     constexpr PxU32 LandingCandidateColor = 0xffff0000;
+    constexpr const char* LegSideLabels[] = {u8"왼쪽", u8"오른쪽"};
+    constexpr const char* LegJointLabels[] = {u8"고관절", u8"무릎", u8"발목"};
+    constexpr const char* LegPartLabels[] = {u8"허벅지", u8"종아리", u8"발"};
     constexpr size_t NormalModeIndex = static_cast<size_t>(PARS::FootstepMode::Normal);
 
     const PARS::FootstepRecoverySnapshot* VisibleRecovery(const PARS::SkeletalMeshComponent& mesh)
@@ -107,13 +110,201 @@ namespace
         return foot == 0 ? u8"왼발" : foot == 1 ? u8"오른발" : u8"없음";
     }
 
+    const char* FootIKIssueLabel(PARS::FootIKIssue issue)
+    {
+        switch (issue)
+        {
+        case PARS::FootIKIssue::TargetPosition:
+            return u8"착지 좌표가 유효하지 않음";
+        case PARS::FootIKIssue::GroundNormal:
+            return u8"지면 법선의 길이나 방향이 유효하지 않음";
+        case PARS::FootIKIssue::ReferenceSole:
+            return u8"기준 발바닥 위치·회전 오류";
+        case PARS::FootIKIssue::SoleOrientation:
+            return u8"지면에 맞는 발바닥 방향 계산 불가";
+        case PARS::FootIKIssue::HipPose:
+            return u8"고관절 기준 자세 오류";
+        case PARS::FootIKIssue::KneePose:
+            return u8"무릎 기준 자세 오류";
+        case PARS::FootIKIssue::AnklePose:
+            return u8"발목 기준 자세 오류";
+        case PARS::FootIKIssue::SoleTransform:
+            return u8"목표 발바닥 또는 발목 기준 발바닥 변환 오류";
+        case PARS::FootIKIssue::ThighLength:
+            return u8"허벅지 길이가 너무 짧거나 유효하지 않음";
+        case PARS::FootIKIssue::CalfLength:
+            return u8"종아리 길이가 너무 짧거나 유효하지 않음";
+        case PARS::FootIKIssue::ReachRatio:
+            return u8"다리 최대 신전 비율 오류";
+        case PARS::FootIKIssue::TargetAnkle:
+            return u8"발바닥에서 역산한 발목 자세 오류";
+        case PARS::FootIKIssue::ThighDirection:
+            return u8"고관절에서 무릎으로 향하는 방향 계산 불가";
+        case PARS::FootIKIssue::CalfDirection:
+            return u8"무릎에서 발목으로 향하는 방향 계산 불가";
+        case PARS::FootIKIssue::TargetDistance:
+            return u8"고관절에서 목표 발목까지 거리 계산 불가";
+        case PARS::FootIKIssue::SolvedPose:
+            return u8"계산된 관절 자세 또는 발바닥 오차가 유효하지 않음";
+        default:
+            return "";
+        }
+    }
+
+    const char* PoseInputIssueLabel(PARS::FootstepPoseInputIssue issue)
+    {
+        switch (issue)
+        {
+        case PARS::FootstepPoseInputIssue::Validator:
+            return u8"착지 자세 검사기 없음";
+        case PARS::FootstepPoseInputIssue::FootIndex:
+            return u8"이동발 번호 오류";
+        case PARS::FootstepPoseInputIssue::PhysicsAsset:
+            return u8"물리 에셋 없음";
+        case PARS::FootstepPoseInputIssue::Ragdoll:
+            return u8"래그돌 검사 준비 안 됨";
+        case PARS::FootstepPoseInputIssue::SoleSample:
+            return u8"발바닥 관측값 없음";
+        case PARS::FootstepPoseInputIssue::LegSetup:
+            return u8"다리 본 체인 데이터 없음";
+        case PARS::FootstepPoseInputIssue::ThighBody:
+            return u8"허벅지 물리 바디 없음";
+        case PARS::FootstepPoseInputIssue::CalfBody:
+            return u8"종아리 물리 바디 없음";
+        case PARS::FootstepPoseInputIssue::FootBody:
+            return u8"발 물리 바디 없음";
+        case PARS::FootstepPoseInputIssue::HipParent:
+            return u8"고관절의 부모 바디 연결 없음";
+        case PARS::FootstepPoseInputIssue::ThighShape:
+            return u8"허벅지 충돌 형상 없음";
+        case PARS::FootstepPoseInputIssue::CalfShape:
+            return u8"종아리 충돌 형상 없음";
+        case PARS::FootstepPoseInputIssue::FootShape:
+            return u8"발 충돌 형상 없음";
+        case PARS::FootstepPoseInputIssue::ReferenceSole:
+            return u8"기준 발바닥 자세 계산 불가";
+        default:
+            return "";
+        }
+    }
+
+    const char* JointInputIssueLabel(PARS::FootstepJointInputIssue issue)
+    {
+        switch (issue)
+        {
+        case PARS::FootstepJointInputIssue::Body:
+            return u8"연결할 물리 바디 없음";
+        case PARS::FootstepJointInputIssue::Constraint:
+            return u8"관절 제약 데이터 없음";
+        case PARS::FootstepJointInputIssue::Rotation:
+            return u8"관절 자세 또는 회전 계산값 오류";
+        default:
+            return "";
+        }
+    }
+
+    void AppendDetail(std::string& details, const std::string& item)
+    {
+        if (!details.empty())
+        {
+            details += ", ";
+        }
+        details += item;
+    }
+
+    std::string PoseFailureDetail(const PARS::FootstepPoseCheck& check, PARS::FootstepPoseFailure reason, size_t movingFoot)
+    {
+        std::string details;
+        char value[240];
+        if (reason == PARS::FootstepPoseFailure::Reach)
+        {
+            if (check.ikIssue != PARS::FootIKIssue::None)
+            {
+                return std::string(FootLabel(static_cast<int>(movingFoot))) + u8" IK 계산 불가 · " + FootIKIssueLabel(check.ikIssue);
+            }
+            if (check.soleError > 0)
+            {
+                std::snprintf(value, sizeof(value), u8"%s 발바닥 오차 %.3f mm / 허용 %.1f mm, 고관절-발목 목표 %.2f cm / 계산 %.2f cm",
+                    FootLabel(static_cast<int>(movingFoot)), check.soleError * 1000, PARS::FootstepPoseCheck::SoleTolerance * 1000,
+                    check.requestedHipAnkleDistance * 100, check.solvedHipAnkleDistance * 100);
+                details = value;
+                if (check.reachLimited && check.requestedHipAnkleDistance > check.solvedHipAnkleDistance)
+                {
+                    AppendDetail(details, u8"최대로 펴도 목표가 너무 멂");
+                }
+                else if (check.reachLimited && check.requestedHipAnkleDistance < check.solvedHipAnkleDistance)
+                {
+                    AppendDetail(details, u8"최대로 접어도 목표가 너무 가까움");
+                }
+            }
+        }
+        else if (reason == PARS::FootstepPoseFailure::JointLimit)
+        {
+            for (size_t joint = 0; joint < check.joints.size(); ++joint)
+            {
+                if (check.joints[joint].correctionRadians > 0)
+                {
+                    std::snprintf(value, sizeof(value), u8"%s %s 보정 %.2f°", LegSideLabels[movingFoot], LegJointLabels[joint],
+                        DirectX::XMConvertToDegrees(check.joints[joint].correctionRadians));
+                    AppendDetail(details, value);
+                }
+            }
+        }
+        else if (reason == PARS::FootstepPoseFailure::OppositeLegOverlap)
+        {
+            for (size_t pair = 0; pair < 9; ++pair)
+            {
+                if (check.overlapPairs & (1u << pair))
+                {
+                    std::snprintf(value, sizeof(value), u8"왼쪽 %s - 오른쪽 %s", LegPartLabels[pair / 3], LegPartLabels[pair % 3]);
+                    AppendDetail(details, value);
+                }
+            }
+        }
+        else if (reason == PARS::FootstepPoseFailure::InvalidInput)
+        {
+            details = PoseInputIssueLabel(check.inputIssue);
+            if (check.ikIssue != PARS::FootIKIssue::None)
+            {
+                AppendDetail(details, FootIKIssueLabel(check.ikIssue));
+            }
+            for (size_t side = 0; side < check.legInputIssues.size(); ++side)
+            {
+                if (check.legInputIssues[side] != PARS::FootstepPoseInputIssue::None)
+                {
+                    AppendDetail(details, std::string(LegSideLabels[side]) + " " + PoseInputIssueLabel(check.legInputIssues[side]));
+                }
+            }
+            for (size_t joint = 0; joint < check.joints.size(); ++joint)
+            {
+                if (check.joints[joint].inputIssue != PARS::FootstepJointInputIssue::None)
+                {
+                    AppendDetail(details, std::string(LegSideLabels[movingFoot]) + " " + LegJointLabels[joint] + " " +
+                        JointInputIssueLabel(check.joints[joint].inputIssue));
+                }
+            }
+        }
+        return details;
+    }
+
     void AppendPoseFailureCandidates(std::string& text, const PARS::FootstepRecoverySnapshot& decision,
         PARS::FootstepPoseFailure reason, const char* label)
     {
+        std::array<std::string, PARS::FootstepRecoverySettings::MaximumPoseChecks> details;
+        std::array<bool, PARS::FootstepRecoverySettings::MaximumPoseChecks> pending{};
+        for (uint32_t index = 0; index < decision.poseChecks; ++index)
+        {
+            const PARS::FootstepPoseCheck& check = decision.poseCheckResults[index];
+            pending[index] = check.failures.isSet(reason);
+            if (pending[index])
+            {
+                details[index] = PoseFailureDetail(check, reason, decision.movingFoot);
+            }
+        }
         bool first = true;
         for (uint32_t index = 0; index < decision.poseChecks; ++index)
         {
-            if (!decision.poseCheckFailures[index].isSet(reason))
+            if (!pending[index])
             {
                 continue;
             }
@@ -126,9 +317,32 @@ namespace
             }
             else
             {
-                text += ", ";
+                text += u8" / 후보 ";
             }
             text += std::to_string(index + 1);
+            // 원인과 표시할 측정값이 같으면 설명을 한 번만 쓰고 해당 후보 번호를 모은다.
+            for (uint32_t next = index + 1; next < decision.poseChecks; ++next)
+            {
+                if (pending[next] && details[next] == details[index])
+                {
+                    text += ", ";
+                    text += std::to_string(next + 1);
+                    pending[next] = false;
+                }
+            }
+            if (!details[index].empty())
+            {
+                text += " (";
+                text += details[index];
+                text += ')';
+            }
+        }
+        if (!first && reason == PARS::FootstepPoseFailure::JointLimit)
+        {
+            char tolerance[80];
+            std::snprintf(tolerance, sizeof(tolerance), u8" · 판정 허용 오차 %.2f°",
+                DirectX::XMConvertToDegrees(PARS::FootstepPoseCheck::JointToleranceRadians));
+            text += tolerance;
         }
     }
 
@@ -224,8 +438,6 @@ namespace
 
         const size_t movingSide = leftMoving ? 0 : 1;
         const size_t otherSide = 1 - movingSide;
-        const char* const sideLabels[] = {u8"왼쪽", u8"오른쪽"};
-        const char* const partLabels[] = {u8"허벅지", u8"종아리", u8"발"};
         PhysicsGroundContact ground;
         const bool otherGrounded = ragdoll.GetBodyGroundContact(bodies[otherSide][2], ground);
         // 양쪽에 이동 명령이 있거나 반대 발이 공중에 있으면 지지 중이라고 표시하지 않는다.
@@ -251,15 +463,15 @@ namespace
                 text += '[';
                 text += label;
                 text += u8"] 이동하는 다리의 (";
-                text += sideLabels[movingSide];
+                text += LegSideLabels[movingSide];
                 text += u8", ";
-                text += partLabels[movingPart];
+                text += LegPartLabels[movingPart];
                 text += u8")가 ";
                 text += otherRole;
                 text += u8" 다리의 (";
-                text += sideLabels[otherSide];
+                text += LegSideLabels[otherSide];
                 text += u8", ";
-                text += partLabels[otherPart];
+                text += LegPartLabels[otherPart];
                 text += u8")에 닿음";
             }
         }
@@ -635,8 +847,6 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
 
     const size_t movingSide = prediction.moving[0] ? 0 : 1;
     const size_t otherSide = 1 - movingSide;
-    const char* const sideLabels[] = {u8"왼쪽", u8"오른쪽"};
-    const char* const partLabels[] = {u8"허벅지", u8"종아리", u8"발"};
     const char* otherRole = prediction.moving[otherSide] ? u8"이동하는" :
         support.feet[otherSide].contact.grounded ? u8"지지하는" : u8"반대쪽";
     uint32_t displayed = 0;
@@ -657,7 +867,7 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
             std::snprintf(message, sizeof(message),
                 u8"\n[예측 %u/%u · %.0fms 뒤] 이동하는 다리의 (%s, %s)가 %s 다리의 (%s, %s)와 겹침 예상",
                 index + 1, prediction.sampleCount, sample.timeAhead * 1000,
-                sideLabels[movingSide], partLabels[movingPart], otherRole, sideLabels[otherSide], partLabels[otherPart]);
+                LegSideLabels[movingSide], LegPartLabels[movingPart], otherRole, LegSideLabels[otherSide], LegPartLabels[otherPart]);
             text += message;
         }
     }
@@ -1163,7 +1373,7 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             const std::string decisionText = FootstepDecisionText(step, decision);
             if (!decisionText.empty())
             {
-                ImGui::TextUnformatted(decisionText.c_str());
+                ImGui::TextWrapped("%s", decisionText.c_str());
             }
             if (decision)
             {

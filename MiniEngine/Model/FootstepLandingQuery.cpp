@@ -23,6 +23,10 @@ void FootstepLandingQuery::Prepare(const SkeletalMeshComponent& mesh, const Foot
     m_Asset = mesh.GetPhysicsAsset();
     m_Ragdoll = &mesh.GetRagdoll();
     m_Legs = {};
+    for (FootstepReachInput& reach : reaches)
+    {
+        reach.available = false;
+    }
     if (!m_Asset)
     {
         return;
@@ -33,15 +37,23 @@ void FootstepLandingQuery::Prepare(const SkeletalMeshComponent& mesh, const Foot
         const FootSoleSample& sample = support.feet[side];
         Leg& leg = m_Legs[side];
         const std::array<int, 3> chain{{sample.leg.hipNode, sample.leg.kneeNode, sample.leg.ankleNode}};
-        if (!sample.available || !sample.leg.available)
+        if (!sample.available)
         {
             continue;
         }
+        if (!sample.leg.available)
+        {
+            leg.issue = FootstepPoseInputIssue::LegSetup;
+            continue;
+        }
+        constexpr FootstepPoseInputIssue bodyIssues[] = {FootstepPoseInputIssue::ThighBody,
+            FootstepPoseInputIssue::CalfBody, FootstepPoseInputIssue::FootBody};
         for (size_t part = 0; part < 3; ++part)
         {
             const std::vector<int>::const_iterator node = std::find(nodes.begin(), nodes.end(), chain[part]);
-            if (node == nodes.end())
+            if (node == nodes.end() || static_cast<size_t>(node - nodes.begin()) >= m_Asset->bodies.size())
             {
+                leg.issue = bodyIssues[part];
                 break;
             }
             leg.bodies[part + 1] = static_cast<int>(node - nodes.begin());
@@ -62,6 +74,7 @@ void FootstepLandingQuery::Prepare(const SkeletalMeshComponent& mesh, const Foot
         }
         if (leg.bodies[0] < 0)
         {
+            leg.issue = FootstepPoseInputIssue::HipParent;
             continue;
         }
         leg.anchor = Frame(m_Ragdoll->GetBoneWorld(leg.bodies[0]));
@@ -74,56 +87,94 @@ void FootstepLandingQuery::Prepare(const SkeletalMeshComponent& mesh, const Foot
         leg.pose.soleInBone = Frame(sample.soleInBone);
         leg.pose.targetSole = Frame(sample.soleWorld);
         PxTransform levelSole(PxIdentity);
-        leg.available = MakeFootSoleTarget(leg.pose.targetSole.p, PxVec3(0, 1, 0), leg.pose.targetSole, levelSole) &&
-            leg.shapes[0].available && leg.shapes[1].available && leg.shapes[2].available;
+        leg.issue = FootstepPoseInputIssue::None;
+        if (!MakeFootSoleTarget(leg.pose.targetSole.p, PxVec3(0, 1, 0), leg.pose.targetSole, levelSole))
+        {
+            leg.issue = FootstepPoseInputIssue::ReferenceSole;
+        }
+        else
+        {
+            constexpr FootstepPoseInputIssue shapeIssues[] = {FootstepPoseInputIssue::ThighShape,
+                FootstepPoseInputIssue::CalfShape, FootstepPoseInputIssue::FootShape};
+            for (size_t part = 0; part < leg.shapes.size(); ++part)
+            {
+                if (!leg.shapes[part].available)
+                {
+                    leg.issue = shapeIssues[part];
+                    break;
+                }
+            }
+        }
         FootstepReachInput& reach = reaches[side];
         reach.hip = leg.pose.hip.p;
         reach.position = leg.pose.targetSole.p;
         reach.ankleOffset = (levelSole * leg.pose.soleInBone.getInverse()).p - levelSole.p;
         reach.legLength = sample.leg.thighLength + sample.leg.calfLength;
         reach.sole = BuildFootSupportHull(FootstepPolygon(sample.corners.begin(), sample.corners.end()));
-        reach.available = leg.available;
+        reach.available = leg.issue == FootstepPoseInputIssue::None;
     }
 }
 
-FootstepPoseFailures FootstepLandingQuery::CheckPose(size_t side, const PxVec3& position, const PxVec3& normal,
+FootstepPoseCheck FootstepLandingQuery::CheckPose(size_t side, const PxVec3& position, const PxVec3& normal,
     const PxVec3& displacement) const
 {
-    if (side > 1 || !m_Legs[side].available || !m_Legs[1 - side].available || !m_Asset || !m_Ragdoll)
+    FootstepPoseCheck check(FootstepPoseFailure::InvalidInput);
+    if (side >= m_Legs.size())
     {
-        return FootstepPoseFailure::InvalidInput;
+        check.inputIssue = FootstepPoseInputIssue::FootIndex;
+        return check;
+    }
+    if (!m_Ragdoll || !m_Asset)
+    {
+        check.inputIssue = !m_Ragdoll ? FootstepPoseInputIssue::Ragdoll : FootstepPoseInputIssue::PhysicsAsset;
+        return check;
+    }
+    if (m_Legs[0].issue != FootstepPoseInputIssue::None || m_Legs[1].issue != FootstepPoseInputIssue::None)
+    {
+        check.legInputIssues = {m_Legs[0].issue, m_Legs[1].issue};
+        return check;
     }
     const Leg& leg = m_Legs[side];
     TwoBoneIKInput input = leg.pose;
-    if (!MakeFootSoleTarget(position, normal, leg.pose.targetSole, input.targetSole, displacement))
+    check.ikIssue = BuildFootSoleTarget(position, normal, leg.pose.targetSole, input.targetSole, displacement);
+    if (check.ikIssue != FootIKIssue::None)
     {
-        return FootstepPoseFailure::InvalidInput;
+        return check;
     }
     const LegIKResult solved = SolveTwoBoneIK(input);
     if (!solved.valid)
     {
-        return FootstepPoseFailure::Reach;
+        check.failures = FootstepPoseFailure::Reach;
+        check.ikIssue = solved.issue;
+        return check;
     }
     // 목표에 닿지 못해도 IK가 계산한 자세로 관절 제한과 반대쪽 다리 겹침을 검사할 수 있다.
-    FootstepPoseFailures failures;
-    if (solved.reachError > .0001f)
+    check.failures = FootstepPoseFailure::None;
+    if (solved.reachError > FootstepPoseCheck::SoleTolerance)
     {
-        failures |= FootstepPoseFailure::Reach;
+        check.failures |= FootstepPoseFailure::Reach;
+        check.soleError = solved.reachError;
+        check.requestedHipAnkleDistance = (solved.requestedAnkle - solved.hip.p).magnitude();
+        check.solvedHipAnkleDistance = (solved.ankle.p - solved.hip.p).magnitude();
+        check.reachLimited = solved.reachLimited;
     }
     const std::array<PxTransform, 4> frames{{leg.anchor, solved.hip, solved.knee, solved.ankle}};
-    failures |= CheckFootstepJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(), leg.bodies, frames);
-    for (size_t moving = 0; moving < 3; ++moving)
+    check.failures |= CheckFootstepJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(), leg.bodies, frames, &check.joints);
+    const std::array<FootstepCollisionShape, 3>& oppositeShapes = m_Legs[1 - side].shapes;
+    for (size_t moving = 0; moving < leg.shapes.size(); ++moving)
     {
         const FootstepCollisionShape& shape = leg.shapes[moving];
         const PxTransform pose = frames[moving + 1] * shape.inBone;
-        for (const FootstepCollisionShape& other : m_Legs[1 - side].shapes)
+        for (size_t opposite = 0; opposite < oppositeShapes.size(); ++opposite)
         {
+            const FootstepCollisionShape& other = oppositeShapes[opposite];
             if (PxGeometryQuery::overlap(shape.geometry.any(), pose, other.geometry.any(), other.actualPose))
             {
-                failures |= FootstepPoseFailure::OppositeLegOverlap;
-                return failures;
+                const size_t pair = side == 0 ? moving * 3 + opposite : opposite * 3 + moving;
+                check.overlapPairs |= static_cast<uint16_t>(1u << pair);
+                check.failures |= FootstepPoseFailure::OppositeLegOverlap;
             }
         }
     }
-    return failures;
+    return check;
 }

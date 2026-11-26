@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "FootSupportHull.h"
+#include "FootstepIK.h"
 #include "FootstepMode.h"
 #include "foundation/PxFlags.h"
 #include <cstdint>
@@ -43,6 +44,67 @@ namespace PARS
     };
 
     using FootstepPoseFailures = physx::PxFlags<FootstepPoseFailure, uint8_t>;
+
+    enum class FootstepPoseInputIssue : uint8_t
+    {
+        None,
+        Validator,
+        FootIndex,
+        PhysicsAsset,
+        Ragdoll,
+        SoleSample,
+        LegSetup,
+        ThighBody,
+        CalfBody,
+        FootBody,
+        HipParent,
+        ThighShape,
+        CalfShape,
+        FootShape,
+        ReferenceSole
+    };
+
+    enum class FootstepJointInputIssue : uint8_t
+    {
+        None,
+        Body,
+        Constraint,
+        Rotation
+    };
+
+    struct FootstepJointCheck
+    {
+    public:
+        float correctionRadians = 0;
+        FootstepJointInputIssue inputIssue = FootstepJointInputIssue::None;
+    };
+
+    struct FootstepPoseCheck
+    {
+    public:
+        FootstepPoseCheck(FootstepPoseFailures failureFlags = {})
+            : failures(failureFlags)
+        {
+        }
+
+    public:
+        static constexpr float SoleTolerance = .0001f;
+        static constexpr float JointToleranceRadians = .01f;
+
+    public:
+        // 이동하는 다리의 고관절, 무릎, 발목 순서다.
+        std::array<FootstepJointCheck, 3> joints{};
+        float soleError = 0;
+        float requestedHipAnkleDistance = 0;
+        float solvedHipAnkleDistance = 0;
+        // 비트 번호는 기존 충돌 예측과 같이 왼쪽 부위 * 3 + 오른쪽 부위다.
+        uint16_t overlapPairs = 0;
+        FootstepPoseFailures failures;
+        FootIKIssue ikIssue = FootIKIssue::None;
+        FootstepPoseInputIssue inputIssue = FootstepPoseInputIssue::None;
+        std::array<FootstepPoseInputIssue, 2> legInputIssues{};
+        bool reachLimited = false;
+    };
 
     struct FootstepRecoverySettings
     {
@@ -87,7 +149,7 @@ namespace PARS
         };
 
     public:
-        std::function<FootstepPoseFailures(const physx::PxVec3&)> checkTargetPose;
+        std::function<FootstepPoseCheck(const physx::PxVec3&)> checkTargetPose;
         std::array<FootstepReachInput, 2> feet;
         size_t movingFoot = 0;
         physx::PxVec3 com{0};
@@ -146,7 +208,8 @@ namespace PARS
         float predictionTime = 0;
         uint32_t capturePieceCount = 0;
         // 같은 번호의 빨간 X에서 확인된 실패 이유를 함께 보관한다.
-        std::array<FootstepPoseFailures, FootstepRecoverySettings::MaximumPoseChecks> poseCheckFailures{};
+        std::array<FootstepPoseCheck, FootstepRecoverySettings::MaximumPoseChecks> poseCheckResults{};
+        uint8_t movingFoot = 0;
         bool hasTarget = false;
         bool modelFeasible = false;
         bool poseRejected = false;

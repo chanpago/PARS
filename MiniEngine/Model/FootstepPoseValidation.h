@@ -15,40 +15,78 @@ namespace PARS
             Math::Vector3(frame.p.x, frame.p.y, frame.p.z)));
     }
 
-    // 착지 후보와 기존 연속 검사에서 실제 구동기의 동일한 관절 제한을 사용한다.
-    inline FootstepPoseFailure CheckFootstepJointLimits(const PhysicsAsset& asset, bool articulation,
-        const std::array<int, 4>& indices, const std::array<physx::PxTransform, 4>& frames)
+    inline float FootstepJointCorrectionRadians(const PhysicsConstraint& constraint, bool articulation,
+        const Math::Matrix4& parent, const Math::Matrix4& child)
+    {
+        const Math::Quaternion raw = EvaluateJointDriveTarget(constraint, parent, child, false);
+        const Math::Quaternion limited = articulation ?
+            ClampArticulationDriveTarget(constraint, raw) : ClampD6DriveTarget(constraint, raw);
+        const float dot = physx::PxAbs(DirectX::XMVectorGetX(DirectX::XMVector4Dot(raw, limited)));
+        return std::isfinite(dot) ? 2 * std::acos(physx::PxClamp(dot, 0.0f, 1.0f)) : dot;
+    }
+
+    // 착지 후보는 위반한 관절을 모두 기록한다. 연속 경로 검사는 첫 위반에서 중단할 수 있다.
+    inline FootstepPoseFailures CheckFootstepJointLimits(const PhysicsAsset& asset, bool articulation,
+        const std::array<int, 4>& indices, const std::array<physx::PxTransform, 4>& frames,
+        std::array<FootstepJointCheck, 3>* details = nullptr)
     {
         std::array<Math::Matrix4, 4> bodies;
-        for (size_t index = 0; index < 4; ++index)
+        std::array<FootstepJointInputIssue, 4> bodyIssues{};
+        for (size_t index = 0; index < bodies.size(); ++index)
         {
             if (indices[index] < 0 || static_cast<size_t>(indices[index]) >= asset.bodies.size())
             {
-                return FootstepPoseFailure::InvalidInput;
+                bodyIssues[index] = FootstepJointInputIssue::Body;
             }
-            bodies[index] = FootstepPoseMatrix(frames[index]) * asset.bodies[indices[index]].GetLocalTransform();
+            else if (!frames[index].isSane())
+            {
+                bodyIssues[index] = FootstepJointInputIssue::Rotation;
+            }
+            else
+            {
+                bodies[index] = FootstepPoseMatrix(frames[index]) * asset.bodies[indices[index]].GetLocalTransform();
+            }
         }
-        for (size_t index = 0; index < 3; ++index)
+        FootstepPoseFailures failures;
+        for (size_t index = 0; index + 1 < bodies.size(); ++index)
         {
-            const int joint = asset.FindConstraint(asset.bodies[indices[index]].bone, asset.bodies[indices[index + 1]].bone);
-            if (joint < 0)
+            FootstepJointCheck joint;
+            joint.inputIssue = bodyIssues[index] != FootstepJointInputIssue::None ? bodyIssues[index] : bodyIssues[index + 1];
+            if (joint.inputIssue == FootstepJointInputIssue::None)
             {
-                return FootstepPoseFailure::InvalidInput;
+                const int constraint = asset.FindConstraint(asset.bodies[indices[index]].bone, asset.bodies[indices[index + 1]].bone);
+                if (constraint < 0)
+                {
+                    joint.inputIssue = FootstepJointInputIssue::Constraint;
+                }
+                else
+                {
+                    const float correction = FootstepJointCorrectionRadians(asset.constraints[constraint], articulation,
+                        bodies[index], bodies[index + 1]);
+                    if (!std::isfinite(correction))
+                    {
+                        joint.inputIssue = FootstepJointInputIssue::Rotation;
+                    }
+                    else if (correction > FootstepPoseCheck::JointToleranceRadians)
+                    {
+                        joint.correctionRadians = correction;
+                        failures |= FootstepPoseFailure::JointLimit;
+                    }
+                }
             }
-            const PhysicsConstraint& constraint = asset.constraints[joint];
-            const Math::Quaternion raw = EvaluateJointDriveTarget(constraint, bodies[index], bodies[index + 1], false);
-            const Math::Quaternion limited = articulation ?
-                ClampArticulationDriveTarget(constraint, raw) : ClampD6DriveTarget(constraint, raw);
-            const float dot = physx::PxClamp(physx::PxAbs(DirectX::XMVectorGetX(DirectX::XMVector4Dot(raw, limited))), 0.0f, 1.0f);
-            if (!std::isfinite(dot))
+            if (joint.inputIssue != FootstepJointInputIssue::None)
             {
-                return FootstepPoseFailure::InvalidInput;
+                failures |= FootstepPoseFailure::InvalidInput;
             }
-            if (2 * std::acos(dot) > .01f)
+            if (details)
             {
-                return FootstepPoseFailure::JointLimit;
+                (*details)[index] = joint;
+            }
+            else if (failures)
+            {
+                break;
             }
         }
-        return FootstepPoseFailure::None;
+        return failures;
     }
 }

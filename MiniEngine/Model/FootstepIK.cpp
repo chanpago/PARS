@@ -82,13 +82,21 @@ PxVec3 PARS::GetFootstepTravelForward(const PxVec3& displacement, const PxVec3& 
     return travel.dot(referenceForward) < 0 ? -travel : travel;
 }
 
-bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
+FootIKIssue PARS::BuildFootSoleTarget(const PxVec3& position, const PxVec3& normal,
     const PxTransform& referenceSole, PxTransform& target, const PxVec3& displacement)
 {
     PxVec3 up = normal;
-    if (!position.isFinite() || !referenceSole.isSane() || !Unit(up))
+    if (!position.isFinite())
     {
-        return false;
+        return FootIKIssue::TargetPosition;
+    }
+    if (!referenceSole.isSane())
+    {
+        return FootIKIssue::ReferenceSole;
+    }
+    if (!Unit(up))
+    {
+        return FootIKIssue::GroundNormal;
     }
     PxVec3 forward = referenceSole.q.rotate(PxVec3(0, 0, 1));
     const PxVec3 travel = GetFootstepTravelForward(displacement, forward);
@@ -102,13 +110,19 @@ bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
         PxVec3 right = referenceSole.q.rotate(PxVec3(1, 0, 0));
         if (!ProjectHint(right, up))
         {
-            return false;
+            return FootIKIssue::SoleOrientation;
         }
         forward = right.cross(up);
     }
     const PxVec3 right = up.cross(forward).getNormalized();
     target = PxTransform(position, PxQuat(PxMat33(right, up, right.cross(up))).getNormalized());
-    return target.isSane();
+    return target.isSane() ? FootIKIssue::None : FootIKIssue::SoleOrientation;
+}
+
+bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
+    const PxTransform& referenceSole, PxTransform& target, const PxVec3& displacement)
+{
+    return BuildFootSoleTarget(position, normal, referenceSole, target, displacement) == FootIKIssue::None;
 }
 
 float PARS::PredictSupportReachTime(const PxVec3& hipFromAnkle, const PxVec3& hipVelocity,
@@ -144,11 +158,39 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     LegIKResult result;
     const float upper = input.thighLength;
     const float lower = input.calfLength;
-    if (!input.hip.isSane() || !input.knee.isSane() || !input.ankle.isSane() ||
-        !input.targetSole.isSane() || !input.soleInBone.isSane() ||
-        !std::isfinite(upper) || !std::isfinite(lower) || upper <= 1e-5f || lower <= 1e-5f ||
-        !std::isfinite(input.maximumReachRatio) || input.maximumReachRatio <= 0 || input.maximumReachRatio > 1)
+    if (!input.hip.isSane())
     {
+        result.issue = FootIKIssue::HipPose;
+        return result;
+    }
+    if (!input.knee.isSane())
+    {
+        result.issue = FootIKIssue::KneePose;
+        return result;
+    }
+    if (!input.ankle.isSane())
+    {
+        result.issue = FootIKIssue::AnklePose;
+        return result;
+    }
+    if (!input.targetSole.isSane() || !input.soleInBone.isSane())
+    {
+        result.issue = FootIKIssue::SoleTransform;
+        return result;
+    }
+    if (!std::isfinite(upper) || upper <= 1e-5f)
+    {
+        result.issue = FootIKIssue::ThighLength;
+        return result;
+    }
+    if (!std::isfinite(lower) || lower <= 1e-5f)
+    {
+        result.issue = FootIKIssue::CalfLength;
+        return result;
+    }
+    if (!std::isfinite(input.maximumReachRatio) || input.maximumReachRatio <= 0 || input.maximumReachRatio > 1)
+    {
+        result.issue = FootIKIssue::ReachRatio;
         return result;
     }
 
@@ -159,14 +201,26 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
 
     PxVec3 sourceUpper = input.knee.p - input.hip.p;
     PxVec3 sourceLower = input.ankle.p - input.knee.p;
-    if (!requested.isSane() || !Unit(sourceUpper) || !Unit(sourceLower))
+    if (!requested.isSane())
     {
+        result.issue = FootIKIssue::TargetAnkle;
+        return result;
+    }
+    if (!Unit(sourceUpper))
+    {
+        result.issue = FootIKIssue::ThighDirection;
+        return result;
+    }
+    if (!Unit(sourceLower))
+    {
+        result.issue = FootIKIssue::CalfDirection;
         return result;
     }
     PxVec3 direction = requested.p - input.hip.p;
     const float requestedDistance = direction.magnitude();
     if (!std::isfinite(requestedDistance))
     {
+        result.issue = FootIKIssue::TargetDistance;
         return result;
     }
     PxVec3 sourceAxis = input.ankle.p - input.hip.p;
@@ -269,6 +323,10 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     result.reachLimited = PxAbs(distance - requestedDistance) > 1e-6f;
     result.valid = result.hip.isSane() && result.knee.isSane() && result.ankle.isSane() &&
         result.solvedSole.isSane() && std::isfinite(result.reachError);
+    if (!result.valid)
+    {
+        result.issue = FootIKIssue::SolvedPose;
+    }
     return result;
 }
 

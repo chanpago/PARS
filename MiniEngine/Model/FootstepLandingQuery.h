@@ -20,13 +20,13 @@ namespace PARS
             TwoBoneIKInput pose;
             physx::PxTransform anchor{physx::PxIdentity};
             std::array<int, 4> bodies{{-1, -1, -1, -1}};
-            bool available = false;
+            FootstepPoseInputIssue issue = FootstepPoseInputIssue::SoleSample;
         };
 
     public:
         void Prepare(const SkeletalMeshComponent& mesh, const FootSupportSnapshot& support,
             std::array<FootstepReachInput, 2>& reaches);
-        FootstepPoseFailures CheckPose(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
+        FootstepPoseCheck CheckPose(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
             const physx::PxVec3& displacement) const;
 
     private:

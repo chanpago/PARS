@@ -191,6 +191,12 @@ namespace
             PxTransform(PxVec3(0), PxQuat(-PxHalfPi, PxVec3(1, 0, 0))), target) && target.isSane(),
             "An animated forward direction parallel to the normal uses its side direction");
         Check(!MakeFootSoleTarget(PxVec3(0), PxVec3(0), animated, target), "A missing ground normal is rejected");
+        Check(BuildFootSoleTarget(PxVec3(0), PxVec3(0), animated, target, PxVec3(0)) == FootIKIssue::GroundNormal,
+            "an invalid ground normal is distinguished from an invalid target position");
+        TwoBoneIKInput invalidLength = BentLeg();
+        invalidLength.calfLength = 0;
+        Check(SolveTwoBoneIK(invalidLength).issue == FootIKIssue::CalfLength,
+            "an unsolved IK pose identifies the invalid leg segment");
 
         const PxVec3 travel(-.2f, .4f, .6f);
         const PxVec3 horizontal = PxVec3(travel.x, 0, travel.z).getNormalized();

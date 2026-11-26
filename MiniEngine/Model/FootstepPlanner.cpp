@@ -465,11 +465,13 @@ namespace
             reach.minimumWidth = MinimumStanceWidth(idleWidth, settings);
         }
         const PxVec3 stepOrigin = request.feet[side].stepOrigin;
-        request.checkTargetPose = [&input, &state, side, stepOrigin](const PxVec3& position) -> FootstepPoseFailures
+        request.checkTargetPose = [&input, &state, side, stepOrigin](const PxVec3& position) -> FootstepPoseCheck
         {
             if (!input.checkLandingPose)
             {
-                return FootstepPoseFailure::InvalidInput;
+                FootstepPoseCheck check(FootstepPoseFailure::InvalidInput);
+                check.inputIssue = FootstepPoseInputIssue::Validator;
+                return check;
             }
             return input.checkLandingPose(side, position, state.groundNormal, position - stepOrigin);
         };
