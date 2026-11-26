@@ -14,6 +14,7 @@
 using namespace physx;
 
 void TestFootstepPlanner();
+void TestProjectileStagger();
 void TestFootstepFalls();
 void TestImpactWarmupPlanning();
 void TestFootstepIK();
@@ -994,6 +995,11 @@ void TestFramePerformance();
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::strcmp(argv[1], "--projectile-stagger-only") == 0)
+    {
+        TestProjectileStagger();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--impact-hand-only") == 0)
     {
         TestApproachingImpact();

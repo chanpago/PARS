@@ -504,6 +504,12 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         for (const RagdollBodyImpulse& impact : ragdoll.GetExternalImpacts())
         {
             const float weight = impact.impulse.magnitude();
+            if (!impact.fromProjectile && !impact.fromCharacterCapsule && std::isfinite(weight) && weight > 0 &&
+                impact.outwardNormal.isFinite() && std::abs(impact.outwardNormal.y) < .70710678f)
+            {
+                // 이미 관측한 벽 접촉만 쓴다. 발 딛기 때문에 추가 스윕을 실행하지 않는다.
+                input.obstacleNormal += PxVec3(impact.outwardNormal.x, 0, impact.outwardNormal.z) * weight;
+            }
             if ((impact.fromProjectile || impact.body == static_cast<size_t>(root)) && impact.position.isFinite() &&
                 std::isfinite(weight) && weight > 1e-6f)
             {

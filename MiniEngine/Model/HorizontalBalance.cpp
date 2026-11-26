@@ -64,7 +64,7 @@ bool HorizontalBalance::Update(const HorizontalBalanceInput& input, const Horizo
     m_Snapshot.revision = input.revision;
     m_Snapshot.completedStep = input.completedStep;
     m_HasSample = true;
-    if (!ValidSettings(settings) || !input.com.isFinite() || !input.velocity.isFinite() ||
+    if (!ValidSettings(settings) || !input.com.isFinite() || !input.velocity.isFinite() || !input.targetVelocity.isFinite() ||
         !std::isfinite(input.mass) || input.mass <= 0 || !std::isfinite(input.deltaTime) || input.deltaTime <= 0 ||
         !std::isfinite(input.supportWeight) || input.supportWeight < 0 || input.supportWeight > 1)
     {
@@ -142,9 +142,9 @@ bool HorizontalBalance::Update(const HorizontalBalanceInput& input, const Horizo
     m_Snapshot.targetCom = m_TargetCom;
     m_Snapshot.positionError = m_TargetCom - input.com;
     m_Snapshot.positionError.y = 0;
-    PxVec3 velocity = input.velocity;
+    PxVec3 velocity = input.velocity - input.targetVelocity;
     velocity.y = 0;
-    const float positionScale = input.stepping ? settings.steppingPositionScale : 1.0f;
+    const float positionScale = input.stepping || !input.targetVelocity.isZero() ? settings.steppingPositionScale : 1.0f;
     const float stiffness = settings.frequency * settings.frequency;
     const float damping = 2.0f * settings.dampingRatio * settings.frequency;
     const PxVec3 requested = m_Snapshot.positionError * (stiffness * positionScale) - velocity * damping;

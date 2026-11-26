@@ -168,12 +168,13 @@ namespace
     }
 
     FootstepComPrediction PredictCom(const FootstepInput& input, const FootstepSettings& settings,
-        float predictionTime, float projectionHeight, int movingFoot, FootstepLandingDirection previousDirection)
+        const ProjectileStagger& stagger, float predictionTime, float projectionHeight, int movingFoot,
+        FootstepLandingDirection previousDirection)
     {
         FootstepComPrediction result;
         result.origin = PxVec3(input.com.x, projectionHeight, input.com.z);
-        result.raw = PxVec3(input.com.x + input.velocity.x * predictionTime,
-            projectionHeight, input.com.z + input.velocity.z * predictionTime);
+        const PxVec3 displacement = stagger.PredictDisplacement(input.velocity, predictionTime);
+        result.raw = PxVec3(input.com.x + displacement.x, projectionHeight, input.com.z + displacement.z);
         result.clamped = result.raw;
         result.enabled = settings.landingComClampEnabled;
         result.valid = result.raw.isFinite();
@@ -247,7 +248,7 @@ namespace
         PxVec3 origin = state.feet[side].IsInProgress() ? state.feet[side].startPosition : foot.position;
         origin.y -= normal.dot(origin - state.groundPosition) / normal.y;
         const FootstepCommand& command = state.feet[side];
-        result.landingCom = PredictCom(input, settings, settings.landingPredictionTime, state.groundPosition.y,
+        result.landingCom = PredictCom(input, settings, state.stagger, settings.landingPredictionTime, state.groundPosition.y,
             static_cast<int>(side),
             command.IsInProgress() ? command.landingComDirection : FootstepLandingDirection::None);
         if (!result.landingCom.valid)
@@ -872,11 +873,65 @@ float FootstepSnapshot::GetMaximumInitialDistance() const
     return distance;
 }
 
+void ProjectileStagger::Advance(const PxVec3& velocityChange, float elapsed, const FootstepSettings& settings)
+{
+    if (!std::isfinite(settings.projectileStaggerDuration) || settings.projectileStaggerDuration <= 0)
+    {
+        *this = {};
+        return;
+    }
+    if (remainingTime > 0)
+    {
+        const float next = PxMax(0.0f, remainingTime - elapsed);
+        velocity *= next / remainingTime;
+        remainingTime = next;
+    }
+    const PxVec3 planar(velocityChange.x, 0, velocityChange.z);
+    if (planar.isFinite() && !planar.isZero())
+    {
+        // 연속 피격은 현재 남아 있는 반응에 새 충격만 합친다.
+        velocity += planar;
+        const float speed = velocity.magnitude();
+        if (!std::isfinite(speed) || speed < 1e-4f)
+        {
+            *this = {};
+            return;
+        }
+        remainingTime = settings.projectileStaggerDuration;
+        braceDistance = PxMin(settings.maximumStepLength, .5f * speed * remainingTime);
+        catchFoot = -1;
+    }
+    else if (remainingTime == 0 && catchFoot < 0)
+    {
+        braceDistance = 0;
+    }
+}
+
+PxVec3 ProjectileStagger::PredictDisplacement(const PxVec3& measuredVelocity, float horizon) const
+{
+    if (remainingTime <= 0)
+    {
+        return measuredVelocity * horizon;
+    }
+    // 실측 속도에 이미 포함된 피격 성분은 한 번만 적분한다. 횡방향·초과 속도는 보존한다.
+    const PxVec3 direction = velocity.getNormalized();
+    const float capturedSpeed = PxClamp(measuredVelocity.dot(direction), 0.0f, velocity.dot(direction));
+    const float time = PxMin(horizon, remainingTime);
+    const float travelTime = time * (1.0f - .5f * time / remainingTime);
+    return (measuredVelocity - direction * capturedSpeed) * horizon + velocity * travelTime;
+}
+
 void FootstepPlanner::Reset()
 {
     m_Snapshot = {};
     m_FallStepStart = 0;
+    m_PendingProjectileVelocity = PxVec3(0);
     m_HasSample = false;
+}
+
+void FootstepPlanner::RecordProjectileImpact(const PxVec3& velocityChange)
+{
+    m_PendingProjectileVelocity += velocityChange;
 }
 
 void FootstepPlanner::Abort(FootstepReason reason)
@@ -886,6 +941,7 @@ void FootstepPlanner::Abort(FootstepReason reason)
         ++m_Snapshot.abortCount;
     }
     m_Snapshot.aborted = true;
+    m_Snapshot.stagger = {};
     m_Snapshot.backwardFallStepsRemaining = 0;
     m_Snapshot.reason = reason;
     m_Snapshot.followupFoot = -1;
@@ -1026,7 +1082,11 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     }
     const bool consecutiveSample = m_HasSample && input.completedStep > m_Snapshot.completedStep &&
         input.completedStep - m_Snapshot.completedStep == 1;
+    const float sampleElapsed = m_HasSample ?
+        static_cast<float>(input.completedStep - m_Snapshot.completedStep) * input.fixedDeltaTime : 0;
     FootstepSnapshot& state = m_Snapshot;
+    const PxVec3 projectileVelocityChange = m_PendingProjectileVelocity;
+    m_PendingProjectileVelocity = PxVec3(0);
     m_HasSample = true;
     state.completedStep = input.completedStep;
     state.revision = input.revision;
@@ -1076,6 +1136,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     if (!input.active || !input.automaticSupport || (!input.idleAnimation && state.backwardFallStepsRemaining == 0))
     {
         state.feet = {};
+        state.stagger = {};
         state.loadTransfer = {};
         state.hasImpact = false;
         state.hasGroundPlane = false;
@@ -1112,15 +1173,31 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     }
     if (!validDeltaTime || !ValidSettings(settings))
     {
+        state.stagger = {};
         state.reason = FootstepReason::InvalidSettings;
         state.loadTransfer.confirmationTimes = {};
         return;
     }
     if (!input.hasCom || !input.hasVelocity || !input.com.isFinite() || !input.velocity.isFinite())
     {
+        state.stagger = {};
         state.reason = FootstepReason::InvalidCom;
         state.loadTransfer.confirmationTimes = {};
         return;
+    }
+    if (input.rootReleased || state.backwardFallStepsRemaining > 0 || !input.hasFloorProjection)
+    {
+        state.stagger = {};
+    }
+    else
+    {
+        state.stagger.Advance(projectileVelocityChange, sampleElapsed, settings);
+        if (state.stagger.remainingTime > 0 && !input.obstacleNormal.isZero())
+        {
+            // 충돌면을 향하는 목표 속도만 제거해 비스듬히 맞았을 때 벽을 따라 디딜 수 있게 한다.
+            const PxVec3 normal = input.obstacleNormal.getNormalized();
+            state.stagger.velocity -= normal * PxMax(0.0f, state.stagger.velocity.dot(normal));
+        }
     }
     state.loadTransfer.loadRatios = MeasureFootLoads(input);
     UpdateGroundPlane(input, state);
@@ -1242,7 +1319,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         }
     }
     // 발을 먼저 고른 뒤 같은 지지발 제한을 시작 예측과 실제 시작 판정에 함께 적용한다.
-    state.startCom = PredictCom(input, settings, settings.startPredictionTime, input.projectionHeight,
+    state.startCom = PredictCom(input, settings, state.stagger, settings.startPredictionTime, input.projectionHeight,
         state.requestedFoot, previousDirection);
     state.predictedCom = state.startCom.clamped;
     state.hasPrediction = state.startCom.valid;
@@ -1384,6 +1461,25 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         command.reason = command.phase == FootstepPhase::Airborne ? FootstepReason::InFlight : FootstepReason::WaitingTakeoff;
         command.motion.swingOutwardOffset = PredictSwingOutwardOffset(input, settings, state, side);
         UpdateMotion(command, foot, input);
+    }
+    if (state.stagger.braceDistance > 0)
+    {
+        for (size_t side = 0; side < state.feet.size(); ++side)
+        {
+            const FootstepCommand& foot = state.feet[side];
+            if (state.stagger.catchFoot < 0 && foot.IsInProgress())
+            {
+                state.stagger.catchFoot = static_cast<int>(side);
+            }
+            // 착지한 순간의 충격이 지나고 해당 발이 실제 체중을 받으면 골반을 다시 편다.
+            if (state.stagger.catchFoot == static_cast<int>(side) && foot.phase == FootstepPhase::Landed &&
+                !foot.justLanded && state.loadTransfer.loadRatios[side] >= settings.supportLoadRatio)
+            {
+                state.stagger.braceDistance = 0;
+                state.stagger.catchFoot = -1;
+                break;
+            }
+        }
     }
     if (state.needsStep && !state.IsInProgress())
     {

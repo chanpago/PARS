@@ -397,8 +397,9 @@ void PhysicsWorld::RecordImpactContact(ContactPair& pair, int sourceSide, bool c
             contact->settings = registered->settings;
             const PxU32 flags = pair.shapes[sourceSide]->getSimulationFilterData().word3;
             const bool arrow = (flags & ProjectileFilterFlag) != 0 && (flags & AttachOnContactFilterFlag) != 0;
-            contact->groundedArrowHit = arrow && std::find(m_GroundedImpactReceivers.begin(),
+            contact->groundedProjectileHit = (flags & ProjectileFilterFlag) != 0 && std::find(m_GroundedImpactReceivers.begin(),
                 m_GroundedImpactReceivers.end(), receiver) != m_GroundedImpactReceivers.end();
+            contact->groundedArrowHit = contact->groundedProjectileHit && arrow;
         }
     }
     pair.impactContactId = contact->id;
@@ -448,6 +449,7 @@ bool PhysicsWorld::GetImpactResponse(uint64_t id, PhysicsImpactResponse& respons
             response.partImpulse = direction * contact.settings.partImpulse;
             response.torqueMultiplier = contact.settings.torqueMultiplier;
             response.groundedArrowHit = contact.groundedArrowHit;
+            response.groundedProjectileHit = contact.groundedProjectileHit;
             return response.position.isFinite() && response.impulse.isFinite() && response.partImpulse.isFinite() &&
                 (!response.impulse.isZero() || !response.partImpulse.isZero());
         }

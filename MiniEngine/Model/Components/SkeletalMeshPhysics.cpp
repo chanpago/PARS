@@ -182,6 +182,7 @@ namespace PARS
         standing.enabled = m_Ragdoll.UsesFootDrivenSupport();
         standing.stepping = step.IsInProgress();
         standing.stepDistance = step.GetMaximumInitialDistance();
+        standing.impactBraceDistance = step.stagger.braceDistance;
         standing.deltaTime = deltaTime;
         standing.revision = sample.contactRevision;
         standing.completedStep = sample.completedPhysicsStep;

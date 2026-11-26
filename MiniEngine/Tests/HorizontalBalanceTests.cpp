@@ -50,6 +50,16 @@ void TestHorizontalBalance()
     CheckBalance(controller.Update(input, settings) && controller.GetSnapshot().force.isZero(),
         "Initial standing pose has no artificial horizontal pull");
     ++input.completedStep;
+    input.targetVelocity = PxVec3(0, 0, -1);
+    input.velocity = input.targetVelocity;
+    CheckBalance(controller.Update(input, settings) && controller.GetSnapshot().force.isZero(),
+        "The balance controller adds no force when the original hit already supplies the target velocity");
+    ++input.completedStep;
+    input.targetVelocity.z = -.5f;
+    CheckBalance(controller.Update(input, settings) && controller.GetSnapshot().force.z > 0,
+        "The decaying target brakes a faster body in the impact axis");
+    input.targetVelocity = PxVec3(0);
+    ++input.completedStep;
     input.com.x = -.1f;
     input.velocity = PxVec3(-.5f, 20, -.3f);
     CheckBalance(controller.Update(input, settings) && controller.GetSnapshot().force.x > 0 &&

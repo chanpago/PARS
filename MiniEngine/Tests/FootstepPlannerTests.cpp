@@ -1523,6 +1523,61 @@ void TestImpactWarmupPlanning()
     std::puts("PASS: COM-based warmup cadence, reach and lateral turn into forward or backward steps");
 }
 
+void TestProjectileStagger()
+{
+    FootstepSettings settings = TestSettings();
+    for (const unsigned rate : {30u, 60u, 120u})
+    {
+        ProjectileStagger stagger;
+        stagger.Advance(PxVec3(0, 2, -1), 0, settings);
+        const PxVec3 predicted = stagger.PredictDisplacement(PxVec3(.5f, 0, -1), 1);
+        Check(Near(predicted.x, .5f) && Near(predicted.z, -.4f) && stagger.velocity.y == 0,
+            "Integrate only the planar hit once and preserve independent lateral movement");
+        for (unsigned tick = 0; tick < rate * 2 / 5; ++tick)
+        {
+            stagger.Advance(PxVec3(0), 1.0f / static_cast<float>(rate), settings);
+        }
+        Check(Near(stagger.velocity.z, -.5f), "The target speed halves after 0.4 s at every physics rate");
+        stagger.Advance(PxVec3(1, 0, .5f), 0, settings);
+        Check(Near(stagger.velocity.x, 1) && Near(stagger.velocity.z, 0), "A second hit adds to the residual velocity");
+        stagger.Advance(PxVec3(0), 1, settings);
+        Check(stagger.velocity.isZero() && stagger.remainingTime == 0, "The target stops at the end of the interval");
+    }
+    FootstepPlanner planner;
+    FootstepInput input = Standing();
+    input.hasFloorProjection = true;
+    input.velocity = PxVec3(0);
+    planner.RecordProjectileImpact(PxVec3(0, 0, -1));
+    planner.Update(input, settings);
+    const FootstepSnapshot& step = planner.GetSnapshot();
+    Check(step.feet[1].justStarted && step.feet[1].target.position.z < -.15f && step.stagger.catchFoot == 1,
+        "A frontal hit places the catch foot behind the character even after contact friction slows the COM");
+    const float brace = step.stagger.braceDistance;
+    planner.Update(input, settings);
+    Check(Near(step.stagger.remainingTime, settings.projectileStaggerDuration), "A repeated sample does not age a hit twice");
+    input.feet[1].grounded = false;
+    Advance(planner, input, settings, 60);
+    Check(step.stagger.velocity.isZero() && step.stagger.braceDistance == brace,
+        "The brace outlasts the velocity while the catch foot is airborne");
+    input.feet[1].grounded = true;
+    input.feet[1].normalImpulse = 0;
+    Advance(planner, input, settings, 2);
+    Check(step.stagger.braceDistance == brace, "Touching down without load keeps the pelvis low");
+    input.feet[1].normalImpulse = input.bodyWeight * .75f * input.fixedDeltaTime;
+    Advance(planner, input, settings);
+    Check(step.stagger.braceDistance == 0, "The loaded catch foot releases the brace");
+    input.obstacleNormal = PxVec3(1, 0, 0);
+    planner.RecordProjectileImpact(PxVec3(1, 0, 1));
+    Advance(planner, input, settings);
+    Check(step.stagger.velocity.x == 0 && Near(step.stagger.velocity.z, 1),
+        "A wall removes the blocked component while retaining movement along the wall");
+    planner.RecordProjectileImpact(PxVec3(1, 0, 0));
+    input.rootReleased = true;
+    Advance(planner, input, settings);
+    Check(step.stagger.velocity.isZero() && step.stagger.braceDistance == 0, "Falling clears the standing response");
+    std::puts("PASS: directional projectile steps, linear decay, repeated hits and loaded landing");
+}
+
 void TestFootstepFalls()
 {
     TestLowestSoleFallHeight();
@@ -1533,6 +1588,7 @@ void TestFootstepFalls()
 
 void TestFootstepPlanner()
 {
+    TestProjectileStagger();
     TestFootstepRecovery();
     checks = 0;
     TestImpactWarmupPlanning();

@@ -41,4 +41,5 @@ public:
     physx::PxVec3 partImpulse{0};
     float torqueMultiplier = 0;
     bool groundedArrowHit = false;
+    bool groundedProjectileHit = false;
 };

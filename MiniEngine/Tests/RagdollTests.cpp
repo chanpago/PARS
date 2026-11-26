@@ -203,8 +203,11 @@ namespace
         const bool groundedArrow = grounded && (sourceFlags & PhysicsWorld::AttachOnContactFilterFlag) != 0;
         Check(responses.size() == 1 && responses.front().groundedArrowHit == groundedArrow,
             "The hit retains its source and pre-impact support across the mode change");
-        ragdoll.ApplyImpactResponses(responses);
-        ragdoll.ApplyImpactResponses(responses);
+        const PxVec3 stagger = ragdoll.ApplyImpactResponses(responses);
+        const PxVec3 expectedStagger = grounded && !capsule ?
+            PxVec3(direction.x, 0, direction.z) * (bodyImpulse / 4.0f) : PxVec3(0);
+        Check((stagger - expectedStagger).magnitude() < .001f && ragdoll.ApplyImpactResponses(responses).isZero(),
+            "Only an accepted grounded projectile reports its whole-body planar velocity change once");
         world.Step();
         Vector3 velocity(kZero);
         PxVec3 expectedImpulse = direction * bodyImpulse;

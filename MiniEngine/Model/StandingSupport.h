@@ -49,6 +49,7 @@ namespace PARS
         uint64_t revision = 0;
         uint64_t completedStep = 0;
         float stepDistance = 0;
+        float impactBraceDistance = 0;
         float deltaTime = 0;
         physx::PxTransform pelvis{physx::PxIdentity};
         physx::PxTransform animatedPelvis{physx::PxIdentity};

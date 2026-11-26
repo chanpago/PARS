@@ -135,7 +135,8 @@ namespace PARS
         void ResetDriveTargetHistory();
         void AddVelocity(Math::Vector3 velocity);
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
-        void ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
+        // 실제 적용된 지상 투사체의 전신 수평 속도 변화량을 반환한다.
+        physx::PxVec3 ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
         void UpdateWounds(const std::vector<RagdollBodyImpulse>& impacts);
         void DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const physx::PxTransform& palm,
             const physx::PxTransform& target, float weight, bool canHold, bool canAssist = false);

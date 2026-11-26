@@ -216,7 +216,7 @@ namespace PARS
             });
         if (!capsuleWarmup)
         {
-            m_Ragdoll.ApplyImpactResponses(responses);
+            m_FootSupport.RecordProjectileImpact(m_Ragdoll.ApplyImpactResponses(responses));
         }
         UpdateFootSupport();
         if (m_FootSupport.GetSnapshot().hasGroundedFoot)
@@ -229,7 +229,7 @@ namespace PARS
         }
         if (capsuleWarmup)
         {
-            m_Ragdoll.ApplyImpactResponses(responses);
+            m_FootSupport.RecordProjectileImpact(m_Ragdoll.ApplyImpactResponses(responses));
         }
         bool longitudinalImpact = false;
         if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()))

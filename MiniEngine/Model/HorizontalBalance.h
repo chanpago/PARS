@@ -39,6 +39,7 @@ namespace PARS
         std::array<HorizontalBalanceFoot, 2> feet;
         physx::PxVec3 com{0};
         physx::PxVec3 velocity{0};
+        physx::PxVec3 targetVelocity{0};
         float mass = 0;
         float deltaTime = 0;
         float supportWeight = 0;

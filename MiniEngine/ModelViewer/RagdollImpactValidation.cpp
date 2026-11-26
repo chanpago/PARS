@@ -1514,8 +1514,75 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             CommandLineArgs::GetFloat(L"woundpartimpulse", projectile.partImpulse);
             CommandLineArgs::GetFloat(L"woundtorque", projectile.torqueMultiplier);
             const ImpactProjectileType type = arrow ? ImpactProjectileType::Arrow : ImpactProjectileType::Sphere;
+            float staggerDuration = 0;
+            const bool checkStagger = CommandLineArgs::GetFloat(L"staggerduration", staggerDuration);
+            if (checkStagger)
+            {
+                check(std::isfinite(staggerDuration) && staggerDuration >= 0 && staggerDuration <= 5,
+                    "Use a stagger duration in the editor's supported range");
+                mesh.GetFootSupport().GetFootstepSettings().projectileStaggerDuration = staggerDuration;
+            }
             check(test.SetProjectileSettings(type, projectile) && test.FireAimed(player, eye, target - eye),
                 "Fire a projectile through the normal aim path");
+            if (checkStagger)
+            {
+                const Vector3 direction = Normalize(target - eye);
+                const Vector3 start(mesh.GetRagdoll().GetBoneWorld(pelvis).GetW());
+                float peakTargetSpeed = 0;
+                float retreat = 0;
+                float pelvisDrop = 0;
+                float catchDistance = 0;
+                float landedDistance = 0;
+                unsigned catchSteps = 0;
+                unsigned landings = 0;
+                const unsigned frames = static_cast<unsigned>(std::ceil(PxMax(2.0f, staggerDuration + 1.0f) / PhysicsWorld::FixedDeltaTime));
+                for (unsigned tick = 0; tick < frames; ++tick)
+                {
+                    world.Tick(static_cast<float>(PhysicsWorld::FixedDeltaTime));
+                    test.Update();
+                    const FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
+                    const FootstepSnapshot& step = sample.footstep;
+                    if (mesh.GetRootSupportRelease() != RootSupportRelease::None)
+                    {
+                        break;
+                    }
+                    const Vector3 root(mesh.GetRagdoll().GetBoneWorld(pelvis).GetW());
+                    peakTargetSpeed = PxMax(peakTargetSpeed, step.stagger.velocity.magnitude());
+                    retreat = PxMax(retreat, static_cast<float>(Dot(root - start, direction)));
+                    pelvisDrop = PxMax(pelvisDrop, static_cast<float>(start.GetY() - root.GetY()));
+                    for (size_t sideIndex = 0; sideIndex < step.feet.size(); ++sideIndex)
+                    {
+                        const FootstepCommand& foot = step.feet[sideIndex];
+                        const Vector3 origin(foot.startPosition.x, foot.startPosition.y, foot.startPosition.z);
+                        if (foot.justStarted)
+                        {
+                            ++catchSteps;
+                            const Vector3 landing(foot.initialTarget.x, foot.initialTarget.y, foot.initialTarget.z);
+                            catchDistance = PxMax(catchDistance, static_cast<float>(Dot(landing - origin, direction)));
+                        }
+                        if (foot.justLanded)
+                        {
+                            ++landings;
+                            const Vector3 sole(sample.feet[sideIndex].soleWorld.GetW());
+                            landedDistance = PxMax(landedDistance, static_cast<float>(Dot(sole - origin, direction)));
+                        }
+                    }
+                }
+                report << "target_mps=" << peakTargetSpeed << " root_travel_m=" << retreat << " root_drop_m=" << pelvisDrop
+                    << " steps=" << catchSteps << " planned_m=" << catchDistance << " landings=" << landings
+                    << " landed_m=" << landedDistance << std::endl;
+                if (staggerDuration > 0)
+                {
+                    check(peakTargetSpeed > 0 && retreat > .02f && pelvisDrop > .01f && catchDistance > .02f && landedDistance > .02f,
+                        "The supported body retreats, lowers its pelvis and lands a step in the incoming direction");
+                }
+                else
+                {
+                    check(peakTargetSpeed == 0, "A zero duration disables the stagger target");
+                }
+                check(mesh.GetPhysicsError().empty(), "The stagger finishes without a controller error");
+                return true;
+            }
             unsigned longest = 0;
             unsigned consecutive = 0;
             int lastHit = -1;

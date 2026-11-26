@@ -129,6 +129,10 @@ namespace PARS
         void ResumeAfterWarmup(uint32_t supportFoot);
         // 물리 모드 전환으로 접촉 캐시가 비워져도 최초 충격 위치를 전달한다.
         void RecordImpact(const physx::PxVec3& position);
+        void RecordProjectileImpact(const physx::PxVec3& velocityChange)
+        {
+            m_FootstepPlanner.RecordProjectileImpact(velocityChange);
+        }
         void ReportRecoveryPath(size_t side, const physx::PxVec3& target, bool accepted);
         // PA 적용 시에만 저장한 발 바디의 연결·형상 변경 여부를 확인한다.
         void OnPhysicsAssetChanged(const PhysicsAsset& asset);

@@ -1317,6 +1317,8 @@ namespace
             const PARS::StandingSupportSnapshot& standing = mesh.GetStandingSupportSnapshot();
             PARS::StandingSupportSettings& standingSettings = mesh.GetStandingSupportSettings();
             PARS::HorizontalBalanceSettings& horizontalSettings = mesh.GetHorizontalBalanceSettings();
+            ImGui::SliderFloat(u8"피격 후 수평 감속 시간 (초)", &support.GetFootstepSettings().projectileStaggerDuration,
+                0.0f, 5.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             ImGui::Checkbox(u8"골반 XZ 직접 PD 보조", &horizontalSettings.enabled);
             if (horizontalSettings.enabled)
             {

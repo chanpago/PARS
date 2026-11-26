@@ -129,6 +129,7 @@ private:
         float weight = 0;
         ImpactImpulseSettings settings;
         bool groundedArrowHit = false;
+        bool groundedProjectileHit = false;
         bool consumed = false;
     };
     struct StoppedProjectile

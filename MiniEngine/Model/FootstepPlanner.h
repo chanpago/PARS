@@ -31,6 +31,7 @@ namespace PARS
         FootstepRecoverySettings recovery;
         float startPredictionTime = .6f;
         float landingPredictionTime = .4f;
+        float projectileStaggerDuration = .8f;
         float stanceScale = 1.7f;
         float minimumStanceWidthRatio = .0f;
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
@@ -119,6 +120,7 @@ namespace PARS
         physx::PxVec3 velocity{0};
         physx::PxVec3 supportRight{1, 0, 0};
         physx::PxVec3 impactPosition{0};
+        physx::PxVec3 obstacleNormal{0};
         FootSupportZone zone = FootSupportZone::Invalid;
         float projectionHeight = 0;
         float pelvisY = std::numeric_limits<float>::quiet_NaN();
@@ -271,6 +273,19 @@ namespace PARS
         bool ready = false;
     };
 
+    struct ProjectileStagger
+    {
+    public:
+        void Advance(const physx::PxVec3& velocityChange, float elapsed, const FootstepSettings& settings);
+        physx::PxVec3 PredictDisplacement(const physx::PxVec3& measuredVelocity, float horizon) const;
+
+    public:
+        physx::PxVec3 velocity{0};
+        float remainingTime = 0;
+        float braceDistance = 0;
+        int catchFoot = -1;
+    };
+
     struct FootstepSnapshot
     {
     public:
@@ -292,6 +307,7 @@ namespace PARS
         physx::PxVec3 groundNormal{0, 1, 0};
         physx::PxVec3 lastImpactPosition{0};
         FootstepLoadTransfer loadTransfer;
+        ProjectileStagger stagger;
         float pelvisHeightRatio = std::numeric_limits<float>::quiet_NaN();
         float fallHeightRatio = 0;
         FootstepReason reason = FootstepReason::Inactive;
@@ -309,6 +325,7 @@ namespace PARS
     {
     public:
         void Reset();
+        void RecordProjectileImpact(const physx::PxVec3& velocityChange);
         void Update(const FootstepInput& input, const FootstepSettings& settings);
         void ReportRecoveryPath(size_t side, const physx::PxVec3& target, bool accepted);
 
@@ -329,6 +346,7 @@ namespace PARS
     private:
         FootstepSnapshot m_Snapshot;
         uint64_t m_FallStepStart = 0;
+        physx::PxVec3 m_PendingProjectileVelocity{0};
         bool m_HasSample = false;
     };
 

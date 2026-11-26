@@ -528,15 +528,16 @@ namespace PARS
         return responses;
     }
 
-    void Ragdoll::ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses)
+    PxVec3 Ragdoll::ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses)
     {
         if (!m_World || !IsSimulating())
         {
-            return;
+            return PxVec3(0);
         }
         PxVec3 center(0);
         float mass = 0;
         PxVec3 linearImpulse(0);
+        PxVec3 groundedProjectileImpulse(0);
         PxVec3 angularImpulse(0);
         for (const RagdollImpactResponse& response : responses)
         {
@@ -558,17 +559,21 @@ namespace PARS
                 Math::Vector3 position(Math::kZero);
                 if (!GetCenterOfMass(position, mass) || !std::isfinite(mass) || mass <= 0)
                 {
-                    return;
+                    return PxVec3(0);
                 }
                 center = PxVec3(position.GetX(), position.GetY(), position.GetZ());
             }
             // 지상 화살 피격의 전신 이동에서만 상승분을 뺀다. 회전에는 원래 충격량을 사용한다.
             linearImpulse += response.GetLinearImpulse();
+            if (response.groundedProjectileHit)
+            {
+                groundedProjectileImpulse += PxVec3(response.impulse.x, 0, response.impulse.z);
+            }
             angularImpulse += response.GetAngularImpulse(center);
         }
         if (mass == 0 || !linearImpulse.isFinite() || !angularImpulse.isFinite())
         {
-            return;
+            return PxVec3(0);
         }
         PxVec3 linear = linearImpulse / mass;
         if (!angularImpulse.isZero())
@@ -576,7 +581,7 @@ namespace PARS
             const PxVec3 angular = GetImpactAngularVelocity(center, angularImpulse);
             if (!angular.isFinite() || !linear.isFinite())
             {
-                return;
+                return PxVec3(0);
             }
             if (m_Articulation)
             {
@@ -601,6 +606,7 @@ namespace PARS
             }
         }
         AddVelocity(Math::Vector3(linear.x, linear.y, linear.z));
+        return groundedProjectileImpulse / mass;
     }
 
     float RagdollImpactReaction::GetJointDriveScale(size_t joint) const

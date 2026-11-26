@@ -95,6 +95,7 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
     if (!input.pelvis.isSane() || !input.animatedPelvis.isSane() || !input.velocity.isFinite() ||
         !std::isfinite(input.deltaTime) || input.deltaTime <= 0 ||
         !std::isfinite(input.stepDistance) || input.stepDistance < 0 ||
+        !std::isfinite(input.impactBraceDistance) || input.impactBraceDistance < 0 ||
         !std::isfinite(settings.stepLoweringScale) || settings.stepLoweringScale < 0 ||
         !std::isfinite(settings.contactLowering) || settings.contactLowering < 0 ||
         !std::isfinite(settings.contactLoweringTime) || settings.contactLoweringTime <= 0 ||
@@ -203,7 +204,8 @@ bool StandingSupport::Update(const StandingSupportInput& input, const StandingSu
         return true;
     }
     nominalHeight /= supportCount;
-    const float stepLowering = input.stepping ? input.stepDistance * settings.stepLoweringScale : 0;
+    const float braceDistance = PxMax(input.stepping ? input.stepDistance : 0.0f, input.impactBraceDistance);
+    const float stepLowering = braceDistance * settings.stepLoweringScale;
     const float contactLowering = missingAmount * settings.contactLowering;
     const float reachLowering = (std::max)(0.0f, nominalHeight - maximumHeight);
     const float requestedLowering = (std::min)(settings.maximumLowering,
