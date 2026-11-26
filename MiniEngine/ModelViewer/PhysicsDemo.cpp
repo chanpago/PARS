@@ -666,19 +666,7 @@ void PhysicsDemo::RenderDebugTriangles(GraphicsContext& context, const Math::Cam
 
 void PhysicsDemo::RenderUI()
 {
-    static bool visible = true;
-    if (ImGui::IsKeyPressed(ImGuiKey_F1, false))
-    {
-        visible = !visible;
-    }
-    if (!visible)
-    {
-        return;
-    }
-    ImGui::SetNextWindowPos(ImVec2(20, 70), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(410, 460), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(390, 360), ImVec2(FLT_MAX, FLT_MAX));
-    if (ImGui::Begin(u8"PARS - 물리", &visible))
+    if (ImGui::BeginChild("PhysicsSettings"))
     {
         bool paused = m_GameWorld.IsPhysicsPaused();
         bool slowMotion = m_GameWorld.GetPhysicsTimeScale() < 1.0f;
@@ -750,5 +738,5 @@ void PhysicsDemo::RenderUI()
         ImGui::Text(u8"PhysX 오류: %u개", m_World.GetErrorCount());
         ImGui::TextWrapped(u8"Tab: 캐릭터 / 자유 카메라 전환. F1: 패널 표시. 단위: m.");
     }
-    ImGui::End();
+    ImGui::EndChild();
 }

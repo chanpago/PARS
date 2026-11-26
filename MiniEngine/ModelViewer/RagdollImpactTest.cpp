@@ -716,7 +716,7 @@ void RagdollImpactTest::Update()
     }
 }
 
-void RagdollImpactTest::DrawContactOverlay(float topInset) const
+void RagdollImpactTest::DrawContactOverlay(const ImVec2& sceneOrigin, const ImVec2& sceneSize) const
 {
     const PARS::Character* dummy = GetDummy();
     if (!dummy)
@@ -748,7 +748,7 @@ void RagdollImpactTest::DrawContactOverlay(float topInset) const
     }
     const bool predicted = mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled &&
         mesh.GetFootstepCollisionSnapshot().overlapPairs != 0;
-    m_FootSoles.DrawContactOverlay(text, touching || predicted, topInset);
+    m_FootSoles.DrawContactOverlay(text, touching || predicted, sceneOrigin, sceneSize);
 }
 
 void RagdollImpactTest::BuildLines(std::vector<PxDebugLine>& lines)
@@ -875,9 +875,7 @@ void RagdollImpactTest::DrawImpactSettingsUI(Character* player)
 
 void RagdollImpactTest::DrawUI(Character* player)
 {
-    ImGui::SetNextWindowPos(ImVec2(450, 70), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(440, 760), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin(u8"PARS - 더미 충격 테스트"))
+    if (ImGui::BeginChild("DummyImpactSettings"))
     {
         DrawBodyImpactUI(player);
         DrawImpactSettingsUI(player);
@@ -953,5 +951,5 @@ void RagdollImpactTest::DrawUI(Character* player)
             ImGui::PopID();
         }
     }
-    ImGui::End();
+    ImGui::EndChild();
 }

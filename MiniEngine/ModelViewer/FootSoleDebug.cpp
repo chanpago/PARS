@@ -910,21 +910,20 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     return text;
 }
 
-void FootSoleDebug::DrawContactOverlay(const std::string& text, bool touching, float topInset) const
+void FootSoleDebug::DrawContactOverlay(const std::string& text, bool touching, const ImVec2& sceneOrigin, const ImVec2& sceneSize) const
 {
-    // 툴바나 설정 창과 독립적인 화면 상단 표시이며 마우스 입력을 가로채지 않는다.
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const float wrapWidth = (std::max)(1.0f, (std::min)(1000.0f, viewport->Size.x - 48.0f));
+    const float wrapWidth = (std::max)(1.0f, (std::min)(1000.0f, sceneSize.x - 48.0f));
     const ImVec2 textSize = ImGui::CalcTextSize(text.c_str(), nullptr, false, wrapWidth);
-    const ImVec2 position(viewport->Pos.x + (viewport->Size.x - textSize.x) * .5f,
-        viewport->Pos.y + topInset + 14.0f);
+    const ImVec2 position(sceneOrigin.x + (sceneSize.x - textSize.x) * .5f, sceneOrigin.y + 14.0f);
     ImDrawList* draw = ImGui::GetForegroundDrawList();
+    draw->PushClipRect(sceneOrigin, ImVec2(sceneOrigin.x + sceneSize.x, sceneOrigin.y + sceneSize.y), true);
     draw->AddRectFilled(ImVec2(position.x - 12.0f, position.y - 6.0f),
         ImVec2(position.x + textSize.x + 12.0f, position.y + textSize.y + 6.0f),
         IM_COL32(12, 16, 22, 205), 5.0f);
     const ImU32 color = touching ? IM_COL32(255, 192, 96, 255) : IM_COL32(200, 208, 220, 255);
     draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), position, color,
         text.c_str(), nullptr, wrapWidth);
+    draw->PopClipRect();
 }
 
 void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<PxDebugLine>& lines) const

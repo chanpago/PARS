@@ -44,6 +44,8 @@
 #include "Display.h"
 #include "imgui.h"
 #include "imgui_stdlib.h"
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #if defined(_M_X64)
 #include "PhysicsDemo.h"
@@ -319,10 +321,13 @@ private:
     void LoadAnimationPreview(bool forceRebuild);
     void SelectPreview(uint32_t index);
     void ResetPreviewCamera();
-    void UpdateCharacterInput(float deltaTime);
+    void UpdateCharacterInput(float deltaTime, bool sceneMouse);
     void UpdateFollowCamera(float deltaTime = 0);
+    void UpdateSceneViewport();
     void SetFreeCamera(bool freeCamera);
     void RenderModels(Renderer::MeshSorter& sorter);
+    void DrawSettingsPanel();
+    void DrawCharacterAnimationTab();
     void DrawRagdollPanel(PARS::Character& character);
     void EnableActiveRagdoll(PARS::Character& character);
     void ApplyPendingPhysicsAssetSave();
@@ -340,6 +345,7 @@ public:
 
 private:
     void SetPlayerFootDebugVisible(bool visible);
+    bool HasSettingsPanel() const;
     PARS::PlayerController* GetPlayerController() const
     {
         return m_World.FindActor<PARS::PlayerController>(m_PlayerController);
@@ -377,6 +383,9 @@ private:
 #endif
     D3D12_VIEWPORT m_MainViewport{};
     D3D12_RECT m_MainScissor{};
+    ImVec2 m_SceneOrigin{};
+    ImVec2 m_SceneSize{};
+    float m_SettingsPanelWidth = 460.0f;
     float m_ControlYaw = XM_PI;
     float m_ControlPitch = 0.28f;
 #if defined(_M_X64)
@@ -384,6 +393,7 @@ private:
     uint32_t m_ComparisonCaptureFrames = 0;
 #endif
     bool m_FreeCamera = false;
+    bool m_SettingsPanelVisible = true;
     bool m_IsAiming = false;
     bool m_PreviewMode = false;
     bool m_PreviewReady = false;
@@ -1295,7 +1305,7 @@ void ModelViewer::SetFreeCamera(bool freeCamera)
     }
 }
 
-void ModelViewer::UpdateCharacterInput(float deltaTime)
+void ModelViewer::UpdateCharacterInput(float deltaTime, bool sceneMouse)
 {
     using namespace GameInput;
     PARS::PlayerController* player = GetPlayerController();
@@ -1327,7 +1337,7 @@ void ModelViewer::UpdateCharacterInput(float deltaTime)
     }
     m_ControlYaw -= GetAnalogInput(kAnalogRightStickX) * deltaTime * 2.0f;
     m_ControlPitch -= GetAnalogInput(kAnalogRightStickY) * deltaTime * 2.0f;
-    if (IsPressed(kMouse1) && (m_IsAiming || !ImGui::GetIO().WantCaptureMouse))
+    if (IsPressed(kMouse1) && (m_IsAiming || sceneMouse))
     {
         m_ControlYaw -= GetAnalogInput(kAnalogMouseX);
         m_ControlPitch -= GetAnalogInput(kAnalogMouseY);
@@ -1399,6 +1409,53 @@ void ModelViewer::Cleanup(void)
 namespace Graphics
 {
     extern EnumVar DebugZoom;
+}
+
+bool ModelViewer::HasSettingsPanel() const
+{
+#if defined(_M_X64)
+    return m_PreviewMode || m_PhysicsDemo != nullptr;
+#else
+    return m_PreviewMode;
+#endif
+}
+
+void ModelViewer::UpdateSceneViewport()
+{
+    const ImGuiViewport* display = ImGui::GetMainViewport();
+    const float width = (std::max)(1.0f, display->Size.x);
+    const float height = (std::max)(1.0f, display->Size.y);
+    const float menuHeight = m_PreviewMode ? (std::min)(ImGui::GetFrameHeight(), height - 1.0f) : 0.0f;
+    m_SceneOrigin = ImVec2(display->Pos.x, display->Pos.y + menuHeight);
+    m_SceneSize = ImVec2(width, height - menuHeight);
+
+    const bool hasPanel = HasSettingsPanel();
+    if (hasPanel && ImGui::IsKeyPressed(ImGuiKey_F1, false))
+    {
+        m_SettingsPanelVisible = !m_SettingsPanelVisible;
+    }
+    if (hasPanel && m_SettingsPanelVisible)
+    {
+        const float minimumPanel = (std::min)(320.0f, width * .45f);
+        const float minimumScene = (std::min)(360.0f, width * .5f);
+        const float panelWidth = (std::max)(minimumPanel, (std::min)(m_SettingsPanelWidth, width - minimumScene));
+        m_SceneSize.x = (std::max)(1.0f, std::round(width - panelWidth));
+    }
+
+    // 창 좌표의 장면 경계를 장면 버퍼 픽셀로 옮긴다. 창과 내부 렌더 해상도는 다를 수 있다.
+    const LONG bufferWidth = static_cast<LONG>(g_SceneColorBuffer.GetWidth());
+    const LONG bufferHeight = static_cast<LONG>(g_SceneColorBuffer.GetHeight());
+    m_MainScissor.left = 0;
+    m_MainScissor.top = (std::min)(bufferHeight - 1L, std::lround(menuHeight * bufferHeight / height));
+    m_MainScissor.right = (std::max)(1L, std::lround(m_SceneSize.x * bufferWidth / width));
+    m_MainScissor.bottom = bufferHeight;
+    TemporalEffects::GetJitterOffset(m_MainViewport.TopLeftX, m_MainViewport.TopLeftY);
+    m_MainViewport.TopLeftY += static_cast<float>(m_MainScissor.top);
+    m_MainViewport.Width = static_cast<float>(m_MainScissor.right);
+    m_MainViewport.Height = static_cast<float>(bufferHeight - m_MainScissor.top);
+    m_MainViewport.MinDepth = 0.0f;
+    m_MainViewport.MaxDepth = 1.0f;
+    m_Camera.SetAspectRatio(hasPanel ? m_SceneSize.y / m_SceneSize.x : m_MainViewport.Height / m_MainViewport.Width);
 }
 
 void ModelViewer::Update(float deltaT)
@@ -1533,17 +1590,18 @@ void ModelViewer::Update(float deltaT)
     }
 #endif
 
-    // 현재 렌더 타깃의 세로/가로 비율을 카메라 투영에 반영한다.
-    m_Camera.SetAspectRatio(float(g_SceneColorBuffer.GetHeight()) / float(g_SceneColorBuffer.GetWidth()));
+    UpdateSceneViewport();
+    const ImVec2 sceneEnd(m_SceneOrigin.x + m_SceneSize.x, m_SceneOrigin.y + m_SceneSize.y);
+    const bool sceneMouse = !ImGui::GetIO().WantCaptureMouse && ImGui::IsMouseHoveringRect(m_SceneOrigin, sceneEnd, false);
     // 조작 가능 여부, 카메라 조준 방향, 이동/달리기 입력을 설정한다. 실제 이동은 아래 World::Tick에서 처리한다.
-    UpdateCharacterInput(deltaT);
+    UpdateCharacterInput(deltaT, sceneMouse);
 
 #if defined(_M_X64)
     const PARS::PlayerController* player = GetPlayerController();
     PARS::Character* character = GetPreviewCharacter();
     const bool controlsPlayer = player && player->IsInputEnabled() && character && !m_FreeCamera;
     const ImGuiIO& io = ImGui::GetIO();
-    const bool beginAim = GameInput::IsFirstPressed(GameInput::kMouse1) && !io.WantCaptureMouse;
+    const bool beginAim = GameInput::IsFirstPressed(GameInput::kMouse1) && sceneMouse;
     m_IsAiming = controlsPlayer && GameInput::IsPressed(GameInput::kMouse1) && (m_IsAiming || beginAim);
     if (character)
     {
@@ -1555,7 +1613,7 @@ void ModelViewer::Update(float deltaT)
     if ((!GetPlayerController() || m_FreeCamera) && !(m_MeshViewer && m_MeshViewer->WantsInput()))
     {
         // 마우스 버튼을 누르는 동안 시점 회전을 허용하고, 카메라 컨트롤러의 이동/회전을 갱신한다.
-        m_CameraController->EnableMouseInput(GameInput::IsPressed(GameInput::kMouse1));
+        m_CameraController->EnableMouseInput(GameInput::IsPressed(GameInput::kMouse1) && sceneMouse);
         m_CameraController->Update(deltaT);
     }
 
@@ -1588,9 +1646,9 @@ void ModelViewer::Update(float deltaT)
         UpdateFollowCamera(deltaT);
     }
 #if defined(_M_X64)
-    // 이번 프레임의 이동과 카메라 회전을 반영한 뒤, 화면 중앙과 같은 시선으로 발사한다.
+    // 이번 프레임의 이동과 카메라 회전을 반영해 장면 뷰포트 중앙의 시선으로 발사한다.
     const bool fireKey = !io.WantCaptureKeyboard && GameInput::IsFirstPressed(GameInput::kKey_r);
-    const bool fireMouse = m_IsAiming && GameInput::IsFirstPressed(GameInput::kMouse0);
+    const bool fireMouse = m_IsAiming && sceneMouse && GameInput::IsFirstPressed(GameInput::kMouse0);
     if (m_ImpactTest && canAimNow && (fireKey || fireMouse))
     {
         if (m_IsAiming)
@@ -1629,29 +1687,6 @@ void ModelViewer::Update(float deltaT)
 
     // 기록한 GPU 갱신 명령을 제출한다. 인자 기본값이 false이므로 여기서는 GPU 완료를 기다리지 않는다.
     gfxContext.Finish();
-
-    // [7. 그리기 영역 준비] 이어지는 RenderScene에서 사용할 TAA 샘플 오프셋과 뷰포트/시저를 설정한다.
-    // TAA를 위해 뷰포트 오프셋으로 프레임마다 샘플 위치를 조금씩 이동시킨다.
-    // D3D에서는 소수 오프셋을 사용할 때 뷰포트의 암묵적인 시저 영역이
-    // floor(TopLeftXY)와 floor(TopLeftXY + WidthHeight)로 정해진다.
-    // 따라서 왼쪽 위 좌표가 (-0.25, -0.25)처럼 음의 소수이면
-    // 오른쪽 아래 좌표도 정수 한 칸만큼 위로 이동한다. 뷰포트 크기에
-    // 한 픽셀을 더하는 방법도 있지만, 여기서는 양의 소수 오프셋만 사용한다.
-    // 이때 평균 샘플 위치는 +0.5가 되므로, 시간적 안티앨리어싱을 끈 경우에도
-    // 이 값을 사용한다.
-    TemporalEffects::GetJitterOffset(m_MainViewport.TopLeftX, m_MainViewport.TopLeftY);
-
-    // 뷰포트는 화면에 투영할 영역과 깊이 범위를 정한다.
-    m_MainViewport.Width = (float)g_SceneColorBuffer.GetWidth();
-    m_MainViewport.Height = (float)g_SceneColorBuffer.GetHeight();
-    m_MainViewport.MinDepth = 0.0f;
-    m_MainViewport.MaxDepth = 1.0f;
-
-    // 시저 사각형은 실제 픽셀을 기록할 수 있는 영역을 렌더 타깃 전체로 제한한다.
-    m_MainScissor.left = 0;
-    m_MainScissor.top = 0;
-    m_MainScissor.right = (LONG)g_SceneColorBuffer.GetWidth();
-    m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
 }
 
 void ModelViewer::ApplyPendingPhysicsAssetSave()
@@ -1905,6 +1940,309 @@ void ModelViewer::DrawRagdollPanel(PARS::Character& character)
     }
 }
 
+void ModelViewer::DrawCharacterAnimationTab()
+{
+    if (ImGui::BeginChild("CharacterAnimationSettings"))
+    {
+        PARS::Character* character = GetPreviewCharacter();
+        PreviewAnimInstance* animation = GetPreviewAnimation();
+        const bool previewReady = m_PreviewReady && character && animation;
+        const bool passiveRagdoll = character && character->GetMesh().GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll;
+        if (!previewReady)
+        {
+            ImGui::TextWrapped("%s", m_PreviewError.empty() ? u8"월드에 미리보기 캐릭터가 없습니다." : m_PreviewError.c_str());
+        }
+        else if (ImGui::CollapsingHeader(u8"애니메이션 재생", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::Text(u8"재생 중: %s", ViewerLabels::Animation(animation->GetAnimationName(animation->GetCurrentAnimationIndex())));
+            const PARS::CharacterMovementComponent& movement = character->GetCharacterMovement();
+            ImGui::Text(u8"이동 속도 %.2f m/s | 균형 상태 %s", movement.GetGroundSpeed(),
+                PARS::CharacterBalanceStateLabel(character->GetMesh().GetBalanceState()));
+            ImGui::Text(u8"블렌딩: %.0f%%", animation->GetBlendAlpha() * 100.0f);
+            ImGui::TextUnformatted(character->GetMesh().IsActiveRagdoll()
+                    ? (character->GetMesh().GetRagdoll().UsesCharacterImpact()
+                        ? u8"수평 충돌: 환경 PA / 캐릭터 몸통 캡슐" : u8"수평 충돌: PA 리지드바디")
+                    : character->IsRagdoll() ? u8"수평 이동 제어: 꺼짐 (패시브 래그돌)"
+                        : u8"수평 충돌: 이동 캡슐");
+            ImGui::BeginDisabled(passiveRagdoll);
+            if (GetPlayerController())
+            {
+                bool automatic = animation->IsLocomotionEnabled();
+                if (ImGui::Checkbox(u8"이동에 맞춰 애니메이션 재생", &automatic))
+                {
+                    animation->SetLocomotionEnabled(automatic);
+                }
+            }
+            if (!animation->IsLocomotionEnabled())
+            {
+                bool playing = animation->IsPlaying();
+                if (ImGui::Checkbox(u8"재생", &playing))
+                {
+                    animation->SetPlaying(playing);
+                }
+                ImGui::SameLine();
+                bool autoCycle = animation->IsAutoCycleEnabled();
+                if (ImGui::Checkbox(u8"자동 전환", &autoCycle))
+                {
+                    animation->SetAutoCycleEnabled(autoCycle);
+                }
+                if (autoCycle)
+                {
+                    ImGui::Text(u8"%.1f초 후 다음 애니메이션", animation->GetTimeUntilNextAnimation());
+                }
+            }
+            for (uint32_t i = 0; i < kPreviewCount; ++i)
+            {
+                if (i > 0)
+                {
+                    ImGui::SameLine();
+                }
+                if (ImGui::Button(ViewerLabels::Animation(kPreviewNames[i])))
+                {
+                    SelectPreview(i);
+                }
+            }
+            ImGui::EndDisabled();
+        }
+#if defined(_M_X64)
+        const bool showingComparison = m_Comparison && m_Comparison->IsShowingScene();
+        if (ImGui::CollapsingHeader(u8"발 상태 및 디버그 표시"))
+        {
+            if (ImGui::Button(m_ShowLandingCandidates ? u8"착지 후보 X 표시 끄기###LandingCandidateToggle" :
+                u8"착지 후보 X 표시 켜기###LandingCandidateToggle"))
+            {
+                m_ShowLandingCandidates = !m_ShowLandingCandidates;
+            }
+            if (ImGui::Button(m_ContactOverlayVisible ? u8"상단 디버그 끄기###ContactOverlayToggle" :
+                u8"상단 디버그 켜기###ContactOverlayToggle"))
+            {
+                m_ContactOverlayVisible = !m_ContactOverlayVisible;
+            }
+            if (!showingComparison)
+            {
+                PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
+                bool dummyFootStatesVisible = dummy && dummy->GetMesh().IsFootCandidateDebugVisible();
+                ImGui::BeginDisabled(!dummy);
+                if (ImGui::Button(dummyFootStatesVisible ? u8"더미 발 상태 표시 끄기" : u8"더미 발 상태 표시") && dummy)
+                {
+                    dummyFootStatesVisible = !dummyFootStatesVisible;
+                    dummy->GetMesh().SetFootCandidateDebugVisible(dummyFootStatesVisible);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button(m_DummyFootSoles.IsVisible() ? u8"더미 발 디버그 끄기" : u8"더미 발 디버그 켜기"))
+                {
+                    m_DummyFootSoles.SetVisible(!m_DummyFootSoles.IsVisible());
+                }
+                ImGui::EndDisabled();
+                if (ImGui::Button(m_PlayerFootDebugVisible ? u8"플레이어 발 상태·디버그 끄기###PlayerFootDebugToggle" :
+                    u8"플레이어 발 상태·디버그 켜기###PlayerFootDebugToggle"))
+                {
+                    SetPlayerFootDebugVisible(!m_PlayerFootDebugVisible);
+                }
+                void (*const drawFootStates)(PARS::Character*, const char*) = [](PARS::Character* target, const char* label) -> void
+                {
+                    if (!target)
+                    {
+                        return;
+                    }
+                    const PARS::FootSupportSnapshot& sample = target->GetMesh().GetFootSupport().GetSnapshot();
+                    ImGui::TextUnformatted(label);
+                    for (size_t side = 0; side < sample.feet.size(); ++side)
+                    {
+                        const PARS::FootContactSample& contact = sample.feet[side].contact;
+                        ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
+                            contact.hasSample && contact.grounded ? "ON" : "OFF",
+                            sample.footstep.feet[side].IsInProgress() ? "ON" : "OFF");
+                    }
+                };
+                if (dummyFootStatesVisible)
+                {
+                    drawFootStates(dummy, u8"더미 발 상태");
+                }
+                if (m_PlayerFootDebugVisible)
+                {
+                    drawFootStates(character, u8"플레이어 발 상태");
+                }
+            }
+            if (previewReady && m_PlayerFootSoles.IsVisible())
+            {
+                ImGui::Indent();
+                m_PlayerFootSoles.DrawUI(character->GetMesh());
+                ImGui::Unindent();
+            }
+        }
+        if (m_Comparison && ImGui::CollapsingHeader(u8"시뮬레이션 비교"))
+        {
+            if (ImGui::Button(u8"시뮬레이션 A 시작"))
+            {
+                m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
+                    character ? character->GetMesh().GetPhysicsAsset() : nullptr);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(u8"시뮬레이션 B 시작"))
+            {
+                m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
+                    character ? character->GetMesh().GetPhysicsAsset() : nullptr, RagdollComparisonRunner::Simulation::B);
+            }
+            if (m_Comparison->IsShowingScene() && ImGui::Button(u8"캐릭터 조작으로 돌아가기 (WASD)"))
+            {
+                m_Comparison->ReturnToPlayer();
+            }
+        }
+#endif
+        if (previewReady)
+        {
+            DrawRagdollPanel(*character);
+        }
+        if (previewReady && ImGui::CollapsingHeader(u8"카메라 설정"))
+        {
+            ImGui::BeginDisabled(passiveRagdoll);
+            if (GetPlayerController())
+            {
+                bool freeCamera = m_FreeCamera;
+                if (ImGui::Checkbox(u8"자유 카메라 (Tab)", &freeCamera))
+                {
+                    SetFreeCamera(freeCamera);
+                }
+            }
+            if (ImGui::Button(u8"카메라 초기화"))
+            {
+                ResetPreviewCamera();
+            }
+            ImGui::EndDisabled();
+            if (m_SpringArm)
+            {
+                PARS::SpringArmComponent::Settings settings = m_SpringArm->GetSettings();
+                ImGui::SetNextItemWidth(110);
+                bool changed = ImGui::DragFloat(u8"기본 거리 (m)", &settings.targetArmLength, .1f, .5f, 8, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SetNextItemWidth(110);
+                changed |= ImGui::DragFloat(u8"따라오기 속도", &settings.cameraLagSpeed, .5f, 0, 30, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SetNextItemWidth(110);
+                changed |= ImGui::DragFloat(u8"거리 복원 속도", &settings.armReturnSpeed, .5f, 0, 30, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                if (changed)
+                {
+                    m_SpringArm->SetSettings(settings);
+                }
+                ImGui::TextWrapped(u8"속도를 0으로 설정하면 즉시 반영합니다. 어깨 조준 시 벽이 가까우면 카메라가 앞으로 당겨집니다.");
+                ImGui::Text(u8"현재 거리: %.2f m", m_SpringArm->GetCurrentArmLength());
+            }
+        }
+#if defined(_M_X64)
+        const bool hasDummyControls = m_ImpactTest && !showingComparison;
+#else
+        constexpr bool hasDummyControls = false;
+#endif
+        if ((previewReady || hasDummyControls) && ImGui::CollapsingHeader(u8"조작 안내 및 초기화"))
+        {
+#if defined(_M_X64)
+            if (hasDummyControls)
+            {
+                if (ImGui::Button(u8"더미 리셋 (G)"))
+                {
+                    m_ImpactTest->Reset();
+                }
+                if (!m_ImpactTest->GetStatusMessage().empty())
+                {
+                    ImGui::TextWrapped("%s", m_ImpactTest->GetStatusMessage().c_str());
+                }
+            }
+            if (previewReady && m_PhysicsDemo)
+            {
+                if (ImGui::Button(u8"캐릭터 초기화"))
+                {
+                    ResetMapCharacter();
+                }
+                ImGui::TextWrapped(m_FreeCamera ? u8"자유 카메라: WASD + Q/E 이동. Tab: 캐릭터 조작." : u8"캐릭터: WASD 이동, Shift 달리기. Tab: 자유 카메라.");
+                ImGui::Text(u8"F: 0.1배속 / 정상 속도 전환 | 현재 %.1f배 | G: 더미 리셋", m_World.GetPhysicsTimeScale());
+                ImGui::TextWrapped(u8"우클릭 유지로 시점 이동·조준, 조준 중 좌클릭 또는 R로 구를 발사합니다. 애니메이션 버튼으로 수동 미리보기를 시작합니다.");
+            }
+            else if (previewReady)
+#endif
+            {
+                ImGui::TextWrapped(u8"우클릭 드래그로 시점을 회전하고 우클릭 상태에서 휠로 확대/축소합니다.");
+            }
+        }
+    }
+    ImGui::EndChild();
+}
+
+void ModelViewer::DrawSettingsPanel()
+{
+    const float panelWidth = ImGui::GetMainViewport()->Size.x - m_SceneSize.x;
+    if (panelWidth < 2.0f)
+    {
+        return;
+    }
+    ImGui::SetNextWindowPos(ImVec2(m_SceneOrigin.x + m_SceneSize.x, m_SceneOrigin.y));
+    ImGui::SetNextWindowSize(ImVec2(panelWidth, m_SceneSize.y));
+    ImGui::SetNextWindowBgAlpha(1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1, 1));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBringToFrontOnFocus;
+    const bool visible = ImGui::Begin("##ViewerSettingsPanel", nullptr, flags);
+    ImGui::PopStyleVar(4);
+    if (visible)
+    {
+        const float dividerWidth = (std::min)(7.0f, panelWidth * .25f);
+        ImGui::InvisibleButton("##SceneDivider", ImVec2(dividerWidth, m_SceneSize.y));
+        const bool dragging = ImGui::IsItemActive();
+        const bool hovered = ImGui::IsItemHovered();
+        if (dragging || hovered)
+        {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        }
+        if (dragging && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
+        {
+            m_SettingsPanelWidth = panelWidth - ImGui::GetIO().MouseDelta.x;
+        }
+        const ImGuiCol dividerColor = dragging ? ImGuiCol_SeparatorActive : hovered ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator;
+        ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImGui::GetColorU32(dividerColor));
+
+        ImGui::SameLine(0.0f, 0.0f);
+        if (ImGui::BeginChild("SettingsTabs", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+        {
+            if (ImGui::BeginTabBar("ViewerTabs", ImGuiTabBarFlags_FittingPolicyScroll))
+            {
+#if defined(_M_X64)
+                if (m_PhysicsDemo && ImGui::BeginTabItem(u8"물리"))
+                {
+                    m_PhysicsDemo->RenderUI();
+                    ImGui::EndTabItem();
+                }
+                if (m_PhysicsDemo && ImGui::BeginTabItem(u8"더미 충격 테스트"))
+                {
+                    if (m_Comparison && m_Comparison->IsShowingScene())
+                    {
+                        ImGui::TextWrapped(u8"캐릭터 조작 화면으로 돌아가면 더미 충격 테스트를 사용할 수 있습니다.");
+                    }
+                    else if (m_ImpactTest)
+                    {
+                        m_ImpactTest->DrawUI(GetPreviewCharacter());
+                    }
+                    else
+                    {
+                        ImGui::TextUnformatted(u8"충격 테스트 더미가 없습니다.");
+                    }
+                    ImGui::EndTabItem();
+                }
+#endif
+                if (m_PreviewMode && ImGui::BeginTabItem(u8"캐릭터 애니메이션"))
+                {
+                    DrawCharacterAnimationTab();
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();
+}
+
 void ModelViewer::RenderUI(GraphicsContext& context)
 {
 #if defined(_M_X64)
@@ -1915,15 +2253,15 @@ void ModelViewer::RenderUI(GraphicsContext& context)
     }
     if (m_ContactOverlayVisible && m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
     {
-        m_ImpactTest->DrawContactOverlay(m_PreviewMode ? ImGui::GetFrameHeight() : 0.0f);
+        m_ImpactTest->DrawContactOverlay(m_SceneOrigin, m_SceneSize);
     }
     if (m_IsAiming)
     {
         ImGui::SetMouseCursor(ImGuiMouseCursor_None);
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
-        const ImVec2 center(viewport->Pos.x + viewport->Size.x * .5f, viewport->Pos.y + viewport->Size.y * .5f);
+        const ImVec2 center(m_SceneOrigin.x + m_SceneSize.x * .5f, m_SceneOrigin.y + m_SceneSize.y * .5f);
         ImDrawList* draw = ImGui::GetForegroundDrawList();
-        const float scale = (std::max)(1.0f, viewport->Size.y / 720.0f);
+        draw->PushClipRect(m_SceneOrigin, ImVec2(m_SceneOrigin.x + m_SceneSize.x, m_SceneOrigin.y + m_SceneSize.y), true);
+        const float scale = (std::max)(1.0f, m_SceneSize.y / 720.0f);
         const ImVec2 axes[] = {ImVec2(1, 0), ImVec2(-1, 0), ImVec2(0, 1), ImVec2(0, -1)};
         for (const ImVec2& axis : axes)
         {
@@ -1934,25 +2272,12 @@ void ModelViewer::RenderUI(GraphicsContext& context)
         }
         draw->AddCircleFilled(center, 3 * scale, IM_COL32(0, 0, 0, 220));
         draw->AddCircleFilled(center, 1.5f * scale, IM_COL32(255, 255, 255, 255));
-        // 조준 중에는 상단 디버그와 조준점만 표시한다.
-        return;
-    }
-    if (m_PhysicsDemo)
-    {
-        m_PhysicsDemo->RenderUI();
-        if (m_ImpactTest && !(m_Comparison && m_Comparison->IsShowingScene()))
-        {
-            m_ImpactTest->DrawUI(GetPreviewCharacter());
-        }
-        if (!m_PreviewMode)
-        {
-            return;
-        }
+        draw->PopClipRect();
     }
 #endif
-    if (m_PreviewMode)
+    if (HasSettingsPanel())
     {
-        if (ImGui::BeginMainMenuBar())
+        if (m_PreviewMode && ImGui::BeginMainMenuBar())
         {
 #if defined(_M_X64)
             if (m_PhysicsDemo && ImGui::BeginMenu(u8"맵"))
@@ -1968,6 +2293,7 @@ void ModelViewer::RenderUI(GraphicsContext& context)
 #endif
             if (ImGui::BeginMenu(u8"창"))
             {
+                ImGui::MenuItem(u8"설정 패널", "F1", &m_SettingsPanelVisible);
                 if (ImGui::MenuItem(u8"스켈레탈 메시 뷰어", nullptr, false, m_MeshViewer != nullptr))
                 {
                     m_MeshViewer->Open();
@@ -1982,231 +2308,11 @@ void ModelViewer::RenderUI(GraphicsContext& context)
             }
             ImGui::EndMainMenuBar();
         }
-        ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 24.0f, 70.0f),
-            ImGuiCond_FirstUseEver, ImVec2(1.0f, 0.0f));
-        ImGui::SetNextWindowSize(ImVec2(390.0f, 380.0f), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin(u8"캐릭터 애니메이션"))
+        DrawSettingsPanel();
+        if (!m_PreviewMode || m_IsAiming)
         {
-            PARS::Character* character = GetPreviewCharacter();
-            PreviewAnimInstance* animation = GetPreviewAnimation();
-            const bool previewReady = m_PreviewReady && character && animation;
-            const bool passiveRagdoll = character && character->GetMesh().GetPhysicsMode() == PARS::PhysicsAnimationMode::PassiveRagdoll;
-            if (!previewReady)
-            {
-                ImGui::TextWrapped("%s", m_PreviewError.empty() ? u8"월드에 미리보기 캐릭터가 없습니다." : m_PreviewError.c_str());
-            }
-            else if (ImGui::CollapsingHeader(u8"애니메이션 재생", ImGuiTreeNodeFlags_DefaultOpen))
-            {
-                ImGui::Text(u8"재생 중: %s", ViewerLabels::Animation(animation->GetAnimationName(animation->GetCurrentAnimationIndex())));
-                const PARS::CharacterMovementComponent& movement = character->GetCharacterMovement();
-                ImGui::Text(u8"이동 속도 %.2f m/s | 균형 상태 %s", movement.GetGroundSpeed(),
-                    PARS::CharacterBalanceStateLabel(character->GetMesh().GetBalanceState()));
-                ImGui::Text(u8"블렌딩: %.0f%%", animation->GetBlendAlpha() * 100.0f);
-                ImGui::TextUnformatted(character->GetMesh().IsActiveRagdoll()
-                        ? (character->GetMesh().GetRagdoll().UsesCharacterImpact()
-                            ? u8"수평 충돌: 환경 PA / 캐릭터 몸통 캡슐" : u8"수평 충돌: PA 리지드바디")
-                        : character->IsRagdoll() ? u8"수평 이동 제어: 꺼짐 (패시브 래그돌)"
-                            : u8"수평 충돌: 이동 캡슐");
-                ImGui::BeginDisabled(passiveRagdoll);
-                if (GetPlayerController())
-                {
-                    bool automatic = animation->IsLocomotionEnabled();
-                    if (ImGui::Checkbox(u8"이동에 맞춰 애니메이션 재생", &automatic))
-                    {
-                        animation->SetLocomotionEnabled(automatic);
-                    }
-                }
-                if (!animation->IsLocomotionEnabled())
-                {
-                    bool playing = animation->IsPlaying();
-                    if (ImGui::Checkbox(u8"재생", &playing))
-                    {
-                        animation->SetPlaying(playing);
-                    }
-                    ImGui::SameLine();
-                    bool autoCycle = animation->IsAutoCycleEnabled();
-                    if (ImGui::Checkbox(u8"자동 전환", &autoCycle))
-                    {
-                        animation->SetAutoCycleEnabled(autoCycle);
-                    }
-                    if (autoCycle)
-                    {
-                        ImGui::Text(u8"%.1f초 후 다음 애니메이션", animation->GetTimeUntilNextAnimation());
-                    }
-                }
-                for (uint32_t i = 0; i < kPreviewCount; ++i)
-                {
-                    if (i > 0)
-                    {
-                        ImGui::SameLine();
-                    }
-                    if (ImGui::Button(ViewerLabels::Animation(kPreviewNames[i])))
-                    {
-                        SelectPreview(i);
-                    }
-                }
-                ImGui::EndDisabled();
-            }
-#if defined(_M_X64)
-            const bool showingComparison = m_Comparison && m_Comparison->IsShowingScene();
-            if (ImGui::CollapsingHeader(u8"발 상태 및 디버그 표시"))
-            {
-                if (ImGui::Button(m_ShowLandingCandidates ? u8"착지 후보 X 표시 끄기###LandingCandidateToggle" :
-                    u8"착지 후보 X 표시 켜기###LandingCandidateToggle"))
-                {
-                    m_ShowLandingCandidates = !m_ShowLandingCandidates;
-                }
-                if (ImGui::Button(m_ContactOverlayVisible ? u8"상단 디버그 끄기###ContactOverlayToggle" :
-                    u8"상단 디버그 켜기###ContactOverlayToggle"))
-                {
-                    m_ContactOverlayVisible = !m_ContactOverlayVisible;
-                }
-                if (!showingComparison)
-                {
-                    PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
-                    bool dummyFootStatesVisible = dummy && dummy->GetMesh().IsFootCandidateDebugVisible();
-                    ImGui::BeginDisabled(!dummy);
-                    if (ImGui::Button(dummyFootStatesVisible ? u8"더미 발 상태 표시 끄기" : u8"더미 발 상태 표시") && dummy)
-                    {
-                        dummyFootStatesVisible = !dummyFootStatesVisible;
-                        dummy->GetMesh().SetFootCandidateDebugVisible(dummyFootStatesVisible);
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button(m_DummyFootSoles.IsVisible() ? u8"더미 발 디버그 끄기" : u8"더미 발 디버그 켜기"))
-                    {
-                        m_DummyFootSoles.SetVisible(!m_DummyFootSoles.IsVisible());
-                    }
-                    ImGui::EndDisabled();
-                    if (ImGui::Button(m_PlayerFootDebugVisible ? u8"플레이어 발 상태·디버그 끄기###PlayerFootDebugToggle" :
-                        u8"플레이어 발 상태·디버그 켜기###PlayerFootDebugToggle"))
-                    {
-                        SetPlayerFootDebugVisible(!m_PlayerFootDebugVisible);
-                    }
-                    void (*const drawFootStates)(PARS::Character*, const char*) = [](PARS::Character* target, const char* label) -> void
-                    {
-                        if (!target)
-                        {
-                            return;
-                        }
-                        const PARS::FootSupportSnapshot& sample = target->GetMesh().GetFootSupport().GetSnapshot();
-                        ImGui::TextUnformatted(label);
-                        for (size_t side = 0; side < sample.feet.size(); ++side)
-                        {
-                            const PARS::FootContactSample& contact = sample.feet[side].contact;
-                            ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
-                                contact.hasSample && contact.grounded ? "ON" : "OFF",
-                                sample.footstep.feet[side].IsInProgress() ? "ON" : "OFF");
-                        }
-                    };
-                    if (dummyFootStatesVisible)
-                    {
-                        drawFootStates(dummy, u8"더미 발 상태");
-                    }
-                    if (m_PlayerFootDebugVisible)
-                    {
-                        drawFootStates(character, u8"플레이어 발 상태");
-                    }
-                }
-                if (previewReady && m_PlayerFootSoles.IsVisible())
-                {
-                    ImGui::Indent();
-                    m_PlayerFootSoles.DrawUI(character->GetMesh());
-                    ImGui::Unindent();
-                }
-            }
-            if (m_Comparison && ImGui::CollapsingHeader(u8"시뮬레이션 비교"))
-            {
-                if (ImGui::Button(u8"시뮬레이션 A 시작"))
-                {
-                    m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
-                        character ? character->GetMesh().GetPhysicsAsset() : nullptr);
-                }
-                ImGui::SameLine();
-                if (ImGui::Button(u8"시뮬레이션 B 시작"))
-                {
-                    m_Comparison->RequestLocomotionComparison(m_MeshViewer ? &m_MeshViewer->GetPhysicsAsset() : nullptr,
-                        character ? character->GetMesh().GetPhysicsAsset() : nullptr, RagdollComparisonRunner::Simulation::B);
-                }
-                if (m_Comparison->IsShowingScene() && ImGui::Button(u8"캐릭터 조작으로 돌아가기 (WASD)"))
-                {
-                    m_Comparison->ReturnToPlayer();
-                }
-            }
-#endif
-            if (previewReady)
-            {
-                DrawRagdollPanel(*character);
-            }
-            if (previewReady && ImGui::CollapsingHeader(u8"카메라 설정"))
-            {
-                ImGui::BeginDisabled(passiveRagdoll);
-                if (GetPlayerController())
-                {
-                    bool freeCamera = m_FreeCamera;
-                    if (ImGui::Checkbox(u8"자유 카메라 (Tab)", &freeCamera))
-                    {
-                        SetFreeCamera(freeCamera);
-                    }
-                }
-                if (ImGui::Button(u8"카메라 초기화"))
-                {
-                    ResetPreviewCamera();
-                }
-                ImGui::EndDisabled();
-                if (m_SpringArm)
-                {
-                    PARS::SpringArmComponent::Settings settings = m_SpringArm->GetSettings();
-                    ImGui::SetNextItemWidth(110);
-                    bool changed = ImGui::DragFloat(u8"기본 거리 (m)", &settings.targetArmLength, .1f, .5f, 8, "%.1f", ImGuiSliderFlags_AlwaysClamp);
-                    ImGui::SetNextItemWidth(110);
-                    changed |= ImGui::DragFloat(u8"따라오기 속도", &settings.cameraLagSpeed, .5f, 0, 30, "%.1f", ImGuiSliderFlags_AlwaysClamp);
-                    ImGui::SetNextItemWidth(110);
-                    changed |= ImGui::DragFloat(u8"거리 복원 속도", &settings.armReturnSpeed, .5f, 0, 30, "%.1f", ImGuiSliderFlags_AlwaysClamp);
-                    if (changed)
-                    {
-                        m_SpringArm->SetSettings(settings);
-                    }
-                    ImGui::TextWrapped(u8"속도를 0으로 설정하면 즉시 반영합니다. 어깨 조준 시 벽이 가까우면 카메라가 앞으로 당겨집니다.");
-                    ImGui::Text(u8"현재 거리: %.2f m", m_SpringArm->GetCurrentArmLength());
-                }
-            }
-#if defined(_M_X64)
-            const bool hasDummyControls = m_ImpactTest && !showingComparison;
-#else
-            constexpr bool hasDummyControls = false;
-#endif
-            if ((previewReady || hasDummyControls) && ImGui::CollapsingHeader(u8"조작 안내 및 초기화"))
-            {
-#if defined(_M_X64)
-                if (hasDummyControls)
-                {
-                    if (ImGui::Button(u8"더미 리셋 (G)"))
-                    {
-                        m_ImpactTest->Reset();
-                    }
-                    if (!m_ImpactTest->GetStatusMessage().empty())
-                    {
-                        ImGui::TextWrapped("%s", m_ImpactTest->GetStatusMessage().c_str());
-                    }
-                }
-                if (previewReady && m_PhysicsDemo)
-                {
-                    if (ImGui::Button(u8"캐릭터 초기화"))
-                    {
-                        ResetMapCharacter();
-                    }
-                    ImGui::TextWrapped(m_FreeCamera ? u8"자유 카메라: WASD + Q/E 이동. Tab: 캐릭터 조작." : u8"캐릭터: WASD 이동, Shift 달리기. Tab: 자유 카메라.");
-                    ImGui::Text(u8"F: 0.1배속 / 정상 속도 전환 | 현재 %.1f배 | G: 더미 리셋", m_World.GetPhysicsTimeScale());
-                    ImGui::TextWrapped(u8"우클릭 유지로 시점 이동·조준, 조준 중 좌클릭 또는 R로 구를 발사합니다. 애니메이션 버튼으로 수동 미리보기를 시작합니다.");
-                }
-                else if (previewReady)
-#endif
-                {
-                    ImGui::TextWrapped(u8"우클릭 드래그로 시점을 회전하고 우클릭 상태에서 휠로 확대/축소합니다.");
-                }
-            }
+            return;
         }
-        ImGui::End();
         if (m_MeshViewer)
         {
             const PARS::Character* character = GetPreviewCharacter();

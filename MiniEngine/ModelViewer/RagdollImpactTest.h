@@ -43,7 +43,7 @@ public:
     void Update();
     void ResumeSimulation();
     void DrawUI(PARS::Character* player);
-    void DrawContactOverlay(float topInset) const;
+    void DrawContactOverlay(const ImVec2& sceneOrigin, const ImVec2& sceneSize) const;
     bool LoadImpactSettings(PARS::Character& player, const std::string& path);
     bool SaveImpactSettings(const PARS::Character& player);
     void LoadBodyImpactSettings(PARS::Character& player, const std::string& path);

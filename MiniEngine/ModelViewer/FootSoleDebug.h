@@ -5,6 +5,8 @@
 #include <functional>
 #include <string>
 
+struct ImVec2;
+
 namespace PARS
 {
     class SkeletalMeshComponent;
@@ -15,7 +17,7 @@ class FootSoleDebug
 {
 public:
     void DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings = {});
-    void DrawContactOverlay(const std::string& text, bool touching, float topInset) const;
+    void DrawContactOverlay(const std::string& text, bool touching, const ImVec2& sceneOrigin, const ImVec2& sceneSize) const;
     void BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
     static void BuildLandingCandidateLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines);
     void BuildRegionTriangles(const PARS::SkeletalMeshComponent& mesh,
