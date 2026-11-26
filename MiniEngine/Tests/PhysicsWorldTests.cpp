@@ -436,6 +436,85 @@ namespace
         std::puts("PASS: mirrored clavicle reach, joint limit, chest rotation, blending and fallback");
     }
 
+    void TestWoundHandSelection(const std::vector<int32_t>& parents, const std::vector<PxTransform>& rest,
+        std::array<PARS::FallArmSample, 2> arms)
+    {
+        struct Surface
+        {
+        public:
+            PxVec3 point;
+            PxVec3 normal;
+            int handForLeftHit;
+        };
+
+        // 이 리그에서 오른쪽은 +X, 정면은 -Z다. 평평한 가슴과 등은 좌우의 법선이 같다.
+        const Surface surfaces[] = {
+            {PxVec3(-.10f, -.12f, -.08f), PxVec3(0, 0, -1), 1},
+            {PxVec3(-.10f, -.45f, -.07f), PxVec3(0, 0, -1), 1},
+            {PxVec3(-.16f, -.18f, .02f), PxVec3(-1, 0, 0), 1},
+            {PxVec3(-.13f, -.12f, .07f), PxVec3(-1, 0, 1).getNormalized(), 1},
+            {PxVec3(-.13f, -.12f, .07f), PxVec3(-.7f, 0, 1).getNormalized(), 0},
+            {PxVec3(-.08f, -.12f, .10f), PxVec3(0, 0, 1), 0},
+            {PxVec3(-.02f, .13f, .09f), PxVec3(0, 1, 0), 0},
+            {PxVec3(-.001f, -.14f, -.09f), PxVec3(0, 0, -1), 1},
+            {PxVec3(-.30f, -1.2f, -.10f), PxVec3(0, 0, -1), 1}
+        };
+        const PxTransform tilted(PxVec3(2, -1, 3), PxQuat(2.2f, PxVec3(1, 3, 2).getNormalized()));
+        for (const PxTransform& body : {PxTransform(PxIdentity), tilted})
+        {
+            const PxVec3 left = body.transform(rest[arms[0].setup.shoulderNode].p);
+            const PxVec3 right = body.transform(rest[arms[1].setup.shoulderNode].p);
+            const PxVec3 pelvis = body.transform(PxVec3(0, -.5f, 0));
+            const PxVec3 center = body.transform(PxVec3(0, -.15f, -.10f));
+            Check(PARS::SelectWoundHand(center, body.q.rotate(PxVec3(0, 0, -1)), left, right, pelvis).hand == -1,
+                "An exact midline hit has no anatomical side");
+            for (const Surface& surface : surfaces)
+            {
+                for (int mirror = 0; mirror < 2; ++mirror)
+                {
+                    const float sign = mirror == 0 ? 1.0f : -1.0f;
+                    const int expected = mirror == 0 ? surface.handForLeftHit : 1 - surface.handForLeftHit;
+                    PARS::ImpactPalmGoal goal;
+                    goal.hitNode = 0;
+                    goal.weight = 1;
+                    goal.approach = 1;
+                    goal.point = body.transform(PxVec3(sign * surface.point.x, surface.point.y, surface.point.z));
+                    goal.normal = body.q.rotate(PxVec3(sign * surface.normal.x, surface.normal.y, surface.normal.z));
+                    goal.selection = PARS::SelectWoundHand(goal.point, goal.normal, left, right, pelvis);
+                    Check(goal.selection.hand == expected && goal.selection.onBack == (surface.handForLeftHit == 0),
+                        "Mirrored wounds use the torso's front, side and back");
+                    for (PARS::FallArmSample& arm : arms)
+                    {
+                        arm.actualAnchor = body;
+                        arm.actualHand = body * rest[arm.setup.handNode];
+                    }
+                    // 반대 후보의 손바닥을 상처에 바로 놓아 거리로는 항상 그 손이 유리하게 한다.
+                    arms[1 - expected].actualHand = PxTransform(goal.point, body.q) * arms[1 - expected].setup.palmInHand.getInverse();
+                    std::vector<PxTransform> pose = rest;
+                    PARS::FallArmSnapshot result;
+                    Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && goal.hand == expected &&
+                        result.arms[expected].applied && !result.arms[1 - expected].applied,
+                        "The anatomical hand wins even when the other palm already touches the wound");
+                    if (surface.point.y < -1.0f)
+                    {
+                        Check(result.arms[expected].reachLimited, "An out-of-reach wound keeps the selected side");
+                    }
+                    goal.approach = .5f;
+                    const PxVec3 contact = result.arms[expected].palm.p;
+                    pose = rest;
+                    Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && goal.hand == expected,
+                        "Keep the chosen hand during approach");
+                    const PxVec3 detour = result.arms[expected].palm.p - contact - goal.normal * .05f;
+                    const PxVec3 outward = body.q.rotate(PxVec3(expected == 0 ? -1.0f : 1.0f, 0, 0));
+                    const float sideDistance = goal.selection.onBack ? arms[expected].setup.upperLength * .75f : 0;
+                    Check((detour - outward * sideDistance).magnitude() < 1e-4f,
+                        "A rear reach passes around the flank before closing onto the wound");
+                }
+            }
+        }
+        std::puts("PASS: wound hand selection on mirrored chest, abdomen, flank and back in a rotated torso");
+    }
+
     void TestImpactPalm()
     {
         const std::vector<int32_t> parents{-1, 0, 1, 2, 0, 4, 5};
@@ -473,9 +552,11 @@ namespace
         Check(!goal.SampleTiming(1.15f, 1.15f, false), "Lower-body hits keep their short gesture");
         goal.weight = 1;
         goal.approach = 1;
+        TestWoundHandSelection(parents, rest, arms);
         for (int side = 0; side < 2; ++side)
         {
             goal.hand = -1;
+            goal.selection = {side, true};
             goal.hitNode = arms[side].setup.shoulderNode;
             const PxVec3 hit(rest[goal.hitNode].p.x, -.13f, .07f);
             for (const PxTransform& body : {PxTransform(PxIdentity), PxTransform(PxVec3(-2, 3, 1), PxQuat(.9f, PxVec3(0, 1, 0)))})
@@ -499,6 +580,7 @@ namespace
         }
         std::vector<PxTransform> pose = rest;
         goal.hand = -1;
+        goal.selection = {};
         goal.hitNode = 0;
         goal.point = arms[1].actualHand.transform(PxVec3(0, -.8f, .05f));
         PARS::FallArmSnapshot result;

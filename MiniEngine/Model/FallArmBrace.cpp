@@ -158,7 +158,9 @@ namespace
         solve.calfLength = setup.lowerLength;
         solve.maximumReachRatio = ArmReachRatio;
         solve.preferReferenceBend = true;
-        solve.referenceBend = right * sign - forward * .25f - up * .4f;
+        // 등 뒤에서 같은 손의 손바닥이 몸으로 향하도록 팔꿈치를 뒤쪽으로 굽힌다.
+        solve.referenceBend = goal.selection.onBack && side == goal.selection.hand ?
+            right * (sign * .65f) - forward * 1.2f - up * .3f : right * sign - forward * .25f - up * .4f;
         const LegIKResult result = SolveTwoBoneIK(solve);
         if (!result.valid)
         {
@@ -223,6 +225,42 @@ bool PARS::ImpactPalmGoal::SampleTiming(float hitAge, float approachAge, bool su
     return hitAge < releaseStart + releaseTime;
 }
 
+WoundHandSelection PARS::SelectWoundHand(const PxVec3& point, const PxVec3& normal, const PxVec3& leftShoulder,
+    const PxVec3& rightShoulder, const PxVec3& pelvis)
+{
+    const PxVec3 center = (leftShoulder + rightShoulder) * .5f;
+    PxVec3 up = center - pelvis;
+    if (!point.isFinite() || !normal.isFinite() || !Normalize(up))
+    {
+        return {};
+    }
+    PxVec3 right = rightShoulder - leftShoulder;
+    right -= up * right.dot(up);
+    if (!Normalize(right))
+    {
+        return {};
+    }
+    const PxVec3 forward = up.cross(right);
+    const PxVec3 offset = point - center;
+    const float lateral = offset.dot(right);
+    if (PxAbs(lateral) <= 1e-5f)
+    {
+        return {};
+    }
+    // 평평한 가슴과 등에서도 좌우는 피격점으로, 등 쪽 면인지는 표면 법선으로 구분한다.
+    float facing = normal.dot(forward);
+    float sideways = normal.dot(right);
+    if (facing * facing + sideways * sideways < 1e-6f)
+    {
+        // 윗면이나 아랫면처럼 수평 법선이 없으면 피격점이 위치한 방향을 쓴다.
+        facing = offset.dot(forward);
+        sideways = lateral;
+    }
+    const int hitSide = lateral > 0 ? 1 : 0;
+    const bool onBack = -facing > PxAbs(sideways) + 1e-5f;
+    return {onBack ? hitSide : 1 - hitSide, onBack};
+}
+
 bool PARS::ApplyImpactPalmTarget(ImpactPalmGoal& goal, const std::array<FallArmSample, 2>& arms,
     const std::vector<int32_t>& parents, std::vector<PxTransform>& pose, FallArmSnapshot& targets)
 {
@@ -251,7 +289,6 @@ bool PARS::ApplyImpactPalmTarget(ImpactPalmGoal& goal, const std::array<FallArmS
             continue;
         }
         const PxTransform mapping = arm.actualAnchor * pose[setup.anchorNode].getInverse();
-        const PxTransform shoulder = mapping * pose[setup.shoulderNode];
         const PxTransform elbow = mapping * pose[setup.elbowNode];
         const PxTransform actualPalm = arm.actualHand * setup.palmInHand;
         PxVec3 fingers = goal.point - elbow.p;
@@ -265,6 +302,20 @@ bool PARS::ApplyImpactPalmTarget(ImpactPalmGoal& goal, const std::array<FallArmS
         {
             continue;
         }
+        if (side == goal.selection.hand)
+        {
+            if (goal.selection.onBack && goal.approach < 1.0f)
+            {
+                // 접근 중에는 옆구리 바깥을 돌아가고, 접촉 시에는 원래 상처 위치로 수렴한다.
+                const float outward = setup.upperLength * (1.0f - goal.approach * goal.approach);
+                const float sign = side == 0 ? -1.0f : 1.0f;
+                candidate.p += arm.actualAnchor.q.rotate(setup.rightInAnchor) * (sign * outward);
+            }
+            selected = side;
+            palm = candidate;
+            break;
+        }
+        const PxTransform shoulder = mapping * pose[setup.shoulderNode];
         const PxVec3 wristAtContact = (candidate * setup.palmInHand.getInverse()).p - normal * approachOffset;
         const float reach = (setup.upperLength + setup.lowerLength) * ArmReachRatio;
         const float excess = PxMax(0.0f, (wristAtContact - shoulder.p).magnitude() - reach);

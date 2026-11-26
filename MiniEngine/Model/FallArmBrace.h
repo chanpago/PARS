@@ -59,6 +59,13 @@ namespace PARS
         bool active = false;
     };
 
+    struct WoundHandSelection
+    {
+    public:
+        int hand = -1;
+        bool onBack = false;
+    };
+
     struct ImpactPalmGoal
     {
     public:
@@ -87,7 +94,12 @@ namespace PARS
         float clavicleReachFraction = .08f;
         int hitNode = -1;
         int hand = -1;
+        WoundHandSelection selection;
     };
+
+    // 피격 순간의 양쪽 어깨와 골반을 기준으로 왼손(0) 또는 오른손(1)을 고른다. 중심선은 -1이다.
+    WoundHandSelection SelectWoundHand(const physx::PxVec3& point, const physx::PxVec3& normal,
+        const physx::PxVec3& leftShoulder, const physx::PxVec3& rightShoulder, const physx::PxVec3& pelvis);
 
     // 닿을 손을 처음 한 번 고르고, 이후에는 같은 손으로 움직이는 피격 표면을 따라간다.
     bool ApplyImpactPalmTarget(ImpactPalmGoal& goal, const std::array<FallArmSample, 2>& arms,

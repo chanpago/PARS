@@ -1476,7 +1476,14 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             const Vector3 front = Cross(Vector3(kYUnitVector), across);
             const float side = bone.find("Right") != std::string::npos ? .6f : bone.find("Left") != std::string::npos ? -.6f : 0;
             const Vector3 target(shape.p.x, shape.p.y, shape.p.z);
-            const Vector3 eye = target + (front + across * side) * 2.0f;
+            Vector3 fromTarget = front + across * side;
+            float angleDegrees = 0;
+            if (CommandLineArgs::GetFloat(L"woundangle", angleDegrees))
+            {
+                const float angle = DirectX::XMConvertToRadians(angleDegrees);
+                fromTarget = front * std::cos(angle) + across * std::sin(angle);
+            }
+            const Vector3 eye = target + fromTarget * 2.0f;
             player.SetActorLocation(eye - Vector3(0, .15f, 0));
             uint32_t arrow = 0;
             CommandLineArgs::GetInteger(L"woundarrow", arrow);
@@ -1491,6 +1498,10 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             unsigned longest = 0;
             unsigned consecutive = 0;
             int lastHit = -1;
+            int reachingHand = -1;
+            uint32_t expectedHand = 0;
+            const bool checkHand = CommandLineArgs::GetInteger(L"woundexpectedhand", expectedHand);
+            bool handMatches = true;
             float nearest = PX_MAX_F32;
             float gripAge = -1;
             float fiveSecondMaximum = 0;
@@ -1507,6 +1518,8 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 if (sampled)
                 {
                     lastHit = hit;
+                    reachingHand = mesh.GetImpactReachingHand();
+                    handMatches = handMatches && reachingHand == static_cast<int>(expectedHand);
                     nearest = PxMin(nearest, distance);
                 }
                 if (sampled && hit == static_cast<int>(woundBody) && distance <= .05f)
@@ -1531,9 +1544,14 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                     ++heldSteps;
                 }
             }
-            report << "aim=" << bone << " hit=" << lastHit << " closest_m=" << nearest
+            report << "aim=" << bone << " hit=" << lastHit << " hand=" << reachingHand << " closest_m=" << nearest
                 << " grip_age_s=" << gripAge << " continuous_steps=" << longest
                 << " first_five_seconds_max_m=" << fiveSecondMaximum << std::endl;
+            if (checkHand)
+            {
+                check(lastHit == static_cast<int>(woundBody) && reachingHand >= 0 && handMatches,
+                    "The expected hand follows the struck surface from approach through release");
+            }
             check(heldSteps == 300 && !missingContact && fiveSecondMaximum <= .05f && longest >= 300,
                 "Actual palm stays at the moving wound for five seconds from physical contact");
             check(heldExpectedStrength && !mesh.GetRagdoll().HasWound(), "Keep the hit region's drive strength through the full wound hold");

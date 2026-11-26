@@ -39,6 +39,14 @@ namespace
         return -1;
     }
 
+    int FindBody(const PhysicsSkeleton& skeleton, const Ragdoll& ragdoll, const std::string& name)
+    {
+        const std::vector<int>& nodes = ragdoll.GetBoneNodes();
+        const int node = FindNode(skeleton, name);
+        const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), node);
+        return body != nodes.end() ? static_cast<int>(body - nodes.begin()) : -1;
+    }
+
     float Extent(const PhysicsBody& body, const PxTransform& frame, const PxVec3& direction)
     {
         const PxVec3 axis = frame.q.rotateInv(direction);
@@ -121,16 +129,35 @@ SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReac
         reach.body = static_cast<int>(strongest->body);
         reach.pointInBone = bone.transformInv(strongest->position);
         reach.normalInBone = bone.q.rotateInv(strongest->outwardNormal.getNormalized());
+        const int leftShoulder = FindBody(m_PhysicsSkeleton, m_Ragdoll, "LeftArm");
+        const int rightShoulder = FindBody(m_PhysicsSkeleton, m_Ragdoll, "RightArm");
+        int pelvis = FindBody(m_PhysicsSkeleton, m_Ragdoll, "Hips");
+        if (pelvis < 0)
+        {
+            pelvis = FindBody(m_PhysicsSkeleton, m_Ragdoll, "Pelvis");
+        }
+        if (leftShoulder >= 0 && rightShoulder >= 0 && pelvis >= 0)
+        {
+            reach.selection = SelectWoundHand(strongest->position, strongest->outwardNormal,
+                ToFrame(m_Ragdoll.GetBoneWorld(leftShoulder)).p, ToFrame(m_Ragdoll.GetBoneWorld(rightShoulder)).p,
+                ToFrame(m_Ragdoll.GetBoneWorld(pelvis)).p);
+        }
         reach.step = physics->GetStepCount();
         reach.clock = physics->GetClockRevision();
         reach.approachStep = reach.step;
-        if (reach.woundJoint >= 0 && m_ImpactHandReach.body == reach.body && m_ImpactHandReach.clock == reach.clock &&
+        const bool sameHand = reach.selection.hand < 0 || reach.selection.hand == m_ImpactHandReach.selection.hand ||
+            reach.selection.hand == m_ImpactHandReach.hand;
+        if (sameHand && reach.woundJoint >= 0 && m_ImpactHandReach.body == reach.body && m_ImpactHandReach.clock == reach.clock &&
             (m_ImpactHandReach.pointInBone - reach.pointInBone).magnitudeSquared() < .04f * .04f &&
             m_ImpactHandReach.normalInBone.dot(reach.normalInBone) > .5f)
         {
             // 같은 부위의 재피격은 유지 시간을 갱신하되 이미 다가간 손을 떼지 않는다.
             reach.approachStep = m_ImpactHandReach.approachStep;
             reach.hand = m_ImpactHandReach.hand;
+            if (reach.selection.hand < 0)
+            {
+                reach.selection = m_ImpactHandReach.selection;
+            }
         }
     }
     return reach;
@@ -165,6 +192,7 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
     goal.point = bone.transform(m_ImpactHandReach.pointInBone);
     goal.normal = bone.q.rotate(m_ImpactHandReach.normalInBone);
     goal.hitNode = m_Ragdoll.GetBoneNodes()[m_ImpactHandReach.body];
+    goal.selection = m_ImpactHandReach.selection;
     goal.hand = m_ImpactHandReach.hand;
     if (woundJoint >= 0)
     {

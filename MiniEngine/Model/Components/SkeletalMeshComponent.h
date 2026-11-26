@@ -94,6 +94,7 @@ namespace PARS
             int body = -1;
             int hand = -1;
             int woundJoint = -1;
+            WoundHandSelection selection;
         };
 
         struct ImpactWarmup
@@ -262,6 +263,10 @@ namespace PARS
             return m_Ragdoll;
         }
         bool GetImpactPalmDistance(int& hitBody, float& meters) const;
+        int GetImpactReachingHand() const
+        {
+            return m_ImpactHandReach.hand;
+        }
         FootSupport& GetFootSupport()
         {
             return m_FootSupport;
