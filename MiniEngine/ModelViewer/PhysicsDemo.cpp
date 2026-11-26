@@ -5,6 +5,8 @@
 #include "Camera.h"
 #include "CommandContext.h"
 #include "GraphicsCommon.h"
+#include "Model.h"
+#include "ModelLoader.h"
 #include "imgui.h"
 #include "CompiledShaders/PhysicsDemoVS.h"
 #include "CompiledShaders/PhysicsDemoPS.h"
@@ -198,9 +200,11 @@ PhysicsDemo::PhysicsDemo(PARS::World& world)
 {
 }
 
-bool PhysicsDemo::Startup(MapId map)
+PhysicsDemo::~PhysicsDemo() = default;
+
+bool PhysicsDemo::Startup(MapId map, const std::wstring& sceneryPath)
 {
-    if (!m_World.IsInitialized() || !LoadMap(map))
+    if (!m_World.IsInitialized() || !LoadMap(map, sceneryPath))
     {
         return false;
     }
@@ -242,6 +246,8 @@ void PhysicsDemo::Cleanup()
 {
     m_PvdConnecting = false;
     ReleaseMap();
+    m_Gatehouse.reset();
+    m_GatehouseBounds.clear();
 }
 
 void PhysicsDemo::ReleaseMap()
@@ -266,7 +272,66 @@ bool PhysicsDemo::AddMapBox(std::vector<MapBox>& boxes, const PxTransform& pose,
     return true;
 }
 
-bool PhysicsDemo::LoadMap(MapId map)
+bool PhysicsDemo::PrepareGatehouse(const std::wstring& path)
+{
+    if (m_Gatehouse)
+    {
+        return true;
+    }
+    if (path.empty())
+    {
+        return false;
+    }
+    const std::shared_ptr<const Model> model = Renderer::LoadModel(path);
+    if (!model)
+    {
+        return false;
+    }
+    std::unique_ptr<ModelInstance> scenery = std::make_unique<ModelInstance>(model);
+    GraphicsContext& context = GraphicsContext::Begin(L"Upload gatehouse");
+    scenery->Update(context, 0.0f);
+    context.Finish(true);
+
+    // 메시와 같은 좌표로 저장한 빈 노드만 지형 충돌에 쓴다. 장식은 충돌체를 만들지 않는다.
+    std::vector<PxBounds3> bounds;
+    for (uint32_t node = 0; node < model->m_NumNodes; ++node)
+    {
+        if (model->m_NodeNames[node].compare(0, 4, "COL_") != 0)
+        {
+            continue;
+        }
+        Math::Matrix4 transform;
+        if (!scenery->GetNodeTransform(node, transform))
+        {
+            return false;
+        }
+        const Math::Vector4 position = transform.GetW();
+        const PxVec3 center(position.GetX(), position.GetY(), position.GetZ());
+        const PxVec3 extents(transform.GetX().GetX(), transform.GetY().GetY(), transform.GetZ().GetZ());
+        if (!center.isFinite() || !extents.isFinite() || extents.minElement() <= 0.0f)
+        {
+            return false;
+        }
+        bounds.push_back(PxBounds3::centerExtents(center, extents));
+    }
+    if (bounds.empty())
+    {
+        return false;
+    }
+    m_GatehouseBounds = std::move(bounds);
+    m_Gatehouse = std::move(scenery);
+    return true;
+}
+
+void PhysicsDemo::RenderScenery(Renderer::MeshSorter& sorter) const
+{
+    if (m_Map == MapId::Gatehouse && m_Gatehouse)
+    {
+        m_Gatehouse->Render(sorter);
+    }
+}
+
+bool PhysicsDemo::LoadMap(MapId map, const std::wstring& sceneryPath)
 {
     if (!m_World.IsInitialized() || map >= MapId::Count)
     {
@@ -277,7 +342,23 @@ bool PhysicsDemo::LoadMap(MapId map)
     const PxVec3 groundColor(.24f, .34f, .42f);
     const PARS::PhysicsMaterialSettings groundMaterial{.9f, .7f, 0.0f};
     bool ready = true;
-    if (map == MapId::Cliff)
+    if (map == MapId::Gatehouse)
+    {
+        if (!PrepareGatehouse(sceneryPath))
+        {
+            return false;
+        }
+        boxes.reserve(m_GatehouseBounds.size());
+        for (const PxBounds3& bounds : m_GatehouseBounds)
+        {
+            if (!AddMapBox(boxes, PxTransform(bounds.getCenter()), bounds.getExtents(), groundColor, "Gatehouse", groundMaterial))
+            {
+                ready = false;
+                break;
+            }
+        }
+    }
+    else if (map == MapId::Cliff)
     {
         ready = AddMapBox(boxes, PxTransform(PxVec3(0, -1, 0)), PxVec3(6, 1, 6),
             PxVec3(.48f, .32f, .20f), "Cliff platform", groundMaterial);
@@ -341,6 +422,8 @@ const char* PhysicsDemo::GetMapName(MapId map)
         return u8"계단 · 경사로";
     case MapId::Cliff:
         return u8"절벽 낙하장";
+    case MapId::Gatehouse:
+        return u8"왕관 성문 광장";
     default:
         return u8"맵 선택";
     }
@@ -358,18 +441,30 @@ const char* PhysicsDemo::GetMapDescription(MapId map)
         return u8"왼쪽은 계단, 오른쪽은 경사로.\n높이가 달라지는 지형을 이동합니다.";
     case MapId::Cliff:
         return u8"아래 바닥까지 6m 높이의 발판.\n가장자리에서의 지지 상실과 낙하를 확인합니다.";
+    case MapId::Gatehouse:
+        return u8"쌍탑 사이의 성문을 지나 안뜰로 들어갑니다.\n동쪽 계단에서 광장을 내려다볼 수 있습니다.";
     default:
         return "";
     }
 }
 
-Math::Vector3 PhysicsDemo::GetSpawnLocation(float halfHeight) const
+Math::AffineTransform PhysicsDemo::GetPlayerSpawn(const Math::AffineTransform& current, float halfHeight) const
 {
-    return Math::Vector3(2, halfHeight, m_Map == MapId::Cliff ? 2.0f : 0.0f);
+    if (m_Map == MapId::Gatehouse)
+    {
+        return Math::AffineTransform(Math::Matrix3::MakeYRotation(DirectX::XM_PI), Math::Vector3(-0.8f, halfHeight, 10.0f));
+    }
+    Math::AffineTransform spawn = current;
+    spawn.SetTranslation(Math::Vector3(2, halfHeight, m_Map == MapId::Cliff ? 2.0f : 0.0f));
+    return spawn;
 }
 
 Math::Vector3 PhysicsDemo::GetDummySpawnOrigin() const
 {
+    if (m_Map == MapId::Gatehouse)
+    {
+        return Math::Vector3(2.0f, 0.0f, 5.8f);
+    }
     // 절벽 앞쪽 경계(Z=-6)에서 30cm 안쪽에 더미를 배치한다.
     return Math::Vector3(3.5f, 0, m_Map == MapId::Cliff ? -5.7f : -2.5f);
 }
@@ -506,9 +601,16 @@ void PhysicsDemo::Render(GraphicsContext& context, const Math::Camera& camera,
 {
     context.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET);
     context.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
+    const bool gatehouse = m_Map == MapId::Gatehouse && !comparisonScene;
     float background[] = {0.025f, 0.04f, 0.065f, 1.0f};
-    context.ClearColor(g_SceneColorBuffer, background);
+    float courtyardSky[] = {0.18f, 0.31f, 0.46f, 1.0f};
+    context.ClearColor(g_SceneColorBuffer, gatehouse ? courtyardSky : background);
     context.ClearDepth(g_SceneDepthBuffer);
+    if (gatehouse)
+    {
+        // 광장은 공용 메시 렌더러의 깊이·그림자·색상 패스에서 그린다.
+        return;
+    }
     context.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV());
     context.SetViewportAndScissor(viewport, scissor);
     context.SetRootSignature(m_RootSignature);

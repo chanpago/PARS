@@ -3,10 +3,12 @@
 #include "PhysicsWorld.h"
 #include "RootSignature.h"
 #include "PipelineState.h"
+#include <memory>
 #include <string>
 
 namespace Math
 {
+    class AffineTransform;
     class Camera;
 }
 namespace PARS
@@ -14,6 +16,11 @@ namespace PARS
     class World;
 }
 class GraphicsContext;
+class ModelInstance;
+namespace Renderer
+{
+    class MeshSorter;
+}
 struct ImpactProjectileVisual;
 
 class PhysicsDemo
@@ -25,6 +32,7 @@ public:
         Flat,
         Stairs,
         Cliff,
+        Gatehouse,
         Count
     };
 
@@ -39,15 +47,17 @@ private:
 
 public:
     explicit PhysicsDemo(PARS::World& world);
+    ~PhysicsDemo();
 
 public:
-    bool Startup(MapId map = MapId::TestYard);
-    bool LoadMap(MapId map);
+    bool Startup(MapId map = MapId::TestYard, const std::wstring& sceneryPath = {});
+    bool LoadMap(MapId map, const std::wstring& sceneryPath = {});
     void Cleanup();
     void Update(float deltaTime);
     void Render(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor, bool comparisonScene = false);
     void RenderUI();
+    void RenderScenery(Renderer::MeshSorter& sorter) const;
     void RenderProjectiles(GraphicsContext& context, const Math::Camera& camera,
         const D3D12_VIEWPORT& viewport, const D3D12_RECT& scissor,
         const std::vector<ImpactProjectileVisual>& projectiles);
@@ -61,6 +71,7 @@ public:
         const std::vector<physx::PxDebugTriangle>& triangles);
 
 private:
+    bool PrepareGatehouse(const std::wstring& path);
     bool AddMapBox(std::vector<MapBox>& boxes, const physx::PxTransform& pose,
         const physx::PxVec3& halfExtents, const physx::PxVec3& color, const char* name,
         const PARS::PhysicsMaterialSettings& material = {});
@@ -76,7 +87,7 @@ public:
     {
         return m_Map;
     }
-    Math::Vector3 GetSpawnLocation(float halfHeight) const;
+    Math::AffineTransform GetPlayerSpawn(const Math::AffineTransform& current, float halfHeight) const;
     Math::Vector3 GetDummySpawnOrigin() const;
 
 private:
@@ -88,6 +99,8 @@ private:
     GraphicsPSO m_OverlayLinePSO;
     GraphicsPSO m_RegionPSO;
     std::vector<MapBox> m_MapBoxes;
+    std::unique_ptr<ModelInstance> m_Gatehouse;
+    std::vector<physx::PxBounds3> m_GatehouseBounds;
     uint64_t m_PvdConnectDeadline = 0;
     uint64_t m_PvdNextAttempt = 0;
     std::string m_PvdMessage;

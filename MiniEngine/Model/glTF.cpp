@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -521,9 +521,10 @@ void glTF::Asset::ProcessImages( json& images )
     for (json::iterator it = images.begin(); it != images.end(); ++it)
     {
         json& thisImage = it.value();
+        glTF::Image& image = m_images[imageIdx++];
         if (thisImage.find("uri") != thisImage.end())
         {
-            m_images[imageIdx++].path = thisImage.at("uri").get<string>();
+            image.path = thisImage.at("uri").get<string>();
         }
         else if (thisImage.find("bufferView") != thisImage.end())
         {
@@ -614,10 +615,32 @@ void glTF::Asset::ProcessTextures( json& textures )
         texture.sampler = nullptr;
 
         if (thisTexture.find("source") != thisTexture.end())
+        {
             texture.source = &m_images[thisTexture.at("source")];
+        }
 
+        // GPU 압축본을 함께 제공한 에셋은 DDS의 밉 체인을 그대로 사용한다.
+        const json::const_iterator extensions = thisTexture.find("extensions");
+        if (extensions != thisTexture.end() && extensions->count("MSFT_texture_dds") != 0)
+        {
+            const json& dds = extensions->at("MSFT_texture_dds");
+            const json::const_iterator source = dds.find("source");
+            if (source != dds.end() && source->is_number_unsigned() && source->get<uint64_t>() < m_images.size())
+            {
+                glTF::Image& image = m_images[source->get<size_t>()];
+                const std::wstring path = m_basePath + Utility::UTF8ToWideString(image.path);
+                const DWORD attributes = GetFileAttributesW(path.c_str());
+                if (Utility::ToLower(Utility::GetFileExtension(path)) == L"dds" &&
+                    attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+                {
+                    texture.source = &image;
+                }
+            }
+        }
         if (thisTexture.find("sampler") != thisTexture.end())
+        {
             texture.sampler = &m_samplers[thisTexture.at("sampler")];
+        }
     }
 }
 

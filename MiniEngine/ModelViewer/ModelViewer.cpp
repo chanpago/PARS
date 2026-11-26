@@ -81,8 +81,12 @@ using Renderer::MeshSorter;
 
 namespace
 {
-    const wchar_t* const kPreviewFiles[] = {
-        L"Idle/Idle.gltf", L"Walking/Walking.gltf", L"SlowRun/SlowRun.gltf"};
+    const wchar_t* const kPreviewFiles[] =
+    {
+        L"Characters/Mixamo/Converted/Idle/Idle.gltf",
+        L"Characters/Mixamo/Converted/Walking/Walking.gltf",
+        L"Characters/Mixamo/Converted/SlowRun/SlowRun.gltf"
+    };
     const char* const kPreviewNames[] = {"Idle", "Walking", "Slow Run"};
     constexpr uint32_t kPreviewCount = 3;
     const char* const kWalkingDirections[] =
@@ -190,7 +194,8 @@ namespace
 
     // 실행 파일 위치와 작업 디렉터리 양쪽을 기준으로 프로젝트 에셋을 찾는다.
     // 빌드 출력 폴더에서 직접 실행한 경우에도 동작한다.
-    std::wstring FindPreviewAssetRoot()
+    template<size_t FileCount>
+    std::wstring FindAssetRoot(const wchar_t* const (&requiredFiles)[FileCount])
     {
         wchar_t path[32768];
         for (int location = 0; location < 2; ++location)
@@ -208,11 +213,11 @@ namespace
             }
             while (!directory.empty())
             {
-                const std::wstring root = directory + L"/Assets/Characters/";
+                const std::wstring root = directory + L"/Assets/";
                 bool found = true;
-                for (const wchar_t* file : kPreviewFiles)
+                for (const wchar_t* file : requiredFiles)
                 {
-                    const DWORD attributes = GetFileAttributesW((root + L"Mixamo/Converted/" + file).c_str());
+                    const DWORD attributes = GetFileAttributesW((root + file).c_str());
                     found &= attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
                 }
                 if (found)
@@ -716,6 +721,18 @@ bool ModelViewer::EnterMap(PhysicsDemo::MapId map)
     // UI 콜백 밖에서 이전 프레임의 렌더 참조를 끝낸 뒤 지형을 교체한다.
     g_CommandManager.IdleGPU();
     m_MapError.clear();
+    std::wstring sceneryPath;
+    if (map == PhysicsDemo::MapId::Gatehouse)
+    {
+        const wchar_t* const files[] = {L"Maps/Gatehouse/Courtyard.gltf"};
+        const std::wstring root = FindAssetRoot(files);
+        if (root.empty())
+        {
+            m_MapError = u8"왕관 성문 광장의 Courtyard.gltf를 찾을 수 없습니다.";
+            return false;
+        }
+        sceneryPath = root + files[0];
+    }
     if (!m_PhysicsDemo)
     {
         if (!m_World.InitializePhysics())
@@ -724,7 +741,7 @@ bool ModelViewer::EnterMap(PhysicsDemo::MapId map)
             return false;
         }
         m_PhysicsDemo = std::make_unique<PhysicsDemo>(m_World);
-        if (!m_PhysicsDemo->Startup(map))
+        if (!m_PhysicsDemo->Startup(map, sceneryPath))
         {
             m_PhysicsDemo->Cleanup();
             m_PhysicsDemo.reset();
@@ -758,7 +775,7 @@ bool ModelViewer::EnterMap(PhysicsDemo::MapId map)
             m_MapError = u8"캐릭터 상태를 초기화하지 못했습니다. " + m_RagdollMessage;
             return false;
         }
-        if (!m_PhysicsDemo->LoadMap(map))
+        if (!m_PhysicsDemo->LoadMap(map, sceneryPath))
         {
             m_MapError = u8"새 맵을 생성하지 못했습니다. 기존 맵을 유지합니다.";
             return false;
@@ -806,7 +823,8 @@ bool ModelViewer::ResetMapCharacter(bool resetAnimation)
     {
         return false;
     }
-    character->SetActorLocation(m_PhysicsDemo->GetSpawnLocation(character->GetCapsuleComponent().GetHalfHeight()));
+    const float halfHeight = character->GetCapsuleComponent().GetHalfHeight();
+    character->SetActorTransform(m_PhysicsDemo->GetPlayerSpawn(character->GetActorTransform(), halfHeight));
     character->GetCharacterMovement().StopMovementImmediately();
     if (resetAnimation)
     {
@@ -862,11 +880,13 @@ void ModelViewer::DrawMapSelection()
                 }
                 const bool hovered = ImGui::IsItemHovered();
                 ImDrawList* draw = ImGui::GetWindowDrawList();
-                const ImU32 accents[] =
+                static constexpr ImU32 accents[] =
                 {
                     IM_COL32(103, 174, 211, 255), IM_COL32(118, 196, 166, 255),
-                    IM_COL32(202, 179, 110, 255), IM_COL32(224, 145, 110, 255)
+                    IM_COL32(202, 179, 110, 255), IM_COL32(224, 145, 110, 255),
+                    IM_COL32(218, 183, 121, 255)
                 };
+                static_assert(_countof(accents) == static_cast<size_t>(PhysicsDemo::MapId::Count));
                 draw->AddRectFilled(start, ImVec2(start.x + size.x, start.y + size.y),
                     hovered ? IM_COL32(38, 57, 78, 255) : IM_COL32(25, 37, 53, 255), 10);
                 draw->AddRect(start, ImVec2(start.x + size.x, start.y + size.y),
@@ -924,12 +944,13 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     FXAA::Enable = true;
     ResetPreviewCamera();
 
-    const std::wstring characterDirectory = FindPreviewAssetRoot();
-    if (characterDirectory.empty())
+    const std::wstring assetRoot = FindAssetRoot(kPreviewFiles);
+    if (assetRoot.empty())
     {
         m_PreviewError = u8"Assets/Characters/Mixamo/Converted에서 대기, 걷기, 달리기 애니메이션을 찾을 수 없습니다.";
         return;
     }
+    const std::wstring characterDirectory = assetRoot + L"Characters/";
     const std::wstring root = characterDirectory + L"Mixamo/";
 
     /*
@@ -951,7 +972,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
         std::shared_ptr<const Model>& model = models[i];
-        model = LoadAnimationModel(convertedDirectory + kPreviewFiles[i], forceRebuild, animationModels);
+        model = LoadAnimationModel(assetRoot + kPreviewFiles[i], forceRebuild, animationModels);
         if (!model || model->m_NumAnimations == 0 || model->m_Animations[0].duration <= 0.0f)
         {
             m_PreviewError = std::string(u8"애니메이션을 불러오지 못했습니다: ") + kPreviewNames[i];
@@ -1046,7 +1067,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
 #if defined(_M_X64)
     if (m_PhysicsDemo)
     {
-        character->SetActorLocation(m_PhysicsDemo->GetSpawnLocation(halfHeight));
+        character->SetActorTransform(m_PhysicsDemo->GetPlayerSpawn(character->GetActorTransform(), halfHeight));
     }
     if (!m_PhysicsDemo)
 #endif
@@ -1114,9 +1135,6 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     {
         animation->SetAutoCycleEnabled(false);
         m_SpringArm = &character->CreateDefaultSubobject<PARS::SpringArmComponent>("SpringArmComponent");
-        PARS::SpringArmComponent::Settings cameraSettings = m_SpringArm->GetSettings();
-        cameraSettings.collisionTest = false;
-        m_SpringArm->SetSettings(cameraSettings);
         m_SpringArm->AttachToComponent(character->GetCapsuleComponent());
         m_SpringArm->SetRelativeLocation(Vector3(0, .55f, 0));
         // 래그돌의 최종 위치와 렌더 프레임 시간을 사용하도록 World::Tick 뒤에 갱신한다.
@@ -1233,6 +1251,10 @@ void ModelViewer::RenderModels(Renderer::MeshSorter& sorter)
         Renderer::AddWorldMeshes(m_Comparison->GetWorld(), sorter);
         return;
     }
+    if (m_PhysicsDemo)
+    {
+        m_PhysicsDemo->RenderScenery(sorter);
+    }
 #endif
     Renderer::AddWorldMeshes(m_World, sorter);
     m_ModelInst.Render(sorter);
@@ -1251,7 +1273,14 @@ void ModelViewer::ResetPreviewCamera()
     {
         m_Camera.SetZRange(0.1f, 100.0f);
         m_ControlYaw = XM_PI;
-        m_ControlPitch = 0.28f;
+        const bool gatehouse = m_PhysicsDemo->GetMap() == PhysicsDemo::MapId::Gatehouse;
+        m_ControlPitch = gatehouse ? -0.23f : 0.28f;
+        if (m_SpringArm)
+        {
+            PARS::SpringArmComponent::Settings settings = m_SpringArm->GetSettings();
+            settings.collisionTest = gatehouse;
+            m_SpringArm->SetSettings(settings);
+        }
         if (GetPlayerController() && !m_FreeCamera)
         {
             UpdateFollowCamera();
@@ -2418,14 +2447,17 @@ void ModelViewer::RenderScene(void)
     bool physicsScene = false;
     bool hasModels = Renderer::HasWorldMeshes(m_World) || !m_ModelInst.IsNull();
 #if defined(_M_X64)
-    if (m_Comparison && m_Comparison->IsShowingScene())
+    const bool comparing = m_Comparison && m_Comparison->IsShowingScene();
+    if (comparing)
     {
         hasModels = Renderer::HasWorldMeshes(m_Comparison->GetWorld());
     }
+    const bool gatehouse = m_PhysicsDemo && m_PhysicsDemo->GetMap() == PhysicsDemo::MapId::Gatehouse && !comparing;
+    hasModels = hasModels || gatehouse;
     if (m_PhysicsDemo)
     {
         physicsScene = true;
-        m_PhysicsDemo->Render(gfxContext, m_Camera, viewport, scissor, m_Comparison && m_Comparison->IsShowingScene());
+        m_PhysicsDemo->Render(gfxContext, m_Camera, viewport, scissor, comparing);
         if (!hasModels)
         {
             m_PhysicsDemo->RenderCapsules(gfxContext, m_Camera, viewport, scissor);
@@ -2462,14 +2494,20 @@ void ModelViewer::RenderScene(void)
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3(costheta * cosphi, sinphi, sintheta * cosphi));
-        const Vector3 shadowBounds = physicsScene ? Vector3(16, 10, 16) : Vector3(5000, 3000, 3000);
+        Vector3 shadowBounds = physicsScene ? Vector3(16, 10, 16) : Vector3(5000, 3000, 3000);
         Vector3 shadowCenter(0, -500.0f, 0);
 #if defined(_M_X64)
         if (physicsScene)
         {
-            const Vector3 focus = m_Comparison && m_Comparison->IsShowingScene()
+            Vector3 focus = comparing
                 ? m_Comparison->GetViewCenter()
                 : m_Camera.GetPosition() + m_Camera.GetForwardVec() * 4.0f;
+            if (gatehouse)
+            {
+                // 기존 그림자 맵 하나에 광장 바닥부터 성문의 첨탑까지 넣는다.
+                focus = Vector3(0.0f, 6.0f, -5.0f);
+                shadowBounds = Vector3(42.0f, 48.0f, 54.0f);
+            }
             // 역방향 깊이의 0은 먼 평면이므로 주시점을 그림자 볼륨의 가운데에 둔다.
             shadowCenter = focus - SunDirection * (shadowBounds.GetZ() * 0.5f);
         }
