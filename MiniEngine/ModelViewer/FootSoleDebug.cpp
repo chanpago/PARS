@@ -32,6 +32,8 @@ namespace
     constexpr const char* LegSideLabels[] = {u8"왼쪽", u8"오른쪽"};
     constexpr const char* LegJointLabels[] = {u8"고관절", u8"무릎", u8"발목"};
     constexpr const char* LegPartLabels[] = {u8"허벅지", u8"종아리", u8"발"};
+    constexpr std::array<const char*, 3> D6AxisLabels{u8"트위스트(X)", u8"스윙(Y)", u8"스윙(Z)"};
+    constexpr std::array<const char*, 3> ArticulationAxisLabels{u8"회전(X)", u8"회전(Y)", u8"회전(Z)"};
     constexpr size_t NormalModeIndex = static_cast<size_t>(PARS::FootstepMode::Normal);
 
     const PARS::FootstepRecoverySnapshot* VisibleRecovery(const PARS::SkeletalMeshComponent& mesh)
@@ -242,11 +244,31 @@ namespace
         {
             for (size_t joint = 0; joint < check.joints.size(); ++joint)
             {
-                if (check.joints[joint].correctionRadians > 0)
+                const PARS::FootstepJointCheck& jointCheck = check.joints[joint];
+                if (jointCheck.correctionRadians > 0)
                 {
                     std::snprintf(value, sizeof(value), u8"%s %s 보정 %.2f°", LegSideLabels[movingFoot], LegJointLabels[joint],
-                        DirectX::XMConvertToDegrees(check.joints[joint].correctionRadians));
+                        DirectX::XMConvertToDegrees(jointCheck.correctionRadians));
                     AppendDetail(details, value);
+                    const std::array<const char*, 3>& labels = jointCheck.usesArticulation ? ArticulationAxisLabels : D6AxisLabels;
+                    std::string axes;
+                    for (size_t axis = 0; axis < labels.size(); ++axis)
+                    {
+                        if (jointCheck.limitedAxes[axis])
+                        {
+                            AppendDetail(axes, labels[axis]);
+                        }
+                    }
+                    if (jointCheck.limitedAxes[3])
+                    {
+                        AppendDetail(axes, u8"스윙 원뿔(Y·Z)");
+                    }
+                    if (!axes.empty())
+                    {
+                        details += " [";
+                        details += axes;
+                        details += ']';
+                    }
                 }
             }
         }

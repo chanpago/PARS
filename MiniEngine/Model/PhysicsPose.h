@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "Animation.h"
 #include "PhysicsAsset.h"
+#include <array>
 
 namespace PARS
 {
@@ -24,10 +25,13 @@ namespace PARS
     Math::Quaternion EvaluateJointDriveTarget(const PhysicsConstraint& joint,
         const Math::Matrix4& parentBodyTarget, const Math::Matrix4& childBodyTarget, bool clampToLimits = true);
     // IK와 D6 구동에서 같은 트위스트·스윙 제한을 적용한다.
-    Math::Quaternion ClampD6DriveTarget(const PhysicsConstraint& joint, Math::Quaternion rotation);
+    // 축 진단은 개별 X, Y, Z 제한과 D6의 결합 스윙 원뿔 제한 순서다.
+    Math::Quaternion ClampD6DriveTarget(const PhysicsConstraint& joint, Math::Quaternion rotation,
+        std::array<bool, 4>* limitedAxes = nullptr);
     // 최단 회전의 축 * 각도(rad). Articulation 런타임과 비교 보고서가 같은 좌표를 사용한다.
     Math::Vector3 JointRotationVector(Math::Quaternion rotation);
-    Math::Quaternion ClampArticulationDriveTarget(const PhysicsConstraint& joint, Math::Quaternion rotation);
+    Math::Quaternion ClampArticulationDriveTarget(const PhysicsConstraint& joint, Math::Quaternion rotation,
+        std::array<bool, 4>* limitedAxes = nullptr);
     // 주요 본 전체를 포함한 프리셋이다(바디 20개 / 제약 19개). 손가락, 발가락,
     // 말단 표시 노드는 제외한다. 질량은 73kg 성인 남성 기준값(de Leva 1996)을 사용한다.
     // 몸통 그룹은 프리셋 콜라이더 부피에 비례해 나누고, 머리/목은

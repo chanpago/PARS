@@ -16,11 +16,11 @@ namespace PARS
     }
 
     inline float FootstepJointCorrectionRadians(const PhysicsConstraint& constraint, bool articulation,
-        const Math::Matrix4& parent, const Math::Matrix4& child)
+        const Math::Matrix4& parent, const Math::Matrix4& child, std::array<bool, 4>* limitedAxes = nullptr)
     {
         const Math::Quaternion raw = EvaluateJointDriveTarget(constraint, parent, child, false);
         const Math::Quaternion limited = articulation ?
-            ClampArticulationDriveTarget(constraint, raw) : ClampD6DriveTarget(constraint, raw);
+            ClampArticulationDriveTarget(constraint, raw, limitedAxes) : ClampD6DriveTarget(constraint, raw, limitedAxes);
         const float dot = physx::PxAbs(DirectX::XMVectorGetX(DirectX::XMVector4Dot(raw, limited)));
         return std::isfinite(dot) ? 2 * std::acos(physx::PxClamp(dot, 0.0f, 1.0f)) : dot;
     }
@@ -61,8 +61,9 @@ namespace PARS
                 }
                 else
                 {
+                    std::array<bool, 4> limitedAxes{};
                     const float correction = FootstepJointCorrectionRadians(asset.constraints[constraint], articulation,
-                        bodies[index], bodies[index + 1]);
+                        bodies[index], bodies[index + 1], details ? &limitedAxes : nullptr);
                     if (!std::isfinite(correction))
                     {
                         joint.inputIssue = FootstepJointInputIssue::Rotation;
@@ -70,6 +71,8 @@ namespace PARS
                     else if (correction > FootstepPoseCheck::JointToleranceRadians)
                     {
                         joint.correctionRadians = correction;
+                        joint.limitedAxes = limitedAxes;
+                        joint.usesArticulation = articulation;
                         failures |= FootstepPoseFailure::JointLimit;
                     }
                 }

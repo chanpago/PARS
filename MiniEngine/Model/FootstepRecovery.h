@@ -77,6 +77,9 @@ namespace PARS
     public:
         float correctionRadians = 0;
         FootstepJointInputIssue inputIssue = FootstepJointInputIssue::None;
+        // 개별 X, Y, Z 제한과 D6 스윙 원뿔 제한 순서다.
+        std::array<bool, 4> limitedAxes{};
+        bool usesArticulation = false;
     };
 
     struct FootstepPoseCheck
@@ -88,7 +91,7 @@ namespace PARS
         }
 
     public:
-        static constexpr float SoleTolerance = .0001f;
+        static constexpr float SoleTolerance = .005f;
         static constexpr float JointToleranceRadians = .01f;
 
     public:

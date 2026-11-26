@@ -8,6 +8,12 @@ namespace PARS
 {
     namespace
     {
+        bool AxisChangedByLimit(float requested, float limited)
+        {
+            // 좌표 변환의 반올림 오차로 인접 축까지 제한된 것으로 표시되는 것을 막는다.
+            return std::abs(requested - limited) > 1e-6f;
+        }
+
         Matrix4 Local(const GraphNode& node)
         {
             Matrix4 result = node.xform;
@@ -126,7 +132,8 @@ namespace PARS
         return length > 1e-8f ? Vector3(q.x, q.y, q.z) * (2 * std::atan2(length, q.w) / length) : Vector3(kZero);
     }
 
-    Quaternion ClampArticulationDriveTarget(const PhysicsConstraint& joint, Quaternion rotation)
+    Quaternion ClampArticulationDriveTarget(const PhysicsConstraint& joint, Quaternion rotation,
+        std::array<bool, 4>* limitedAxes)
     {
         XMFLOAT3 position;
         XMStoreFloat3(&position, JointRotationVector(rotation));
@@ -144,6 +151,11 @@ namespace PARS
             {
                 values[axis] = Clamp(values[axis], lower[axis], upper[axis]);
             }
+        }
+        if (limitedAxes)
+        {
+            *limitedAxes = {AxisChangedByLimit(position.x, values[0]), AxisChangedByLimit(position.y, values[1]),
+                AxisChangedByLimit(position.z, values[2]), false};
         }
         const Vector3 vector(values[0], values[1], values[2]);
         const float angle = Length(vector);
@@ -178,7 +190,8 @@ namespace PARS
         return ClampD6DriveTarget(joint, q);
     }
 
-    Quaternion ClampD6DriveTarget(const PhysicsConstraint& joint, Quaternion rotation)
+    Quaternion ClampD6DriveTarget(const PhysicsConstraint& joint, Quaternion rotation,
+        std::array<bool, 4>* limitedAxes)
     {
         Quaternion q = Normalize(rotation);
         XMFLOAT4 v;
@@ -201,6 +214,7 @@ namespace PARS
         float x = norm > 1e-7f ? 2 * std::atan2(v.x, v.w) : 0;
         float y = 4 * std::atan2(s.y, 1 + s.w);
         float z = 4 * std::atan2(s.z, 1 + s.w);
+        const std::array<float, 3> requested{x, y, z};
         if (joint.twist == PhysicsJointMotion::Locked)
         {
             x = 0;
@@ -225,6 +239,11 @@ namespace PARS
         {
             z = std::max(joint.swingZMin, std::min(joint.swingZMax, z));
         }
+        if (limitedAxes)
+        {
+            *limitedAxes = {AxisChangedByLimit(requested[0], x), AxisChangedByLimit(requested[1], y),
+                AxisChangedByLimit(requested[2], z), false};
+        }
         if (joint.swingY == PhysicsJointMotion::Limited && joint.swingZ == PhysicsJointMotion::Limited &&
             !joint.HasAsymmetricSwingZLimit())
         {
@@ -233,8 +252,14 @@ namespace PARS
             const float r = std::sqrt(y * y / (joint.swingYLimit * joint.swingYLimit) + z * z / (joint.swingZMax * joint.swingZMax));
             if (r > 1)
             {
-                y /= r;
-                z /= r;
+                const float coneY = y / r;
+                const float coneZ = z / r;
+                if (limitedAxes)
+                {
+                    (*limitedAxes)[3] = AxisChangedByLimit(y, coneY) || AxisChangedByLimit(z, coneZ);
+                }
+                y = coneY;
+                z = coneZ;
             }
         }
         const float ty = std::tan(y * .25f);
