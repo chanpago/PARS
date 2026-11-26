@@ -178,12 +178,17 @@ std::wstring Utility::UTF8ToWideString( const std::string& str )
     return wstr;
 }
 
-std::string Utility::WideStringToUTF8( const std::wstring& wstr )
+std::string Utility::WideStringToUTF8(const std::wstring& wstr)
 {
-    char str[MAX_PATH];
-    if ( !WideCharToMultiByte(CP_ACP, MB_PRECOMPOSED, wstr.c_str(), -1, str, MAX_PATH, nullptr, nullptr) )
-        str[0] = L'\0';
-    return str;
+    const int byteCount = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (byteCount <= 1)
+    {
+        return {};
+    }
+    std::string utf8(static_cast<size_t>(byteCount), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &utf8[0], byteCount, nullptr, nullptr);
+    utf8.pop_back();
+    return utf8;
 }
 
 std::string Utility::ToLower(const std::string& str)

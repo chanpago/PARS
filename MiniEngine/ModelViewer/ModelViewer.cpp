@@ -208,11 +208,11 @@ namespace
             }
             while (!directory.empty())
             {
-                const std::wstring root = directory + L"/Assets/Characters/Mixamo/";
+                const std::wstring root = directory + L"/Assets/Characters/";
                 bool found = true;
                 for (const wchar_t* file : kPreviewFiles)
                 {
-                    const DWORD attributes = GetFileAttributesW((root + L"Converted/" + file).c_str());
+                    const DWORD attributes = GetFileAttributesW((root + L"Mixamo/Converted/" + file).c_str());
                     found &= attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
                 }
                 if (found)
@@ -916,13 +916,13 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     FXAA::Enable = true;
     ResetPreviewCamera();
 
-    const std::wstring root = FindPreviewAssetRoot();
-    if (root.empty())
+    const std::wstring characterDirectory = FindPreviewAssetRoot();
+    if (characterDirectory.empty())
     {
         m_PreviewError = u8"Assets/Characters/Mixamo/Converted에서 대기, 걷기, 달리기 애니메이션을 찾을 수 없습니다.";
         return;
     }
-
+    const std::wstring root = characterDirectory + L"Mixamo/";
 
     /*
     idle,walk,run에 사용할 모델 데이터를 파일에서 읽어 models배열에 저장한다.
@@ -1172,7 +1172,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
     ResetPreviewCamera();
     m_MeshViewer = std::make_unique<SkeletalMeshViewer>();
     LoadViewerAnimations(convertedDirectory, forceRebuild, animationModels);
-    if (!m_MeshViewer->Initialize(models[0], animationModels))
+    if (!m_MeshViewer->Initialize(models[0], animationModels, characterDirectory, forceRebuild))
     {
         m_MeshViewer.reset();
     }
@@ -2307,6 +2307,10 @@ void ModelViewer::RenderUI(GraphicsContext& context)
                 if (ImGui::MenuItem(u8"스켈레탈 메시 뷰어", nullptr, false, m_MeshViewer != nullptr))
                 {
                     m_MeshViewer->Open();
+                }
+                if (ImGui::MenuItem(u8"캐릭터 메시 미리보기", nullptr, false, m_MeshViewer != nullptr))
+                {
+                    m_MeshViewer->OpenMeshPreview();
                 }
 #if defined(_M_X64)
                 if (ImGui::MenuItem(u8"래그돌 비교", nullptr, false, m_Comparison != nullptr))

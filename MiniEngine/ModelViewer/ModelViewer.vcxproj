@@ -72,6 +72,7 @@
   <ItemGroup>
     <ClCompile Include="ModelViewer.cpp" />
     <ClCompile Include="SkeletalMeshViewer.cpp" />
+    <ClCompile Include="SkeletalMeshViewerPreview.cpp" />
     <ClCompile Include="SkeletonOverlay.cpp" />
     <ClCompile Include="SkeletonOverlayShapes.cpp" />
     <ClCompile Include="SkeletalMeshViewerPhysics.cpp" />

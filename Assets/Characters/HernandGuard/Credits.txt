@@ -1,0 +1,16 @@
+Hernand gate guard
+
+Visual reference
+Crimson Desert by Pearl Abyss. Gate guard screenshot captured by GamesRadar+.
+https://www.gamesradar.com/games/rpg/crimson-desert-hernand-castle-alchemists-chamber/
+
+Face mesh and face maps
+Infinite, 3D Head Scan by Lee Perry-Smith / Infinite-Realities, sourced from the three.js example assets.
+https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf/LeePerrySmith
+https://www.triplegangers.com/
+Creative Commons Attribution 3.0 Unported
+https://creativecommons.org/licenses/by/3.0/
+Adaptations include cropping and fitting the head, adjusting UV orientation and adding the eyes.
+
+The rig and hand topology come from this PARS project's existing Mixamo character.
+The armor, costume, heraldic relief, polearm, equipment textures and gate-watch motion were modeled for this asset.

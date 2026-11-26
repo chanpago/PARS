@@ -9,11 +9,11 @@
 #include "PipelineState.h"
 #include "RootSignature.h"
 #include "Animation.h"
+#include "Model.h"
 #include "SkeletonOverlay.h"
 #include <map>
 #include <memory>
 
-class Model;
 namespace PARS
 {
     class SkeletalMeshComponent;
@@ -33,6 +33,33 @@ public:
         B
     };
 
+private:
+    struct PreviewMesh
+    {
+    public:
+        std::string label;
+        std::unique_ptr<ModelInstance> instance;
+    };
+
+    struct CharacterPreview
+    {
+    public:
+        Math::Camera camera;
+        ColorBuffer display;
+        std::wstring directory;
+        std::vector<PreviewMesh> meshes;
+        std::string loadError;
+        uint64_t image = 0;
+        size_t selected = 0;
+        float yaw = 0.0f;
+        float pitch = 0.0f;
+        float zoom = 1.0f;
+        bool open = false;
+        bool focused = false;
+        bool focusRequested = false;
+        bool forceRebuild = false;
+    };
+
 public:
     ~SkeletalMeshViewer()
     {
@@ -40,7 +67,8 @@ public:
     }
 
 public:
-    bool Initialize(const std::shared_ptr<const Model>& referenceMesh, const AnimationModels& animations);
+    bool Initialize(const std::shared_ptr<const Model>& referenceMesh, const AnimationModels& animations,
+        const std::wstring& characterDirectory, bool forceRebuild);
     void Cleanup(); // GPU가 유휴 상태가 된 후, 렌더러/ImGui를 종료하기 전에 호출한다.
     void Update(float deltaTime);
     void RenderUI(GraphicsContext& context, bool comparisonAvailable = false, bool physicsSaveAvailable = false);
@@ -55,10 +83,18 @@ public:
         m_Open = true;
         m_FocusRequested = true;
     }
+    void OpenMeshPreview()
+    {
+        m_CharacterPreview.open = true;
+        m_CharacterPreview.focusRequested = true;
+    }
     void Close()
     {
         m_Open = false;
         m_Focused = false;
+        m_CharacterPreview.open = false;
+        m_CharacterPreview.focused = false;
+        m_CharacterPreview.focusRequested = false;
     }
     bool SetPhysicsAsset(const PARS::PhysicsAsset& asset, std::string& error);
     bool ConsumePhysicsSaveRequest(std::string& path);
@@ -67,7 +103,13 @@ public:
 private:
     void ResetCamera();
     void UpdateCamera(bool hovered);
-    void RenderPreview(GraphicsContext& context, float aspect);
+    void CancelInteraction();
+    void DrawPhysicsEditor(GraphicsContext& context, bool comparisonAvailable, bool physicsSaveAvailable);
+    void InitializeMeshPreview();
+    void DrawMeshPreview(GraphicsContext& context);
+    void ResetMeshPreviewCamera();
+    void DrawMeshPreviewViewport(GraphicsContext& context);
+    void RenderPreview(GraphicsContext& context, Renderer::MeshSorter& sorter, ColorBuffer& display);
     void BuildSkeleton();
     void DrawBoneTree(int32_t node);
     void DrawNavigation();
@@ -94,7 +136,7 @@ private:
 public:
     bool WantsInput() const
     {
-        return m_Open && m_Focused;
+        return (m_Open && m_Focused) || (m_CharacterPreview.open && m_CharacterPreview.focused);
     }
     const PARS::PhysicsAsset& GetPhysicsAsset() const
     {
@@ -103,7 +145,6 @@ public:
     void SetDefaultPhysicsAssetPath(const std::string& path);
 
 private:
-    void CancelInteraction();
     float GetGizmoLength() const;
     Math::Vector3 GetBoneAxis(int axis) const;
     float GetDragAngle(float x, float y) const;
@@ -128,6 +169,7 @@ private:
     ColorBuffer m_Color;
     ColorBuffer m_Display;
     ColorBuffer m_AmbientOcclusion{Color(1.0f, 1.0f, 1.0f, 1.0f)};
+    CharacterPreview m_CharacterPreview;
     SkeletonOverlay m_Overlay;
     GraphNode m_DragOriginal{};
     Math::Vector3 m_DragLocalDirection{Math::kZero};

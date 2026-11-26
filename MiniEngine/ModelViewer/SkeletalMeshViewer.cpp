@@ -20,12 +20,15 @@ namespace
     constexpr uint32_t PreviewResolution = 1024;
 }
 
-bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>& referenceMesh, const AnimationModels& animations)
+bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>& referenceMesh, const AnimationModels& animations,
+    const std::wstring& characterDirectory, bool forceRebuild)
 {
     if (!referenceMesh)
     {
         return false;
     }
+    m_CharacterPreview.directory = characterDirectory;
+    m_CharacterPreview.forceRebuild = forceRebuild;
     PARS::Actor* actor = m_World.SpawnActor<PARS::Actor>("MeshPreview");
     m_Mesh = &actor->CreateDefaultSubobject<PARS::SkeletalMeshComponent>("SkeletalMeshComponent");
     actor->SetRootComponent(*m_Mesh);
@@ -119,6 +122,12 @@ bool SkeletalMeshViewer::Initialize(const std::shared_ptr<const Model>& referenc
 void SkeletalMeshViewer::Cleanup()
 {
     CancelInteraction();
+    ImGuiOverlay::UnregisterTexture(m_CharacterPreview.image);
+    m_CharacterPreview.image = 0;
+    m_CharacterPreview.display.Destroy();
+    m_CharacterPreview.meshes.clear();
+    m_CharacterPreview.loadError.clear();
+    m_CharacterPreview.selected = 0;
     ImGuiOverlay::UnregisterTexture(m_Image);
     m_Image = 0;
     m_Overlay.Cleanup();
@@ -218,6 +227,12 @@ void SkeletalMeshViewer::UpdateCamera(bool hovered)
 
 void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvailable, bool physicsSaveAvailable)
 {
+    DrawPhysicsEditor(context, comparisonAvailable, physicsSaveAvailable);
+    DrawMeshPreview(context);
+}
+
+void SkeletalMeshViewer::DrawPhysicsEditor(GraphicsContext& context, bool comparisonAvailable, bool physicsSaveAvailable)
+{
     m_PhysicsSaveAvailable = physicsSaveAvailable;
     m_Focused = false;
     if (!m_Open || !m_Mesh)
@@ -252,6 +267,11 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
         ImGui::SameLine();
         ImGui::TextDisabled(u8"| 본 %u개 | 바디 %zu개 | 관절 %zu개", m_Mesh->GetSkeletalMesh()->m_NumJoints,
             m_PhysicsAsset.bodies.size(), m_PhysicsAsset.constraints.size());
+        ImGui::SameLine();
+        if (ImGui::Button(u8"캐릭터 메시 미리보기"))
+        {
+            OpenMeshPreview();
+        }
         ImGui::BeginDisabled(!comparisonAvailable || m_PhysicsAsset.bodies.empty());
         if (ImGui::Button(u8"시뮬레이션 A 시작"))
         {
@@ -419,7 +439,13 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
                 const bool hovered = ImGui::IsItemHovered();
                 UpdateGizmoDrag(mouse.x - origin.x, mouse.y - origin.y);
                 UpdateCamera(hovered);
-                RenderPreview(context, size.y / size.x);
+                m_Camera.SetPerspectiveMatrix(XM_PIDIV4, size.y / size.x, m_Radius * 0.01f, m_Radius * 100);
+                m_Camera.Update();
+                m_Mesh->UpdateRenderData(context, m_EditPose.empty() ? nullptr : &m_EditPose);
+                Renderer::MeshSorter sorter(Renderer::MeshSorter::kDefault);
+                sorter.SetCamera(m_Camera);
+                m_Mesh->Render(sorter);
+                RenderPreview(context, sorter, m_Display);
                 UpdateBoneWorld();
                 m_ViewportHeight = size.y;
                 m_Overlay.Begin(m_Camera, size.x, size.y);
@@ -457,21 +483,15 @@ void SkeletalMeshViewer::RenderUI(GraphicsContext& context, bool comparisonAvail
     }
 }
 
-void SkeletalMeshViewer::RenderPreview(GraphicsContext& context, float aspect)
+void SkeletalMeshViewer::RenderPreview(GraphicsContext& context, Renderer::MeshSorter& sorter, ColorBuffer& display)
 {
-    m_Camera.SetPerspectiveMatrix(XM_PIDIV4, aspect, m_Radius * 0.01f, m_Radius * 100);
-    m_Camera.Update();
-    m_Mesh->UpdateRenderData(context, m_EditPose.empty() ? nullptr : &m_EditPose);
     context.TransitionResource(m_Color, D3D12_RESOURCE_STATE_RENDER_TARGET);
     context.TransitionResource(m_Depth, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
     context.ClearColor(m_Color);
     context.ClearDepth(m_Depth);
-    Renderer::MeshSorter sorter(Renderer::MeshSorter::kDefault);
-    sorter.SetCamera(m_Camera);
     sorter.SetDepthStencilTarget(m_Depth);
     sorter.AddRenderTarget(m_Color);
     sorter.SetCommonTextures(m_Textures);
-    m_Mesh->Render(sorter);
     sorter.Sort();
     GlobalConstants globals{};
     globals.SunShadowMatrix = Matrix4(Vector4(kZero), Vector4(kZero), Vector4(kZero), Vector4(0.5f, 0.5f, 1, 1));
@@ -480,13 +500,13 @@ void SkeletalMeshViewer::RenderPreview(GraphicsContext& context, float aspect)
     sorter.RenderMeshes(Renderer::MeshSorter::kTransparent, context, globals);
 
     context.TransitionResource(m_Color, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    context.TransitionResource(m_Display, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
+    context.TransitionResource(display, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
     context.SetRootSignature(m_PresentRoot);
     context.SetPipelineState(m_PresentPSO);
     context.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context.SetRenderTarget(m_Display.GetRTV());
+    context.SetRenderTarget(display.GetRTV());
     context.SetViewportAndScissor(0, 0, PreviewResolution, PreviewResolution);
     context.SetDynamicDescriptor(0, 0, m_Color.GetSRV());
     context.Draw(3);
-    context.TransitionResource(m_Display, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(display, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }

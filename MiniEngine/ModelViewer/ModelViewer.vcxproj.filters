@@ -250,6 +250,7 @@
     <ClCompile Include="RagdollValidation.cpp" />
     <ClCompile Include="ActiveRagdollValidation.cpp" />
     <ClCompile Include="SkeletalMeshViewer.cpp" />
+    <ClCompile Include="SkeletalMeshViewerPreview.cpp" />
     <ClCompile Include="SkeletalMeshViewerSkeleton.cpp" />
     <ClCompile Include="SkeletonOverlay.cpp" />
     <ClCompile Include="SkeletonOverlayShapes.cpp" />
