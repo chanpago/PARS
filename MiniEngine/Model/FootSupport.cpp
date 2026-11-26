@@ -444,11 +444,6 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         {
             return landingQuery.CheckPose(side, position, normal, displacement);
         };
-        input.checkPelvisTurn = [&landingQuery, &input](size_t side, const FootstepCommand& command, float angle,
-            FootstepPelvisTurn& selected) -> bool
-        {
-            return landingQuery.CheckPelvisTurn(side, command, angle, input.fixedDeltaTime, selected);
-        };
     }
     input.active = mesh.IsActiveRagdoll();
     input.automaticSupport = mesh.UsesAutomaticRootSupport();

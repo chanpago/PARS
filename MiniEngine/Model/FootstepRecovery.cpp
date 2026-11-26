@@ -449,7 +449,6 @@ namespace
                 break;
             }
             result.poseCheckPositions[result.poseChecks] = candidate.position;
-            result.poseCheckModes[result.poseChecks] = static_cast<FootstepMode>(candidate.mode);
             const FootstepPoseCheck check = input.checkTargetPose ? input.checkTargetPose(candidate.position) : FootstepPoseCheck{};
             result.poseCheckResults[result.poseChecks] = check;
             ++result.poseChecks;
@@ -466,34 +465,6 @@ namespace
             return;
         }
         result.status = result.poseRejected ? FootstepRecoveryStatus::PoseRejected : FootstepRecoveryStatus::NoReach;
-    }
-
-    void RetryWithPelvisTurn(const FootstepRecoveryInput& input, FootstepRecoverySnapshot& result)
-    {
-        // 양쪽 회전 부호와 모든 기존 후보를 같은 각도에서 먼저 검사한다.
-        for (int degrees = 5; degrees <= 40; degrees += 5)
-        {
-            for (uint32_t index = 0; index < result.poseChecks; ++index)
-            {
-                const FootstepPoseCheck& check = result.poseCheckResults[index];
-                if (!check.failures.isSet(FootstepPoseFailure::JointLimit) || !check.joints[2].limitedAxes[0])
-                {
-                    continue;
-                }
-                const FootstepMode mode = result.poseCheckModes[index];
-                const PxVec3& position = result.poseCheckPositions[index];
-                const float angle = static_cast<float>(degrees) * (PxPi / 180.0f);
-                if (input.checkPelvisTurn(position, mode, angle) || input.checkPelvisTurn(position, mode, -angle))
-                {
-                    result.mode = mode;
-                    result.target = position;
-                    result.hasTarget = true;
-                    result.modelFeasible = Contains(result.intersections[static_cast<size_t>(mode)], position);
-                    result.status = result.modelFeasible ? FootstepRecoveryStatus::Feasible : FootstepRecoveryStatus::BestEffort;
-                    return;
-                }
-            }
-        }
     }
 }
 
@@ -861,10 +832,6 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     else if (!result.hasTarget)
     {
         SelectTarget(input, settings, modes, HasModeOverlap(modes, result), result);
-    }
-    if (result.status == FootstepRecoveryStatus::PoseRejected && input.checkPelvisTurn)
-    {
-        RetryWithPelvisTurn(input, result);
     }
     if (result.hasTarget && result.modelFeasible)
     {

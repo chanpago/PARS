@@ -444,12 +444,6 @@ bool FootstepIK::BuildLegInput(const FootstepIKInput& input, size_t side,
     {
         return false;
     }
-    if (leg.turnReference)
-    {
-        result = *leg.turnReference;
-        result.targetSole = leg.targetSole;
-        return true;
-    }
     const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
     result.hip = toPhysical * pose[leg.hipNode];
     result.knee = toPhysical * pose[leg.kneeNode];

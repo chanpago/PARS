@@ -28,11 +28,6 @@ namespace PARS
             std::array<FootstepReachInput, 2>& reaches);
         FootstepPoseCheck CheckPose(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
             const physx::PxVec3& displacement) const;
-        bool CheckPelvisTurn(size_t side, const FootstepCommand& command, float angle,
-            float fixedDeltaTime, FootstepPelvisTurn& selected) const;
-
-    private:
-        TwoBoneIKInput MakeSwingReference(size_t side) const;
 
     private:
         const PhysicsAsset* m_Asset = nullptr;

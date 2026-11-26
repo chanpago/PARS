@@ -371,7 +371,7 @@ namespace
             Near(SampleFootstepPathVelocity(replacement, .08f), velocity),
             "Replanning joins the old position and derivative at the current flight clock");
         input = MakeAvoidanceFixture();
-        input.acceptsPose = [](size_t, const LegIKResult&, float) -> bool
+        input.acceptsPose = [](size_t, const LegIKResult&) -> bool
         {
             return false;
         };
@@ -397,88 +397,8 @@ namespace
     }
 }
 
-void TestPelvisTurnTrajectory()
-{
-    for (size_t side = 0; side < 2; ++side)
-    {
-        FootstepCollisionInput input = MakeInput();
-        input.legs[0] = MakeLeg(-.18f);
-        input.legs[1] = MakeLeg(.18f);
-        const size_t support = 1 - side;
-        input.legs[support].command.phase = FootstepPhase::Idle;
-        FootstepCommand& command = input.legs[side].command;
-        const float sign = side == 0 ? -1.0f : 1.0f;
-        command.target.position = command.startPosition + PxVec3(sign * .075f, 0, -.18f);
-        FootstepPelvisTurn turn;
-        turn.angle = -sign * PxPi / 6;
-        turn.duration = command.motion.duration;
-        turn.pelvis = PxTransform(PxVec3(0, 1, 0));
-        for (size_t foot = 0; foot < 2; ++foot)
-        {
-            FootstepCollisionLeg& leg = input.legs[foot];
-            turn.legs[foot] = leg.pose;
-            leg.pelvisTurn = &turn;
-            leg.side = foot;
-            leg.pelvisPivot = turn.pelvis.p;
-        }
-        PxTransform landing(PxIdentity);
-        Check(MakeFootSoleTarget(command.target.position, command.target.normal, input.legs[side].pose.targetSole,
-            landing, command.target.position - command.startPosition), "Build the unchanged stride-aligned sole");
-        turn.SetLandingSole(side, landing);
-        Check(std::abs(turn.SoleRotationAt(0).dot(input.legs[side].pose.targetSole.q)) > .99999f &&
-            std::abs(turn.SoleRotationAt(turn.duration).dot(landing.q)) > .99999f, "Rotate from the measured foot to the required stride heading");
-        input.rejectInvalidPoses = true;
-        const FootstepCollisionSnapshot path = PredictFootstepCollisions(input);
-        Check(path.status == FootstepCollisionStatus::Clear && !path.reachLimited, "Certify both signs of the moving-pelvis swing");
-        for (size_t foot = 0; foot < input.legs.size(); ++foot)
-        {
-            const FootstepCollisionLeg& leg = input.legs[foot];
-            const float begin = turn.duration * .4f;
-            const float end = turn.duration * .41f;
-            std::array<FootstepInterval::Transform, 3> bounds;
-            Check(BoundFootstepLeg(leg, begin, end, bounds), "Bound the mid-turn geometry of each leg");
-            for (int sample = 0; sample <= 8; ++sample)
-            {
-                const float time = begin + (end - begin) * static_cast<float>(sample) / 8;
-                std::array<PxTransform, 3> shapes;
-                LegIKResult solved;
-                Check(PredictFootstepLeg(leg, time, shapes, solved), "Sample both legs within the turn interval");
-                for (size_t part = 0; part < shapes.size(); ++part)
-                {
-                    const PxVec3 local(.07f, -.11f, .19f);
-                    const PxVec3 point = shapes[part].transform(local);
-                    const FootstepInterval::Vector bound = bounds[part].position +
-                        FootstepInterval::Rotate(bounds[part].rotation, FootstepInterval::Vector(local));
-                    Check(point.x >= bound.x.lower && point.x <= bound.x.upper && point.y >= bound.y.lower &&
-                        point.y <= bound.y.upper && point.z >= bound.z.lower && point.z <= bound.z.upper,
-                        "The interval contains the turning leg shape including the rotating toe");
-                }
-            }
-        }
-        for (int index = 0; index <= 10; ++index)
-        {
-            const float time = turn.duration * static_cast<float>(index) / 10;
-            LegIKResult planted;
-            std::array<PxTransform, 3> shapes;
-            Check(PredictFootstepLeg(input.legs[support], time, shapes, planted) && Near(planted.solvedSole.p, turn.legs[support].targetSole.p) &&
-                std::abs(planted.solvedSole.q.dot(turn.legs[support].targetSole.q)) > .99999f, "Support sole stays planted throughout the turn");
-            LegIKResult moving;
-            Check(PredictFootstepLeg(input.legs[side], time, shapes, moving) &&
-                Near(moving.solvedSole.p, SampleFootstepPosition(command, time)) &&
-                std::abs(moving.solvedSole.q.dot(turn.SoleRotationAt(time))) > .99999f, "Moving sole follows the tested swing and toe rotation");
-        }
-        input.acceptsPose = [support](size_t foot, const LegIKResult&, float time) -> bool
-        {
-            return foot != support || time <= .1f;
-        };
-        const FootstepCollisionSnapshot blocked = PredictFootstepCollisions(input);
-        Check(blocked.status != FootstepCollisionStatus::Clear && blocked.jointLimited, "A mid-turn support joint vetoes the entire path");
-    }
-}
-
 void TestFootstepCollision()
 {
-    TestPelvisTurnTrajectory();
     TestFuturePathAndRetarget();
     TestAllPairsAndOffsets();
     TestBothMoving();

@@ -86,7 +86,6 @@ namespace PARS
     struct FootIKLegInput
     {
     public:
-        const TwoBoneIKInput* turnReference = nullptr;
         int anchorNode = -1;
         int hipNode = -1;
         int kneeNode = -1;
