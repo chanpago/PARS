@@ -88,6 +88,12 @@ class PhysicsWorld : private physx::PxSimulationEventCallback, private physx::Px
 {
 public:
     using BeforeStep = std::function<void(float)>;
+    enum class SphereSweepPurpose : uint8_t
+    {
+        Gameplay,
+        Camera
+    };
+
     struct CapsuleMoveResult
     {
     public:
@@ -175,9 +181,9 @@ public:
     // 수신 정책이 켜진 캐릭터 PA만 수집한다. 여러 바디와 초기 겹침도 누락하지 않는다.
     void SweepCharacterCapsule(const physx::PxTransform& pose, float radius, float halfLength,
         const physx::PxVec3& displacement, const void* ignoredOwner, std::vector<PhysicsCapsuleHit>& hits) const;
-    // 구형 프로브가 장애물에 닿기 전까지 이동할 수 있는 거리(m). 자기 Actor와 트리거는 제외한다.
+    // 구형 프로브의 이동 가능 거리(m). 카메라는 다른 캐릭터의 이동 캡슐과 PA도 통과한다.
     float SweepSphereDistance(const physx::PxVec3& origin, const physx::PxVec3& displacement,
-        float radius, const void* ignoredOwner = nullptr) const;
+        float radius, const void* ignoredOwner = nullptr, SphereSweepPurpose purpose = SphereSweepPurpose::Gameplay) const;
     // 변위 길이 안의 가장 가까운 표면. 자기 Actor와 트리거는 제외한다.
     bool Raycast(const physx::PxVec3& origin, const physx::PxVec3& displacement,
         physx::PxRaycastHit& hit, const void* ignoredOwner = nullptr) const;
@@ -281,6 +287,8 @@ public:
     }
 
 public:
+    // 장면 쿼리 word0에서 캐릭터 형상을 식별한다. 시뮬레이션 충돌 설정과 독립적이다.
+    static constexpr uint32_t CharacterQueryFlag = 1u;
     // 캐릭터 PA는 word3의 이 비트와 word2의 소유자 번호를 사용한다.
     static constexpr uint32_t CharacterImpactFilterFlag = 1u << 31;
     // 몸통 캡슐의 수신 대상인 루트와 상체 바디만 설정한다.

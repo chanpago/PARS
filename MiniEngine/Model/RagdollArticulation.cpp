@@ -478,7 +478,7 @@ namespace PARS
                 m_Standby->SetSceneActive(false, ignored);
                 return false;
             }
-            m_Standby->SetQueryOwner(m_QueryOwner);
+            m_Standby->SetQueryOwner(m_QueryOwner, m_QueryOwnerIsCharacter);
             m_Standby->SetCollisionEnabled(m_CollisionEnabled);
             m_Standby->SetArmDriveStrength(m_ArmDriveStrength);
             m_Standby->SetArmDriveScales(m_ArmDriveScales, m_ArmDriveOverride);
@@ -505,7 +505,7 @@ namespace PARS
         {
             return false;
         }
-        candidate.SetQueryOwner(m_QueryOwner);
+        candidate.SetQueryOwner(m_QueryOwner, m_QueryOwnerIsCharacter);
         candidate.SetCollisionEnabled(m_CollisionEnabled);
         candidate.SetArmDriveStrength(m_ArmDriveStrength);
         candidate.SetArmDriveScales(m_ArmDriveScales, m_ArmDriveOverride);

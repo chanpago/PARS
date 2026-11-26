@@ -1186,6 +1186,7 @@ namespace
         {
             return shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE) ||
                     (ignoredOwner && actor->userData == ignoredOwner) ||
+                    (cameraProbe && (shape->getQueryFilterData().word0 & PhysicsWorld::CharacterQueryFlag) != 0) ||
                     (ignoreCharacters && (shape->getSimulationFilterData().word3 & PhysicsWorld::CharacterImpactFilterFlag))
                 ? PxQueryHitType::eNONE
                 : PxQueryHitType::eBLOCK;
@@ -1205,6 +1206,7 @@ namespace
         PxVec3 direction{0};
         bool verticalOnly = false;
         bool ignoreCharacters = false;
+        bool cameraProbe = false;
     };
 
     // 로컬 버퍼 용량보다 충돌 결과가 많은 씬에서도 모든 겹침을 처리한다.
@@ -1255,7 +1257,7 @@ namespace
 }
 
 float PhysicsWorld::SweepSphereDistance(const PxVec3& origin, const PxVec3& displacement,
-    float radius, const void* ignoredOwner) const
+    float radius, const void* ignoredOwner, SphereSweepPurpose purpose) const
 {
     const float distance = displacement.magnitude();
     if (!origin.isFinite() || !displacement.isFinite() || !std::isfinite(distance) ||
@@ -1271,10 +1273,15 @@ float PhysicsWorld::SweepSphereDistance(const PxVec3& origin, const PxVec3& disp
     const PxTransform pose(origin);
     const PxVec3 direction = displacement / distance;
     OwnerQueryFilter filter(ignoredOwner);
+    filter.cameraProbe = purpose == SphereSweepPurpose::Camera;
     PxSweepBuffer hit;
     m_Scene->sweep(geometry, pose, direction, distance, hit, PxHitFlag::eDEFAULT,
         PxQueryFilterData(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER), &filter);
-    float allowed = hit.hasBlock ? PxMax(0.0f, hit.block.distance) : distance;
+    float allowed = hit.hasBlock ? PxClamp(hit.block.distance, 0.0f, distance) : distance;
+    if (filter.cameraProbe)
+    {
+        return allowed;
+    }
     // 이동용 캡슐은 씬에 PxActor를 만들지 않으므로 별도로 검사한다.
     for (const std::unique_ptr<PhysicsQueryCapsule>& capsule : m_QueryCapsules)
     {

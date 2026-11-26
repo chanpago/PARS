@@ -175,9 +175,34 @@ namespace
         f.world.Tick(0);
         Check(f.rig->arm->IsCollisionFixApplied() && std::abs(f.rig->arm->GetCurrentArmLength() - 1.68f) < .003f,
             "Sphere radius and collision padding keep the camera in front of the wall");
+        int otherOwner = 0;
         PhysicsQueryCapsule* other = f.physics->CreateQueryCapsule(PxVec3(0, 2, -1), .3f, .9f);
+        other->owner = &otherOwner;
         f.world.Tick(0);
-        Check(std::abs(f.rig->arm->GetCurrentArmLength() - .48f) < .003f, "Other characters' query-only capsules still obstruct the camera");
+        Check(std::abs(f.rig->arm->GetCurrentArmLength() - 1.68f) < .003f, "The wall behind a movement capsule sets the camera distance");
+        const PxVec3 origin(0, 2, 0);
+        const PxVec3 back(0, 0, -4.5f);
+        Check(std::abs(f.physics->SweepSphereDistance(origin, back, .2f, f.rig) - .5f) < .003f,
+            "Gameplay sweeps detect the other movement capsule");
+
+        PxRigidDynamic* torso = f.physics->CreateDynamicBox(PxTransform(origin), PxVec3(.25f), 1, "Other character's torso");
+        torso->userData = &otherOwner;
+        PxShape* torsoShape = nullptr;
+        torso->getShapes(&torsoShape, 1);
+        torsoShape->setQueryFilterData(PxFilterData(PhysicsWorld::CharacterQueryFlag, 0, 0, 0));
+        f.world.Tick(0);
+        Check(std::abs(f.rig->arm->GetCurrentArmLength() - 1.68f) < .003f,
+            "Overlapping another character's torso still leaves the wall as the closest camera obstacle");
+        Check(f.physics->SweepSphereDistance(origin, back, .2f, f.rig) == 0,
+            "A muzzle sweep detects a torso overlapping its origin");
+        PxRaycastHit hit;
+        Check(f.physics->Raycast(PxVec3(1, 2, 0), PxVec3(-2, 0, 0), hit, f.rig) && hit.actor == torso,
+            "An aiming ray can target the same torso");
+        f.rig->arm->ResetLagState();
+        f.rig->arm->UpdateArm(0.0f, true);
+        Check(!f.rig->arm->IsCollisionFixApplied(), "Shoulder aiming can start inside another character's collision shapes");
+        f.rig->arm->ResetLagState();
+        torso->release();
         f.physics->DestroyQueryCapsule(other);
         f.physics->DestroyQueryCapsule(capsule);
         physx::PxRigidDynamic* dynamic = f.physics->CreateDynamicBox(PxTransform(PxVec3(0, 2, -.8f)), PxVec3(.1f), 1, "Moving obstacle");

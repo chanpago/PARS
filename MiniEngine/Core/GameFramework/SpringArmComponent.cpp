@@ -108,7 +108,7 @@ namespace PARS
             allowed = physics->SweepSphereDistance(
                 physx::PxVec3(float(pivot.GetX()), float(pivot.GetY()), float(pivot.GetZ())),
                 physx::PxVec3(float(desiredOffset.GetX()), float(desiredOffset.GetY()), float(desiredOffset.GetZ())),
-                m_Settings.probeRadius, &GetOwner());
+                m_Settings.probeRadius, &GetOwner(), PhysicsWorld::SphereSweepPurpose::Camera);
             if (allowed < desiredLength)
             {
                 allowed = std::max(0.0f, allowed - m_Settings.collisionPadding);

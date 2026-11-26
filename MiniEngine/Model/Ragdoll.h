@@ -332,8 +332,8 @@ namespace PARS
         {
             return m_ContactRevision;
         }
-        // PxActor::userData로 소유자를 식별해 이동 쿼리에서 자기 자신을 제외한다.
-        void SetQueryOwner(void* owner);
+        // 소유자 태그를 설정하고 캐릭터의 PA 형상을 카메라 쿼리에서 구분한다.
+        void SetQueryOwner(void* owner, bool isCharacter = false);
         // 통합 테스트와 PVD 패널에서도 사용하는 진단 정보다.
         float GetMaxAnchorError() const;
         float GetMaxAngularError(size_t* worstJoint = nullptr) const;
@@ -401,6 +401,7 @@ namespace PARS
         uint32_t m_CharacterImpactGroup = 0;
         uint32_t m_RejectedGripSteps = 0;
         bool m_CollisionEnabled = true;
+        bool m_QueryOwnerIsCharacter = false;
         bool m_CharacterImpactEnabled = false;
         bool m_SweepKinematicTorso = false;
         bool m_Simulating = false;

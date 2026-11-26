@@ -84,7 +84,7 @@ void RunRagdollReuseTests(bool verifyReuse)
     PxArticulationReducedCoordinate* originalArticulation = nullptr;
     std::vector<double> activateMs, deactivateMs;
     int owner = 0;
-    ragdoll.SetQueryOwner(&owner);
+    ragdoll.SetQueryOwner(&owner, true);
     ragdoll.SetCollisionEnabled(false);
     for (int cycle = 0; cycle < 100; ++cycle)
     {
@@ -124,6 +124,8 @@ void RunRagdollReuseTests(bool verifyReuse)
             link->getShapes(&shape, 1);
             Require(link->userData == &owner && shape && !(shape->getFlags() & PxShapeFlag::eSIMULATION_SHAPE),
                 "Owner and disabled contact flags survive activation");
+            Require((shape->getQueryFilterData().word0 & PhysicsWorld::CharacterQueryFlag) != 0,
+                "The camera ignores character shapes after each ragdoll activation");
         }
         // 대기 전에 남긴 외력이 다음 활성화에 재적용되지 않는지 실제 물리 스텝으로 확인한다.
         world.Step();

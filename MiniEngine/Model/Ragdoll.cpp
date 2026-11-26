@@ -227,6 +227,7 @@ namespace PARS
         m_World = nullptr;
         m_BoneNames.clear();
         m_QueryOwner = nullptr;
+        m_QueryOwnerIsCharacter = false;
         m_CollisionEnabled = true;
         m_CharacterImpactEnabled = false;
         m_SweepKinematicTorso = false;
@@ -276,6 +277,7 @@ namespace PARS
         std::swap(m_World, other.m_World);
         m_BoneNames.swap(other.m_BoneNames);
         std::swap(m_QueryOwner, other.m_QueryOwner);
+        std::swap(m_QueryOwnerIsCharacter, other.m_QueryOwnerIsCharacter);
         std::swap(m_CollisionEnabled, other.m_CollisionEnabled);
         std::swap(m_CharacterImpactEnabled, other.m_CharacterImpactEnabled);
         std::swap(m_SweepKinematicTorso, other.m_SweepKinematicTorso);
@@ -896,21 +898,35 @@ namespace PARS
         (void)velocity;
 #endif
     }
-    void Ragdoll::SetQueryOwner(void* owner)
+    void Ragdoll::SetQueryOwner(void* owner, bool isCharacter)
     {
         if (m_QueryOwner != owner)
         {
             m_ImpactSampleStep = UINT64_MAX;
         }
         m_QueryOwner = owner;
+        m_QueryOwnerIsCharacter = isCharacter;
 #if defined(_M_X64)
         if (m_CharacterCapsuleBody)
         {
             m_CharacterCapsuleBody->userData = owner;
         }
+        const uint32_t characterFlag = isCharacter ? PhysicsWorld::CharacterQueryFlag : 0u;
         for (physx::PxRigidBody* body : m_Bodies)
         {
             body->userData = owner;
+            const physx::PxU32 count = body->getNbShapes();
+            for (physx::PxU32 index = 0; index < count; ++index)
+            {
+                physx::PxShape* shape = nullptr;
+                body->getShapes(&shape, 1, index);
+                physx::PxFilterData data = shape->getQueryFilterData();
+                if ((data.word0 & PhysicsWorld::CharacterQueryFlag) != characterFlag)
+                {
+                    data.word0 = (data.word0 & ~PhysicsWorld::CharacterQueryFlag) | characterFlag;
+                    shape->setQueryFilterData(data);
+                }
+            }
         }
 #else
         (void)owner;

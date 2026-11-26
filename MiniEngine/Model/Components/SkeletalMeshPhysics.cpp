@@ -4,6 +4,7 @@
 #include "GameFramework/World.h"
 #include "PhysicsWorld.h"
 #include "../FootstepPoseValidation.h"
+#include "../GameFramework/Character.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -48,7 +49,7 @@ namespace PARS
         {
             return false;
         }
-        candidate.SetQueryOwner(&GetOwner());
+        candidate.SetQueryOwner(&GetOwner(), dynamic_cast<const Character*>(&GetOwner()) != nullptr);
         candidate.SetArmDriveStrength(m_ArmDriveStrength);
         return true;
     }
