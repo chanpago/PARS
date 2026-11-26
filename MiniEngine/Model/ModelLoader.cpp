@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -172,8 +172,8 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     {
         inFile = std::ifstream(miniFileName, std::ios::in | std::ios::binary);
         inFile.read((char*)&header, sizeof(FileHeader));
-        // Rebuild v13 when source is available, but retain cache-only assets.
-        const bool legacyCache = header.version == 13 &&
+        // 원본이 있으면 새 재질 값을 다시 읽고, 캐시만 있는 모델은 기존 반사 강도로 표시한다.
+        const bool legacyCache = (header.version == 13 || header.version == 14) &&
             (sourceFileMissing || Utility::ToLower(Utility::GetFileExtension(filePath)) == L"mini");
         if (!inFile || strncmp(header.id, "MINI", 4) != 0 ||
             (header.version != CURRENT_MINI_FILE_VERSION && !legacyCache))
@@ -225,7 +225,7 @@ std::shared_ptr<Model> Renderer::LoadModel(const std::wstring& filePath, bool fo
     if (!inFile)
         return nullptr;
 
-    ASSERT(strncmp(header.id, "MINI", 4) == 0 && (header.version == CURRENT_MINI_FILE_VERSION || header.version == 13));
+    ASSERT(strncmp(header.id, "MINI", 4) == 0 && (header.version == CURRENT_MINI_FILE_VERSION || header.version == 14 || header.version == 13));
 
     std::wstring basePath = Utility::GetBasePath(filePath);
 

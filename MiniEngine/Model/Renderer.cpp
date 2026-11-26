@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -416,7 +416,8 @@ uint8_t Renderer::GetPSO(uint16_t psoFlags)
 
     if (psoFlags & kAlphaBlend)
     {
-        ColorPSO.SetBlendState(BlendPreMultiplied);
+        // 재질 셰이더가 반환하는 RGB에는 알파가 곱해져 있지 않다.
+        ColorPSO.SetBlendState(BlendTraditional);
         ColorPSO.SetDepthStencilState(DepthStateReadOnly);
     }
     if (psoFlags & kTwoSided)

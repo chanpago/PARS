@@ -356,13 +356,26 @@ void glTF::Asset::ProcessMaterials( json& materials )
 
     for (json::iterator it = materials.begin(); it != materials.end(); ++it)
     {
-        glTF::Material material;
+        glTF::Material material{};
         json& thisMaterial = it.value();
 
         material.index = materialIdx++;
         material.flags = 0;
         material.alphaCutoff = floatToHalf(0.5f);
         material.normalTextureScale = 1.0f;
+        material.baseColorFactor[0] = 1.0f;
+        material.baseColorFactor[1] = 1.0f;
+        material.baseColorFactor[2] = 1.0f;
+        material.baseColorFactor[3] = 1.0f;
+        material.metallicFactor = 1.0f;
+        material.roughnessFactor = 1.0f;
+
+        const json::const_iterator extensions = thisMaterial.find("extensions");
+        if (extensions != thisMaterial.end() && extensions->count("KHR_materials_specular") != 0)
+        {
+            const float strength = extensions->at("KHR_materials_specular").value("specularFactor", 1.0f);
+            material.specularReduction = static_cast<uint32_t>((1.0f - Math::Clamp(strength, 0.0f, 1.0f)) * 255.0f + 0.5f);
+        }
 
         if (thisMaterial.find("alphaMode") != thisMaterial.end())
         {
@@ -382,15 +395,6 @@ void glTF::Asset::ProcessMaterials( json& materials )
         if (thisMaterial.find("pbrMetallicRoughness") != thisMaterial.end())
         {
             json& metallicRoughness = thisMaterial.at("pbrMetallicRoughness");
-
-            material.baseColorFactor[0] = 1.0f;
-            material.baseColorFactor[1] = 1.0f;
-            material.baseColorFactor[2] = 1.0f;
-            material.baseColorFactor[3] = 1.0f;
-            material.metallicFactor = 1.0f;
-            material.roughnessFactor = 1.0f;
-            for (uint32_t i = 0; i < Material::kNumTextures; ++i)
-                material.textures[i] = nullptr;
 
             if (metallicRoughness.find("baseColorFactor") != metallicRoughness.end())
                 ReadFloats(metallicRoughness.at("baseColorFactor"), material.baseColorFactor);

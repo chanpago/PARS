@@ -6,6 +6,9 @@
    "sourceFile": "Erika Archer.fbx"
   }
  },
+ "extensionsUsed": [
+  "KHR_materials_specular"
+ ],
  "scene": 0,
  "scenes": [
   {
@@ -3905,8 +3908,12 @@
   {
    "name": "eyelash_MAT",
    "doubleSided": true,
-   "alphaMode": "MASK",
-   "alphaCutoff": 0.35,
+   "alphaMode": "BLEND",
+   "extensions": {
+    "KHR_materials_specular": {
+     "specularFactor": 0.06
+    }
+   },
    "pbrMetallicRoughness": {
     "baseColorTexture": {
      "index": 2

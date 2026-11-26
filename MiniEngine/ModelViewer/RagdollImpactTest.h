@@ -34,7 +34,7 @@ public:
     ~RagdollImpactTest();
 
 public:
-    bool Initialize(std::shared_ptr<const Model> idle, const PARS::PhysicsAsset& asset, const PARS::AnimInstance& motionSource);
+    bool Initialize(std::shared_ptr<const Model> dummyMesh, const PARS::PhysicsAsset& asset, const PARS::AnimInstance& motionSource);
     bool Reset();
     bool SetAutomaticSupport(bool enabled);
     bool FireFrom(const PARS::Character& player);

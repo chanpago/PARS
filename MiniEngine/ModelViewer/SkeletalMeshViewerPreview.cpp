@@ -30,8 +30,9 @@ namespace
             const std::wstring relative = folder + name;
             if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             {
-                // Mixamo의 변환 폴더에는 같은 외형을 담은 동작별 파일이 있다. 기준 메시는 별도로 등록한다.
-                if (Utility::ToLower(relative) != L"mixamo/converted")
+                // 카탈로그에는 캐릭터별 원본을 한 번만 표시한다. 공용 본에 맞춘 게임용 메시와 동작 폴더는 건너뛴다.
+                const std::wstring directory = Utility::ToLower(relative);
+                if (directory != L"mixamo/converted" && directory != L"gameplay")
                 {
                     FindCharacterMeshes(root, relative + L"/", files);
                 }

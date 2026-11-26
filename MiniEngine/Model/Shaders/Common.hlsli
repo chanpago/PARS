@@ -34,7 +34,7 @@
         "addressV = TEXTURE_ADDRESS_CLAMP," \
         "addressW = TEXTURE_ADDRESS_CLAMP," \
         "comparisonFunc = COMPARISON_GREATER_EQUAL," \
-        "filter = FILTER_MIN_MAG_LINEAR_MIP_POINT)," \
+        "filter = FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT)," \
     "StaticSampler(s12, maxAnisotropy = 8, visibility = SHADER_VISIBILITY_PIXEL)"
 
 // Common (static) samplers

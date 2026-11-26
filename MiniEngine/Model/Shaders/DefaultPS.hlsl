@@ -50,6 +50,7 @@ cbuffer GlobalConstants : register(b1)
     float IBLRange;
     float IBLBias;
     uint EnableDirectionalLight;
+    float IBLIntensity;
 }
 
 struct VSOutput
@@ -90,6 +91,7 @@ struct SurfaceProperties
     float3 V;
     float3 c_diff;
     float3 c_spec;
+    float specularF90;
     float roughness;
     float alpha; // roughness squared
     float alphaSqr; // alpha squared
@@ -163,7 +165,7 @@ float3 Specular_BRDF(SurfaceProperties Surface, LightProperties Light)
     float GV = G_Schlick_Smith(Surface, Light);
 
     // Fresnel term
-    float3 F = Fresnel_Shlick(Surface.c_spec, 1.0, Light.LdotH);
+    float3 F = Fresnel_Shlick(Surface.c_spec, Surface.specularF90, Light.LdotH);
 
     return ND * GV * F;
 }
@@ -193,26 +195,32 @@ float3 ShadeDirectionalLight(SurfaceProperties Surface, float3 L, float3 c_light
     return Light.NdotL * c_light * (diffuse + specular);
 }
 
-// Diffuse irradiance
 float3 Diffuse_IBL(SurfaceProperties Surface)
 {
-    // Assumption:  L = N
-
-    //return Surface.c_diff * irradianceIBLTexture.Sample(defaultSampler, Surface.N);
-
-    // This is nicer but more expensive, and specular can often drown out the diffuse anyway
-    float LdotH = saturate(dot(Surface.N, normalize(Surface.N + Surface.V)));
-    float fd90 = 0.5 + 2.0 * Surface.roughness * LdotH * LdotH;
-    float3 DiffuseBurley = Surface.c_diff * Fresnel_Shlick(1, fd90, Surface.NdotV);
-    return DiffuseBurley * irradianceIBLTexture.Sample(defaultSampler, Surface.N);
+    // 반구에서 들어오는 확산광은 법선 방향으로 미리 적분되어 있다.
+    return Surface.c_diff * irradianceIBLTexture.Sample(defaultSampler, Surface.N);
 }
 
-// Approximate specular IBL by sampling lower mips according to roughness.  Then modulate by Fresnel. 
 float3 Specular_IBL(SurfaceProperties Surface)
 {
+    // Karis의 환경 BRDF 근사로 거친 표면의 미세면 가림까지 반사 강도에 반영한다.
+    float smoothness = 1.0 - Surface.roughness;
+    float grazing = smoothness * min(smoothness * smoothness, exp2(-9.28 * Surface.NdotV));
+    grazing += 0.0425 - 0.0275 * Surface.roughness;
+    float scale = 1.04 - 0.572 * Surface.roughness - 1.04 * grazing;
+    float bias = 1.04 * grazing + 0.022 * Surface.roughness - 0.04;
+    float3 reflectance = Surface.c_spec * saturate(scale) + Surface.specularF90 * saturate(bias);
     float lod = Surface.roughness * IBLRange + IBLBias;
-    float3 specular = Fresnel_Shlick(Surface.c_spec, 1, Surface.NdotV);
-    return specular * radianceIBLTexture.SampleLevel(cubeMapSampler, reflect(-Surface.V, Surface.N), lod);
+    return reflectance * radianceIBLTexture.SampleLevel(cubeMapSampler, reflect(-Surface.V, Surface.N), lod);
+}
+
+float SunVisibility(float3 shadowCoord)
+{
+    if (any(shadowCoord < 0.0) || any(shadowCoord > 1.0))
+    {
+        return 1.0;
+    }
+    return texSunShadow.SampleCmpLevelZero(shadowSampler, shadowCoord.xy, shadowCoord.z);
 }
 
 float3 ComputeNormal(VSOutput vsOutput)
@@ -239,7 +247,7 @@ float3 ComputeNormal(VSOutput vsOutput)
 }
 
 [RootSignature(Renderer_RootSig)]
-float4 main(VSOutput vsOutput) : SV_Target0
+float4 main(VSOutput vsOutput, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 {
     // Load and modulate textures
     float4 baseColor = baseColorFactor * baseColorTexture.Sample(baseColorSampler, UVSET(BASECOLOR));
@@ -250,11 +258,16 @@ float4 main(VSOutput vsOutput) : SV_Target0
     float3 normal = ComputeNormal(vsOutput);
 
     SurfaceProperties Surface;
-    Surface.N = normal;
+    // 양면 재질의 뒷면은 법선을 뒤집어 카메라 쪽 표면의 조명과 환경 반사를 계산한다.
+    Surface.N = isFrontFace ? normal : -normal;
     Surface.V = normalize(ViewerPos - vsOutput.worldPos);
     Surface.NdotV = saturate(dot(Surface.N, Surface.V));
-    Surface.c_diff = baseColor.rgb * (1 - kDielectricSpecular) * (1 - metallicRoughness.x);
-    Surface.c_spec = lerp(kDielectricSpecular, baseColor.rgb, metallicRoughness.x);
+    // 비금속의 반사 강도는 정면 반사와 비스듬히 볼 때의 반사에 함께 적용한다.
+    float dielectricWeight = 1.0 - float((flags >> 8) & 255) / 255.0;
+    float3 dielectricF0 = kDielectricSpecular * dielectricWeight;
+    Surface.c_diff = baseColor.rgb * (1 - dielectricF0) * (1 - metallicRoughness.x);
+    Surface.c_spec = lerp(dielectricF0, baseColor.rgb, metallicRoughness.x);
+    Surface.specularF90 = lerp(dielectricWeight, 1.0, metallicRoughness.x);
     Surface.roughness = metallicRoughness.y;
     float directRoughness = max(Surface.roughness, 0.045);
     Surface.alpha = directRoughness * directRoughness;
@@ -265,10 +278,10 @@ float4 main(VSOutput vsOutput) : SV_Target0
 
     if (EnableDirectionalLight != 0)
     {
-        colorAccum += ShadeDirectionalLight(Surface, SunDirection, SunIntensity);
+        colorAccum += SunVisibility(vsOutput.sunShadowCoord) * ShadeDirectionalLight(Surface, SunDirection, SunIntensity);
     }
     float ambientOcclusion = occlusion * texSSAO[uint2(vsOutput.position.xy)];
-    colorAccum += ambientOcclusion * (Diffuse_IBL(Surface) + Specular_IBL(Surface));
+    colorAccum += IBLIntensity * ambientOcclusion * (Diffuse_IBL(Surface) + Specular_IBL(Surface));
 
     // TODO: Shade each light using Forward+ tiles
 

@@ -97,10 +97,18 @@ namespace glTF
 
     struct Material
     {
+    public:
+        enum
+        {
+            kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kNumTextures
+        };
+
+    public:
         union
         {
             struct
             {
+            public:
                 float baseColorFactor[4]; // default=[1,1,1,1]
                 float metallicFactor; // default=1
                 float roughnessFactor; // default=1
@@ -111,6 +119,7 @@ namespace glTF
             uint32_t flags;
             struct
             {
+            public:
                 uint32_t baseColorUV : 1;
                 uint32_t metallicRoughnessUV : 1;
                 uint32_t occlusionUV : 1;
@@ -119,13 +128,12 @@ namespace glTF
                 uint32_t twoSided : 1;
                 uint32_t alphaTest : 1;
                 uint32_t alphaBlend : 1;
-                uint32_t _pad : 8;
+                uint32_t specularReduction : 8;
                 uint32_t alphaCutoff : 16; // FP16
             };
         };
         float emissiveFactor[3]; // default=[0,0,0]
         float normalTextureScale; // default=1
-        enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kNumTextures };
         Texture* textures[kNumTextures];
         uint32_t index;
 

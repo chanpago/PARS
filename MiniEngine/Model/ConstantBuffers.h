@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -28,6 +28,7 @@ enum { kBaseColor, kMetallicRoughness, kOcclusion, kEmissive, kNormal, kNumTextu
 
 __declspec(align(256)) struct MaterialConstants
 {
+public:
     float baseColorFactor[4]; // default=[1,1,1,1]
     float emissiveFactor[3]; // default=[0,0,0]
     float normalTextureScale; // default=1
@@ -38,6 +39,7 @@ __declspec(align(256)) struct MaterialConstants
         uint32_t flags;
         struct
         {
+        public:
             // UV0 or UV1 for each texture
             uint32_t baseColorUV : 1;
             uint32_t metallicRoughnessUV : 1;
@@ -50,7 +52,7 @@ __declspec(align(256)) struct MaterialConstants
             uint32_t alphaTest : 1;
             uint32_t alphaBlend : 1;
 
-            uint32_t _pad : 8;
+            uint32_t specularReduction : 8; // 0은 기본 반사 강도, 255는 무반사다.
 
             uint32_t alphaRef : 16; // half float
         };
@@ -68,4 +70,5 @@ public:
     float IBLRange;
     float IBLBias;
     uint32_t EnableDirectionalLight = 0;
+    float IBLIntensity = 1.0f;
 };

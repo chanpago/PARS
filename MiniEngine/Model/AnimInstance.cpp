@@ -149,7 +149,9 @@ namespace PARS
 
     bool AnimInstance::ShareMotionFramesFrom(const AnimInstance& source, std::string& error)
     {
-        if (!source.m_MotionDatabase || m_Skeleton != source.m_Skeleton)
+        if (!source.m_MotionDatabase || !m_Skeleton || !source.m_Skeleton ||
+            (m_Skeleton != source.m_Skeleton && (m_Skeleton->m_NodeNames != source.m_Skeleton->m_NodeNames ||
+                !CompatibleSkeletons(*m_Skeleton, *source.m_Skeleton))))
         {
             error = u8"모션 후보를 공유하려면 같은 기준 스켈레톤과 생성된 후보 배열이 필요합니다.";
             return false;

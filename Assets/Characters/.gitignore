@@ -1,6 +1,7 @@
 # 메시와 텍스처의 네이티브 캐시는 원본 에셋에서 다시 생성된다.
 /Erika Archer.mini
 /Paladin J Nordstrom.mini
+/Gameplay/*.mini
 /HernandGuard/HernandGuard.mini
 /ErikaArcher/Textures/*.dds
 /HernandGuard/Textures/*.dds

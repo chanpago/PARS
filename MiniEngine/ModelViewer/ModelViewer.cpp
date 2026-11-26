@@ -416,8 +416,9 @@ private:
 CREATE_APPLICATION(ModelViewer)
 
 ExpVar g_SunLightIntensity("Viewer/Lighting/Sun Light Intensity", 4.0f, 0.0f, 16.0f, 0.1f);
-NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f);
-NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f);
+// 맵을 비추는 (0.4, 1, 0.6) 방향과 같은 방위각과 고도에서 시작한다.
+NumVar g_SunOrientation("Viewer/Lighting/Sun Orientation", 0.982794f, -100.0f, 100.0f, 0.1f);
+NumVar g_SunInclination("Viewer/Lighting/Sun Inclination", 0.602269f, 0.0f, 1.0f, 0.01f);
 
 void ChangeIBLSet(EngineVar::ActionType);
 void ChangeIBLBias(EngineVar::ActionType);
@@ -958,41 +959,28 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         }
     }
 
-    // [캐릭터 생성] 앞에서 읽은 Model 데이터를 사용할 실제 캐릭터 Actor를 월드에 만든다.
-    // World가 소유하는 Character를 첫 BeginPlay/Tick 전에 설정한다.
-    PARS::Character* character = m_World.SpawnActor<PARS::Character>("MixamoCharacter");
+    const std::shared_ptr<const Model> playerMesh = Renderer::LoadModel(characterDirectory + L"Gameplay/Paladin J Nordstrom.gltf", forceRebuild);
+    if (!playerMesh)
+    {
+        m_PreviewError = u8"플레이어 메시 Paladin J Nordstrom을 불러오지 못했습니다.";
+        return;
+    }
+    PARS::Character* character = m_World.SpawnActor<PARS::Character>("Paladin J Nordstrom");
     if (!character)
     {
         return;
     }
-    // 캐릭터가 가진 SkeletalMeshComponent의 참조다. 외형, 애니메이션, PA를 이 컴포넌트에 연결한다.
     PARS::SkeletalMeshComponent& mesh = character->GetMesh();
-
-    // [외형·본 연결 및 애니메이션 등록] 외형은 Idle 모델 하나를 사용하고, 동작은 세 모델에서 가져온다.
-    // 이 반복문은 PA의 충돌체나 물리 관절을 읽지 않는다. PA 설정은 아래의 별도 단계에서 수행한다.
+    if (!mesh.SetSkeletalMesh(playerMesh) || !mesh.SetAnimInstance(std::make_unique<PreviewAnimInstance>(mesh, kPreviewCount)))
+    {
+        m_PreviewError = u8"팔라딘의 스켈레탈 메시를 초기화하지 못했습니다.";
+        character->Destroy();
+        return;
+    }
+    // 팔라딘의 외형에 공용 스켈레톤의 대기, 걷기, 달리기 클립을 등록한다.
     for (uint32_t i = 0; i < kPreviewCount; ++i)
     {
-        // 앞에서 로딩해 둔 Model을 참조한다. 여기서 모델 파일을 다시 읽는 것은 아니다.
-        const std::shared_ptr<const Model>& model = models[i];
-
-        // 첫 번째 모델(Idle)의 외형과 본 구조를 캐릭터의 기준 스켈레탈 메시로 한 번만 설정한다.
-        if (i == 0)
-        {
-            if (!mesh.SetSkeletalMesh(model))
-            {
-                m_PreviewError = u8"캐릭터 모델에 사용할 수 있는 스켈레톤이 없습니다.";
-                // 초기화에 실패한 캐릭터를 World가 정리하도록 파괴를 요청한다.
-                character->Destroy();
-                return;
-            }
-
-            // 재생 시간, 클립 선택과 전환을 관리할 객체를 만든다. 실제 재생 시작은 아래 PlayAnimation에서 한다.
-            mesh.SetAnimInstance(std::make_unique<PreviewAnimInstance>(mesh, kPreviewCount));
-        }
-
-        // 각 Model의 첫 번째 애니메이션을 Idle / Walking / Slow Run이라는 이름으로 등록한다.
-        // 기준 메시와 본 구조·바인드 포즈가 호환되는지 검사하며, Walking/SlowRun의 외형으로 교체하지 않는다.
-        if (!mesh.GetAnimInstance().AddAnimation(kPreviewNames[i], model))
+        if (!mesh.GetAnimInstance().AddAnimation(kPreviewNames[i], models[i]))
         {
             m_PreviewError = std::string(u8"애니메이션과 캐릭터의 스켈레톤이 다릅니다: ") + kPreviewNames[i];
             character->Destroy();
@@ -1154,7 +1142,8 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "CharacterImpact.settings.json");
         m_ImpactTest->LoadImpactSettings(*character,
             m_DefaultPAPath.substr(0, impactDirectory + 1) + "Projectile.settings.json");
-        if (!m_ImpactTest->Initialize(models[0], *mesh.GetPhysicsAsset(), motionSource))
+        const std::shared_ptr<const Model> dummyMesh = Renderer::LoadModel(characterDirectory + L"Gameplay/Erika Archer.gltf", forceRebuild);
+        if (!m_ImpactTest->Initialize(dummyMesh, *mesh.GetPhysicsAsset(), motionSource))
         {
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
             m_ImpactTest.reset();
@@ -2473,23 +2462,33 @@ void ModelViewer::RenderScene(void)
         float sinphi = sinf(g_SunInclination * 3.14159f * 0.5f);
 
         Vector3 SunDirection = Normalize(Vector3(costheta * cosphi, sinphi, sintheta * cosphi));
-        Vector3 shadowCenter = physicsScene ? Vector3(0, 2, 0) : Vector3(0, -500.0f, 0);
+        const Vector3 shadowBounds = physicsScene ? Vector3(16, 10, 16) : Vector3(5000, 3000, 3000);
+        Vector3 shadowCenter(0, -500.0f, 0);
 #if defined(_M_X64)
-        if (m_Comparison && m_Comparison->IsShowingScene())
+        if (physicsScene)
         {
-            shadowCenter = m_Comparison->GetViewCenter();
+            const Vector3 focus = m_Comparison && m_Comparison->IsShowingScene()
+                ? m_Comparison->GetViewCenter()
+                : m_Camera.GetPosition() + m_Camera.GetForwardVec() * 4.0f;
+            // 역방향 깊이의 0은 먼 평면이므로 주시점을 그림자 볼륨의 가운데에 둔다.
+            shadowCenter = focus - SunDirection * (shadowBounds.GetZ() * 0.5f);
         }
 #endif
-        m_SunShadowCamera.UpdateMatrix(-SunDirection, shadowCenter,
-            physicsScene ? Vector3(16, 10, 16) : Vector3(5000, 3000, 3000),
+        m_SunShadowCamera.UpdateMatrix(-SunDirection, shadowCenter, shadowBounds,
             (uint32_t)g_ShadowBuffer.GetWidth(), (uint32_t)g_ShadowBuffer.GetHeight(), 16);
 
-        GlobalConstants globals;
+        GlobalConstants globals{};
         globals.ViewProjMatrix = m_Camera.GetViewProjMatrix();
         globals.SunShadowMatrix = m_SunShadowCamera.GetShadowMatrix();
         globals.CameraPos = m_Camera.GetPosition();
         globals.SunDirection = SunDirection;
         globals.SunIntensity = Vector3(Scalar(g_SunLightIntensity));
+        if (physicsScene)
+        {
+            globals.EnableDirectionalLight = 1;
+            // 직사광이 닿지 않는 얼굴과 갑옷 틈에는 환경광이 채움광으로 남는다.
+            globals.IBLIntensity = 0.55f;
+        }
 
         // 깊이 렌더링을 시작한다.
         gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);

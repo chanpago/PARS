@@ -154,14 +154,19 @@ Character* RagdollImpactTest::GetDummy() const
     return m_World.FindActor<Character>(m_Dummy);
 }
 
-bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const PhysicsAsset& asset, const AnimInstance& motionSource)
+bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> dummyMesh, const PhysicsAsset& asset, const AnimInstance& motionSource)
 {
+    if (!dummyMesh)
+    {
+        m_Message = u8"피격 더미 메시 Erika Archer를 불러오지 못했습니다.";
+        return false;
+    }
     m_Asset = asset;
     if (std::none_of(m_Asset.constraints.begin(), m_Asset.constraints.end(), HasEnabledAngularDrive))
     {
         ConfigureDefaultDrives(m_Asset);
     }
-    PARS::Character* dummy = m_World.SpawnActor<Character>("IdleImpactDummy");
+    PARS::Character* dummy = m_World.SpawnActor<Character>("Erika Archer");
     if (!dummy)
     {
         return false;
@@ -172,18 +177,22 @@ bool RagdollImpactTest::Initialize(std::shared_ptr<const Model> idle, const Phys
     PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
     mesh.SetFootCandidateDebugVisible(true);
     mesh.SetArmDriveStrength(1.0f);
-    if (!mesh.SetSkeletalMesh(idle))
+    if (!mesh.SetSkeletalMesh(dummyMesh))
     {
         m_Message = u8"더미 메시를 초기화하지 못했습니다.";
         return false;
     }
-    if (!mesh.SetAnimInstance(std::make_unique<AnimInstance>(mesh)) ||
-        !mesh.GetAnimInstance().AddAnimation("Idle", idle) || !mesh.GetAnimInstance().PlayAnimation(0))
+    AnimInstance& animation = mesh.GetAnimInstance();
+    if (!animation.ShareMotionFramesFrom(motionSource, m_Message))
+    {
+        return false;
+    }
+    if (!animation.PlayAnimation(0))
     {
         m_Message = u8"더미의 Idle 애니메이션을 등록하지 못했습니다. 파일과 본 구조를 확인하세요.";
         return false;
     }
-    if (!mesh.GetAnimInstance().ShareMotionFramesFrom(motionSource, m_Message) || !mesh.SetPhysicsAsset(m_Asset, m_Message))
+    if (!mesh.SetPhysicsAsset(m_Asset, m_Message))
     {
         return false;
     }
