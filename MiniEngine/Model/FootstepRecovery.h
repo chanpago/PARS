@@ -197,6 +197,7 @@ namespace PARS
         double elapsedMilliseconds = 0;
         FootstepNormalReach normalReach;
         physx::PxVec3 icp{0};
+        physx::PxVec3 captureCenter{0};
         physx::PxVec3 target{0};
         physx::PxVec3 preferred{0};
         std::array<physx::PxVec3, FootstepRecoverySettings::MaximumPoseChecks> poseCheckPositions{
@@ -220,13 +221,14 @@ namespace PARS
         bool pathRejected = false;
         bool usesFutureReachApproximation = false;
         bool targetInCaptureMargin = false;
+        bool captureBeyondSupport = false;
     };
 
     // 볼록 조각을 별도로 보존한다. 조각 사이의 금지 공간을 볼록 껍질로 채우지 않는다.
     FootstepPolygon IntersectFootstepPolygons(const FootstepPolygon& first, const FootstepPolygon& second);
     float FootstepPolygonArea(const FootstepPolygon& polygon);
     physx::PxVec3 ClosestFootstepPoint(const FootstepPolygon& polygon, const physx::PxVec3& point);
-    float FootstepUnionArea(const std::vector<FootstepPolygon>& polygons);
+    float FootstepUnionArea(const std::vector<FootstepPolygon>& polygons, physx::PxVec3* centroid = nullptr);
     FootstepRecoverySnapshot SelectFootstepRecovery(const FootstepRecoveryInput& input,
         const FootstepRecoverySettings& settings);
     const char* FootstepModeLabel(FootstepMode mode);

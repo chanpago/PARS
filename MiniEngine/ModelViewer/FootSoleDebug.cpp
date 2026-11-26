@@ -27,6 +27,7 @@ namespace
     constexpr PxU32 IKStepColor = 0xffffff33, IKSupportColor = 0xff44dd88, KneeHintColor = 0xffcc88ff;
     constexpr PxU32 RecoveryModeColors[] = {0xff000000, 0xffff9933, 0xffbb66ff};
     constexpr PxU32 RecoveryCaptureColor = 0xff33dd77;
+    constexpr PxU32 RecoveryCenterColor = 0xff126337;
     constexpr PxU32 RecoveryTargetColor = 0xffeeffff;
     constexpr PxU32 LandingCandidateColor = 0xffff0000;
     constexpr const char* LegSideLabels[] = {u8"왼쪽", u8"오른쪽"};
@@ -58,13 +59,11 @@ namespace
 
     bool ShowCrossReachRegions(const PARS::FootstepRecoverySnapshot& recovery)
     {
-        if (recovery.status == PARS::FootstepRecoveryStatus::Preview)
+        if (recovery.status == PARS::FootstepRecoveryStatus::Unavailable)
         {
-            return recovery.overlapAreas[NormalModeIndex] <= 0.0f;
+            return false;
         }
-        return recovery.status != PARS::FootstepRecoveryStatus::Unavailable &&
-            (!recovery.hasTarget || recovery.mode != PARS::FootstepMode::Normal ||
-                (!recovery.modelFeasible && !recovery.targetInCaptureMargin));
+        return recovery.hasTarget ? recovery.mode != PARS::FootstepMode::Normal : recovery.captureBeyondSupport;
     }
 
     void AppendRegion(std::vector<PxDebugTriangle>& triangles, const PARS::FootstepPolygon& polygon,
@@ -932,6 +931,10 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     if (m_ShowRecoveryRegions && recovery)
     {
         AppendVisibleRecoveryRegions(lines, *recovery, .009f, .012f);
+        if (recovery->status != PARS::FootstepRecoveryStatus::Unavailable)
+        {
+            ProjectionMarker(lines, ToMath(recovery->captureCenter + PxVec3(0, .02f, 0)), RecoveryCenterColor, false);
+        }
         if (recovery->hasTarget)
         {
             Point(lines, ToMath(recovery->target + PxVec3(0, .025f, 0)), RecoveryTargetColor, .04f);
@@ -1402,8 +1405,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                 if (m_ShowRecoveryRegions)
                 {
                     ImGui::TextUnformatted(ShowCrossReachRegions(*decision) ?
-                        u8"영역 색상 · 검정 일반 도달 / 연초록 회복 / 연주황 앞 교차 / 연보라 뒤 교차" :
-                        u8"영역 색상 · 검정 일반 도달 / 연초록 회복");
+                        u8"검정 일반 도달 / 연초록 회복 (진초록 원은 중심) / 연주황 앞 교차 / 연보라 뒤 교차" :
+                        u8"검정 일반 도달 / 연초록 회복 (진초록 원은 중심)");
                 }
                 ImGui::Text(u8"최대 보폭 적용 후 겹침 · 일반 %.1f / 앞 %.1f / 뒤 %.1f cm²",
                     decision->overlapAreas[0] * 10000, decision->overlapAreas[1] * 10000, decision->overlapAreas[2] * 10000);

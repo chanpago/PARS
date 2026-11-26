@@ -256,12 +256,12 @@ namespace
         }
     }
 
-    bool EvaluateIntersections(FootstepRecoverySnapshot& result)
+    void EvaluateIntersections(const std::vector<FootstepPolygon>& capturePieces, FootstepRecoverySnapshot& result)
     {
         for (size_t mode = 0; mode < 3; ++mode)
         {
             result.intersections[mode].clear();
-            for (const FootstepPolygon& capture : result.capture)
+            for (const FootstepPolygon& capture : capturePieces)
             {
                 FootstepPolygon intersection = IntersectFootstepPolygons(capture, result.reachable[mode]);
                 if (FootstepPolygonArea(intersection) > 1e-9f)
@@ -271,19 +271,15 @@ namespace
             }
             result.overlapAreas[mode] = FootstepUnionArea(result.intersections[mode]);
         }
-        return result.overlapAreas[0] > 0 || result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0;
     }
 
-    bool CaptureReachesNormalSide(const FootstepRecoverySnapshot& result)
+    bool HasModeOverlap(const std::array<bool, 3>& modes, const FootstepRecoverySnapshot& result)
     {
-        for (const FootstepPolygon& piece : result.capture)
+        for (size_t mode = 0; mode < modes.size(); ++mode)
         {
-            for (const PxVec3& point : piece)
+            if (modes[mode] && result.overlapAreas[mode] > 0)
             {
-                if (point.dot(result.normalReach.outward) >= result.normalReach.minimumProjection)
-                {
-                    return true;
-                }
+                return true;
             }
         }
         return false;
@@ -348,8 +344,9 @@ namespace
     }
 
     void SelectTarget(const FootstepRecoveryInput& input, const FootstepRecoverySettings& settings,
-        bool hasOverlap, bool allowGroundedSwitch, FootstepRecoverySnapshot& result)
+        const std::array<bool, 3>& modes, bool hasOverlap, FootstepRecoverySnapshot& result)
     {
+        result.modelFeasible = hasOverlap;
         std::vector<LandingCandidate> candidates;
         std::array<size_t, 3> order{{0, 1, 2}};
         if (result.overlapAreas[2] > result.overlapAreas[1])
@@ -363,14 +360,10 @@ namespace
             order[1] = previous;
             order[2] = 3 - previous;
         }
-        // 일반 방향의 회복 영역이 보폭 밖에 있으면 일반 도달 영역 안에서 최선점을 찾는다.
-        const bool normalOutOfRange = !hasOverlap && input.previousMode == FootstepMode::Normal &&
-            !result.reachable[0].empty() && CaptureReachesNormalSide(result);
         const bool checkAlternatives = input.checkTargetPose || input.hasRejectedTarget;
         for (size_t mode : order)
         {
-            if ((normalOutOfRange && mode != 0) ||
-                (mode != previous && input.modeSelection != FootstepRecoveryInput::ModeSelection::NewStep && !allowGroundedSwitch))
+            if (!modes[mode])
             {
                 continue;
             }
@@ -403,6 +396,11 @@ namespace
                 }
             }
             std::stable_sort(candidates.begin() + first, candidates.end());
+            if (checkAlternatives && first > 1 && first < candidates.size())
+            {
+                // 앞뒤 교차가 모두 가능하면 한쪽의 대체 자세가 검사 예산을 다 쓰기 전에 반대쪽 첫 후보도 검사한다.
+                std::rotate(candidates.begin() + 1, candidates.begin() + first, candidates.begin() + first + 1);
+            }
         }
         if (!hasOverlap)
         {
@@ -417,7 +415,7 @@ namespace
                     {best.mode, start + stride * .5f, best.score}, {best.mode, start + stride * .25f, best.score}});
             }
         }
-        if (input.backwardFall && input.previousMode == FootstepMode::Normal && !result.reachable[0].empty())
+        if (input.backwardFall && modes[0] && !result.reachable[0].empty())
         {
             // 이미 넘어지는 중에는 골반 아래에서 짧게 짚을 수 있는 자세를 같은 검사 예산 안에서 먼저 찾는다.
             const FootstepPolygon& reach = result.reachable[0];
@@ -541,15 +539,17 @@ PxVec3 PARS::ClosestFootstepPoint(const FootstepPolygon& polygon, const PxVec3& 
     return result;
 }
 
-float PARS::FootstepUnionArea(const std::vector<FootstepPolygon>& polygons)
+float PARS::FootstepUnionArea(const std::vector<FootstepPolygon>& polygons, PxVec3* centroid)
 {
-    if (polygons.size() == 1)
+    if (polygons.size() == 1 && centroid == nullptr)
     {
         return FootstepPolygonArea(polygons.front());
     }
     // 각 다각형의 경계 중 다른 조각 내부에 가려지지 않은 구간만 적분한다.
     // 수직 단면마다 모든 변을 재검색하는 방식보다 비용의 증가를 제한할 수 있다.
     double area2 = 0;
+    double momentX = 0;
+    double momentZ = 0;
     PxVec3 origin(0);
     for (const FootstepPolygon& polygon : polygons)
     {
@@ -608,17 +608,44 @@ float PARS::FootstepUnionArea(const std::vector<FootstepPolygon>& polygons)
                 }
             }
             std::sort(covered.begin(), covered.end());
-            float visible = 1;
+            double visible = 1;
+            double visibleMoment = 1;
             float end = 0;
             for (const std::pair<float, float>& interval : covered)
             {
                 if (interval.second > end)
                 {
-                    visible -= interval.second - (std::max)(end, interval.first);
+                    const double start = (std::max)(end, interval.first);
+                    const double length = interval.second - start;
+                    visible -= length;
+                    if (centroid != nullptr)
+                    {
+                        visibleMoment -= length * (start + interval.second);
+                    }
                     end = interval.second;
                 }
             }
-            area2 += Cross(a - origin, edge) * (std::max)(0.0f, visible);
+            if (visible > 0)
+            {
+                const PxVec3 offset = a - origin;
+                const double cross = Cross(offset, edge);
+                area2 += cross * visible;
+                if (centroid != nullptr)
+                {
+                    // 드러난 각 선분과 원점이 만드는 삼각형의 면적과 무게중심을 함께 누적한다.
+                    momentX += cross * (2 * offset.x * visible + edge.x * visibleMoment);
+                    momentZ += cross * (2 * offset.z * visible + edge.z * visibleMoment);
+                }
+            }
+        }
+    }
+    if (centroid != nullptr)
+    {
+        *centroid = origin;
+        if (area2 > 0)
+        {
+            centroid->x += static_cast<float>(momentX / (3 * area2));
+            centroid->z += static_cast<float>(momentZ / (3 * area2));
         }
     }
     return static_cast<float>((std::max)(0.0, area2 * .5));
@@ -748,25 +775,51 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
         result.budgetExhausted = true;
         return result;
     }
-    bool hasOverlap = EvaluateIntersections(result);
-    result.modelFeasible = hasOverlap;
-    const bool allowGroundedSwitch = input.modeSelection == FootstepRecoveryInput::ModeSelection::GroundedNormal &&
-        input.previousMode == FootstepMode::Normal && (result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0);
     const bool expand = settings.maximumSteps == 1 && settings.oneStepCaptureScale > 1.0f &&
         !result.capture.empty() && result.capture.front().size() >= 3;
     if (expand)
     {
-        // 원래 영역의 자세 후보를 먼저 검사한다. 확장 영역도 같은 틱의 검사 예산을 공유한다.
-        if (input.stepping && !input.locked && hasOverlap)
-        {
-            SelectTarget(input, settings, hasOverlap, allowGroundedSwitch, result);
-        }
         ExpandOneStepCapture(result.capture.front(), settings.oneStepCaptureScale);
-        hasOverlap = EvaluateIntersections(result);
+    }
+    if (FootstepUnionArea(result.capture, &result.captureCenter) <= 0)
+    {
+        return result;
+    }
+    // 이동발의 바깥 방향과 반대로 지지발 중심선을 넘으면 교차 딛기다.
+    const PxVec3 fromSupport = result.captureCenter - input.feet[1 - side].position;
+    result.captureBeyondSupport = fromSupport.dot(input.feet[side].outward) < -Epsilon;
+
+    EvaluateIntersections(expand ? captureBySteps[0] : result.capture, result);
+    const bool groundedNormal = input.modeSelection == FootstepRecoveryInput::ModeSelection::GroundedNormal &&
+        input.previousMode == FootstepMode::Normal;
+    std::array<bool, 3> modes{};
+    if (input.modeSelection == FootstepRecoveryInput::ModeSelection::NewStep ||
+        (groundedNormal && (result.overlapAreas[1] > 0 || result.overlapAreas[2] > 0)))
+    {
+        modes = {{!result.captureBeyondSupport, result.captureBeyondSupport, result.captureBeyondSupport}};
+    }
+    else
+    {
+        modes[static_cast<size_t>(input.previousMode)] = true;
+    }
+    if (expand)
+    {
+        // 같은 모드에서 원래 영역을 먼저 검사하고 확장분과 자세 검사 예산을 공유한다.
+        if (input.stepping && !input.locked && HasModeOverlap(modes, result))
+        {
+            SelectTarget(input, settings, modes, true, result);
+        }
+        EvaluateIntersections(result.capture, result);
+        if (groundedNormal)
+        {
+            // 확장 여유분만으로 이미 시작한 일반 딛기를 교차로 바꾸지 않는다.
+            modes = {{true, false, false}};
+        }
     }
     if (!input.stepping)
     {
         result.status = FootstepRecoveryStatus::Preview;
+        result.modelFeasible = HasModeOverlap(modes, result);
     }
     else if (input.locked)
     {
@@ -778,12 +831,7 @@ FootstepRecoverySnapshot PARS::SelectFootstepRecovery(const FootstepRecoveryInpu
     }
     else if (!result.hasTarget)
     {
-        // 1보 확장 여유분이나 모델 밖의 최선 시도로는 진행 중인 일반 딛기를 바꾸지 않는다.
-        const bool allowSwitch = allowGroundedSwitch && !expand;
-        const bool keepNormal = input.previousMode == FootstepMode::Normal &&
-            input.modeSelection != FootstepRecoveryInput::ModeSelection::NewStep && !allowSwitch;
-        const bool usableOverlap = keepNormal ? !result.intersections[0].empty() : hasOverlap;
-        SelectTarget(input, settings, usableOverlap, allowSwitch, result);
+        SelectTarget(input, settings, modes, HasModeOverlap(modes, result), result);
     }
     if (result.hasTarget && result.modelFeasible)
     {

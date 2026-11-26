@@ -81,6 +81,12 @@ namespace
             "opposite shared edges disappear from union boundary");
         Check(std::abs(FootstepUnionArea({Rectangle(0, 1, 0, 1), Rectangle(2, 3, 0, 1)}) - 2) < 1e-5f,
             "disconnected pieces retain the forbidden gap");
+        PxVec3 centroid(0);
+        const FootstepPolygon wing = Rectangle(1, 4, 0, 1);
+        const FootstepPolygon island = Rectangle(6, 7, 0, 1);
+        Check(std::abs(FootstepUnionArea({a, wing, a, island}, &centroid) - 7) < 1e-5f &&
+            (centroid - PxVec3(16.5f / 7, 0, 5.5f / 7)).magnitude() < 1e-5f,
+            "the capture center weights disconnected area and counts overlapping pieces only once");
         Check((ClosestFootstepPoint(a, PxVec3(3, 0, 1)) - PxVec3(2, 0, 1)).magnitude() < 1e-5f,
             "preferred target projects to the closest edge");
         Check(IntersectFootstepPolygons(a, Rectangle(5, 6, 5, 6)).empty(),
@@ -231,6 +237,64 @@ namespace
             "landing lock preserves the target and avoids a second pose search");
     }
 
+    void TestCaptureCenterCrossing()
+    {
+        FootstepRecoverySettings settings;
+        settings.maximumSteps = 1;
+        FootstepRecoveryInput input = Input();
+        input.firstStepTime = .4f;
+        const float growth = std::exp(std::sqrt(9.81f) * input.firstStepTime);
+        for (size_t moving = 0; moving < input.feet.size(); ++moving)
+        {
+            input.movingFoot = moving;
+            input.feet[moving].minimumWidth = 0;
+            const FootstepReachInput& support = input.feet[1 - moving];
+            for (float forward : {-.32f, .32f})
+            {
+                for (float outward : {-.01f, 0.0f, .01f})
+                {
+                    const PxVec3 offset = support.outward * outward + input.forward * forward;
+                    input.com = support.position + offset / growth + PxVec3(0, 1, 0);
+                    const FootstepRecoverySnapshot result = SelectFootstepRecovery(input, settings);
+                    const FootstepMode crossMode = forward > 0 ? FootstepMode::FrontCross : FootstepMode::BackCross;
+                    Check((result.captureCenter - support.position - offset).magnitude() < 1e-5f &&
+                        result.overlapAreas[0] > 0 && result.overlapAreas[static_cast<size_t>(crossMode)] > 0,
+                        "the capture straddles the support foot with feasible normal and cross landings");
+                    Check(result.hasTarget && result.modelFeasible && result.captureBeyondSupport == (outward > 0) &&
+                        result.mode == (outward > 0 ? crossMode : FootstepMode::Normal),
+                        "either stance foot crosses only when the center passes its lateral position");
+                }
+            }
+        }
+        input = Input();
+        input.com = PxVec3(input.feet[0].position.x + .01f, 1, .15f);
+        const FootstepRecoverySnapshot inside = SelectFootstepRecovery(input, settings);
+        Check(inside.overlapAreas[0] == 0 && inside.overlapAreas[1] > 0 && inside.hasTarget &&
+            inside.mode == FootstepMode::Normal && inside.status == FootstepRecoveryStatus::BestEffort,
+            "cross overlap alone cannot turn an inside center into a crossover");
+        input.com.x = input.feet[0].position.x - .01f;
+        input.backwardFall = true;
+        const FootstepRecoverySnapshot outside = SelectFootstepRecovery(input, settings);
+        Check(outside.hasTarget && outside.mode == FootstepMode::FrontCross,
+            "a fall cannot inject a normal under-hip target into the selected cross modes");
+
+        input.backwardFall = false;
+        input.com.z = 0;
+        input.firstStepTime = .45f;
+        settings.maximumPoseChecks = 2;
+        const FootstepRecoverySnapshot firstChoice = SelectFootstepRecovery(input, settings);
+        const bool frontFirst = firstChoice.mode == FootstepMode::FrontCross;
+        input.checkTargetPose = [frontFirst](const PxVec3& point) -> FootstepPoseFailures
+        {
+            return (point.z > 0) == frontFirst ? FootstepPoseFailure::JointLimit : FootstepPoseFailure::None;
+        };
+        const FootstepRecoverySnapshot alternative = SelectFootstepRecovery(input, settings);
+        Check(firstChoice.overlapAreas[1] > 0 && firstChoice.overlapAreas[2] > 0 && alternative.hasTarget &&
+            alternative.modelFeasible && alternative.poseChecks == 2 &&
+            alternative.mode == (frontFirst ? FootstepMode::BackCross : FootstepMode::FrontCross),
+            "the other cross direction gets a pose check when the preferred direction is blocked");
+    }
+
     void TestNearestNormalLanding()
     {
         FootstepRecoverySettings settings;
@@ -369,6 +433,8 @@ namespace
             input.preferred = input.normalTarget;
             const FootstepRecoverySnapshot two = SelectFootstepRecovery(input, twoSteps);
             const FootstepRecoverySnapshot three = SelectFootstepRecovery(input, threeSteps);
+            Check(three.capture.size() > 1 && three.captureBeyondSupport && three.mode == FootstepMode::FrontCross,
+                "the center of the combined three-step capture can request a crossover for either stance foot");
             Check(!two.modelFeasible && three.hasTarget && three.modelFeasible && three.requiredSteps == 3,
                 "either moving foot can use a landing that requires all three steps");
         }
@@ -750,6 +816,7 @@ void TestFootstepRecovery()
     TestNormalReachDisplay();
     TestBackwardFallFoothold();
     TestModeChoice();
+    TestCaptureCenterCrossing();
     TestNearestNormalLanding();
     TestCaptureAndTiming();
     TestThreeStepReachForBothFeet();
