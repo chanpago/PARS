@@ -1465,7 +1465,8 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             check(mesh.GetRagdoll().GetBodyCollisionShape(woundBody, geometry, inBone, shape), "Measure the physical target");
             const PhysicsAsset& asset = *mesh.GetPhysicsAsset();
             const std::string& bone = asset.bodies[woundBody].bone;
-            const int joint = mesh.GetRagdoll().FindWoundJoint(woundBody);
+            float minimumStrength = 1.0f;
+            const int joint = mesh.GetRagdoll().FindWoundJoint(woundBody, &minimumStrength);
             check(joint >= 0, "Resolve the local wound joint");
             const int left = asset.FindBody("mixamorig1:LeftArm");
             const int right = asset.FindBody("mixamorig1:RightArm");
@@ -1495,7 +1496,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
             float fiveSecondMaximum = 0;
             unsigned heldSteps = 0;
             bool missingContact = false;
-            bool weakened = true;
+            bool heldExpectedStrength = true;
             for (unsigned frame = 0; frame < 690; ++frame)
             {
                 world.Tick(static_cast<float>(PhysicsWorld::FixedDeltaTime));
@@ -1524,7 +1525,8 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 if (gripAge >= 0 && heldSteps < 300)
                 {
                     missingContact = missingContact || !sampled || hit != static_cast<int>(woundBody);
-                    weakened = weakened && mesh.GetRagdoll().GetWoundStrength(joint) <= .101f;
+                    heldExpectedStrength = heldExpectedStrength &&
+                        std::abs(mesh.GetRagdoll().GetWoundStrength(joint) - minimumStrength) <= .001f;
                     fiveSecondMaximum = PxMax(fiveSecondMaximum, distance);
                     ++heldSteps;
                 }
@@ -1534,7 +1536,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 << " first_five_seconds_max_m=" << fiveSecondMaximum << std::endl;
             check(heldSteps == 300 && !missingContact && fiveSecondMaximum <= .05f && longest >= 300,
                 "Actual palm stays at the moving wound for five seconds from physical contact");
-            check(weakened && !mesh.GetRagdoll().HasWound(), "Only release and recover after the full hold");
+            check(heldExpectedStrength && !mesh.GetRagdoll().HasWound(), "Keep the hit region's drive strength through the full wound hold");
             check(mesh.GetPhysicsError().empty(), "Wound hold finishes without controller errors");
             return true;
         }

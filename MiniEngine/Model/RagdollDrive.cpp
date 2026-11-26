@@ -85,7 +85,7 @@ namespace PARS
     }
 #endif
 
-    int Ragdoll::FindWoundJoint(size_t body) const
+    int Ragdoll::FindWoundJoint(size_t body, float* minimumStrength) const
     {
         if (body >= m_Asset.bodies.size())
         {
@@ -95,16 +95,21 @@ namespace PARS
         const std::string name = LowerBoneName(bone);
         const ArmPart part = GetArmPart(name);
         const bool pelvis = name == "hips" || name == "pelvis";
-        if (part == ArmPart::None && !pelvis && !IsSpine(name) &&
-            name.find("neck") == std::string::npos && name.find("head") == std::string::npos)
+        const bool weakensDrive = part != ArmPart::None || name.find("neck") != std::string::npos ||
+            name.find("head") != std::string::npos;
+        if (!weakensDrive && !pelvis && !IsSpine(name))
         {
             return -1;
+        }
+        if (minimumStrength)
+        {
+            *minimumStrength = weakensDrive ? WoundMinimumStrength : 1.0f;
         }
         int inbound = -1;
         for (size_t joint = 0; joint < m_Asset.constraints.size(); ++joint)
         {
             const PhysicsConstraint& constraint = m_Asset.constraints[joint];
-            // 골반은 루트이므로 다리 대신 허리를 굽히는 첫 척추 관절을 약화한다.
+            // 루트인 골반의 상처는 첫 척추 관절에 기록해 손의 접촉 시간을 추적한다.
             if (pelvis && constraint.parentBone == bone && IsSpine(LowerBoneName(constraint.childBone)))
             {
                 return static_cast<int>(joint);

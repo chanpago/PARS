@@ -319,16 +319,16 @@ namespace PARS
                 drivesChanged = true;
                 continue;
             }
-            float strength = WoundMinimumStrength;
+            float strength = wound->minimumStrength;
             if (age < approachEnd)
             {
                 const float t = age / approachEnd;
-                strength = wound->initialStrength + (WoundMinimumStrength - wound->initialStrength) * t * t * (3.0f - 2.0f * t);
+                strength = wound->initialStrength + (wound->minimumStrength - wound->initialStrength) * t * t * (3.0f - 2.0f * t);
             }
             else if (age > holdEnd)
             {
                 const float t = (age - holdEnd) / WoundRecoveryTime;
-                strength += (1.0f - WoundMinimumStrength) * t * t * (3.0f - 2.0f * t);
+                strength += (1.0f - wound->minimumStrength) * t * t * (3.0f - 2.0f * t);
             }
             drivesChanged = drivesChanged || strength != wound->strength;
             wound->strength = strength;
@@ -340,7 +340,8 @@ namespace PARS
             {
                 continue;
             }
-            const int joint = FindWoundJoint(hit.body);
+            float minimumStrength = 1.0f;
+            const int joint = FindWoundJoint(hit.body, &minimumStrength);
             if (joint < 0)
             {
                 continue;
@@ -359,6 +360,7 @@ namespace PARS
             }
             // 재피격은 남은 힘에서 다시 약화해 관절이 한 스텝 동안 강해지는 것을 막는다.
             wound->initialStrength = wound->strength;
+            wound->minimumStrength = minimumStrength;
             wound->hitStep = step;
             wound->gripAge = -1.0f;
         }

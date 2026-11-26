@@ -155,11 +155,36 @@ namespace
             ragdoll.FindWoundJoint(2) == 1 && ragdoll.FindWoundJoint(3) == 2 && ragdoll.FindWoundJoint(4) == 3 &&
             ragdoll.FindWoundJoint(5) < 0, "Map hips, spine, chest, neck and head wounds to their local joints");
         ragdoll.SetDrivesEnabled(true);
-        hit.body = 2;
+        const float deltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
+        const unsigned lastImpactStep = static_cast<unsigned>(.32 / PhysicsWorld::FixedDeltaTime);
+        const std::vector<RagdollBodyImpulse> noContacts;
+        hit.impulse = PxVec3(0, 0, 80);
+        for (const size_t body : std::array<size_t, 4>{5, 0, 1, 2})
+        {
+            hit.body = body;
+            hit.newProjectileHit = true;
+            // 이 테스트 골격에서 골반은 첫 척추 관절, 나머지 바디는 자신의 부모 관절에 반응한다.
+            const size_t joint = body == 0 ? 0 : body - 1;
+            for (unsigned step = 0; step <= lastImpactStep + 1; ++step)
+            {
+                ragdoll.UpdateImpactReaction(step == 0 ? contacts : noContacts, deltaTime);
+                // 골반은 인접 척추로 감쇠되어 전달되고, 직접 맞은 관절은 0.32초 직전까지 약해진다.
+                if (step == 0 || (body != 0 && step == lastImpactStep))
+                {
+                    CheckArmDrive(ragdoll.GetImpactReaction().GetJointDriveScale(joint) < 1.0f,
+                        "The leg, pelvis and spine retain the transient projectile response");
+                }
+                advance(1);
+            }
+            CheckArmDrive(ragdoll.GetImpactReaction().GetJointDriveScale(joint) == 1.0f &&
+                ragdoll.GetWoundStrength(joint) == 1.0f, "Leg, pelvis and spine regain full drive after the impact response");
+        }
+        CheckArmDrive(ragdoll.HasWound(), "The chest wound remains available for hand contact");
+        hit.body = 3;
         hit.newProjectileHit = true;
         advance(21);
-        CheckArmDrive(ragdoll.GetWoundStrength(1) == .10f && ragdoll.GetWoundStrength(0) == 1.0f &&
-            ragdoll.GetWoundStrength(2) == 1.0f, "A chest hit weakens only the struck spine joint");
+        CheckArmDrive(ragdoll.GetWoundStrength(2) == .10f && ragdoll.GetWoundStrength(1) == 1.0f,
+            "A neck wound retains its local drive reduction while the chest stays at full strength");
     }
 
     float MeasureArmDeflection(bool articulated, float strength)

@@ -100,6 +100,7 @@ namespace PARS
             uint64_t hitStep = 0;
             size_t joint = 0;
             float initialStrength = 1.0f;
+            float minimumStrength = 1.0f;
             float strength = 1.0f;
             float gripAge = -1.0f;
         };
@@ -286,7 +287,8 @@ namespace PARS
         float GetExternalImpactImpulse() const;
         const std::vector<RagdollBodyImpulse>& GetExternalImpacts() const;
         bool IsPrimaryProjectileHit(const RagdollBodyImpulse& hit, const std::vector<RagdollBodyImpulse>& impacts) const;
-        int FindWoundJoint(size_t body) const;
+        // 손이 짚을 상처 관절과 해당 부위의 지속 피격 반응에 사용할 최소 구동 배율을 구한다.
+        int FindWoundJoint(size_t body, float* minimumStrength = nullptr) const;
         float GetWoundStrength(size_t joint) const;
         float GetWoundGripAge(size_t joint) const;
         bool HasWound() const
