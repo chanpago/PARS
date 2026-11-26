@@ -467,6 +467,7 @@ namespace PARS
         PhysicsAnimationMode m_PhysicsMode = PhysicsAnimationMode::Animation;
         float m_KinematicStableDuration = 2.0f;
         float m_ArmDriveStrength = 1.0f;
+        float m_FootstepPelvisYawOffset = 0;
         float m_KinematicBlendTime = 0;
         float m_StandingUpStableTime = 0;
         uint32_t m_FallingAnimationIndex = UINT32_MAX;

@@ -153,6 +153,7 @@ namespace PARS
 
     public:
         std::function<FootstepPoseCheck(const physx::PxVec3&)> checkTargetPose;
+        std::function<bool(const physx::PxVec3&, FootstepMode, float)> checkPelvisTurn;
         std::array<FootstepReachInput, 2> feet;
         size_t movingFoot = 0;
         physx::PxVec3 com{0};
@@ -213,6 +214,7 @@ namespace PARS
         uint32_t capturePieceCount = 0;
         // 같은 번호의 빨간 X에서 확인된 실패 이유를 함께 보관한다.
         std::array<FootstepPoseCheck, FootstepRecoverySettings::MaximumPoseChecks> poseCheckResults{};
+        std::array<FootstepMode, FootstepRecoverySettings::MaximumPoseChecks> poseCheckModes{};
         uint8_t movingFoot = 0;
         bool hasTarget = false;
         bool modelFeasible = false;

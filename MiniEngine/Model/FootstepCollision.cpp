@@ -74,8 +74,10 @@ namespace
                 return false;
             }
             sample.solePositions[side] = solved.solvedSole.p;
-            sample.reachLimited = sample.reachLimited || solved.reachLimited;
-            if (input.legs[side].command.IsInProgress() && input.acceptsPose && !input.acceptsPose(side, solved))
+            const FootstepCollisionLeg& leg = input.legs[side];
+            sample.reachLimited = sample.reachLimited || (leg.pelvisTurn ?
+                solved.reachError > FootstepPoseCheck::SoleTolerance : solved.reachLimited);
+            if ((leg.command.IsInProgress() || leg.pelvisTurn) && input.acceptsPose && !input.acceptsPose(side, solved, time))
             {
                 result.jointLimited = true;
             }
@@ -170,7 +172,7 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
         for (size_t part = 0; part < 3; ++part)
         {
             float tracking = 0;
-            if (result.moving[side] && input.includeTrackingError)
+            if ((result.moving[side] || input.legs[side].pelvisTurn) && input.includeTrackingError)
             {
                 const FootstepCollisionShape& shape = input.legs[side].shapes[part];
                 const PxTransform& target = shapes[side][part];

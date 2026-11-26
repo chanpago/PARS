@@ -28,6 +28,14 @@ namespace
         return time * time * (Range(3) - Range(2) * time);
     }
 
+    Quaternion BoundTurn(const PxVec3& axis, float angle, const Range& fraction)
+    {
+        const Range halfAngle = Range(.5f * angle) * fraction;
+        const Range sine = Cos(Range(1.5707963267948966) - halfAngle);
+        const Range cosine = Cos(Range(.5f * PxAbs(angle)) * fraction);
+        return Quaternion(Range(axis.x) * sine, Range(axis.y) * sine, Range(axis.z) * sine, cosine);
+    }
+
     Vector BoundOffset(const FootstepPath& path, const Range& flight)
     {
         if (!path.enabled || flight.upper < 0 || flight.lower >= path.startTime + path.duration)
@@ -199,7 +207,7 @@ namespace
         return Normalize(result);
     }
 
-    bool BoundIK(const TwoBoneIKInput& input, const Vector& sole, std::array<Transform, 3>& bones)
+    bool BoundIK(const TwoBoneIKInput& input, const Transform& target, std::array<Transform, 3>& bones)
     {
         const float upper = input.thighLength;
         const float lower = input.calfLength;
@@ -209,8 +217,6 @@ namespace
         {
             return false;
         }
-        Transform target(input.targetSole);
-        target.position = sole;
         const Transform requested = target * input.soleInBone.getInverse();
         Vector direction = requested.position - Vector(input.hip.p);
         const Range requestedDistance = Length(direction);
@@ -347,7 +353,7 @@ namespace
 bool PARS::PredictFootstepLeg(const FootstepCollisionLeg& leg, float timeAhead,
     std::array<PxTransform, 3>& shapes, LegIKResult& result)
 {
-    if (!leg.command.IsInProgress())
+    if (!leg.command.IsInProgress() && !leg.pelvisTurn)
     {
         for (size_t part = 0; part < shapes.size(); ++part)
         {
@@ -355,9 +361,17 @@ bool PARS::PredictFootstepLeg(const FootstepCollisionLeg& leg, float timeAhead,
         }
         return true;
     }
-    TwoBoneIKInput pose = leg.pose;
-    // 발바닥 회전은 이번 실제 제어 목표와 정확히 같게 유지한다.
-    pose.targetSole.p = SampleFootstepPosition(leg.command, leg.path, timeAhead);
+    TwoBoneIKInput pose = leg.pelvisTurn ? leg.pelvisTurn->LegAt(leg.side,
+        leg.pelvisTurn->FrameAt(leg.pelvisPivot, leg.turnElapsed + timeAhead * leg.turnRate)) : leg.pose;
+    if (leg.command.IsInProgress())
+    {
+        pose.targetSole.p = SampleFootstepPosition(leg.command, leg.path, timeAhead);
+        if (leg.pelvisTurn)
+        {
+            // 실제 발 방향에서 기존 보폭 방향까지 골반과 함께 회전하는 구간을 검사한다.
+            pose.targetSole.q = leg.pelvisTurn->SoleRotationAt(leg.turnElapsed + timeAhead * leg.turnRate);
+        }
+    }
     result = SolveTwoBoneIK(pose);
     if (!result.valid)
     {
@@ -374,7 +388,7 @@ bool PARS::PredictFootstepLeg(const FootstepCollisionLeg& leg, float timeAhead,
 bool PARS::BoundFootstepLeg(const FootstepCollisionLeg& leg, float begin, float end,
     std::array<Transform, 3>& shapes)
 {
-    if (!leg.command.IsInProgress())
+    if (!leg.command.IsInProgress() && !leg.pelvisTurn)
     {
         for (size_t part = 0; part < shapes.size(); ++part)
         {
@@ -382,14 +396,42 @@ bool PARS::BoundFootstepLeg(const FootstepCollisionLeg& leg, float begin, float 
         }
         return true;
     }
-    TwoBoneIKInput pose = leg.pose;
+    const Range time = Time(begin, end);
+    const TwoBoneIKInput& pose = leg.pelvisTurn ? leg.pelvisTurn->legs[leg.side] : leg.pose;
+    Transform target(pose.targetSole);
+    if (leg.command.IsInProgress())
+    {
+        target.position = BoundPosition(leg, time);
+    }
+    Quaternion rotation;
+    if (leg.pelvisTurn)
+    {
+        // 시작 골반 좌표에서 IK를 풀면 두 다리의 원래 굽힘 평면은 상수로 유지된다.
+        const FootstepPelvisTurn& turn = *leg.pelvisTurn;
+        const Range progress = Clamp((Range(leg.turnElapsed) + time * Range(leg.turnRate)) / Range(turn.duration), 0, 1);
+        const Range fraction = Clamp(Blend(progress), 0, 1);
+        rotation = BoundTurn(PxVec3(0, 1, 0), turn.angle, fraction);
+        if (leg.command.IsInProgress())
+        {
+            target.rotation = BoundTurn(turn.soleTurnAxis, turn.soleTurnAngle, fraction) * Quaternion(turn.startSoleRotation);
+        }
+        const Quaternion inverse(Range(0), -rotation.y, Range(0), rotation.w);
+        target.position = Vector(turn.pelvis.p) + Rotate(inverse, target.position - Vector(leg.pelvisPivot));
+        target.rotation = inverse * target.rotation;
+    }
     std::array<Transform, 3> bones;
-    if (!BoundIK(pose, BoundPosition(leg, Time(begin, end)), bones))
+    if (!BoundIK(pose, target, bones))
     {
         return false;
     }
     for (size_t part = 0; part < shapes.size(); ++part)
     {
+        if (leg.pelvisTurn)
+        {
+            bones[part].position = Vector(leg.pelvisPivot) +
+                Rotate(rotation, bones[part].position - Vector(leg.pelvisTurn->pelvis.p));
+            bones[part].rotation = rotation * bones[part].rotation;
+        }
         shapes[part] = bones[part] * leg.shapes[part].inBone;
     }
     return true;

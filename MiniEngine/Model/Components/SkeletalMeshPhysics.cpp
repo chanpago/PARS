@@ -151,6 +151,7 @@ namespace PARS
 
         if (!IsActiveRagdoll() || !m_AutomaticRootSupport || (!fallingSteps && !hasRecoveryTargets))
         {
+            m_FootstepPelvisYawOffset = 0;
             m_FootstepIK.Reset();
             m_FootstepAvoidance.Reset();
             return;
@@ -164,6 +165,40 @@ namespace PARS
             return physx::PxTransform(physx::PxVec3(frame.offset.x, frame.offset.y, frame.offset.z),
                 physx::PxQuat(frame.rotation.x, frame.rotation.y, frame.rotation.z, frame.rotation.w));
         };
+        const int turnSide = step.GetPelvisTurnFoot();
+        const FootstepPelvisTurn* turn = turnSide >= 0 ? step.feet[turnSide].target.pelvisTurn.get() : nullptr;
+        float driveElapsed = 0;
+        if (turn)
+        {
+            const FootstepMotion& motion = step.feet[turnSide].motion;
+            driveElapsed = motion.pelvisTurnElapsed + (motion.hasSupportDeadline ? deltaTime * motion.pelvisTurnRate : 0.0f);
+        }
+        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        if (turn || m_FootstepPelvisYawOffset != 0)
+        {
+            const int root = m_Ragdoll.GetImpactRootBody();
+            if (root >= 0 && static_cast<size_t>(root) < nodes.size())
+            {
+                const PxTransform base = toPx(target[nodes[root]]);
+                float goal = 0;
+                if (turn)
+                {
+                    const PxQuat difference = turn->RotationAt(driveElapsed) * turn->pelvis.q * base.q.getConjugate();
+                    goal = std::remainder(2.0f * std::atan2(difference.y, difference.w), PxTwoPi);
+                }
+                // 기존 목표의 기울기와 위치는 유지하고 월드 수직축 회전만 골반 PD에 전달한다.
+                const float change = std::remainder(goal - m_FootstepPelvisYawOffset, PxTwoPi);
+                const float limit = FootstepPelvisTurn::MaximumAngularSpeed * deltaTime;
+                m_FootstepPelvisYawOffset = PxAbs(change) <= limit ? goal :
+                    std::remainder(m_FootstepPelvisYawOffset + PxClamp(change, -limit, limit), PxTwoPi);
+                const PxQuat yaw(m_FootstepPelvisYawOffset, PxVec3(0, 1, 0));
+                const Matrix4 rotation = FootstepPoseMatrix(PxTransform(base.p - yaw.rotate(base.p), yaw));
+                for (Matrix4& matrix : target)
+                {
+                    matrix = rotation * matrix;
+                }
+            }
+        }
         std::vector<physx::PxTransform> rigidTargets;
         rigidTargets.reserve(target.size());
         for (const Matrix4& matrix : target)
@@ -177,7 +212,7 @@ namespace PARS
         input.revision = sample.contactRevision;
 
 
-        const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
+        std::array<TwoBoneIKInput, 2> turnedLegs;
         StandingSupportInput standing;
         standing.enabled = m_Ragdoll.UsesFootDrivenSupport();
         standing.stepping = step.IsInProgress();
@@ -365,6 +400,25 @@ namespace PARS
             }
         }
 
+        if (turn)
+        {
+            for (size_t side = 0; side < input.legs.size(); ++side)
+            {
+                FootIKLegInput& leg = input.legs[side];
+                const PxTransform frame = turn->FrameAt(leg.actualAnchor.p, driveElapsed);
+                turnedLegs[side] = turn->LegAt(side, frame);
+                leg.turnReference = &turnedLegs[side];
+                leg.actualAnchor = frame * turn->pelvis;
+                leg.targetSole = turnedLegs[side].targetSole;
+                if (side == static_cast<size_t>(turnSide))
+                {
+                    const FootstepCommand& command = step.feet[side];
+                    leg.targetSole.q = turn->SoleRotationAt(driveElapsed);
+                    leg.targetSole.p = command.motion.hasSupportDeadline ?
+                        SampleFootstepPosition(command, deltaTime) : command.motion.position;
+                }
+            }
+        }
         UpdateFootstepCollision(input, rigidTargets, deltaTime);
 
         // 선택한 경로의 현재 발 목표로 실제 양쪽 다리 IK를 계산한다.
@@ -393,7 +447,9 @@ namespace PARS
         const std::vector<PxTransform>& sourcePose, float deltaTime)
     {
         const FootstepSnapshot& step = m_FootSupport.GetSnapshot().footstep;
-        if (!m_FootSupport.GetFootstepSettings().pathAvoidanceEnabled || !step.IsInProgress())
+        const bool avoid = m_FootSupport.GetFootstepSettings().pathAvoidanceEnabled;
+        const int turnSide = step.GetPelvisTurnFoot();
+        if ((!avoid && turnSide < 0) || !step.IsInProgress())
         {
             m_FootstepAvoidance.Reset();
             return;
@@ -404,12 +460,25 @@ namespace PARS
         prediction.completedStep = step.completedStep;
         prediction.revision = step.revision;
         prediction.fixedDeltaTime = deltaTime;
+        prediction.rejectInvalidPoses = turnSide >= 0;
+        if (turnSide >= 0)
+        {
+            prediction.maximumIntervals = FootstepCollisionInput::PelvisTurnMaximumIntervals;
+        }
         const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
         for (size_t side = 0; side < prediction.legs.size(); ++side)
         {
             FootstepCollisionLeg& leg = prediction.legs[side];
             leg.command = step.feet[side];
             const FootIKLegInput& source = input.legs[side];
+            if (turnSide >= 0)
+            {
+                leg.pelvisTurn = step.feet[turnSide].target.pelvisTurn.get();
+                leg.side = side;
+                leg.pelvisPivot = source.actualAnchor.p;
+                leg.turnElapsed = step.feet[turnSide].motion.pelvisTurnElapsed;
+                leg.turnRate = step.feet[turnSide].motion.pelvisTurnRate;
+            }
             // 실제 IK와 동일한 원본 자세·부모 좌표·이전 무릎 힌트로 후보를 평가한다.
             if (!m_FootstepIK.BuildLegInput(input, side, sourcePose, leg.pose))
             {
@@ -430,11 +499,15 @@ namespace PARS
                     shape.geometry, shape.inBone, shape.actualPose);
             }
         }
-        prediction.acceptsPose = [this, &input](size_t side, const LegIKResult& solved) -> bool
+        prediction.acceptsPose = [this, &input, &prediction](size_t side, const LegIKResult& solved, float time) -> bool
         {
             const FootIKLegInput& leg = input.legs[side];
             const std::array<int, 4> chain{leg.anchorNode, leg.hipNode, leg.kneeNode, leg.ankleNode};
-            const std::array<PxTransform, 4> frames{leg.actualAnchor, solved.hip, solved.knee, solved.ankle};
+            const FootstepCollisionLeg& moving = prediction.legs[side];
+            const PxTransform parent = moving.pelvisTurn ?
+                moving.pelvisTurn->FrameAt(moving.pelvisPivot, moving.turnElapsed + time * moving.turnRate) *
+                    moving.pelvisTurn->pelvis : leg.actualAnchor;
+            const std::array<PxTransform, 4> frames{parent, solved.hip, solved.knee, solved.ankle};
             std::array<int, 4> bodies;
             for (size_t index = 0; index < chain.size(); ++index)
             {
@@ -449,9 +522,17 @@ namespace PARS
         };
         const Vector3 actorForward = GetOwner().GetActorTransform().GetBasis() * Vector3(0, 0, 1);
         const PxVec3 forward(float(actorForward.GetX()), float(actorForward.GetY()), float(actorForward.GetZ()));
-        m_FootstepAvoidance.Update(prediction, forward);
+        if (avoid)
+        {
+            m_FootstepAvoidance.Update(prediction, forward);
+            m_FootstepCollision = m_FootstepAvoidance.GetSnapshot().collision;
+        }
+        else
+        {
+            m_FootstepAvoidance.Reset();
+            m_FootstepCollision = PredictFootstepCollisions(prediction);
+        }
         const FootstepAvoidanceSnapshot& avoidance = m_FootstepAvoidance.GetSnapshot();
-        m_FootstepCollision = avoidance.collision;
         for (size_t side = 0; side < input.legs.size(); ++side)
         {
             if (step.feet[side].IsInProgress())

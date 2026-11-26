@@ -14,6 +14,11 @@ namespace
 
     void AssignTarget(FootstepCommand& command, const FootstepTarget& target)
     {
+        if (command.target.pelvisTurn != target.pelvisTurn)
+        {
+            command.motion.pelvisTurnElapsed = 0;
+            command.motion.pelvisTurnRate = 1;
+        }
         command.target = target;
         // 영역 도형은 이번 틱의 후보에만 보관한다. 경로 검사에서 명령을 복사할 때 힙 할당을 반복하지 않는다.
         command.target.recovery.reachable = {};
@@ -342,6 +347,43 @@ namespace
         return (std::min)(budget, (std::max)(minimumTime, support.timeToReachLimit));
     }
 
+    void InitializeStep(const FootstepInput& input, const FootstepSettings& settings, const FootstepSnapshot& state,
+        size_t side, const FootstepTarget& candidate, FootstepCommand& command)
+    {
+        const FootstepFootInput& foot = input.feet[side];
+        const bool landingFreeFoot = state.backwardFallStepsRemaining > 0 && !foot.grounded;
+        command = {};
+        command.startedStep = input.completedStep;
+        command.takeoffStep = input.completedStep;
+        command.trajectoryStartStep = input.completedStep;
+        command.startPosition = foot.position;
+        command.takeoffPosition = foot.position;
+        command.initialTarget = candidate.position;
+        command.initialDistance = candidate.travelDistance;
+        AssignTarget(command, candidate);
+        command.phase = foot.grounded ? FootstepPhase::AwaitingTakeoff : FootstepPhase::Airborne;
+        command.hasTakenOff = !foot.grounded;
+        command.justStarted = true;
+        command.motion.heightLimit = foot.calfLength;
+        command.motion.initialHeight = landingFreeFoot ? 0.0f : (std::min)((std::max)(
+            command.initialDistance * settings.liftHeightScale, settings.minimumLiftHeight), foot.calfLength);
+        const PxVec3 forward(-input.supportRight.z, 0, input.supportRight.x);
+        if (forward.isFinite() && command.initialDistance > MinimumStepDistance)
+        {
+            const float backward = PxClamp((foot.position - candidate.position).dot(forward.getNormalized()) /
+                command.initialDistance, 0.0f, 1.0f);
+            command.motion.liftTimeRatio = 1.0f + backward * (settings.backwardLiftTimeRatio - 1.0f);
+        }
+        const float remaining = SupportLandingTime(input, state, side);
+        command.motion.hasSupportDeadline = std::isfinite(remaining);
+        command.motion.duration = command.motion.hasSupportDeadline ? remaining :
+            PxClamp(settings.stepDuration, MinimumFootstepDuration, MaximumFootstepDuration);
+        command.motion.progressPerSecond = 1.0f / command.motion.duration;
+        command.motion.landingLockProgress = settings.landingLockProgress;
+        command.motion.landingLoweringSpeed = settings.landingLoweringSpeed;
+        command.motion.maximumLandingLowering = (std::min)(settings.maximumLandingLowering, foot.calfLength);
+    }
+
     void UpdateSupportDeadline(FootstepCommand& command, const FootstepInput& input, float remaining)
     {
         FootstepMotion& motion = command.motion;
@@ -434,7 +476,12 @@ namespace
         request.stepping = needsStep || inProgress;
         request.tryShorterFirstStep = input.resumingWarmup && !inProgress && input.requestedFoot == static_cast<int>(side);
         request.backwardFall = state.backwardFallStepsRemaining > 0;
+        const bool keepTurn = inProgress && command.target.pelvisTurn && !command.target.recovery.pathRejected;
         request.locked = inProgress && command.motion.landingTargetLocked;
+        if (request.locked)
+        {
+            normal.pelvisTurn = command.target.pelvisTurn;
+        }
         request.lockedTarget = command.target.position;
         request.previousMode = inProgress ? command.target.recovery.mode : FootstepMode::Normal;
         request.hasRejectedTarget = inProgress && command.target.recovery.pathRejected && !request.locked;
@@ -475,6 +522,40 @@ namespace
             }
             return input.checkLandingPose(side, position, state.groundNormal, position - stepOrigin);
         };
+        if (input.checkPelvisTurn && request.stepping && !request.locked && !keepTurn &&
+            input.feet[1 - side].grounded && !state.feet[1 - side].IsInProgress())
+        {
+            request.checkPelvisTurn = [&](const PxVec3& position, FootstepMode mode, float angle) -> bool
+            {
+                FootstepTarget target;
+                target.position = position;
+                target.normal = state.groundNormal;
+                target.travelDistance = HorizontalDistance(input.feet[side].position, position);
+                target.recovery.mode = mode;
+                target.valid = true;
+                FootstepCommand trial;
+                if (inProgress)
+                {
+                    trial = command;
+                    AssignTarget(trial, target);
+                }
+                else
+                {
+                    InitializeStep(input, settings, state, side, target, trial);
+                }
+                trial.motion.swingOutwardOffset = mode == FootstepMode::Normal ?
+                    PredictSwingOutwardOffset(input, settings, state, side) : PxVec3(0);
+                trial.hasTarget = true;
+                trial.motion.valid = true;
+                FootstepPelvisTurn turn;
+                if (!input.checkPelvisTurn(side, trial, angle, turn))
+                {
+                    return false;
+                }
+                normal.pelvisTurn = std::make_shared<const FootstepPelvisTurn>(turn);
+                return true;
+            };
+        }
         normal.recovery = SelectFootstepRecovery(request, settings.recovery);
         normal.recovery.pathRejected = inProgress && command.target.recovery.pathRejected;
         if (!normal.recovery.hasTarget && inProgress)
@@ -496,6 +577,12 @@ namespace
         }
         if (normal.recovery.hasTarget)
         {
+            // 같은 착지점을 계속 쓸 때만 기존 회전을 이어 간다. 새 무회전 후보와 모드 전환은 계속 허용한다.
+            if (keepTurn && normal.recovery.mode == command.target.recovery.mode &&
+                (normal.recovery.target - command.target.position).magnitudeSquared() < 1e-8f)
+            {
+                normal.pelvisTurn = command.target.pelvisTurn;
+            }
             normal.recovery.pathRejected = request.locked ? command.target.recovery.pathRejected :
                 (request.hasRejectedTarget && (normal.recovery.target - request.rejectedTarget).magnitudeSquared() < .0001f);
             normal.position = normal.recovery.target;
@@ -877,6 +964,18 @@ void FootstepPlanner::Reset()
     m_HasSample = false;
 }
 
+int FootstepSnapshot::GetPelvisTurnFoot() const
+{
+    for (size_t side = 0; side < feet.size(); ++side)
+    {
+        if (feet[side].IsInProgress() && feet[side].target.pelvisTurn)
+        {
+            return static_cast<int>(side);
+        }
+    }
+    return -1;
+}
+
 void FootstepPlanner::Abort(FootstepReason reason)
 {
     if (!m_Snapshot.aborted)
@@ -928,6 +1027,51 @@ bool FootstepPlanner::UpdateFallSteps(const FootstepInput& input, bool outsideBu
         return false;
     }
     return true;
+}
+
+void FootstepPelvisTurn::SetLandingSole(size_t side, const PxTransform& target)
+{
+    startSoleRotation = legs[side].targetSole.q;
+    PxQuat delta = (target.q * startSoleRotation.getConjugate()).getNormalized();
+    if (delta.w < 0)
+    {
+        delta = -delta;
+    }
+    delta.toRadiansAndUnitAxis(soleTurnAngle, soleTurnAxis);
+    legs[side].targetSole = target;
+}
+
+float FootstepPelvisTurn::ProgressAt(float elapsed) const
+{
+    const float progress = duration > 0 ? PxClamp(elapsed / duration, 0.0f, 1.0f) : 0.0f;
+    return SmoothStep(progress);
+}
+
+PxQuat FootstepPelvisTurn::RotationAt(float elapsed) const
+{
+    return PxQuat(angle * ProgressAt(elapsed), PxVec3(0, 1, 0));
+}
+
+PxQuat FootstepPelvisTurn::SoleRotationAt(float elapsed) const
+{
+    return PxQuat(soleTurnAngle * ProgressAt(elapsed), soleTurnAxis) * startSoleRotation;
+}
+
+PxTransform FootstepPelvisTurn::FrameAt(const PxVec3& pivot, float elapsed) const
+{
+    const PxQuat rotation = RotationAt(elapsed);
+    return PxTransform(pivot - rotation.rotate(pelvis.p), rotation);
+}
+
+TwoBoneIKInput FootstepPelvisTurn::LegAt(size_t side, const PxTransform& frame) const
+{
+    TwoBoneIKInput pose = legs[side];
+    pose.hip = frame * pose.hip;
+    pose.knee = frame * pose.knee;
+    pose.ankle = frame * pose.ankle;
+    pose.referenceBend = frame.q.rotate(pose.referenceBend);
+    pose.previousBend = frame.q.rotate(pose.previousBend);
+    return pose;
 }
 
 float PARS::GetFootstepRemainingTime(const FootstepCommand& command)
@@ -1025,6 +1169,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     const bool consecutiveSample = m_HasSample && input.completedStep > m_Snapshot.completedStep &&
         input.completedStep - m_Snapshot.completedStep == 1;
     FootstepSnapshot& state = m_Snapshot;
+    const float stepTime = m_HasSample ? static_cast<float>(input.completedStep - state.completedStep) * input.fixedDeltaTime : 0.0f;
     m_HasSample = true;
     state.completedStep = input.completedStep;
     state.revision = input.revision;
@@ -1035,14 +1180,19 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     state.loadTransfer.ready = false;
     const std::array<float, 2> previousLoads = state.loadTransfer.loadRatios;
     state.loadTransfer.loadRatios = {};
-    for (FootstepCommand& command : state.feet)
+    for (size_t side = 0; side < state.feet.size(); ++side)
     {
+        FootstepCommand& command = state.feet[side];
         command.justStarted = false;
         command.justLanded = false;
         command.hasTarget = false;
         command.motion.valid = false;
         command.motion.swingOutwardOffset = PxVec3(0);
-        if (!settings.pathAvoidanceEnabled)
+        if (command.target.pelvisTurn && !input.feet[1 - side].grounded)
+        {
+            command.target.pelvisTurn.reset();
+        }
+        if (!settings.pathAvoidanceEnabled && !command.target.pelvisTurn)
         {
             command.target.recovery.pathRejected = false;
         }
@@ -1182,6 +1332,16 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 }
                 motion.landingTargetLocked = motion.landingTargetLocked || motion.progress >= motion.landingLockProgress;
             }
+            if (command.target.pelvisTurn)
+            {
+                // 지난 틱에 지시한 각도에서 이어 가고, 새 착지 시한은 남은 회전에만 적용한다.
+                FootstepMotion& motion = command.motion;
+                const float duration = command.target.pelvisTurn->duration;
+                const float timeLeft = GetFootstepRemainingTime(command);
+                motion.pelvisTurnElapsed = timeLeft > 0 ?
+                    PxMin(duration, motion.pelvisTurnElapsed + stepTime * motion.pelvisTurnRate) : duration;
+                motion.pelvisTurnRate = timeLeft > 0 ? (duration - motion.pelvisTurnElapsed) / timeLeft : 0.0f;
+            }
             const bool bearingWeight = consecutiveSample && previousLoads[side] > 0 &&
                 state.loadTransfer.loadRatios[side] >= settings.supportLoadRatio;
             if (HasLandingContact(command, foot, settings, bearingWeight, state.backwardFallStepsRemaining > 0))
@@ -1312,36 +1472,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
                 command.reason = FootstepReason::WaitingSupportLoad;
                 continue;
             }
-            command = {};
-            command.startedStep = input.completedStep;
-            command.takeoffStep = input.completedStep;
-            command.trajectoryStartStep = input.completedStep;
-            command.startPosition = foot.position;
-            command.takeoffPosition = foot.position;
-            command.initialTarget = candidate.position;
-            command.initialDistance = candidate.travelDistance;
-            AssignTarget(command, candidate);
-            command.phase = foot.grounded ? FootstepPhase::AwaitingTakeoff : FootstepPhase::Airborne;
-            command.hasTakenOff = !foot.grounded;
-            command.justStarted = true;
-            command.motion.heightLimit = foot.calfLength;
-            command.motion.initialHeight = landingFreeFoot ? 0.0f : (std::min)((std::max)(
-                command.initialDistance * settings.liftHeightScale, settings.minimumLiftHeight), foot.calfLength);
-            const PxVec3 forward(-input.supportRight.z, 0, input.supportRight.x);
-            if (forward.isFinite() && command.initialDistance > MinimumStepDistance)
-            {
-                const float backward = PxClamp((foot.position - candidate.position).dot(forward.getNormalized()) /
-                    command.initialDistance, 0.0f, 1.0f);
-                command.motion.liftTimeRatio = 1.0f + backward * (settings.backwardLiftTimeRatio - 1.0f);
-            }
-            const float remaining = SupportLandingTime(input, state, side);
-            command.motion.hasSupportDeadline = std::isfinite(remaining);
-            command.motion.duration = command.motion.hasSupportDeadline ? remaining :
-                PxClamp(settings.stepDuration, MinimumFootstepDuration, MaximumFootstepDuration);
-            command.motion.progressPerSecond = 1.0f / command.motion.duration;
-            command.motion.landingLockProgress = settings.landingLockProgress;
-            command.motion.landingLoweringSpeed = settings.landingLoweringSpeed;
-            command.motion.maximumLandingLowering = (std::min)(settings.maximumLandingLowering, foot.calfLength);
+            InitializeStep(input, settings, state, side, candidate, command);
             ++state.startCount;
             state.followupFoot = -1;
             state.loadTransfer.required = true;

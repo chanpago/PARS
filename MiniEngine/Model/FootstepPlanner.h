@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 
 namespace PARS
 {
@@ -105,11 +106,38 @@ namespace PARS
         bool hasSoleRectangle = false;
     };
 
+    struct FootstepCommand;
+
+    struct FootstepPelvisTurn
+    {
+    public:
+        void SetLandingSole(size_t side, const physx::PxTransform& target);
+        physx::PxQuat RotationAt(float elapsed) const;
+        physx::PxQuat SoleRotationAt(float elapsed) const;
+        float ProgressAt(float elapsed) const;
+        physx::PxTransform FrameAt(const physx::PxVec3& pivot, float elapsed) const;
+        TwoBoneIKInput LegAt(size_t side, const physx::PxTransform& frame) const;
+
+    public:
+        static constexpr float MaximumAngularSpeed = physx::PxTwoPi;
+
+    public:
+        // 검사에 사용한 양다리 IK 기준과 월드 발 목표를 걸음이 끝날 때까지 보존한다.
+        std::array<TwoBoneIKInput, 2> legs;
+        physx::PxTransform pelvis{physx::PxIdentity};
+        physx::PxQuat startSoleRotation{physx::PxIdentity};
+        physx::PxVec3 soleTurnAxis{0, 1, 0};
+        float soleTurnAngle = 0;
+        float angle = 0;
+        float duration = 0;
+    };
+
     struct FootstepInput
     {
     public:
         std::function<FootstepPoseCheck(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
             const physx::PxVec3& displacement)> checkLandingPose;
+        std::function<bool(size_t, const FootstepCommand&, float, FootstepPelvisTurn&)> checkPelvisTurn;
         std::vector<physx::PxVec3> hull;
         std::vector<physx::PxVec3> bufferHull;
         uint64_t completedStep = 0;
@@ -182,6 +210,7 @@ namespace PARS
     {
     public:
         FootstepRecoverySnapshot recovery;
+        std::shared_ptr<const FootstepPelvisTurn> pelvisTurn;
         FootstepReason reason = FootstepReason::NotEvaluated;
         physx::PxVec3 raw{0};
         physx::PxVec3 position{0};
@@ -207,6 +236,8 @@ namespace PARS
         float takeoffElapsedTime = 0;
         float elapsedTime = 0;
         float duration = 0;
+        float pelvisTurnElapsed = 0;
+        float pelvisTurnRate = 1;
         float measuredProgress = 0;
         float progress = 0;
         float progressPerSecond = 0;
@@ -275,6 +306,7 @@ namespace PARS
         bool IsInProgress() const;
         bool HasTimedOutOutsideBuffer() const;
         float GetMaximumInitialDistance() const;
+        int GetPelvisTurnFoot() const;
 
     public:
         uint64_t completedStep = 0;

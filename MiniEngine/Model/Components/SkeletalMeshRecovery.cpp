@@ -690,6 +690,7 @@ namespace PARS
 
     void SkeletalMeshComponent::ResetRecovery()
     {
+        m_FootstepPelvisYawOffset = 0;
         ResetCrossStepPlayback();
         m_FootstepAvoidance.Reset();
         m_FootstepCollision = {};

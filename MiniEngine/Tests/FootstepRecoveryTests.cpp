@@ -809,8 +809,75 @@ namespace
     }
 }
 
+void TestPelvisTurnSelection()
+{
+    FootstepSettings settings;
+    settings.recovery.maximumSteps = 1;
+    FootstepInput input = PlannerInput();
+    FootstepPlanner planner;
+    std::vector<PxVec3> positions;
+    int turnChecks = 0;
+    bool ankleX = true;
+    bool passDirect = false;
+    input.checkLandingPose = [&](size_t, const PxVec3& point, const PxVec3&, const PxVec3&) -> FootstepPoseCheck
+    {
+        positions.push_back(point);
+        FootstepPoseCheck check;
+        if (!passDirect)
+        {
+            check.failures = FootstepPoseFailure::JointLimit;
+            check.joints[2].limitedAxes[ankleX ? 0 : 1] = true;
+        }
+        return check;
+    };
+    input.checkPelvisTurn = [&](size_t, const FootstepCommand& command, float angle, FootstepPelvisTurn& turn) -> bool
+    {
+        ++turnChecks;
+        Check(positions.size() == settings.recovery.maximumPoseChecks, "All ordinary positions take priority over a pelvis turn");
+        Check(command.IsInProgress() && command.motion.valid && command.hasTarget, "Turn evaluates the proposed swing command");
+        if (command.target.position != positions.back() || std::abs(angle + PxPi / 18) > 1e-5f)
+        {
+            return false;
+        }
+        turn.angle = angle;
+        turn.duration = GetFootstepRemainingTime(command);
+        return true;
+    };
+    planner.Update(input, settings);
+    const int side = planner.GetSnapshot().GetPelvisTurnFoot();
+    Check(side == input.requestedFoot && turnChecks > 0, "A rejected ankle X can recover with a negative yaw");
+    const FootstepCommand& command = planner.GetSnapshot().feet[side];
+    Check(command.target.position == positions.back() && std::abs(command.target.pelvisTurn->angle + PxPi / 18) < 1e-5f,
+        "The smallest passing turn keeps its original world foothold");
+    const int firstTurnChecks = turnChecks;
+    ++input.completedStep;
+    input.feet[1 - side].timeToReachLimit = .16f;
+    planner.Update(input, settings);
+    Check(turnChecks == firstTurnChecks && planner.GetSnapshot().GetPelvisTurnFoot() == side,
+        "A running turn keeps its command and does not reapply another relative angle each tick");
+    Check(command.motion.pelvisTurnElapsed > 0 && std::abs(command.motion.pelvisTurnElapsed +
+        GetFootstepRemainingTime(command) * command.motion.pelvisTurnRate - command.target.pelvisTurn->duration) < 1e-5f,
+        "A revised touchdown time keeps the existing turn progress and finishes at landing");
+    ++input.completedStep;
+    input.feet[1 - side].grounded = false;
+    planner.Update(input, settings);
+    Check(planner.GetSnapshot().GetPelvisTurnFoot() < 0, "Losing the planted foot releases the turn");
+    input.feet[1 - side].grounded = true;
+    for (int mode = 0; mode < 2; ++mode)
+    {
+        planner.Reset();
+        positions.clear();
+        ankleX = false;
+        passDirect = mode == 1;
+        planner.Update(input, settings);
+        Check(turnChecks == firstTurnChecks && planner.GetSnapshot().GetPelvisTurnFoot() < 0 &&
+            planner.GetSnapshot().IsInProgress() == passDirect, "An ordinary success or another joint axis never requests yaw");
+    }
+}
+
 void TestFootstepRecovery()
 {
+    TestPelvisTurnSelection();
     checks = 0;
     TestPolygonGeometry();
     TestNormalReachDisplay();

@@ -387,6 +387,13 @@ namespace
             {
                 text += u8" (기존 목표 유지)";
             }
+            if (command.target.pelvisTurn)
+            {
+                char turn[72];
+                std::snprintf(turn, sizeof(turn), u8" · 골반 회전 목표 %+.1f°",
+                    DirectX::XMConvertToDegrees(command.target.pelvisTurn->angle));
+                text += turn;
+            }
         }
         if (!decision)
         {
@@ -819,7 +826,8 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     decisionText += u8"[추종 애니메이션] ";
     decisionText += GetFollowedAnimationText(mesh);
     decisionText += '\n';
-    if (!mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled)
+    const bool avoid = mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled;
+    if (!avoid && support.footstep.GetPelvisTurnFoot() < 0)
     {
         return decisionText + u8"[더미] 이동 경로 충돌 예측 꺼짐";
     }
@@ -842,7 +850,8 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     char summary[512];
     std::snprintf(summary, sizeof(summary),
         u8"[더미] %s · %s · 후보 %u개 · 전체 %u구간 / %u쌍 · %.3fms · 추종 오차 %.1fcm",
-        route, state, avoidance.candidatesChecked, avoidance.totalIntervals, avoidance.totalQueries,
+        route, state, avoidance.candidatesChecked, avoid ? avoidance.totalIntervals : prediction.intervalCount,
+        avoid ? avoidance.totalQueries : prediction.queryCount,
         prediction.elapsedMilliseconds, prediction.maximumTrackingError * 100);
     std::string text = decisionText + summary;
     if (prediction.assumesTakeoff)
@@ -1055,7 +1064,8 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     if (m_ShowFootstep)
     {
         const PARS::FootstepCollisionSnapshot& prediction = mesh.GetFootstepCollisionSnapshot();
-        if (mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled && prediction.sampleCount > 0 &&
+        if ((mesh.GetFootSupport().GetFootstepSettings().pathAvoidanceEnabled || sample.footstep.GetPelvisTurnFoot() >= 0) &&
+            prediction.sampleCount > 0 &&
             prediction.revision == sample.footstep.revision && prediction.completedStep == sample.footstep.completedStep)
         {
             for (size_t side = 0; side < prediction.moving.size(); ++side)
@@ -1412,7 +1422,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
                     decision->overlapAreas[0] * 10000, decision->overlapAreas[1] * 10000, decision->overlapAreas[2] * 10000);
                 ImGui::Text(u8"착지 자세 %u회 / 영역 %u조각 / 착지 예측 %.3fs / 경로 %s",
                     decision->poseChecks, decision->capturePieceCount, decision->predictionTime,
-                    !settings.pathAvoidanceEnabled ? u8"예측 꺼짐" : decision->pathRejected ? u8"미확보" : u8"아래 충돌 예측 참조");
+                    !settings.pathAvoidanceEnabled && step.GetPelvisTurnFoot() < 0 ? u8"예측 꺼짐" :
+                    decision->pathRejected ? u8"미확보" : u8"아래 충돌 예측 참조");
                 if (decision->targetInCaptureMargin)
                 {
                     ImGui::TextUnformatted(u8"확장 영역의 착지 후보 · 한 걸음 회복 미확정");
