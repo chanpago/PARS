@@ -75,9 +75,14 @@ namespace
             }
             sample.solePositions[side] = solved.solvedSole.p;
             sample.reachLimited = sample.reachLimited || solved.reachLimited;
-            if (input.legs[side].command.IsInProgress() && input.acceptsPose && !input.acceptsPose(side, solved))
+            if (input.legs[side].command.IsInProgress() && input.checkJoints)
             {
-                result.jointLimited = true;
+                const FootstepJointStatus joints = input.checkJoints(side, solved);
+                if (joints == FootstepJointStatus::InvalidInput)
+                {
+                    return false;
+                }
+                result.jointLimited = result.jointLimited || joints == FootstepJointStatus::Clamped;
             }
         }
         for (uint32_t left = 0; left < 3; ++left)
@@ -200,7 +205,7 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
         result.status = FootstepCollisionStatus::Collision;
         return result;
     }
-    if (input.rejectInvalidPoses && (result.reachLimited || result.jointLimited))
+    if (input.rejectInvalidPoses && result.reachLimited)
     {
         result.status = FootstepCollisionStatus::Uncertain;
         result.uncertainPairs = 0x1ff;
@@ -244,7 +249,7 @@ FootstepCollisionSnapshot PARS::PredictFootstepCollisions(const FootstepCollisio
             result.status = FootstepCollisionStatus::Collision;
             return result;
         }
-        if (input.rejectInvalidPoses && (result.reachLimited || result.jointLimited))
+        if (input.rejectInvalidPoses && result.reachLimited)
         {
             result.status = FootstepCollisionStatus::Uncertain;
             result.uncertainPairs = interval.pairs;

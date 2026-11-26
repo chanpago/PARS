@@ -213,6 +213,43 @@ namespace
         details += item;
     }
 
+    std::string JointCorrectionDetail(const PARS::FootstepPoseCheck& check, size_t movingFoot)
+    {
+        std::string details;
+        for (size_t joint = 0; joint < check.joints.size(); ++joint)
+        {
+            const PARS::FootstepJointCheck& jointCheck = check.joints[joint];
+            if (jointCheck.correctionRadians <= 0)
+            {
+                continue;
+            }
+            char value[128];
+            std::snprintf(value, sizeof(value), u8"%s %s 보정 %.2f°", LegSideLabels[movingFoot], LegJointLabels[joint],
+                DirectX::XMConvertToDegrees(jointCheck.correctionRadians));
+            AppendDetail(details, value);
+            const std::array<const char*, 3>& labels = jointCheck.usesArticulation ? ArticulationAxisLabels : D6AxisLabels;
+            std::string axes;
+            for (size_t axis = 0; axis < labels.size(); ++axis)
+            {
+                if (jointCheck.limitedAxes[axis])
+                {
+                    AppendDetail(axes, labels[axis]);
+                }
+            }
+            if (jointCheck.limitedAxes[3])
+            {
+                AppendDetail(axes, u8"스윙 원뿔(Y·Z)");
+            }
+            if (!axes.empty())
+            {
+                details += " [";
+                details += axes;
+                details += ']';
+            }
+        }
+        return details;
+    }
+
     std::string PoseFailureDetail(const PARS::FootstepPoseCheck& check, PARS::FootstepPoseFailure reason, size_t movingFoot)
     {
         std::string details;
@@ -236,38 +273,6 @@ namespace
                 else if (check.reachLimited && check.requestedHipAnkleDistance < check.solvedHipAnkleDistance)
                 {
                     AppendDetail(details, u8"최대로 접어도 목표가 너무 가까움");
-                }
-            }
-        }
-        else if (reason == PARS::FootstepPoseFailure::JointLimit)
-        {
-            for (size_t joint = 0; joint < check.joints.size(); ++joint)
-            {
-                const PARS::FootstepJointCheck& jointCheck = check.joints[joint];
-                if (jointCheck.correctionRadians > 0)
-                {
-                    std::snprintf(value, sizeof(value), u8"%s %s 보정 %.2f°", LegSideLabels[movingFoot], LegJointLabels[joint],
-                        DirectX::XMConvertToDegrees(jointCheck.correctionRadians));
-                    AppendDetail(details, value);
-                    const std::array<const char*, 3>& labels = jointCheck.usesArticulation ? ArticulationAxisLabels : D6AxisLabels;
-                    std::string axes;
-                    for (size_t axis = 0; axis < labels.size(); ++axis)
-                    {
-                        if (jointCheck.limitedAxes[axis])
-                        {
-                            AppendDetail(axes, labels[axis]);
-                        }
-                    }
-                    if (jointCheck.limitedAxes[3])
-                    {
-                        AppendDetail(axes, u8"스윙 원뿔(Y·Z)");
-                    }
-                    if (!axes.empty())
-                    {
-                        details += " [";
-                        details += axes;
-                        details += ']';
-                    }
                 }
             }
         }
@@ -358,13 +363,6 @@ namespace
                 text += ')';
             }
         }
-        if (!first && reason == PARS::FootstepPoseFailure::JointLimit)
-        {
-            char tolerance[80];
-            std::snprintf(tolerance, sizeof(tolerance), u8" · 판정 허용 오차 %.2f°",
-                DirectX::XMConvertToDegrees(PARS::FootstepPoseCheck::JointToleranceRadians));
-            text += tolerance;
-        }
     }
 
     std::string FootstepDecisionText(const PARS::FootstepSnapshot& step, const PARS::FootstepRecoverySnapshot* decision)
@@ -409,9 +407,18 @@ namespace
         if (decision->status == PARS::FootstepRecoveryStatus::PoseRejected)
         {
             AppendPoseFailureCandidates(text, *decision, PARS::FootstepPoseFailure::Reach, u8"발 도달 실패");
-            AppendPoseFailureCandidates(text, *decision, PARS::FootstepPoseFailure::JointLimit, u8"관절 각도 제한");
             AppendPoseFailureCandidates(text, *decision, PARS::FootstepPoseFailure::OppositeLegOverlap, u8"반대쪽 다리와 겹침");
             AppendPoseFailureCandidates(text, *decision, PARS::FootstepPoseFailure::InvalidInput, u8"자세 검사 데이터 오류");
+        }
+        else if (decision->hasTarget && decision->poseChecks > 0)
+        {
+            const std::string correction = JointCorrectionDetail(decision->poseCheckResults[decision->poseChecks - 1],
+                decision->movingFoot);
+            if (!correction.empty())
+            {
+                text += u8"\n  선택한 후보의 관절 보정 (참고) · ";
+                text += correction;
+            }
         }
         return text;
     }
@@ -855,7 +862,7 @@ std::string FootSoleDebug::GetLegPredictionText(const PARS::SkeletalMeshComponen
     }
     if (prediction.jointLimited)
     {
-        text += u8" (관절 각도 제한 있음)";
+        text += u8" (이동 중 관절 보정 예상)";
     }
     if (prediction.budgetExhausted || avoidance.searchBudgetExhausted)
     {

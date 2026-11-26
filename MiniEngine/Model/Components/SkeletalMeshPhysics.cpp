@@ -430,7 +430,7 @@ namespace PARS
                     shape.geometry, shape.inBone, shape.actualPose);
             }
         }
-        prediction.acceptsPose = [this, &input](size_t side, const LegIKResult& solved) -> bool
+        prediction.checkJoints = [this, &input](size_t side, const LegIKResult& solved) -> FootstepJointStatus
         {
             const FootIKLegInput& leg = input.legs[side];
             const std::array<int, 4> chain{leg.anchorNode, leg.hipNode, leg.kneeNode, leg.ankleNode};
@@ -441,11 +441,11 @@ namespace PARS
                 const int body = m_PhysicsAsset->FindBody(m_PhysicsSkeleton.names[chain[index]]);
                 if (body < 0)
                 {
-                    return false;
+                    return FootstepJointStatus::InvalidInput;
                 }
                 bodies[index] = body;
             }
-            return CheckFootstepJointLimits(*m_PhysicsAsset, m_Ragdoll.UsesArticulation(), bodies, frames) == FootstepPoseFailure::None;
+            return CheckFootstepJointLimits(*m_PhysicsAsset, m_Ragdoll.UsesArticulation(), bodies, frames);
         };
         const Vector3 actorForward = GetOwner().GetActorTransform().GetBasis() * Vector3(0, 0, 1);
         const PxVec3 forward(float(actorForward.GetX()), float(actorForward.GetY()), float(actorForward.GetZ()));
@@ -469,8 +469,7 @@ namespace PARS
             if (step.feet[side].IsInProgress())
             {
                 m_FootSupport.ReportRecoveryPath(side, step.feet[side].target.position,
-                    m_FootstepCollision.status == FootstepCollisionStatus::Clear &&
-                    !m_FootstepCollision.reachLimited && !m_FootstepCollision.jointLimited);
+                    m_FootstepCollision.IsReachableAndClear());
             }
         }
     }

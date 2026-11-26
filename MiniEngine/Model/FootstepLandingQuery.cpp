@@ -148,7 +148,7 @@ FootstepPoseCheck FootstepLandingQuery::CheckPose(size_t side, const PxVec3& pos
         check.ikIssue = solved.issue;
         return check;
     }
-    // 목표에 닿지 못해도 IK가 계산한 자세로 관절 제한과 반대쪽 다리 겹침을 검사할 수 있다.
+    // 도달 오차가 있어도 계산된 자세로 다른 탈락 사유와 관절 보정량을 함께 확인한다.
     check.failures = FootstepPoseFailure::None;
     if (solved.reachError > FootstepPoseCheck::SoleTolerance)
     {
@@ -159,7 +159,11 @@ FootstepPoseCheck FootstepLandingQuery::CheckPose(size_t side, const PxVec3& pos
         check.reachLimited = solved.reachLimited;
     }
     const std::array<PxTransform, 4> frames{{leg.anchor, solved.hip, solved.knee, solved.ankle}};
-    check.failures |= CheckFootstepJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(), leg.bodies, frames, &check.joints);
+    if (CheckFootstepJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(), leg.bodies, frames, &check.joints) ==
+        FootstepJointStatus::InvalidInput)
+    {
+        check.failures |= FootstepPoseFailure::InvalidInput;
+    }
     const std::array<FootstepCollisionShape, 3>& oppositeShapes = m_Legs[1 - side].shapes;
     for (size_t moving = 0; moving < leg.shapes.size(); ++moving)
     {

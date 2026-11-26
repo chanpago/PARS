@@ -371,19 +371,28 @@ namespace
             Near(SampleFootstepPathVelocity(replacement, .08f), velocity),
             "Replanning joins the old position and derivative at the current flight clock");
         input = MakeAvoidanceFixture();
-        input.acceptsPose = [](size_t, const LegIKResult&) -> bool
+        input.checkJoints = [](size_t, const LegIKResult&) -> FootstepJointStatus
         {
-            return false;
+            return FootstepJointStatus::Clamped;
         };
         avoidance.Reset();
         avoidance.Update(input, PxVec3(0, 0, 1));
-        Check(avoidance.GetSnapshot().status == FootstepAvoidanceStatus::Failed &&
-            !avoidance.GetSnapshot().paths[0].enabled, "Joint-rejected candidates are not applied");
+        Check(avoidance.GetSnapshot().status == FootstepAvoidanceStatus::Detouring &&
+            avoidance.GetSnapshot().paths[0].enabled && avoidance.GetSnapshot().collision.jointLimited &&
+            avoidance.GetSnapshot().collision.IsReachableAndClear(), "A collision-free detour can retain a clamped joint target");
+        avoidance.Reset();
         input.legs[1].shapes[2].actualPose.p.x += 3;
         avoidance.Update(input, PxVec3(0, 0, 1));
         Check(avoidance.GetSnapshot().status == FootstepAvoidanceStatus::Direct &&
-            avoidance.GetSnapshot().candidatesChecked == 0,
+            avoidance.GetSnapshot().candidatesChecked == 0 && avoidance.GetSnapshot().collision.IsReachableAndClear(),
             "Existing joint clamping alone does not trigger collision detour search on a clear direct path");
+        input.checkJoints = [](size_t, const LegIKResult&) -> FootstepJointStatus
+        {
+            return FootstepJointStatus::InvalidInput;
+        };
+        avoidance.Update(input, PxVec3(0, 0, 1));
+        Check(avoidance.GetSnapshot().collision.status == FootstepCollisionStatus::Unavailable,
+            "Invalid joint data still rejects a geometrically clear path");
         input = MakeAvoidanceFixture();
         input.legs[1].shapes[2].geometry.storeAny(PxSphereGeometry(1));
         const PxVec3 landing = input.legs[0].command.target.position;

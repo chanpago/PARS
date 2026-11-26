@@ -38,7 +38,6 @@ namespace PARS
     {
         None = 0,
         Reach = 1 << 0,
-        JointLimit = 1 << 1,
         OppositeLegOverlap = 1 << 2,
         InvalidInput = 1 << 3
     };
@@ -70,6 +69,13 @@ namespace PARS
         Body,
         Constraint,
         Rotation
+    };
+
+    enum class FootstepJointStatus : uint8_t
+    {
+        WithinLimits,
+        Clamped,
+        InvalidInput
     };
 
     struct FootstepJointCheck

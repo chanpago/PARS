@@ -222,13 +222,18 @@ namespace
         input = Input();
         input.velocity = PxVec3(-.8f, 0, 0);
         input.com.z = .15f;
-        input.checkTargetPose = [](const PxVec3&) -> FootstepPoseFailures
+        input.checkTargetPose = [](const PxVec3&) -> FootstepPoseCheck
         {
-            return FootstepPoseFailure::JointLimit;
+            FootstepPoseCheck check;
+            check.joints[0].correctionRadians = .2f;
+            check.joints[1].correctionRadians = .3f;
+            check.joints[2].correctionRadians = .82f;
+            return check;
         };
         result = SelectFootstepRecovery(input, settings);
-        Check(!result.hasTarget && result.poseRejected && result.poseChecks <= settings.maximumPoseChecks,
-            "PA rejection cannot be promoted to an accepted target");
+        Check(result.hasTarget && !result.poseRejected && result.poseChecks == 1 &&
+            result.poseCheckResults[0].joints[2].correctionRadians == .82f,
+            "A reachable first candidate is accepted even when all three joint targets need clamping");
         input.locked = true;
         input.lockedTarget = PxVec3(.1f, 0, .2f);
         input.previousMode = FootstepMode::Normal;
@@ -286,7 +291,7 @@ namespace
         const bool frontFirst = firstChoice.mode == FootstepMode::FrontCross;
         input.checkTargetPose = [frontFirst](const PxVec3& point) -> FootstepPoseFailures
         {
-            return (point.z > 0) == frontFirst ? FootstepPoseFailure::JointLimit : FootstepPoseFailure::None;
+            return (point.z > 0) == frontFirst ? FootstepPoseFailure::OppositeLegOverlap : FootstepPoseFailure::None;
         };
         const FootstepRecoverySnapshot alternative = SelectFootstepRecovery(input, settings);
         Check(firstChoice.overlapAreas[1] > 0 && firstChoice.overlapAreas[2] > 0 && alternative.hasTarget &&
@@ -484,7 +489,8 @@ namespace
             if (checked.size() == 1)
             {
                 check.failures = FootstepPoseFailure::Reach;
-                check.failures |= FootstepPoseFailure::JointLimit;
+                check.failures |= FootstepPoseFailure::InvalidInput;
+                check.joints[0].inputIssue = FootstepJointInputIssue::Constraint;
                 check.soleError = .015f;
                 check.reachLimited = true;
                 check.joints[1].correctionRadians = .21f;
@@ -505,7 +511,7 @@ namespace
         const FootstepPoseCheck& firstCheck = rejected.poseCheckResults[0];
         const FootstepPoseCheck& secondCheck = rejected.poseCheckResults[1];
         Check(rejected.poseChecks > 1 && firstCheck.failures.isSet(FootstepPoseFailure::Reach) &&
-            firstCheck.failures.isSet(FootstepPoseFailure::JointLimit) && !firstCheck.failures.isSet(FootstepPoseFailure::OppositeLegOverlap) &&
+            firstCheck.failures.isSet(FootstepPoseFailure::InvalidInput) && !firstCheck.failures.isSet(FootstepPoseFailure::OppositeLegOverlap) &&
             secondCheck.failures == FootstepPoseFailure::OppositeLegOverlap,
             "simultaneous and distinct failures stay attached to the correct candidates across the search");
         Check(rejected.movingFoot == input.movingFoot && firstCheck.reachLimited && firstCheck.soleError == .015f &&
@@ -638,12 +644,18 @@ namespace
         input.feet[1].stanceOffset.x += .3f;
         FootstepPolygon checked;
         input.checkLandingPose = [&checked, &input](size_t side, const PxVec3& point, const PxVec3& normal,
-            const PxVec3& displacement) -> FootstepPoseFailures
+            const PxVec3& displacement) -> FootstepPoseCheck
         {
             Check(normal == PxVec3(0, 1, 0) && displacement == point - input.feet[side].position,
                 "Each landing pose is checked with its own stride from the stepping foot");
             checked.push_back(point);
-            return checked.size() == 2 ? FootstepPoseFailure::None : FootstepPoseFailure::JointLimit;
+            FootstepPoseCheck check;
+            check.joints[2].correctionRadians = .82f;
+            if (checked.size() != 2)
+            {
+                check.failures = FootstepPoseFailure::Reach;
+            }
+            return check;
         };
         planner.Reset();
         planner.Update(input, settings);
@@ -654,9 +666,10 @@ namespace
         Check(second.recovery.poseChecks == checked.size() &&
             std::equal(checked.begin(), checked.end(), second.recovery.poseCheckPositions.begin()),
             "the snapshot retains the checked positions through the first accepted landing");
-        Check(second.recovery.poseCheckResults[0].failures == FootstepPoseFailure::JointLimit &&
-            second.recovery.poseCheckResults[1].failures == FootstepPoseFailure::None,
-            "the planner forwards each result without carrying a rejected reason into an accepted candidate");
+        Check(second.recovery.poseCheckResults[0].failures == FootstepPoseFailure::Reach &&
+            second.recovery.poseCheckResults[1].failures == FootstepPoseFailure::None &&
+            second.recovery.poseCheckResults[1].joints[2].correctionRadians == .82f,
+            "the planner starts the reachable step with its measured ankle correction");
         const PxVec3 closest = ClosestFootstepPoint(second.recovery.intersections[0].front(), second.raw);
         Check((checked.front() - closest).magnitudeSquared() < 1e-8f && second.position == checked.back() &&
             InAny(second.recovery.intersections[0], second.position),
@@ -761,7 +774,7 @@ namespace
             "a failed path requests an alternative landing instead of repeating the same candidate");
         input.checkLandingPose = [](size_t, const PxVec3&, const PxVec3&, const PxVec3&) -> FootstepPoseFailures
         {
-            return FootstepPoseFailure::JointLimit;
+            return FootstepPoseFailure::OppositeLegOverlap;
         };
         ++input.completedStep;
         planner.Update(input, settings);

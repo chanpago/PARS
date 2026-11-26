@@ -31,8 +31,8 @@ namespace PARS
     struct FootstepCollisionInput
     {
     public:
-        // 런타임 관절 제한에 의해 목표가 잘리는지 확인한다. 후보 검사에서는 상태를 바꾸지 않는다.
-        std::function<bool(size_t, const LegIKResult&)> acceptsPose;
+        // 물리 구동 시 필요한 관절 보정과 계산할 수 없는 관절 자세를 구분한다.
+        std::function<FootstepJointStatus(size_t, const LegIKResult&)> checkJoints;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
         std::array<FootstepCollisionLeg, 2> legs;
@@ -66,6 +66,12 @@ namespace PARS
     struct FootstepCollisionSnapshot
     {
     public:
+        bool IsReachableAndClear() const
+        {
+            return status == FootstepCollisionStatus::Clear && !reachLimited;
+        }
+
+    public:
         uint64_t completedStep = 0;
         uint64_t revision = 0;
         double elapsedMilliseconds = 0;
@@ -95,7 +101,7 @@ namespace PARS
     // 한 호출 안에서는 골반·지지 다리를 고정한 계획 궤적과 관측한 추종 오차 범위를 검사한다.
     // 이 모델의 시간 구간 전체가 분리되어야 통과하며, 예산·수치 한계는 미확인으로 반환한다.
     // 미래 외력이나 지지 다리의 운동을 보장하지 않으므로 매 물리 틱 다시 검사해야 한다.
-    // 관절 제한 콜백과 도달 제한은 평가한 자세에서 확인하는 별도 후보 거절 조건이다.
+    // 발의 도달 제한은 후보 거절 조건이고, 관절 각도 보정은 디버그용으로 기록한다.
     FootstepCollisionSnapshot PredictFootstepCollisions(const FootstepCollisionInput& input,
         FootstepCollisionPass pass = FootstepCollisionPass::CurrentPath);
 }

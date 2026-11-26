@@ -25,8 +25,8 @@ namespace PARS
         return std::isfinite(dot) ? 2 * std::acos(physx::PxClamp(dot, 0.0f, 1.0f)) : dot;
     }
 
-    // 착지 후보는 위반한 관절을 모두 기록한다. 연속 경로 검사는 첫 위반에서 중단할 수 있다.
-    inline FootstepPoseFailures CheckFootstepJointLimits(const PhysicsAsset& asset, bool articulation,
+    // 각도 보정은 구동 시 참고할 값이다. 다른 관절의 데이터 오류까지 확인한다.
+    inline FootstepJointStatus CheckFootstepJointLimits(const PhysicsAsset& asset, bool articulation,
         const std::array<int, 4>& indices, const std::array<physx::PxTransform, 4>& frames,
         std::array<FootstepJointCheck, 3>* details = nullptr)
     {
@@ -47,7 +47,7 @@ namespace PARS
                 bodies[index] = FootstepPoseMatrix(frames[index]) * asset.bodies[indices[index]].GetLocalTransform();
             }
         }
-        FootstepPoseFailures failures;
+        FootstepJointStatus status = FootstepJointStatus::WithinLimits;
         for (size_t index = 0; index + 1 < bodies.size(); ++index)
         {
             FootstepJointCheck joint;
@@ -73,23 +73,26 @@ namespace PARS
                         joint.correctionRadians = correction;
                         joint.limitedAxes = limitedAxes;
                         joint.usesArticulation = articulation;
-                        failures |= FootstepPoseFailure::JointLimit;
+                        if (status == FootstepJointStatus::WithinLimits)
+                        {
+                            status = FootstepJointStatus::Clamped;
+                        }
                     }
                 }
             }
             if (joint.inputIssue != FootstepJointInputIssue::None)
             {
-                failures |= FootstepPoseFailure::InvalidInput;
+                status = FootstepJointStatus::InvalidInput;
             }
             if (details)
             {
                 (*details)[index] = joint;
             }
-            else if (failures)
+            else if (status == FootstepJointStatus::InvalidInput)
             {
                 break;
             }
         }
-        return failures;
+        return status;
     }
 }

@@ -47,13 +47,17 @@ namespace
         const std::array<PxTransform, 4> frames{PxTransform(PxIdentity), PxTransform(PxIdentity),
             PxTransform(PxQuat(.25f, axis)), PxTransform(PxQuat(.38f, axis))};
         std::array<FootstepJointCheck, 3> details;
-        FootstepPoseFailures failures = CheckFootstepJointLimits(asset, articulation, indices, frames, &details);
-        CheckLimit(failures == FootstepPoseFailure::JointLimit && details[0].correctionRadians == 0 &&
+        FootstepJointStatus status = CheckFootstepJointLimits(asset, articulation, indices, frames, &details);
+        CheckLimit(status == FootstepJointStatus::Clamped && details[0].correctionRadians == 0 &&
             std::abs(details[1].correctionRadians - .25f) < 1e-4f && std::abs(details[2].correctionRadians - .13f) < 1e-4f,
             "A landing records both knee and ankle corrections in joint space and leaves the hip clear");
+        std::array<int, 4> missingFoot = indices;
+        missingFoot[3] = -1;
+        CheckLimit(CheckFootstepJointLimits(asset, articulation, missingFoot, frames) == FootstepJointStatus::InvalidInput,
+            "A clamped knee cannot hide a missing foot body during trajectory evaluation");
         asset.constraints.erase(asset.constraints.begin() + 1);
-        failures = CheckFootstepJointLimits(asset, articulation, indices, frames, &details);
-        CheckLimit(failures.isSet(FootstepPoseFailure::InvalidInput) && failures.isSet(FootstepPoseFailure::JointLimit) &&
+        status = CheckFootstepJointLimits(asset, articulation, indices, frames, &details);
+        CheckLimit(status == FootstepJointStatus::InvalidInput &&
             details[1].inputIssue == FootstepJointInputIssue::Constraint && details[1].correctionRadians == 0 &&
             std::abs(details[2].correctionRadians - .13f) < 1e-4f,
             "A missing knee constraint is identified without hiding a measurable ankle correction");
