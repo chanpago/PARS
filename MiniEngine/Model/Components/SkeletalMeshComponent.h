@@ -24,7 +24,7 @@ namespace PARS
     enum class RootSupportRelease
     {
         None,
-        OutsideBuffer,
+        LowPelvis,
         NoSupport,
         Inactive,
         Error,

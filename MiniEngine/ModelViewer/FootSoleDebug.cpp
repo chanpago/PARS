@@ -1211,8 +1211,8 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
         case PARS::RootSupportRelease::NoSupport:
             state = u8"발 지지 없음으로 해제";
             break;
-        case PARS::RootSupportRelease::OutsideBuffer:
-            state = u8"실제 COM의 B 연속 이탈로 해제";
+        case PARS::RootSupportRelease::LowPelvis:
+            state = u8"낮은 발바닥 기준 골반 높이 부족으로 해제";
             break;
         case PARS::RootSupportRelease::ProjectileImpact:
             state = u8"피격 후 몸통 기울기 증가로 해제";
@@ -1221,8 +1221,16 @@ void FootSoleDebug::DrawUI(PARS::SkeletalMeshComponent& mesh, const std::functio
             break;
         }
         ImGui::Text(u8"적용 w = %.3f / %s", mesh.GetRagdoll().GetRootSupportWeight(), state);
-        ImGui::Text(u8"실제 COM의 B 연속 이탈 %.2f / %.2f초", sample.footstep.outsideBufferTime,
-            PARS::FootstepPlanner::OutsideBufferDuration);
+        PARS::FootstepSettings& settings = support.GetFootstepSettings();
+        float fallHeightPercent = settings.fallHeightRatio * 100.0f;
+        if (ImGui::SliderFloat(u8"낙상 높이 기준 (Idle 대비)", &fallHeightPercent, 1.0f, 99.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp))
+        {
+            settings.fallHeightRatio = fallHeightPercent * .01f;
+        }
+        if (std::isfinite(sample.footstep.pelvisHeightRatio))
+        {
+            ImGui::Text(u8"골반과 낮은 발바닥 사이 높이 · Idle의 %.1f%%", sample.footstep.pelvisHeightRatio * 100);
+        }
         if (released != PARS::RootSupportRelease::None)
         {
             ImGui::TextUnformatted(u8"더미 초기화 전까지 해제 상태를 유지합니다.");

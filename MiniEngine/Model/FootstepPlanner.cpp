@@ -130,6 +130,7 @@ namespace
             std::isfinite(s.maximumLandingLowering) && s.maximumLandingLowering >= 0 &&
             std::isfinite(s.supportLoadRatio) && s.supportLoadRatio > 0 && s.supportLoadRatio <= 1 &&
             std::isfinite(s.supportConfirmationTime) && s.supportConfirmationTime > 0 &&
+            s.fallHeightRatio > 0 && s.fallHeightRatio < 1 &&
             (!s.landingComClampEnabled ||
                 (std::isfinite(s.landingComClampHysteresisDegrees) && s.landingComClampHysteresisDegrees >= 0 &&
                     s.landingComClampHysteresisDegrees < 90));
@@ -852,9 +853,10 @@ bool FootstepSnapshot::IsInProgress() const
     return feet[0].IsInProgress() || feet[1].IsInProgress();
 }
 
-bool FootstepSnapshot::HasTimedOutOutsideBuffer() const
+bool FootstepSnapshot::HasLowPelvis() const
 {
-    return actualComOutsideBuffer && outsideBufferTime + 1e-9 >= FootstepPlanner::OutsideBufferDuration;
+    return fallHeightRatio > 0 && fallHeightRatio < 1 && std::isfinite(pelvisHeightRatio) &&
+        pelvisHeightRatio <= fallHeightRatio;
 }
 
 float FootstepSnapshot::GetMaximumInitialDistance() const
@@ -899,7 +901,7 @@ void FootstepPlanner::Abort(FootstepReason reason)
     }
 }
 
-bool FootstepPlanner::UpdateFallSteps(const FootstepInput& input, bool outsideBufferExpired)
+bool FootstepPlanner::UpdateFallSteps(const FootstepInput& input)
 {
     const bool hasFloor = input.hasFloorProjection || !input.hull.empty() || input.feet[0].grounded || input.feet[1].grounded;
     const bool canStep = hasFloor && !input.pelvisGrounded && input.hasReference && input.hasCom && input.hasVelocity &&
@@ -915,16 +917,16 @@ bool FootstepPlanner::UpdateFallSteps(const FootstepInput& input, bool outsideBu
             return false;
         }
     }
-    else if (canStep && input.fallingBackward && (outsideBufferExpired || input.zone == FootSupportZone::Invalid))
+    else if (canStep && input.fallingBackward && (m_Snapshot.HasLowPelvis() || input.zone == FootSupportZone::Invalid))
     {
         m_Snapshot.backwardFallStepsRemaining = MaximumBackwardFallSteps;
         // 직전 회복 걸음의 다음 발 예약을 지워 낙상 순간에 이미 떠 있는 발부터 짚는다.
         m_Snapshot.followupFoot = -1;
         m_FallStepStart = input.completedStep;
     }
-    else if (outsideBufferExpired)
+    else if (m_Snapshot.HasLowPelvis())
     {
-        Abort(FootstepReason::OutsideBuffer);
+        Abort(FootstepReason::LowPelvis);
         return false;
     }
     return true;
@@ -1055,11 +1057,17 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
     {
         return;
     }
-    // 첫 이탈은 0초로 시작하고 연속된 완료 물리 틱 사이의 시간만 센다.
-    const double nextOutsideTime = consecutiveSample && state.actualComOutsideBuffer ?
-        state.outsideBufferTime + input.fixedDeltaTime : 0.0;
-    state.actualComOutsideBuffer = false;
-    state.outsideBufferTime = 0.0;
+    state.fallHeightRatio = settings.fallHeightRatio;
+    state.pelvisHeightRatio = std::numeric_limits<float>::quiet_NaN();
+    const float leftSoleY = input.feet[0].position.y;
+    const float rightSoleY = input.feet[1].position.y;
+    if (input.feet[0].available && input.feet[1].available && std::isfinite(leftSoleY) && std::isfinite(rightSoleY) &&
+        std::isfinite(input.pelvisY) && std::isfinite(input.standingPelvisHeight) && input.standingPelvisHeight > 0)
+    {
+        // 접촉이나 발딛기 역할에 관계없이 실제 발바닥 중심 두 개 중 낮은 쪽을 쓴다.
+        const float lowestSoleY = (std::min)(leftSoleY, rightSoleY);
+        state.pelvisHeightRatio = (input.pelvisY - lowestSoleY) / input.standingPelvisHeight;
+    }
     if (input.active && input.automaticSupport && input.rootReleased && state.backwardFallStepsRemaining == 0)
     {
         Abort(FootstepReason::RootSupportReleased);
@@ -1098,14 +1106,7 @@ void FootstepPlanner::Update(const FootstepInput& input, const FootstepSettings&
         return;
     }
     const bool validDeltaTime = std::isfinite(input.fixedDeltaTime) && input.fixedDeltaTime > 0;
-    // 실제 COM의 XZ 투영으로 낙상을 판정한다. 경계는 B 안에 포함한다.
-    if (validDeltaTime && input.hasCom && input.com.isFinite() && input.zone != FootSupportZone::Invalid &&
-        input.bufferHull.size() >= 3 && !IsInsideFootSupportHull(input.bufferHull, input.com))
-    {
-        state.actualComOutsideBuffer = true;
-        state.outsideBufferTime = (std::min)(nextOutsideTime, OutsideBufferDuration);
-    }
-    if (!UpdateFallSteps(input, state.HasTimedOutOutsideBuffer()))
+    if (!UpdateFallSteps(input))
     {
         return;
     }
@@ -1471,8 +1472,8 @@ const char* PARS::FootstepReasonLabel(FootstepReason reason)
         return u8"해당 발의 이동 진행";
     case FootstepReason::Landed:
         return u8"해당 발의 실제 접촉 확인";
-    case FootstepReason::OutsideBuffer:
-        return u8"실제 COM의 B 연속 이탈";
+    case FootstepReason::LowPelvis:
+        return u8"낮은 발바닥 기준 골반 높이 부족";
     case FootstepReason::RootSupportReleased:
         return u8"골반 보조 해제";
     case FootstepReason::WaitingSupportLoad:

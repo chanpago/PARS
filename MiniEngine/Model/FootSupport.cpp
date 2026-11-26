@@ -390,6 +390,9 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
 {
     FramePerformance::Scope planningTiming(FramePerformance::Category::FootstepPlanning);
     const AnimInstance& animation = mesh.GetAnimInstance();
+    const Ragdoll& ragdoll = mesh.GetRagdoll();
+    const int root = ragdoll.GetImpactRootBody();
+    const Matrix4 component(mesh.GetComponentTransform());
 
     // 애니메이션 전환 중이 아니고 현재 클립이름이 idle일때만 true
     const bool idle = !animation.IsBlending() && animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle";
@@ -412,6 +415,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         // 메시의 본 계층과 연결정보를 준비, animation.GetPose()에 들어잇는 그 시점의 Idle애니메이션 자세를 본 계층에 따라 계산해서 reference에 넣음 reference는 vector<matrix>
         if (mesh.BuildPhysicsSkeleton(skeleton, error) && EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(kIdentity), reference, error))
         {
+            m_StandingPelvisHeight = 0;
+            float lowestSoleY = std::numeric_limits<float>::infinity();
             m_HasIdleReference = true;
             for (size_t side = 0; side < m_Feet.size(); ++side)
             {
@@ -427,6 +432,25 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
                 // 충격으로 변한 실제 발 간격 대신 최초 유효한 Idle 목표 자세를 저장한다.
                 // 현재발의 목표 월드행렬을 가져온다
                 m_IdleFootBones[side] = PhysicsBoneFrame(reference[node]);
+                const Matrix4 standingSole = PhysicsBoneFrame(component * reference[node]) * m_Snapshot.feet[side].soleInBone;
+                const float soleY = float(standingSole.GetW().GetY());
+                if (!std::isfinite(soleY))
+                {
+                    m_HasIdleReference = false;
+                    break;
+                }
+                lowestSoleY = (std::min)(lowestSoleY, soleY);
+            }
+            const std::vector<int>& nodes = ragdoll.GetBoneNodes();
+            if (m_HasIdleReference && root >= 0 && static_cast<size_t>(root) < nodes.size())
+            {
+                const int pelvisNode = nodes[root];
+                if (pelvisNode >= 0 && static_cast<size_t>(pelvisNode) < reference.size())
+                {
+                    // 같은 Idle 자세에서 골반과 더 낮은 발바닥의 월드 높이 차를 한 번 저장한다.
+                    const Matrix4 standingPelvis = component * reference[pelvisNode];
+                    m_StandingPelvisHeight = float(standingPelvis.GetW().GetY()) - lowestSoleY;
+                }
             }
         }
     }
@@ -454,19 +478,20 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     input.com = m_Snapshot.centerOfMass;
     input.velocity = m_Snapshot.centerOfMassVelocity;
     input.hull = m_Snapshot.hull;
-    input.bufferHull = m_Snapshot.balance.bufferHull;
     input.zone = m_Snapshot.balance.zone;
     input.hasFloorProjection = m_Snapshot.projectedPointCount > 0;
     input.projectionHeight = m_Snapshot.projectedCenterOfMass.y;
     input.fixedDeltaTime = static_cast<float>(PhysicsWorld::FixedDeltaTime);
     input.bodyWeight = m_Snapshot.totalMass * 9.81f;
     // 몸 밀기는 골반 접촉을, 발사 구는 실제 피격 부위를 기준으로 이동발을 고른다.
-    const Ragdoll& ragdoll = mesh.GetRagdoll();
-    const int root = ragdoll.GetImpactRootBody();
+    if (m_HasIdleReference && root >= 0 && static_cast<size_t>(root) < ragdoll.GetBodyCount())
+    {
+        input.standingPelvisHeight = m_StandingPelvisHeight;
+        input.pelvisY = float(ragdoll.GetBoneWorld(root).GetW().GetY());
+    }
     const bool fullBodyFall = mesh.IsFallingAnimationEnabled() &&
         mesh.GetAnimInstance().GetMotionFrameRange(MotionFrameUsage::ShoveFall).frameCount > 0;
     input.fallingBackward = !fullBodyFall && input.active && input.automaticSupport && idle && !input.rootReleased &&
-        (input.zone == FootSupportZone::Outside || input.zone == FootSupportZone::Invalid) &&
         mesh.GetGroundFallDirection() == FallDirection::Backward;
     if (root >= 0 && (input.fallingBackward || continuingFallSteps))
     {
@@ -502,7 +527,6 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
 
     // 캐릭터의 의도된 수평 방향을 사용한다. 충격에 의한 골반의 순간 회전은 기준 방향에 섞지 않는다.
     // 현재 캐릭터가 보고있는 수평 방향을 구한다
-    const Matrix4 component(mesh.GetComponentTransform());
     PxVec3 forward = ToPx(Vector3(component.GetZ()));
     forward.y = 0;
     input.hasReference = m_HasIdleReference && forward.isFinite() && forward.normalize() > 1e-6f;

@@ -44,6 +44,7 @@ namespace PARS
         float maximumLandingLowering = .03f;
         float supportLoadRatio = .25f;
         float supportConfirmationTime = .01f;
+        float fallHeightRatio = .75f;
         float landingComClampHysteresisDegrees = 5.0f;
         bool preventCrossing = true;
         bool landingComClampEnabled = true;
@@ -80,7 +81,7 @@ namespace PARS
         WaitingTakeoff,
         InFlight,
         Landed,
-        OutsideBuffer,
+        LowPelvis,
         RootSupportReleased,
         WaitingSupportLoad
     };
@@ -111,7 +112,6 @@ namespace PARS
         std::function<FootstepPoseCheck(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
             const physx::PxVec3& displacement)> checkLandingPose;
         std::vector<physx::PxVec3> hull;
-        std::vector<physx::PxVec3> bufferHull;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
         std::array<FootstepFootInput, 2> feet;
@@ -121,6 +121,8 @@ namespace PARS
         physx::PxVec3 impactPosition{0};
         FootSupportZone zone = FootSupportZone::Invalid;
         float projectionHeight = 0;
+        float pelvisY = std::numeric_limits<float>::quiet_NaN();
+        float standingPelvisHeight = 0;
         float fixedDeltaTime = 0;
         float bodyWeight = 0;
         int requestedFoot = -1; // 명령 대상만 나타내며 반대 발에 역할을 부여하지 않는다.
@@ -273,7 +275,7 @@ namespace PARS
     {
     public:
         bool IsInProgress() const;
-        bool HasTimedOutOutsideBuffer() const;
+        bool HasLowPelvis() const;
         float GetMaximumInitialDistance() const;
 
     public:
@@ -282,7 +284,6 @@ namespace PARS
         uint64_t startCount = 0;
         uint64_t landingCount = 0;
         uint64_t abortCount = 0;
-        double outsideBufferTime = 0.0;
         std::array<FootstepCommand, 2> feet;
         std::array<FootstepTarget, 2> candidates;
         FootstepComPrediction startCom;
@@ -291,12 +292,13 @@ namespace PARS
         physx::PxVec3 groundNormal{0, 1, 0};
         physx::PxVec3 lastImpactPosition{0};
         FootstepLoadTransfer loadTransfer;
+        float pelvisHeightRatio = std::numeric_limits<float>::quiet_NaN();
+        float fallHeightRatio = 0;
         FootstepReason reason = FootstepReason::Inactive;
         int requestedFoot = -1;
         int followupFoot = -1;
         uint32_t backwardFallStepsRemaining = 0;
         bool hasPrediction = false;
-        bool actualComOutsideBuffer = false;
         bool needsStep = false;
         bool hasGroundPlane = false;
         bool hasImpact = false;
@@ -312,7 +314,7 @@ namespace PARS
 
     private:
         void Abort(FootstepReason reason);
-        bool UpdateFallSteps(const FootstepInput& input, bool outsideBufferExpired);
+        bool UpdateFallSteps(const FootstepInput& input);
         void UpdateMotion(FootstepCommand& command, const FootstepFootInput& foot, const FootstepInput& input);
 
     public:
@@ -322,7 +324,6 @@ namespace PARS
         }
 
     public:
-        static constexpr double OutsideBufferDuration = 0.3;
         static constexpr uint32_t MaximumBackwardFallSteps = 2;
 
     private:

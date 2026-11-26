@@ -13,6 +13,7 @@
 using namespace physx;
 
 void TestFootstepPlanner();
+void TestFootstepFalls();
 void TestImpactWarmupPlanning();
 void TestFootstepIK();
 void TestFootstepCollision();
@@ -844,6 +845,11 @@ int main(int argc, char** argv)
         TestFootstepIK();
         TestFootstepCollision();
         TestStandingSupport();
+        return 0;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--footstep-fall-only") == 0)
+    {
+        TestFootstepFalls();
         return 0;
     }
     if (argc == 2 && std::strcmp(argv[1], "--foot-command-only") == 0)

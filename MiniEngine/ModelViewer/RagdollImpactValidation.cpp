@@ -257,7 +257,7 @@ namespace
             "decision_mode,decision_status,decision_has_target,decision_feasible,decision_pose_checks,decision_ms,"
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state,"
-            "actual_com_outside_b,outside_b_time_s,"
+            "pelvis_to_lowest_sole_ratio,fall_height_threshold_ratio,"
             "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,swing_target_y,backward_fall_steps_remaining,upper_body_clip,upper_body_time_s\n";
     }
 
@@ -307,7 +307,7 @@ namespace
                 << ',' << animation.GetAnimationName(animation.GetCurrentAnimationIndex()) << ',' << animation.GetAnimationTime()
                 << ',' << support.centerOfMassVelocity.x << ',' << support.centerOfMassVelocity.z
                 << ',' << decision.targetInCaptureMargin << ',' << PARS::CharacterBalanceStateLabel(mesh.GetBalanceState())
-                << ',' << support.footstep.actualComOutsideBuffer << ',' << support.footstep.outsideBufferTime
+                << ',' << support.footstep.pelvisHeightRatio << ',' << support.footstep.fallHeightRatio
                 << ',' << command.motion.hasSupportDeadline << ',' << command.motion.duration << ',' << command.motion.elapsedTime
                 << ',' << command.motion.landingTimeError << ',';
             if (command.motion.valid)
@@ -546,17 +546,16 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
                 check(mesh.GetBalanceState() == CharacterBalanceState::GroundFall && !mesh.GetRagdoll().IsRootSupported() &&
                     !mesh.GetRagdoll().UsesFootDrivenSupport(), "Projectile toppling releases support and starts the ground fall in the same tick");
             }
-            if (beforeRelease == RootSupportRelease::None && mesh.GetRootSupportRelease() == RootSupportRelease::OutsideBuffer)
+            if (beforeRelease == RootSupportRelease::None && mesh.GetRootSupportRelease() == RootSupportRelease::LowPelvis)
             {
                 const FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
-                check(support.footstep.actualComOutsideBuffer &&
-                        support.footstep.outsideBufferTime + 1e-9 >= FootstepPlanner::OutsideBufferDuration &&
+                check(support.footstep.HasLowPelvis() &&
                         (support.footstep.aborted || (mesh.GetGroundFallDirection() == FallDirection::Backward &&
                         support.footstep.backwardFallStepsRemaining > 0)) &&
                         !mesh.GetRagdoll().UsesFootDrivenSupport() && !mesh.GetRagdoll().IsRootSupported() &&
                         mesh.GetBalanceState() == CharacterBalanceState::GroundFall &&
                         (!mesh.IsFallingAnimationEnabled() || mesh.IsFollowingFallingAnimation()),
-                    "Continuous actual COM exit from B releases the pelvis and starts the ground fall in the same tick");
+                    "A low pelvis above the lower sole releases support and starts the ground fall in the same tick");
             }
             if (validateLandingRegion && (mesh.GetFootSupport().GetSnapshot().hasComProjection ||
                 mesh.GetFootSupport().GetSnapshot().footstep.hasGroundPlane))
@@ -1993,7 +1992,7 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 const FootSupportSnapshot& feet = support.GetSnapshot();
                 report << "idle_release_frame=" << frame << " reason=" << static_cast<int>(dummy->GetMesh().GetRootSupportRelease())
                     << " zone=" << static_cast<int>(feet.balance.zone)
-                    << " outside_b_time_s=" << feet.footstep.outsideBufferTime << std::endl;
+                    << " pelvis_to_lowest_sole_ratio=" << feet.footstep.pelvisHeightRatio << std::endl;
             }
             idleMinimumWeight = PxMin(idleMinimumWeight, ragdoll.GetRootSupportWeight());
             if (frame >= 480)

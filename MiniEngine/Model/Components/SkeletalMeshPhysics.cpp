@@ -550,9 +550,9 @@ namespace PARS
             {
                 m_RootSupportRelease = RootSupportRelease::NoSupport;
             }
-            else if (sample.footstep.HasTimedOutOutsideBuffer())
+            else if (sample.footstep.HasLowPelvis())
             {
-                m_RootSupportRelease = RootSupportRelease::OutsideBuffer;
+                m_RootSupportRelease = RootSupportRelease::LowPelvis;
             }
             else if ((sample.footstep.needsStep || balance.zone != FootSupportZone::Inside) && m_Ragdoll.IsTopplingFromProjectile())
             {

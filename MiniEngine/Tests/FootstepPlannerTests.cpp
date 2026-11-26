@@ -78,7 +78,8 @@ namespace
         input.velocity = PxVec3(0, 0, 1);
         input.hull = BuildFootSupportHull({{-.25f, .4f, -.15f}, {.25f, .4f, -.15f},
             {.25f, .4f, .15f}, {-.25f, .4f, .15f}});
-        input.bufferHull = EvaluateFootSupportBalance(input.hull, input.com).bufferHull;
+        input.standingPelvisHeight = 1.0f;
+        input.pelvisY = 1.4f;
         input.zone = FootSupportZone::Inside;
         input.projectionHeight = .4f;
         input.fixedDeltaTime = 1.0f / 60;
@@ -428,14 +429,14 @@ namespace
                 "Missing required observations and invalid inputs cannot emit a motion command");
         }
 
-        const std::array<float FootstepSettings::*, 15> fields{{
+        const std::array<float FootstepSettings::*, 16> fields{{
             &FootstepSettings::startPredictionTime, &FootstepSettings::landingPredictionTime,
             &FootstepSettings::stanceScale, &FootstepSettings::minimumStanceWidthRatio,
             &FootstepSettings::maximumStepLength, &FootstepSettings::crossingOffset,
             &FootstepSettings::liftHeightScale, &FootstepSettings::backwardLiftTimeRatio, &FootstepSettings::stepDuration,
             &FootstepSettings::minimumLiftHeight, &FootstepSettings::landingLockProgress,
             &FootstepSettings::landingLoweringSpeed, &FootstepSettings::maximumLandingLowering,
-            &FootstepSettings::supportLoadRatio, &FootstepSettings::supportConfirmationTime}};
+            &FootstepSettings::supportLoadRatio, &FootstepSettings::supportConfirmationTime, &FootstepSettings::fallHeightRatio}};
         for (float FootstepSettings::* field : fields)
         {
             FootstepPlanner planner;
@@ -447,54 +448,52 @@ namespace
         }
     }
 
-    void TestActualComBufferTimeout()
+    void TestLowestSoleFallHeight()
     {
+        FootstepSettings settings = TestSettings();
+        for (size_t lower = 0; lower < 2; ++lower)
+        {
+            FootstepPlanner planner;
+            FootstepInput input = Standing();
+            const FootstepSnapshot& state = planner.GetSnapshot();
+            if (lower == 1)
+            {
+                settings.fallHeightRatio = .625f;
+            }
+            input.standingPelvisHeight = lower == 0 ? 1.0f : .5f;
+            input.feet[lower].position.y = 3.25f;
+            input.feet[lower].grounded = false;
+            input.feet[1 - lower].position.y = 3.625f;
+            input.pelvisY = input.feet[lower].position.y + input.standingPelvisHeight;
+            input.com.z = .45f;
+            input.zone = FootSupportZone::Outside;
+            Advance(planner, input, settings, 30);
+            Check(Near(state.pelvisHeightRatio, 1.0f) && !state.aborted,
+                "The lower sole can be either airborne foot and staying outside B does not cause a fall");
+            input.com.z = 0;
+            input.zone = FootSupportZone::Inside;
+            input.pelvisY = input.feet[lower].position.y + input.standingPelvisHeight * settings.fallHeightRatio;
+            input.pelvisY += .001f;
+            Advance(planner, input, settings);
+            Check(!state.HasLowPelvis() && !state.aborted, "A pelvis just above the threshold can keep stepping");
+            input.pelvisY = input.feet[lower].position.y + input.standingPelvisHeight * settings.fallHeightRatio;
+            Advance(planner, input, settings);
+            Check(state.HasLowPelvis() && state.aborted && state.reason == FootstepReason::LowPelvis && !state.IsInProgress(),
+                "Reaching the configured height triggers a fall on that tick even inside A");
+            input.pelvisY += 1;
+            Advance(planner, input, settings);
+            Check(state.aborted && state.abortCount == 1, "The ground fall remains latched until reset");
+        }
         FootstepPlanner planner;
-        const FootstepSettings settings = TestSettings();
         FootstepInput input = Standing();
-        input.velocity.z = 2.0f;
+        input.pelvisY = .4f;
+        input.feet[0].available = false;
         planner.Update(input, settings);
-        const FootstepSnapshot& state = planner.GetSnapshot();
-        Advance(planner, input, settings, 20);
-        Check(!state.actualComOutsideBuffer && state.outsideBufferTime == 0.0 && !state.aborted,
-            "A prediction outside B does not start the timer while the actual COM is inside");
-        input.com.z = .45f;
-        input.velocity.z = -.9f;
-        input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
+        Check(!planner.GetSnapshot().HasLowPelvis(), "A missing sole cannot fabricate a height fall");
+        input.feet[0].available = true;
+        input.standingPelvisHeight = 0;
         Advance(planner, input, settings);
-        Check(state.actualComOutsideBuffer && state.outsideBufferTime == 0.0 && !state.aborted,
-            "Actual COM outside B starts the timer even when the prediction is inside");
-        Advance(planner, input, settings, 17);
-        const double beforeReentry = state.outsideBufferTime;
-        planner.Update(input, settings);
-        Check(!state.aborted && state.IsInProgress() && std::abs(beforeReentry - 17.0 / 60.0) < 1e-6 &&
-                state.outsideBufferTime == beforeReentry, "Seventeen elapsed ticks and repeated samples keep stepping");
-        input.com.z = .3f;
-        input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
-        Advance(planner, input, settings);
-        Check(!state.actualComOutsideBuffer && state.outsideBufferTime == 0.0 && !state.aborted,
-            "Returning to the B boundary resets the actual COM timer");
-        input.com.z = .45f;
-        input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
-        Advance(planner, input, settings, 5);
-        input.hasCom = false;
-        Advance(planner, input, settings);
-        Check(!state.actualComOutsideBuffer && state.outsideBufferTime == 0.0, "A missing actual COM breaks the outside interval");
-        input.hasCom = true;
-        input.hasVelocity = false;
-        Advance(planner, input, settings, 5);
-        input.completedStep += 2;
-        planner.Update(input, settings);
-        Check(state.actualComOutsideBuffer && state.outsideBufferTime == 0.0, "A missing physics tick restarts the outside interval");
-        Advance(planner, input, settings, 17);
-        Check(!state.aborted, "A new interval under 0.30 seconds keeps stepping");
-        Advance(planner, input, settings);
-        Check(state.aborted && state.reason == FootstepReason::OutsideBuffer && !state.IsInProgress() &&
-                std::abs(state.outsideBufferTime - 0.3) < 1e-8, "Eighteen elapsed ticks at 60 Hz abort at 0.30 seconds");
-        input.com.z = 0.0f;
-        input.zone = FootSupportZone::Inside;
-        Advance(planner, input, settings);
-        Check(state.aborted && state.abortCount == 1, "Re-entry after timeout keeps the fall latched");
+        Check(!planner.GetSnapshot().HasLowPelvis(), "A missing standing reference cannot fabricate a height fall");
     }
 
     void TestBackwardFallSteps()
@@ -509,7 +508,8 @@ namespace
         planner.Update(input, settings);
         const FootstepSnapshot& state = planner.GetSnapshot();
         input.feet[1].grounded = false;
-        Advance(planner, input, settings, 18);
+        input.pelvisY = input.feet[0].position.y + .7f * input.standingPelvisHeight;
+        Advance(planner, input, settings);
         Check(state.backwardFallStepsRemaining == 2 && state.feet[1].IsInProgress() && state.startCount == 1,
             "A backward fall keeps the airborne first step at the normal fall threshold");
         input.rootReleased = true;
@@ -627,7 +627,7 @@ namespace
         Advance(planner, input, settings, 12);
         Check(input.zone == FootSupportZone::Outside && planner.GetSnapshot().feet[1].phase == FootstepPhase::Airborne &&
                 planner.GetSnapshot().feet[1].motion.valid && planner.GetSnapshot().abortCount == 0,
-            "A brief actual COM exit keeps a recovery step active before the timeout");
+            "A recovery step remains active outside B with the pelvis at standing height");
         input.feet[1].grounded = true;
         Advance(planner, input, settings);
         Check(planner.GetSnapshot().feet[1].justLanded && planner.GetSnapshot().landingCount == 1,
@@ -1523,6 +1523,14 @@ void TestImpactWarmupPlanning()
     std::puts("PASS: COM-based warmup cadence, reach and lateral turn into forward or backward steps");
 }
 
+void TestFootstepFalls()
+{
+    TestLowestSoleFallHeight();
+    TestBackwardFallSteps();
+    TestBackwardFallInterruptions();
+    std::puts("PASS: lowest-sole fall height, backward fall steps and interruptions");
+}
+
 void TestFootstepPlanner()
 {
     TestFootstepRecovery();
@@ -1533,9 +1541,7 @@ void TestFootstepPlanner()
     TestIndependentCommands();
     TestGeometry();
     TestGatesAndInvalidData();
-    TestActualComBufferTimeout();
-    TestBackwardFallSteps();
-    TestBackwardFallInterruptions();
+    TestFootstepFalls();
     TestClockAndAbort();
     TestBackwardSwing();
     TestSwingSoleSeparation();
