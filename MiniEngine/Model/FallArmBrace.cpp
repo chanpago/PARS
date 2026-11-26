@@ -10,6 +10,19 @@ using namespace physx;
 namespace
 {
     constexpr float ArmReachRatio = .98f;
+    constexpr float PalmSurfaceOffset = .006f;
+    constexpr float WoundPoseTolerance = .02f;
+    constexpr float WoundClearance = .01f;
+
+    struct ArmReachPose
+    {
+    public:
+        PxTransform toPhysical{PxIdentity};
+        PxTransform clavicle{PxIdentity};
+        std::array<PxTransform, 3> bones;
+        bool usesClavicle = false;
+        bool reachLimited = false;
+    };
 
     bool Normalize(PxVec3& value)
     {
@@ -75,12 +88,27 @@ namespace
             setup.forwardInAnchor.isFinite() && setup.rightInAnchor.isFinite();
     }
 
+    bool LimitJointPose(const ImpactPalmGoal& goal, const FallArmJoint& joint, const PxTransform& parent,
+        const PxQuat& desired, PxTransform& child)
+    {
+        const PxTransform pivot = parent * joint.inParentBone;
+        const PxQuat raw = (pivot.q.getConjugate() * desired * joint.inChildBone.q).getNormalized();
+        const PxQuat limited = goal.limitJointRotation(joint.index, raw);
+        if (!limited.isUnit())
+        {
+            return false;
+        }
+        // 실제 물리 관절의 피벗을 맞춰 제한 후 자식 본의 위치와 회전을 함께 복원한다.
+        child = pivot * PxTransform(limited) * joint.inChildBone.getInverse();
+        return child.isSane();
+    }
+
     bool SolveClavicle(const FallArmSample& arm, const ImpactPalmGoal& goal, const PxVec3& wrist,
         const std::vector<int32_t>& parents, const std::vector<PxTransform>& source, PxTransform& clavicle)
     {
         const FallArmSetup& setup = arm.setup;
-        if (!goal.limitClavicleRotation || !std::isfinite(goal.clavicleReachFraction) || goal.clavicleReachFraction <= 0 ||
-            setup.clavicleJoint < 0 || setup.anchorNode != setup.clavicleNode || !Ancestor(parents, setup.chestNode, setup.clavicleNode) ||
+        if (!goal.limitJointRotation || !std::isfinite(goal.clavicleReachFraction) || goal.clavicleReachFraction <= 0 ||
+            setup.clavicleJoint.index < 0 || setup.anchorNode != setup.clavicleNode || !Ancestor(parents, setup.chestNode, setup.clavicleNode) ||
             !arm.actualChest.isSane())
         {
             return false;
@@ -99,8 +127,7 @@ namespace
         PxVec3 tangent = toward - axis * axis.dot(toward);
         if (tangent.magnitudeSquared() < 1e-12f)
         {
-            clavicle = source[setup.clavicleNode];
-            return true;
+            return LimitJointPose(goal, setup.clavicleJoint, chest, source[setup.clavicleNode].q, clavicle);
         }
         // 가슴을 가로지를수록 낮은 손목이 어깨까지 끌어내리지 않게 앞뒤 이동의 일부를 올림에 나눈다.
         const PxVec3& up = setup.upInChest;
@@ -118,35 +145,27 @@ namespace
             return false;
         }
         const PxQuat swing = PxShortestRotation(axis, direction);
-        const PxQuat limited = goal.limitClavicleRotation(setup, (swing * base.q).getNormalized());
-        if (!limited.isUnit())
-        {
-            return false;
-        }
-        clavicle = chest * PxTransform(base.p, limited);
-        return true;
+        return LimitJointPose(goal, setup.clavicleJoint, chest, chest.q * swing * base.q, clavicle);
     }
 
-    bool ApplyArmPalmTarget(const FallArmSample& arm, int side, const ImpactPalmGoal& goal, const PxTransform& palm,
-        const std::vector<int32_t>& parents, std::vector<PxTransform>& pose, FallArmSnapshot& targets)
+    bool SolveArmReach(const FallArmSample& arm, int side, const ImpactPalmGoal& goal, const PxTransform& palm,
+        const std::vector<int32_t>& parents, const std::vector<PxTransform>& source, ArmReachPose& reach)
     {
         const FallArmSetup& setup = arm.setup;
-        const std::vector<PxTransform> source = pose;
-        PxTransform toPhysical = arm.actualAnchor * source[setup.anchorNode].getInverse();
-        PxTransform armToPhysical = toPhysical;
-        PxTransform clavicle(PxIdentity);
+        reach.toPhysical = arm.actualAnchor * source[setup.anchorNode].getInverse();
+        PxTransform armToPhysical = reach.toPhysical;
         const PxVec3 wrist = (palm * setup.palmInHand.getInverse()).p;
-        const bool useClavicle = SolveClavicle(arm, goal, wrist, parents, source, clavicle);
-        if (useClavicle)
+        reach.usesClavicle = SolveClavicle(arm, goal, wrist, parents, source, reach.clavicle);
+        if (reach.usesClavicle)
         {
             // 같은 가슴 기준에서 쇄골 보정과 팔 IK를 풀어 보정한 어깨 이동이 상쇄되지 않게 한다.
-            toPhysical = arm.actualChest * source[setup.chestNode].getInverse();
-            armToPhysical = toPhysical * clavicle * source[setup.clavicleNode].getInverse();
+            reach.toPhysical = arm.actualChest * source[setup.chestNode].getInverse();
+            armToPhysical = reach.toPhysical * reach.clavicle * source[setup.clavicleNode].getInverse();
         }
-        const PxQuat anchorRotation = useClavicle ? toPhysical.q * source[setup.anchorNode].q : arm.actualAnchor.q;
+        const PxQuat anchorRotation = reach.usesClavicle ? reach.toPhysical.q * source[setup.anchorNode].q : arm.actualAnchor.q;
         const PxVec3 right = anchorRotation.rotate(setup.rightInAnchor);
         const PxVec3 forward = anchorRotation.rotate(setup.forwardInAnchor);
-        const PxVec3 up = useClavicle ? arm.actualChest.q.rotate(setup.upInChest) : PxVec3(0, 1, 0);
+        const PxVec3 up = reach.usesClavicle ? arm.actualChest.q.rotate(setup.upInChest) : PxVec3(0, 1, 0);
         const float sign = side == 0 ? -1.0f : 1.0f;
         TwoBoneIKInput solve;
         solve.hip = armToPhysical * source[setup.shoulderNode];
@@ -166,18 +185,85 @@ namespace
         {
             return false;
         }
+        reach.reachLimited = result.reachLimited;
+        reach.bones = {result.hip, result.knee, result.ankle};
+        if (goal.limitJointRotation)
+        {
+            const PxTransform anchor = armToPhysical * source[setup.anchorNode];
+            for (size_t link = 0; link < reach.bones.size(); ++link)
+            {
+                const FallArmJoint& joint = setup.armJoints[link];
+                const PxTransform& parent = link == 0 ? anchor : reach.bones[link - 1];
+                if (joint.index >= 0 && !LimitJointPose(goal, joint, parent, reach.bones[link].q, reach.bones[link]))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
 
-        const PxTransform toAnimation = toPhysical.getInverse();
+    float HandSurfaceGap(const FallArmHandShape& shape, const PxTransform& hand, const PxVec3& point, const PxVec3& normal)
+    {
+        const PxTransform body = hand * shape.inBone;
+        return (body.p - point).dot(normal) - shape.GetHalfExtent(body.q.rotateInv(normal));
+    }
+
+    bool ApplyArmPalmTarget(const FallArmSample& arm, int side, const ImpactPalmGoal& goal, const PxTransform& palm,
+        const PxTransform& contact, const std::vector<int32_t>& parents, std::vector<PxTransform>& pose, FallArmSnapshot& targets)
+    {
+        const FallArmSetup& setup = arm.setup;
+        const std::vector<PxTransform> source = pose;
+        ArmReachPose reach;
+        if (!SolveArmReach(arm, side, goal, palm, parents, source, reach))
+        {
+            return false;
+        }
+        const PxTransform projectedPalm = reach.bones.back() * setup.palmInHand;
+        FallArmTarget& target = targets.arms[side];
+        target.canDriveWoundGrip = goal.limitJointRotation && PalmFitsWound(projectedPalm, palm, WoundPoseTolerance) &&
+            std::all_of(setup.armJoints.begin(), setup.armJoints.end(), [](const FallArmJoint& joint) -> bool
+            {
+                return joint.index >= 0;
+            });
+        if (target.canDriveWoundGrip && goal.approach < 1.0f)
+        {
+            // 접근 궤적의 한 점까지만 닿아도 최종 상처 자세가 불가능하면 손을 당기지 않는다.
+            ArmReachPose finalReach;
+            target.canDriveWoundGrip = SolveArmReach(arm, side, goal, contact, parents, source, finalReach) &&
+                PalmFitsWound(finalReach.bones.back() * setup.palmInHand, contact, WoundPoseTolerance);
+        }
+        if (goal.limitJointRotation && !target.canDriveWoundGrip)
+        {
+            const FallArmHandShape& shape = setup.handShape;
+            const PxVec3 normal = contact.q.getBasisVector1();
+            const float gap = HandSurfaceGap(shape, reach.bones.back(), goal.point, normal);
+            const float nearWound = shape.halfExtents.magnitude() + shape.radius + WoundClearance;
+            const PxVec3 center = reach.bones.back().transform(shape.inBone.p);
+            if (gap < WoundClearance && (center - goal.point).magnitudeSquared() <= nearWound * nearWound)
+            {
+                // 손날이 상처에 눌리면 이미 가능한 손목 방향을 유지하며 손 형상 전체를 표면 밖으로 물린다.
+                const PxTransform outside(projectedPalm.p + normal * (WoundClearance - gap), projectedPalm.q);
+                ArmReachPose backedOff;
+                if (SolveArmReach(arm, side, goal, outside, parents, source, backedOff) &&
+                    HandSurfaceGap(shape, backedOff.bones.back(), goal.point, normal) > gap)
+                {
+                    reach = backedOff;
+                }
+            }
+        }
+
+        const PxTransform toAnimation = reach.toPhysical.getInverse();
         std::vector<PxTransform> desired = source;
         std::vector<bool> changed(pose.size(), false);
-        if (useClavicle)
+        if (reach.usesClavicle)
         {
-            desired[setup.clavicleNode] = clavicle;
+            desired[setup.clavicleNode] = reach.clavicle;
             changed[setup.clavicleNode] = true;
         }
-        desired[setup.shoulderNode] = toAnimation * result.hip;
-        desired[setup.elbowNode] = toAnimation * result.knee;
-        desired[setup.handNode] = toAnimation * result.ankle;
+        desired[setup.shoulderNode] = toAnimation * reach.bones[0];
+        desired[setup.elbowNode] = toAnimation * reach.bones[1];
+        desired[setup.handNode] = toAnimation * reach.bones[2];
         changed[setup.shoulderNode] = true;
         changed[setup.elbowNode] = true;
         changed[setup.handNode] = true;
@@ -203,13 +289,12 @@ namespace
                 targets.correctedNodes.push_back(static_cast<int>(node));
             }
         }
-        FallArmTarget& target = targets.arms[side];
         target.palm = palm;
-        target.solvedPalm = (toPhysical * pose[setup.handNode] * setup.palmInHand).p;
-        target.elbow = result.knee.p;
+        target.solvedPalm = (reach.toPhysical * pose[setup.handNode] * setup.palmInHand).p;
+        target.elbow = reach.bones[1].p;
         target.weight = goal.weight;
-        target.reachError = result.reachError;
-        target.reachLimited = result.reachLimited;
+        target.reachError = (reach.bones.back().transform(setup.palmInHand.p) - palm.p).magnitude();
+        target.reachLimited = reach.reachLimited;
         target.hasTarget = true;
         target.applied = true;
         return true;
@@ -274,7 +359,8 @@ bool PARS::ApplyImpactPalmTarget(ImpactPalmGoal& goal, const std::array<FallArmS
     }
     // 접근 중에는 몸 바깥을 거쳐 들어가고, 닿은 뒤에는 손바닥 면만 표면에 댄다.
     const float approachOffset = .10f * (1.0f - goal.approach);
-    const PxVec3 palmPosition = goal.point + normal * (.006f + approachOffset);
+    const PxVec3 contactPosition = goal.point + normal * PalmSurfaceOffset;
+    const PxVec3 palmPosition = contactPosition + normal * approachOffset;
     float leastExcess = PX_MAX_F32;
     float nearestPalmSquared = PX_MAX_F32;
     int selected = -1;
@@ -332,7 +418,8 @@ bool PARS::ApplyImpactPalmTarget(ImpactPalmGoal& goal, const std::array<FallArmS
     {
         return false;
     }
-    targets.active = ApplyArmPalmTarget(arms[selected], selected, goal, palm, parents, pose, targets);
+    const PxTransform contact(contactPosition, palm.q);
+    targets.active = ApplyArmPalmTarget(arms[selected], selected, goal, palm, contact, parents, pose, targets);
     if (!targets.active)
     {
         return false;

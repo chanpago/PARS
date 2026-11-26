@@ -47,15 +47,16 @@ namespace
         return body != nodes.end() ? static_cast<int>(body - nodes.begin()) : -1;
     }
 
-    float Extent(const PhysicsBody& body, const PxTransform& frame, const PxVec3& direction)
+    FallArmJoint MakeArmJoint(const PhysicsAsset& asset, int index)
     {
-        const PxVec3 axis = frame.q.rotateInv(direction);
-        if (body.shape == PhysicsShapeType::Box)
-        {
-            return PxAbs(axis.x) * body.halfExtents.x + PxAbs(axis.y) * body.halfExtents.y +
-                PxAbs(axis.z) * body.halfExtents.z;
-        }
-        return body.radius + (body.shape == PhysicsShapeType::Capsule ? PxAbs(axis.x) * body.halfLength : 0);
+        const PhysicsConstraint& constraint = asset.constraints[index];
+        FallArmJoint joint;
+        joint.index = index;
+        joint.inParentBone = ToFrame(asset.bodies[asset.FindBody(constraint.parentBone)].GetLocalTransform() *
+            constraint.parentFrame.GetTransform());
+        joint.inChildBone = ToFrame(asset.bodies[asset.FindBody(constraint.childBone)].GetLocalTransform() *
+            constraint.childFrame.GetTransform());
+        return joint;
     }
 
     void WriteArmPose(const std::vector<PxTransform>& frames, const std::vector<int>& nodes, std::vector<Matrix4>& pose)
@@ -185,6 +186,7 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
     }
     if (goal.weight <= 0)
     {
+        m_Ragdoll.ReleaseWoundGrip();
         m_Ragdoll.SetArmDriveScales({1.0f, 1.0f});
         return;
     }
@@ -196,23 +198,22 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
     goal.hand = m_ImpactHandReach.hand;
     if (woundJoint >= 0)
     {
-        goal.limitClavicleRotation = [this](const FallArmSetup& setup, const PxQuat& rotationInChest) -> PxQuat
+        goal.limitJointRotation = [this](int index, const PxQuat& raw) -> PxQuat
         {
-            const PhysicsConstraint& joint = m_PhysicsAsset->constraints[setup.clavicleJoint];
-            const PxQuat raw = setup.jointInChest.getConjugate() * rotationInChest * setup.jointInClavicle;
+            const PhysicsConstraint& joint = m_PhysicsAsset->constraints[index];
             const Quaternion rotation(DirectX::XMVectorSet(raw.x, raw.y, raw.z, raw.w));
             const Quaternion limited = m_Ragdoll.UsesArticulation() ?
                 ClampArticulationDriveTarget(joint, rotation) : ClampD6DriveTarget(joint, rotation);
             DirectX::XMFLOAT4 value;
             DirectX::XMStoreFloat4(&value, limited);
-            return (setup.jointInChest * PxQuat(value.x, value.y, value.z, value.w) *
-                setup.jointInClavicle.getConjugate()).getNormalized();
+            return PxQuat(value.x, value.y, value.z, value.w);
         };
     }
     if (!ApplyImpactPalmTarget(goal, arms, m_PhysicsSkeleton.parents, frames, corrected))
     {
         if (woundJoint >= 0)
         {
+            m_Ragdoll.ReleaseWoundGrip();
             m_Ragdoll.SetArmDriveScales({1.0f, 1.0f});
         }
         else
@@ -225,9 +226,10 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
     if (woundJoint >= 0)
     {
         const FallArmSample& arm = arms[goal.hand];
-        const PxVec3 palm = arm.actualHand.transform(arm.setup.palmInHand.p);
+        const PxTransform palm = arm.actualHand * arm.setup.palmInHand;
+        const FallArmTarget& target = corrected.arms[goal.hand];
         m_Ragdoll.DriveWoundGrip(woundJoint, arm.setup.handBody, m_ImpactHandReach.body, palm,
-            corrected.arms[goal.hand].palm.p, goal.weight);
+            target.palm, goal.weight, target.canDriveWoundGrip);
     }
     // 선택한 팔만 손 목표를 추종하도록 힘을 올린다. 반대팔은 피격 반동을 유지한다.
     const float base = m_Ragdoll.GetArmDriveStrength();
@@ -304,14 +306,16 @@ void SkeletalMeshComponent::InitializeFallArms()
         setup.handBody = static_cast<int>(hand - bodies.begin());
         const int chain[] = {setup.anchorNode, setup.shoulderNode, setup.elbowNode, setup.handNode};
         bool linked = true;
-        for (size_t link = 1; link < 4; ++link)
+        for (size_t link = 0; link < setup.armJoints.size(); ++link)
         {
-            linked &= std::any_of(m_PhysicsAsset->constraints.begin(), m_PhysicsAsset->constraints.end(),
-                [&](const PhysicsConstraint& joint) -> bool
-                {
-                    return joint.parentBone == m_PhysicsSkeleton.names[chain[link - 1]] &&
-                        joint.childBone == m_PhysicsSkeleton.names[chain[link]];
-                });
+            const std::string& parent = m_PhysicsSkeleton.names[chain[link]];
+            const int constraint = m_PhysicsAsset->FindConstraint(parent, m_PhysicsSkeleton.names[chain[link + 1]]);
+            if (constraint < 0 || m_PhysicsAsset->constraints[constraint].parentBone != parent)
+            {
+                linked = false;
+                break;
+            }
+            setup.armJoints[link] = MakeArmJoint(*m_PhysicsAsset, constraint);
         }
         if (!linked)
         {
@@ -331,13 +335,8 @@ void SkeletalMeshComponent::InitializeFallArms()
                 if (setup.chestBody >= 0)
                 {
                     setup.chestNode = bodies[setup.chestBody];
-                    setup.clavicleJoint = static_cast<int>(joint - joints.begin());
+                    setup.clavicleJoint = MakeArmJoint(*m_PhysicsAsset, static_cast<int>(joint - joints.begin()));
                     setup.upInChest = ToFrame(referenceWorld[setup.chestNode]).q.rotateInv(up);
-                    // 바디 오프셋과 조인트 프레임을 합쳐 각 본에서 본 조인트 축을 저장한다.
-                    setup.jointInChest = ToFrame(m_PhysicsAsset->bodies[setup.chestBody].GetLocalTransform() *
-                        joint->parentFrame.GetTransform()).q;
-                    setup.jointInClavicle = ToFrame(m_PhysicsAsset->bodies[setup.anchorBody].GetLocalTransform() *
-                        joint->childFrame.GetTransform()).q;
                 }
             }
         }
@@ -363,8 +362,18 @@ void SkeletalMeshComponent::InitializeFallArms()
             continue;
         }
         const PhysicsBody& shape = m_PhysicsAsset->bodies[setup.handBody];
-        const PxTransform body = wrist * ToFrame(shape.GetLocalTransform());
-        const PxVec3 center = body.p - palmUp * Extent(shape, body, palmUp);
+        setup.handShape.inBone = ToFrame(shape.GetLocalTransform());
+        if (shape.shape == PhysicsShapeType::Box)
+        {
+            setup.handShape.halfExtents = PxVec3(shape.halfExtents.x, shape.halfExtents.y, shape.halfExtents.z);
+        }
+        else
+        {
+            setup.handShape.radius = shape.radius;
+            setup.handShape.halfExtents.x = shape.shape == PhysicsShapeType::Capsule ? shape.halfLength : 0;
+        }
+        const PxTransform body = wrist * setup.handShape.inBone;
+        const PxVec3 center = body.p - palmUp * setup.handShape.GetHalfExtent(body.q.rotateInv(palmUp));
         const PxVec3 palmRight = palmUp.cross(fingers).getNormalized();
         const PxTransform palm(center, PxQuat(PxMat33(palmRight, palmUp, fingers)).getNormalized());
         setup.palmInHand = wrist.getInverse() * palm;

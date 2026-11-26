@@ -137,8 +137,8 @@ namespace PARS
         void ApplyExternalImpacts(const std::vector<RagdollBodyImpulse>& impacts);
         void ApplyImpactResponses(const std::vector<RagdollImpactResponse>& responses);
         void UpdateWounds(const std::vector<RagdollBodyImpulse>& impacts);
-        void DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const physx::PxVec3& palm,
-            const physx::PxVec3& target, float weight);
+        void DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const physx::PxTransform& palm,
+            const physx::PxTransform& target, float weight, bool canDrive);
         void ReleaseWoundGrip();
         void UpdateImpactReaction(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
         bool AdvanceImpactReaction(RagdollImpactReaction& reaction, const std::vector<RagdollBodyImpulse>& impacts,
@@ -353,6 +353,7 @@ namespace PARS
         mutable uint64_t m_ImpactSampleStep = UINT64_MAX;
         mutable uint64_t m_ImpactSampleClock = UINT64_MAX;
         uint64_t m_WoundClock = UINT64_MAX;
+        uint64_t m_LastRejectedGripStep = UINT64_MAX;
         std::vector<JointWound> m_JointWounds;
         RagdollImpactReaction m_ImpactReaction;
         mutable std::vector<RagdollBodyImpulse> m_ExternalImpacts;
@@ -392,6 +393,7 @@ namespace PARS
         float m_CapsuleHeightScale = 0;
         float m_CapsuleSkin = 0;
         uint32_t m_CharacterImpactGroup = 0;
+        uint32_t m_RejectedGripSteps = 0;
         bool m_CollisionEnabled = true;
         bool m_CharacterImpactEnabled = false;
         bool m_SweepKinematicTorso = false;

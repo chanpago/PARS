@@ -306,7 +306,7 @@ namespace
             PARS::FallArmSetup& setup = arms[side].setup;
             setup.available = true;
             setup.chestNode = 0;
-            setup.clavicleJoint = side;
+            setup.clavicleJoint.index = side;
             setup.clavicleNode = 1 + 4 * side;
             setup.anchorNode = setup.clavicleNode;
             setup.shoulderNode = setup.clavicleNode + 1;
@@ -315,6 +315,7 @@ namespace
             setup.rightInAnchor = PxVec3(-1, 0, 0);
             setup.palmInHand = PxTransform(PxVec3(0, .025f, 0));
             rest[setup.clavicleNode].p = PxVec3(.04f * sign, 0, 0);
+            setup.clavicleJoint.inParentBone = rest[setup.clavicleNode];
             rest[setup.shoulderNode].p = PxVec3(.18f * sign, 0, 0);
             rest[setup.elbowNode].p = PxVec3(.22f * sign, -.28f, .02f);
             rest[setup.handNode].p = PxVec3(.2f * sign, -.55f, .07f);
@@ -345,7 +346,7 @@ namespace
                     goal.hitNode = 0;
                     goal.point = body.transform(hit);
                     goal.normal = body.q.rotate(PxVec3(hit.x, 0, hit.z).getNormalized());
-                    goal.limitClavicleRotation = [](const PARS::FallArmSetup&, const PxQuat& requested) -> PxQuat
+                    goal.limitJointRotation = [](int, const PxQuat& requested) -> PxQuat
                     {
                         PxVec3 axis;
                         float angle = 0;
@@ -393,11 +394,11 @@ namespace
                     Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result), "Solve with zero clavicle assistance");
                     goal.clavicleReachFraction = fraction;
                     std::vector<PxTransform> fallback = rest;
-                    arms[side].setup.clavicleJoint = -1;
+                    arms[side].setup.clavicleJoint.index = -1;
                     Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, fallback, result) && pose == fallback,
                         "A rig without an independent clavicle joint uses the existing anchor");
-                    arms[side].setup.clavicleJoint = side;
-                    goal.limitClavicleRotation = {};
+                    arms[side].setup.clavicleJoint.index = side;
+                    goal.limitJointRotation = {};
                     fallback = rest;
                     Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, fallback, result) && pose == fallback &&
                         pose[setup.clavicleNode] == rest[setup.clavicleNode], "Match the original arm solve for a short gesture");
@@ -408,7 +409,7 @@ namespace
             sweep.hitNode = 0;
             sweep.approach = 1;
             sweep.weight = 1;
-            sweep.limitClavicleRotation = [](const PARS::FallArmSetup&, const PxQuat& requested) -> PxQuat
+            sweep.limitJointRotation = [](int, const PxQuat& requested) -> PxQuat
             {
                 return requested;
             };
@@ -516,6 +517,79 @@ namespace
         std::puts("PASS: wound hand selection on mirrored chest, abdomen, flank and back in a rotated torso");
     }
 
+    void TestWoundContactLimits(const std::vector<int32_t>& parents, const std::vector<PxTransform>& rest,
+        std::array<PARS::FallArmSample, 2> arms)
+    {
+        PARS::FallArmSetup& setup = arms[0].setup;
+        const std::array<int, 4> chain{setup.anchorNode, setup.shoulderNode, setup.elbowNode, setup.handNode};
+        for (size_t link = 0; link < setup.armJoints.size(); ++link)
+        {
+            PARS::FallArmJoint& joint = setup.armJoints[link];
+            joint.index = static_cast<int>(link);
+            joint.inChildBone = PxTransform(PxQuat(.3f, PxVec3(1, 0, 0)));
+            joint.inParentBone = rest[chain[link]].transformInv(rest[chain[link + 1]]) * joint.inChildBone;
+        }
+        const PxTransform restingPalm = rest[setup.handNode] * setup.palmInHand;
+        PARS::ImpactPalmGoal goal;
+        goal.hitNode = 0;
+        goal.hand = 0;
+        goal.weight = 1;
+        goal.approach = 1;
+        goal.point = PxVec3(-.05f, -.22f, .15f);
+        goal.normal = PxVec3(0, 0, 1);
+        goal.limitJointRotation = [](int, const PxQuat& rotation) -> PxQuat
+        {
+            return rotation;
+        };
+        std::vector<PxTransform> pose = rest;
+        PARS::FallArmSnapshot result;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && result.arms[0].canDriveWoundGrip,
+            "A reachable contact survives projection through non-identity joint frames");
+        goal.limitJointRotation = [](int, const PxQuat&) -> PxQuat
+        {
+            return PxQuat(PxIdentity);
+        };
+        pose = rest;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && !result.arms[0].canDriveWoundGrip &&
+            (result.arms[0].solvedPalm - restingPalm.p).magnitude() < 1e-5f,
+            "A locked arm stops at its permitted pose without pulling toward the wound");
+        goal.point = restingPalm.p - goal.normal * .006f;
+        pose = rest;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && !result.arms[0].canDriveWoundGrip &&
+            result.arms[0].reachError < 1e-5f, "Reaching the point edge-on cannot engage the grip");
+        goal.normal = restingPalm.q.getBasisVector1();
+        goal.point = restingPalm.p - goal.normal * .006f;
+        pose = rest;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && result.arms[0].canDriveWoundGrip,
+            "A limited wrist can cover the wound with a different finger heading");
+        goal.point -= goal.normal * .05f;
+        goal.approach = .5f;
+        goal.weight = .5f;
+        pose = rest;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && result.arms[0].reachError < 1e-5f &&
+            !result.arms[0].canDriveWoundGrip, "A reachable approach waypoint cannot pull toward an unreachable final contact");
+
+        setup.palmInHand = PxTransform(PxIdentity);
+        setup.handShape.inBone = PxTransform(PxVec3(0, .018f, 0));
+        setup.handShape.halfExtents = PxVec3(.04f, .018f, .09f);
+        goal.approach = 1;
+        goal.weight = 1;
+        goal.point = PxVec3(-.05f, -.22f, .15f);
+        goal.normal = PxVec3(0, 0, 1);
+        goal.limitJointRotation = [](int joint, const PxQuat& rotation) -> PxQuat
+        {
+            return joint == 2 ? PxQuat(PxIdentity) : rotation;
+        };
+        pose = rest;
+        Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, pose, result) && !result.arms[0].canDriveWoundGrip,
+            "An angled hand can back away while the wrist stays locked");
+        const PxTransform handShape = pose[setup.handNode] * setup.handShape.inBone;
+        const float clearance = (handShape.p - goal.point).dot(goal.normal) -
+            setup.handShape.GetHalfExtent(handShape.q.rotateInv(goal.normal));
+        Check(clearance > .001f && PxAbs(pose[setup.handNode].q.dot(pose[setup.elbowNode].q)) > .99999f,
+            "The hand collider clears the surface instead of pressing its edge into the wound");
+    }
+
     void TestImpactPalm()
     {
         const std::vector<int32_t> parents{-1, 0, 1, 2, 0, 4, 5};
@@ -554,6 +628,7 @@ namespace
         goal.weight = 1;
         goal.approach = 1;
         TestWoundHandSelection(parents, rest, arms);
+        TestWoundContactLimits(parents, rest, arms);
         for (int side = 0; side < 2; ++side)
         {
             goal.hand = -1;

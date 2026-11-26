@@ -219,6 +219,8 @@ namespace PARS
 
     void Ragdoll::ReleaseWoundGrip()
     {
+        m_LastRejectedGripStep = UINT64_MAX;
+        m_RejectedGripSteps = 0;
         if (m_WoundGrip)
         {
             m_WoundGrip->release();
@@ -226,20 +228,50 @@ namespace PARS
         }
     }
 
-    void Ragdoll::DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const PxVec3& palm,
-        const PxVec3& target, float weight)
+    void Ragdoll::DriveWoundGrip(size_t joint, size_t handBody, size_t hitBody, const PxTransform& palm,
+        const PxTransform& target, float weight, bool canDrive)
     {
-        if (!m_DrivesEnabled || !m_World || handBody >= m_Bodies.size() || hitBody >= m_Bodies.size() || handBody == hitBody)
+        if (!m_DrivesEnabled || !m_World || handBody >= m_Bodies.size() || hitBody >= m_Bodies.size() || handBody == hitBody ||
+            !palm.isSane() || !target.isSane() || !(weight > 0 && weight <= 1.0f))
         {
             ReleaseWoundGrip();
             return;
         }
+        constexpr float lockDistance = .04f;
+        constexpr float holdDistance = .06f;
+        constexpr uint32_t releaseSteps = 3;
+        const bool wasHolding = m_WoundGrip && m_WoundGrip->getMotion(PxD6Axis::eX) == PxD6Motion::eLOCKED;
+        const bool close = (palm.p - target.p).magnitudeSquared() <= lockDistance * lockDistance;
+        const bool atContact = PalmFitsWound(palm, target, lockDistance);
+        if (!canDrive || (wasHolding && !PalmFitsWound(palm, target, holdDistance)) ||
+            (!wasHolding && weight >= 1.0f && close && !atContact))
+        {
+            if (!wasHolding || weight < 1.0f)
+            {
+                ReleaseWoundGrip();
+                return;
+            }
+            // 고정한 손만 일시적인 흔들림을 허용한다. 같은 물리 틱의 중복 호출은 한 번만 센다.
+            const uint64_t step = m_World->GetStepCount();
+            if (step != m_LastRejectedGripStep)
+            {
+                m_RejectedGripSteps = m_RejectedGripSteps > 0 && step - m_LastRejectedGripStep == 1 ? m_RejectedGripSteps + 1 : 1;
+                m_LastRejectedGripStep = step;
+            }
+            if (m_RejectedGripSteps >= releaseSteps)
+            {
+                ReleaseWoundGrip();
+            }
+            return;
+        }
+        m_RejectedGripSteps = 0;
+        m_LastRejectedGripStep = UINT64_MAX;
         PxRigidBody& hit = *m_Bodies[hitBody];
         PxRigidBody& hand = *m_Bodies[handBody];
-        const PxTransform hitAnchor(hit.getGlobalPose().transformInv(target));
+        const PxTransform hitAnchor(hit.getGlobalPose().transformInv(target.p));
         if (!m_WoundGrip)
         {
-            const PxTransform palmAnchor(hand.getGlobalPose().transformInv(palm));
+            const PxTransform palmAnchor(hand.getGlobalPose().transformInv(palm.p));
             m_WoundGrip = m_World->CreateJoint(hit, hitAnchor, hand, palmAnchor);
             if (!m_WoundGrip)
             {
@@ -258,8 +290,7 @@ namespace PARS
         }
 
         // 실제 손바닥이 접근한 뒤에만 위치를 고정한다. 두 바디가 함께 움직이고 손목은 자유롭게 회전한다.
-        const bool wasHolding = m_WoundGrip->getMotion(PxD6Axis::eX) == PxD6Motion::eLOCKED;
-        const bool holding = weight >= 1.0f && (wasHolding || (palm - target).magnitudeSquared() <= .04f * .04f);
+        const bool holding = weight >= 1.0f && (wasHolding || atContact);
         if (holding != wasHolding)
         {
             const PxD6Motion::Enum motion = holding ? PxD6Motion::eLOCKED : PxD6Motion::eFREE;

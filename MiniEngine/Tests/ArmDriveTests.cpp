@@ -32,6 +32,44 @@ namespace
         return std::asin(PxClamp(vertical, -1.0f, 1.0f)) * 180.0f / PxPi;
     }
 
+    void TestWoundGripLimits(PhysicsWorld& world, Ragdoll& ragdoll)
+    {
+        PxRigidStatic* marker = world.CreateStaticBox(PxTransform(PxVec3(0, -10, 0)), PxVec3(1), "grip test");
+        CheckArmDrive(marker != nullptr, "Read the scene constraint count for the hand grip");
+        PxScene* scene = marker->getScene();
+        const PxU32 baseline = scene->getNbConstraints();
+        PxTransform palm(PxIdentity);
+        CheckArmDrive(ragdoll.GetBodyPose("RightHand", palm), "Read the actual hand for the grip");
+        const PxTransform far(palm.p + PxVec3(.15f, 0, 0), palm.q);
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, far, .5f, true);
+        CheckArmDrive(scene->getNbConstraints() == baseline + 1, "A feasible approach can assist the hand");
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, far, .5f, false);
+        CheckArmDrive(scene->getNbConstraints() == baseline, "An infeasible approach immediately removes the pulling drive");
+        const PxTransform edgeOn(palm.p, palm.q * PxQuat(PxHalfPi, PxVec3(1, 0, 0)));
+        ragdoll.DriveWoundGrip(4, 4, 5, edgeOn, palm, 1, true);
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, false);
+        CheckArmDrive(scene->getNbConstraints() == baseline, "A close hand cannot lock with the wrong normal or an infeasible pose");
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, true);
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, false);
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, false);
+        world.Update(PhysicsWorld::FixedDeltaTime);
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, false);
+        CheckArmDrive(scene->getNbConstraints() == baseline + 1, "A held hand tolerates two infeasible ticks and duplicate samples");
+        world.Update(PhysicsWorld::FixedDeltaTime);
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, true);
+        for (unsigned tick = 1; tick <= 3; ++tick)
+        {
+            world.Update(PhysicsWorld::FixedDeltaTime);
+            ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, false);
+            CheckArmDrive(scene->getNbConstraints() == baseline + (tick < 3 ? 1 : 0),
+                "A valid tick resets the grace period and the third consecutive failure releases the hand");
+        }
+        ragdoll.DriveWoundGrip(4, 4, 5, palm, palm, 1, true);
+        CheckArmDrive(scene->getNbConstraints() == baseline + 1, "The hand can grip again when contact is feasible");
+        ragdoll.ReleaseWoundGrip();
+        marker->release();
+    }
+
     void TestJointWounds(bool articulated)
     {
         PhysicsWorld world;
@@ -138,6 +176,7 @@ namespace
         world.ResetClock();
         ragdoll.UpdateWounds({});
         CheckArmDrive(!ragdoll.HasWound() && ragdoll.IsFinite() && world.GetErrorCount() == 0, "Reset wounds with the simulation clock");
+        TestWoundGripLimits(world, ragdoll);
 
         ragdoll.Destroy();
         const std::vector<std::string> torso{"Hips", "Spine", "Chest", "Neck", "Head", "RightUpLeg"};

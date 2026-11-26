@@ -1551,9 +1551,20 @@ bool RunRagdollImpactValidation(RagdollImpactTest& test, World& world, Character
                 check(lastHit == static_cast<int>(woundBody) && reachingHand >= 0 && handMatches,
                     "The expected hand follows the struck surface from approach through release");
             }
-            check(heldSteps == 300 && !missingContact && fiveSecondMaximum <= .05f && longest >= 300,
-                "Actual palm stays at the moving wound for five seconds from physical contact");
-            check(heldExpectedStrength && !mesh.GetRagdoll().HasWound(), "Keep the hit region's drive strength through the full wound hold");
+            uint32_t expectedGrip = 1;
+            CommandLineArgs::GetInteger(L"woundexpectedgrip", expectedGrip);
+            if (expectedGrip != 0)
+            {
+                check(heldSteps == 300 && !missingContact && fiveSecondMaximum <= .05f && longest >= 300,
+                    "Actual palm stays at the moving wound for five seconds from physical contact");
+                check(heldExpectedStrength, "Keep the hit region's drive strength through the full wound hold");
+            }
+            else
+            {
+                check(lastHit == static_cast<int>(woundBody) && reachingHand >= 0 && gripAge < 0,
+                    "The selected hand reaches toward the wound without locking to it");
+            }
+            check(!mesh.GetRagdoll().HasWound(), "The local wound recovers after the gesture");
             check(mesh.GetPhysicsError().empty(), "Wound hold finishes without controller errors");
             return true;
         }
