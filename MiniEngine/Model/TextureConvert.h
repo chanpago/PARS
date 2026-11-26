@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -32,13 +32,8 @@ inline uint8_t TextureOptions(bool sRGB, bool hasAlpha=false, bool invertY=false
     return (sRGB ? kSRGB : 0) | (hasAlpha ? kPreserveAlpha : 0) | (invertY ? kFlipVertical : 0);
 }
 
-// If the DDS version of the texture specified does not exist or is older than the source texture, reconvert it.
-void CompileTextureOnDemand(const std::wstring& originalFile, uint32_t flags);
+// 재질 용도에 맞는 DDS를 준비하고 실제로 읽을 경로를 반환한다.
+std::wstring CompileTextureOnDemand(const std::wstring& originalFile, uint32_t flags);
 
-// Loads a non-DDS texture such as TGA, PNG, or JPG, then converts it to a more optimal
-// DDS format with a full mip chain.  Resultant file has the same path with the file extension
-// changed to "DDS".
-bool ConvertToDDS(
-    const std::wstring& filePath,	// UTF8-encoded path to source file
-    uint32_t Flags                  // flags ORed together
-);
+// 원본을 밉맵이 있는 DDS로 변환한다. 출력 경로를 생략하면 원본 확장자를 .dds로 바꾼다.
+bool ConvertToDDS(const std::wstring& filePath, uint32_t flags, const std::wstring& outputFile = L"");

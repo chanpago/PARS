@@ -6455,7 +6455,7 @@
  ],
  "images": [
   {
-   "uri": "PaladinJNordstrom/Textures/Paladin_diffuse.png"
+   "uri": "PaladinJNordstrom/Textures/Paladin_BaseColor.png"
   },
   {
    "uri": "PaladinJNordstrom/Textures/Paladin_Surface.png"

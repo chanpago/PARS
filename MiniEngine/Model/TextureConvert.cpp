@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // This code is licensed under the MIT License (MIT).
 // THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
@@ -22,30 +22,43 @@ using namespace DirectX;
 
 #define GetFlag(f) ((Flags & f) != 0)
 
-void CompileTextureOnDemand(const std::wstring& originalFile, uint32_t flags)
+std::wstring CompileTextureOnDemand(const std::wstring& originalFile, uint32_t flags)
 {
-    std::wstring ddsFile = Utility::RemoveExtension(originalFile) + L".dds";
-
-    struct _stat64 ddsFileStat, srcFileStat;
-
-    bool srcFileMissing = _wstat64(originalFile.c_str(), &srcFileStat) == -1;
-    bool ddsFileMissing = _wstat64(ddsFile.c_str(), &ddsFileStat) == -1;
-
-    if (srcFileMissing && ddsFileMissing)
+    const std::wstring extension = Utility::ToLower(Utility::GetFileExtension(originalFile));
+    if (extension == L"dds")
     {
-        Utility::Printf("Texture %ws is missing.\n", Utility::RemoveBasePath(originalFile).c_str());
-        return;
+        return originalFile;
     }
 
-    // If we can find the source texture and the DDS file is older, reconvert.
-    if (ddsFileMissing || !srcFileMissing && ddsFileStat.st_mtime < srcFileStat.st_mtime)
+    const std::wstring legacyFile = Utility::RemoveExtension(originalFile) + L".dds";
+    // 색공간이나 뒤집기 옵션이 다른 재질끼리 캐시를 공유하지 않도록 원본 이름과 옵션을 함께 쓴다.
+    const std::wstring ddsFile = extension == L"hdr" || extension == L"exr" ? legacyFile :
+        originalFile + L".v2." + std::to_wstring(flags) + L".dds";
+    struct _stat64 srcStat;
+    struct _stat64 ddsStat;
+    const bool hasCache = _wstat64(ddsFile.c_str(), &ddsStat) == 0;
+    if (_wstat64(originalFile.c_str(), &srcStat) != 0)
     {
-        Utility::Printf("DDS texture %ws missing or older than source.  Rebuilding.\n", Utility::RemoveBasePath(originalFile).c_str());
-        ConvertToDDS(originalFile, flags);
+        return hasCache ? ddsFile : legacyFile;
     }
+    if (hasCache && ddsStat.st_mtime >= srcStat.st_mtime)
+    {
+        return ddsFile;
+    }
+
+    const std::wstring pending = ddsFile + L".tmp." + std::to_wstring(GetCurrentProcessId()) +
+        L"." + std::to_wstring(GetCurrentThreadId());
+    if (ConvertToDDS(originalFile, flags, pending) &&
+        MoveFileExW(pending.c_str(), ddsFile.c_str(), MOVEFILE_REPLACE_EXISTING))
+    {
+        return ddsFile;
+    }
+    DeleteFileW(pending.c_str());
+    Utility::Printf("Could not rebuild texture %ws.\n", originalFile.c_str());
+    return GetFileAttributesW(ddsFile.c_str()) != INVALID_FILE_ATTRIBUTES ? ddsFile : legacyFile;
 }
 
-bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
+bool ConvertToDDS(const std::wstring& filePath, uint32_t Flags, const std::wstring& outputFile)
 {
     bool bInterpretAsSRGB =	GetFlag(kSRGB);
     bool bPreserveAlpha =	GetFlag(kPreserveAlpha);
@@ -120,11 +133,7 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
     }
     else
     {
-        WIC_FLAGS wicFlags = WIC_FLAGS_NONE;
-        //if (g_pScene->Settings().bIgnoreSRGB)
-        //    wicFlags |= WIC_FLAGS_IGNORE_SRGB;
-
-        HRESULT hr = LoadFromWICFile( filePath.c_str(), wicFlags, &info, *image );
+        HRESULT hr = LoadFromWICFile(filePath.c_str(), WIC_FLAGS_IGNORE_SRGB, &info, *image);
         if (FAILED(hr))
         {
             Utility::Printf( "Could not load texture \"%ws\" (WIC: %08X).\n", filePath.c_str(), hr );
@@ -179,6 +188,15 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
         cformat = tformat = bInterpretAsSRGB ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
     }
 
+    // 원본 색 텍스처의 바이트는 이미 sRGB로 인코딩되어 있다. 픽셀 배치만 변환하고
+    // 밉맵을 만들기 직전에 재질의 색공간을 지정해야 색과 선형 데이터가 각각 보존된다.
+    const bool authoredLdr = !isDDS && !isHDR;
+    const DXGI_FORMAT pixelFormat = authoredLdr ? MakeLinear(tformat) : tformat;
+    if (authoredLdr && IsSRGB(image->GetMetadata().format) &&
+        !image->OverrideFormat(MakeLinear(image->GetMetadata().format)))
+    {
+        return false;
+    }
     if (bBumpMap)
     {
         std::unique_ptr<ScratchImage> timage(new ScratchImage);
@@ -196,22 +214,23 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
             info.format = tformat;
         }
     }
-    else if ( info.format != tformat )
+    else if (image->GetMetadata().format != pixelFormat)
     {
         std::unique_ptr<ScratchImage> timage(new ScratchImage);
 
         HRESULT hr = Convert( image->GetImages(), image->GetImageCount(), image->GetMetadata(),
-            tformat, TEX_FILTER_DEFAULT, 0.5f, *timage );
+            pixelFormat, TEX_FILTER_DEFAULT, 0.5f, *timage );
 
         if (FAILED(hr))
         {
             Utility::Printf( "Could not convert \"%ws\" (%08X).\n", filePath.c_str(), hr );
+            return false;
         }
-        else
-        {
-            image.swap(timage);
-            info.format = tformat;
-        }
+        image.swap(timage);
+    }
+    if (authoredLdr && image->GetMetadata().format != tformat && !image->OverrideFormat(tformat))
+    {
+        return false;
     }
 
     // Handle mipmaps
@@ -219,16 +238,15 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
     {
         std::unique_ptr<ScratchImage> timage(new ScratchImage);
 
-        HRESULT hr = GenerateMipMaps( image->GetImages(), image->GetImageCount(), image->GetMetadata(), TEX_FILTER_DEFAULT, 0, *timage );
-
+        // 선형 데이터 맵에서는 알파가 다른 채널의 평균에 영향을 주면 안 된다.
+        const TEX_FILTER_FLAGS filter = authoredLdr && !bInterpretAsSRGB ? TEX_FILTER_SEPARATE_ALPHA : TEX_FILTER_DEFAULT;
+        HRESULT hr = GenerateMipMaps(image->GetImages(), image->GetImageCount(), image->GetMetadata(), filter, 0, *timage);
         if (FAILED(hr))
         {
-            Utility::Printf( "Failing generating mimaps for \"%ws\" (WIC: %08X).\n", filePath.c_str(), hr );
+            Utility::Printf("Could not generate mipmaps for \"%ws\" (%08X).\n", filePath.c_str(), hr);
+            return false;
         }
-        else
-        {
-            image.swap(timage);
-        }
+        image.swap(timage);
     }
 
     // Handle compression
@@ -254,8 +272,7 @@ bool ConvertToDDS( const std::wstring& filePath, uint32_t Flags )
         }
     }
 
-    // Rename file extension to DDS
-    const std::wstring wDest = Utility::RemoveExtension(filePath) + L".dds";
+    const std::wstring wDest = outputFile.empty() ? Utility::RemoveExtension(filePath) + L".dds" : outputFile;
     
     // Save DDS
     HRESULT hr = SaveToDDSFile( image->GetImages(), image->GetImageCount(), image->GetMetadata(), DDS_FLAGS_NONE, wDest.c_str() );

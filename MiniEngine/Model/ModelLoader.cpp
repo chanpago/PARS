@@ -55,12 +55,12 @@ void LoadMaterials(Model& model,
         // BuildMaterials marks images unused by the supported material slots as 0xFF.
         // This is a sentinel, not a valid combination of texture conversion flags.
         if (textureOptions[ti] == 0xFF)
+        {
             continue;
+        }
 
-        std::wstring originalFile = basePath + textureNames[ti];
-        CompileTextureOnDemand(originalFile, textureOptions[ti]);
-
-        std::wstring ddsFile = Utility::RemoveExtension(originalFile) + L".dds";
+        const std::wstring originalFile = basePath + textureNames[ti];
+        const std::wstring ddsFile = CompileTextureOnDemand(originalFile, textureOptions[ti]);
         model.textures[ti] = TextureManager::LoadDDSFromFile(ddsFile);
     }
 

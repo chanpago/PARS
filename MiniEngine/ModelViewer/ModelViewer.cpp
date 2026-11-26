@@ -445,17 +445,24 @@ void ChangeIBLBias(EngineVar::ActionType)
     Renderer::SetIBLBias(g_IBLBias);
 }
 
-#include <direct.h> // _getcwd()로 데이터 루트 경로를 확인하기 위해 사용한다.
-
 void LoadIBLTextures()
 {
-    char CWD[256];
-    _getcwd(CWD, 256);
-
     Utility::Printf("Loading IBL environment maps\n");
 
+    std::wstring directory = L"Textures/";
+    const wchar_t* pattern = L"*_diffuseIBL.dds";
     WIN32_FIND_DATA ffd;
-    HANDLE hFind = FindFirstFile(L"Textures/*_diffuseIBL.dds", &ffd);
+    HANDLE hFind = FindFirstFileW((directory + pattern).c_str(), &ffd);
+    if (hFind == INVALID_HANDLE_VALUE)
+    {
+        wchar_t executable[32768];
+        const DWORD length = GetModuleFileNameW(nullptr, executable, _countof(executable));
+        if (length > 0 && length < _countof(executable))
+        {
+            directory = Utility::GetBasePath(std::wstring(executable, length)) + L"Textures/";
+            hFind = FindFirstFileW((directory + pattern).c_str(), &ffd);
+        }
+    }
 
     g_IBLSet.AddEnum(L"None");
 
@@ -473,20 +480,20 @@ void LoadIBLTextures()
             baseFile.resize(baseFile.rfind(L"_diffuseIBL.dds"));
             std::wstring specularFile = baseFile + L"_specularIBL.dds";
 
-            TextureRef diffuseTex = TextureManager::LoadDDSFromFile(L"Textures/" + diffuseFile);
+            TextureRef diffuseTex = TextureManager::LoadDDSFromFile(directory + diffuseFile);
             if (diffuseTex.IsValid())
             {
-                TextureRef specularTex = TextureManager::LoadDDSFromFile(L"Textures/" + specularFile);
+                TextureRef specularTex = TextureManager::LoadDDSFromFile(directory + specularFile);
                 if (specularTex.IsValid())
                 {
                     g_IBLSet.AddEnum(baseFile);
                     g_IBLTextures.push_back(std::make_pair(diffuseTex, specularTex));
                 }
             }
-        } while (FindNextFile(hFind, &ffd) != 0);
+        }
+        while (FindNextFileW(hFind, &ffd) != 0);
+        FindClose(hFind);
     }
-
-    FindClose(hFind);
 
     Utility::Printf("Found %u IBL environment map sets\n", g_IBLTextures.size());
 

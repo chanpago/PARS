@@ -495,8 +495,9 @@ void SkeletalMeshViewer::RenderPreview(GraphicsContext& context, Renderer::MeshS
     sorter.Sort();
     GlobalConstants globals{};
     globals.SunShadowMatrix = Matrix4(Vector4(kZero), Vector4(kZero), Vector4(kZero), Vector4(0.5f, 0.5f, 1, 1));
-    globals.SunDirection = Normalize(Vector3(0.5f, 1, 0.5f));
-    globals.SunIntensity = Vector3(3, 3, 3);
+    globals.EnableDirectionalLight = 1;
+    globals.SunDirection = Normalize(Vector3(-0.55f, 0.75f, 0.65f));
+    globals.SunIntensity = Vector3(2.5f, 2.5f, 2.5f);
     sorter.RenderMeshes(Renderer::MeshSorter::kTransparent, context, globals);
 
     context.TransitionResource(m_Color, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);

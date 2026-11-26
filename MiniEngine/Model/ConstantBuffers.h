@@ -59,6 +59,7 @@ __declspec(align(256)) struct MaterialConstants
 
 __declspec(align(256)) struct GlobalConstants
 {
+public:
     Math::Matrix4 ViewProjMatrix;
     Math::Matrix4 SunShadowMatrix;
     Math::Vector3 CameraPos;
@@ -66,4 +67,5 @@ __declspec(align(256)) struct GlobalConstants
     Math::Vector3 SunIntensity;
     float IBLRange;
     float IBLBias;
+    uint32_t EnableDirectionalLight = 0;
 };

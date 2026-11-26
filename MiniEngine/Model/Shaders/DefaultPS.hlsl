@@ -49,6 +49,7 @@ cbuffer GlobalConstants : register(b1)
     float _pad;
     float IBLRange;
     float IBLBias;
+    uint EnableDirectionalLight;
 }
 
 struct VSOutput
@@ -128,26 +129,20 @@ float Fresnel_Shlick(float F0, float F90, float cosine)
 float3 Diffuse_Burley(SurfaceProperties Surface, LightProperties Light)
 {
     float fd90 = 0.5 + 2.0 * Surface.roughness * Light.LdotH * Light.LdotH;
-    return Surface.c_diff * Fresnel_Shlick(1, fd90, Light.NdotL).x * Fresnel_Shlick(1, fd90, Surface.NdotV).x;
+    return (Surface.c_diff / PI) * Fresnel_Shlick(1, fd90, Light.NdotL) * Fresnel_Shlick(1, fd90, Surface.NdotV);
 }
 
 // GGX specular D (normal distribution)
 float Specular_D_GGX(SurfaceProperties Surface, LightProperties Light)
 {
     float lower = lerp(1, Surface.alphaSqr, Light.NdotH * Light.NdotH);
-    return Surface.alphaSqr / max(1e-6, PI * lower * lower);
+    return Surface.alphaSqr / (PI * lower * lower);
 }
 
 // Schlick-Smith specular geometric visibility function
 float G_Schlick_Smith(SurfaceProperties Surface, LightProperties Light)
 {
-    return 1.0 / max(1e-6, lerp(Surface.NdotV, 1, Surface.alpha * 0.5) * lerp(Light.NdotL, 1, Surface.alpha * 0.5));
-}
-
-// Schlick-Smith specular visibility with Hable's LdotH approximation
-float G_Shlick_Smith_Hable(SurfaceProperties Surface, LightProperties Light)
-{
-    return 1.0 / lerp(Light.LdotH * Light.LdotH, 1, Surface.alphaSqr * 0.25);
+    return 0.25 / max(1e-6, lerp(Surface.NdotV, 1, Surface.alpha * 0.5) * lerp(Light.NdotL, 1, Surface.alpha * 0.5));
 }
 
 
@@ -165,8 +160,7 @@ float3 Specular_BRDF(SurfaceProperties Surface, LightProperties Light)
     float ND = Specular_D_GGX(Surface, Light);
 
     // Geometric Visibility term
-    //float GV = G_Schlick_Smith(Surface, Light);
-    float GV = G_Shlick_Smith_Hable(Surface, Light);
+    float GV = G_Schlick_Smith(Surface, Light);
 
     // Fresnel term
     float3 F = Fresnel_Shlick(Surface.c_spec, 1.0, Light.LdotH);
@@ -178,12 +172,16 @@ float3 ShadeDirectionalLight(SurfaceProperties Surface, float3 L, float3 c_light
 {
     LightProperties Light;
     Light.L = L;
+    Light.NdotL = saturate(dot(Surface.N, L));
+    if (Light.NdotL <= 0.0 || Surface.NdotV <= 0.0)
+    {
+        return 0.0;
+    }
 
     // Half vector
     float3 H = normalize(L + Surface.V);
 
     // Pre-compute dot products
-    Light.NdotL = saturate(dot(Surface.N, L));
     Light.LdotH = saturate(dot(L, H));
     Light.NdotH = saturate(dot(Surface.N, H));
 
@@ -236,7 +234,7 @@ float3 ComputeNormal(VSOutput vsOutput)
     normal = normalize(normal * float3(normalTextureScale, normalTextureScale, 1));
 
     // Multiply by transpose (reverse order)
-    return mul(normal, tangentFrame);
+    return normalize(mul(normal, tangentFrame));
 #endif
 }
 
@@ -255,40 +253,22 @@ float4 main(VSOutput vsOutput) : SV_Target0
     Surface.N = normal;
     Surface.V = normalize(ViewerPos - vsOutput.worldPos);
     Surface.NdotV = saturate(dot(Surface.N, Surface.V));
-    Surface.c_diff = baseColor.rgb * (1 - kDielectricSpecular) * (1 - metallicRoughness.x) * occlusion;
-    Surface.c_spec = lerp(kDielectricSpecular, baseColor.rgb, metallicRoughness.x) * occlusion;
+    Surface.c_diff = baseColor.rgb * (1 - kDielectricSpecular) * (1 - metallicRoughness.x);
+    Surface.c_spec = lerp(kDielectricSpecular, baseColor.rgb, metallicRoughness.x);
     Surface.roughness = metallicRoughness.y;
-    Surface.alpha = metallicRoughness.y * metallicRoughness.y;
+    float directRoughness = max(Surface.roughness, 0.045);
+    Surface.alpha = directRoughness * directRoughness;
     Surface.alphaSqr = Surface.alpha * Surface.alpha;
 
     // Begin accumulating light starting with emissive
     float3 colorAccum = emissive;
 
-#if 0
-    float sunShadow = texSunShadow.SampleCmpLevelZero( shadowSampler, vsOutput.sunShadowCoord.xy, vsOutput.sunShadowCoord.z );
-    colorAccum += ShadeDirectionalLight(Surface, SunDirection, sunShadow * SunIntensity);
-
-    uint2 pixelPos = uint2(vsOutput.position.xy);
-    float ssao = texSSAO[pixelPos];
-
-    Surface.c_diff *= ssao;
-    Surface.c_spec *= ssao;
-
-    // Old-school ambient light
-    colorAccum += Surface.c_diff * 0.1;
-
-#else
-
-    uint2 pixelPos = uint2(vsOutput.position.xy);
-    float ssao = texSSAO[pixelPos];
-
-    Surface.c_diff *= ssao;
-    Surface.c_spec *= ssao;
-
-    // Add IBL
-    colorAccum += Diffuse_IBL(Surface);
-    colorAccum += Specular_IBL(Surface);
-#endif
+    if (EnableDirectionalLight != 0)
+    {
+        colorAccum += ShadeDirectionalLight(Surface, SunDirection, SunIntensity);
+    }
+    float ambientOcclusion = occlusion * texSSAO[uint2(vsOutput.position.xy)];
+    colorAccum += ambientOcclusion * (Diffuse_IBL(Surface) + Specular_IBL(Surface));
 
     // TODO: Shade each light using Forward+ tiles
 
