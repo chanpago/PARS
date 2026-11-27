@@ -8,10 +8,10 @@
         "radiusMeters": 0.009999999776482582,
         "speedMetersPerSecond": 30.0
     },
-    "editingCapsule": false,
+    "editingCapsule": true,
     "playerCapsule": {
         "bodyImpulseNs": 0.0,
-        "bodyTorqueMultiplier": 0.0,
+        "bodyTorqueMultiplier": 1.0,
         "partImpulseNs": 0.0
     },
     "selected": "arrow",
