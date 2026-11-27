@@ -1817,8 +1817,8 @@
       "animation": "ShoveReactionRearLeft",
       "path": "Converted/ShoveReactions/ShoveReactionRearLeft.gltf",
       "source": "Source/ShoveReactions/Shove Reaction Rear Left.fbx",
-      "source_sha256": "2c16326abf0a07ee65a5c9840fc19f7423b4d6386f60727731efa34217cc586c",
-      "gltf_sha256": "4f058503641868e19004a14e1d2c41ed81807b4f3443b8608d4d2b9699c679b0",
+      "source_sha256": "c85085f9cccd5b4ca73d72bbef1d3a81498fe7b80948acb11e1ab50ed106552a",
+      "gltf_sha256": "2d167bc6ce83953cac33226fb52fee50181a03ab8a7ea6204431d63b359f08a7",
       "blender_version": "4.4.3",
       "source_frames": [
         1,
@@ -1862,14 +1862,15 @@
           "bytes": 9555040
         }
       ],
-      "derived_from": "Source/ShoveReactions/Shove Reaction Left.fbx"
+      "derived_from": "Source/ShoveReactions/Shove Reaction.fbx",
+      "impact_source": "Source/UnrealShove/M_relaxed_ragdoll_shove_stand_B_V.FBX.fbx"
     },
     {
       "animation": "ShoveReactionRearRight",
       "path": "Converted/ShoveReactions/ShoveReactionRearRight.gltf",
       "source": "Source/ShoveReactions/Shove Reaction Rear Right.fbx",
-      "source_sha256": "a0dd95961ee6b76e03b93e0d6ba560e701d77b374c77d1e340f49c3dbc412e68",
-      "gltf_sha256": "7ccbf44b7e9eabc5adf411aab9c074c4820433370bf5e2b0a4e6fb499c97b9f5",
+      "source_sha256": "10c9d27318a4328ed790b627b6492337a07d1fa00b185738f8ffaef16956a734",
+      "gltf_sha256": "1e0b5b2001cebd7787ee5acb0b6e8aab7d1b0c66e35c2b065bbeefbb37fd013e",
       "blender_version": "4.4.3",
       "source_frames": [
         1,
@@ -1913,7 +1914,8 @@
           "bytes": 9555040
         }
       ],
-      "derived_from": "Source/ShoveReactions/Shove Reaction.fbx"
+      "derived_from": "Source/ShoveReactions/Shove Reaction Left.fbx",
+      "impact_source": "Source/UnrealShove/M_relaxed_ragdoll_shove_stand_B_V.FBX.fbx"
     }
   ]
 }
