@@ -65,6 +65,14 @@ public:
     {
         return m_ContactCheckEnabled;
     }
+    bool IsBodyImpactCapsuleVisible() const
+    {
+        return m_BodyImpactCapsuleVisible;
+    }
+    void SetBodyImpactCapsuleVisible(bool visible)
+    {
+        m_BodyImpactCapsuleVisible = visible;
+    }
     void SetSpawnOrigin(Math::Vector3 origin)
     {
         m_SpawnOrigin = origin;

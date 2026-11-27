@@ -2085,6 +2085,24 @@ void ModelViewer::DrawCharacterAnimationTab()
             }
             if (!showingComparison)
             {
+                if (PhysicsWorld* physics = m_World.GetPhysicsWorld())
+                {
+                    const bool visible = physics->IsCapsuleDebugVisible();
+                    if (ImGui::Button(visible ? u8"플레이어 이동 캡슐 윤곽선 끄기###MovementCapsuleToggle" :
+                        u8"플레이어 이동 캡슐 윤곽선 켜기###MovementCapsuleToggle"))
+                    {
+                        physics->SetCapsuleDebugVisible(!visible);
+                    }
+                }
+                if (m_ImpactTest)
+                {
+                    const bool visible = m_ImpactTest->IsBodyImpactCapsuleVisible();
+                    if (ImGui::Button(visible ? u8"몸통 충돌 캡슐 윤곽선 끄기###BodyImpactCapsuleToggle" :
+                        u8"몸통 충돌 캡슐 윤곽선 켜기###BodyImpactCapsuleToggle"))
+                    {
+                        m_ImpactTest->SetBodyImpactCapsuleVisible(!visible);
+                    }
+                }
                 PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
                 bool dummyFootStatesVisible = dummy && dummy->GetMesh().IsFootCandidateDebugVisible();
                 ImGui::BeginDisabled(!dummy);
