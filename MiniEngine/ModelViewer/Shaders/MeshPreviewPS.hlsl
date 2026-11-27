@@ -1,4 +1,4 @@
-#include "../../Core/Shaders/ToneMappingUtility.hlsli"
+﻿#include "../../Core/Shaders/ToneMappingUtility.hlsli"
 
 Texture2D<float3> preview : register(t0);
 SamplerState linearClamp : register(s0);

@@ -229,9 +229,23 @@ namespace
         }
         const PxVec3 base(0, 3, 0);
         const PxVec3 angularSample = ragdoll.GetBodyPointVelocity(0, base + PxVec3(1, 0, 0)) - ragdoll.GetBodyPointVelocity(0, base);
+        const PxVec3 center(0, 3.5f, 0);
+        PxVec3 expectedMoment = (responses.front().position - center).cross(direction * bodyImpulse) * torqueMultiplier;
+        if (capsule)
+        {
+            PxVec3 measuredMoment(0);
+            for (const RagdollBodyImpulse& hit : impacts)
+            {
+                measuredMoment += (hit.position - center).cross(hit.impulse);
+            }
+            Check(measuredMoment.magnitude() > .1f &&
+                (responses.front().GetAngularImpulse(center) - measuredMoment * torqueMultiplier).magnitude() < .001f,
+                "Kinematic capsule spin follows the measured contact even with zero configured body impulse");
+            // 이 검사는 솔버 충격을 재생하지 않으므로 동적 바디에 더한 보정분만 관측한다.
+            expectedMoment = torqueMultiplier == 0 ? PxVec3(0) : measuredMoment * (torqueMultiplier - 1.0f);
+        }
         // 두 구의 중심 관성과 평행축 항의 합은 z축 기준 1.064 kg m²다.
-        const float expectedSpin = (responses.front().position - PxVec3(0, 3.5f, 0)).cross(direction).z *
-            bodyImpulse * torqueMultiplier / 1.064f;
+        const float expectedSpin = expectedMoment.z / 1.064f;
         Check(std::abs(angularSample.y - expectedSpin) < .08f,
             "Offset and torque multiplier determine rigid-body spin about the actual COM");
     }
@@ -363,7 +377,10 @@ void RunProjectileBodyImpulseTests()
         TestImpactBodyImpulse(articulation, .5f, 3.0f);
         TestImpactBodyImpulse(articulation, 0, 4.10f, 0, 2);
         TestImpactBodyImpulse(articulation, 0, 4.10f, 8, 2);
+        TestImpactBodyImpulse(articulation, 0, 4.0f, 8, 0, PhysicsWorld::CharacterCapsuleFilterFlag);
         TestImpactBodyImpulse(articulation, .5f, 4.0f, 8, 0, PhysicsWorld::CharacterCapsuleFilterFlag);
+        TestImpactBodyImpulse(articulation, 1.0f, 4.0f, 0, 0, PhysicsWorld::CharacterCapsuleFilterFlag);
+        TestImpactBodyImpulse(articulation, 2.0f, 4.0f, 0, 0, PhysicsWorld::CharacterCapsuleFilterFlag);
         TestImpactBodyImpulse(articulation, .5f, 4.0f, 8, 0, arrow, upward, true);
         TestImpactBodyImpulse(articulation, 0, 4.0f, 8, 0, arrow, physx::PxVec3(0, 1, 0), true);
         TestImpactBodyImpulse(articulation, 0, 4.10f, 8, 2, arrow, upward, true);

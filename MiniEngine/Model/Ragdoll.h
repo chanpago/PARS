@@ -48,7 +48,6 @@ namespace PARS
         size_t body = 0;
         uint64_t contactId = 0;
         physx::PxVec3 partPosition{0};
-        bool fromCharacterCapsule = false;
     };
 
     struct RagdollImpactReaction

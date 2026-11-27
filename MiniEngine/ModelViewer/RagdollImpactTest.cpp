@@ -838,7 +838,7 @@ void RagdollImpactTest::DrawImpactSettingsUI(Character* player)
                 component.SetImpactImpulseSettings(settings);
             }
         }
-        ImGui::TextWrapped("%s", u8"플레이어 몸통이 더미에 처음 부딪힐 때 적용합니다. 떨어졌다 다시 부딪히면 새 충격을 줍니다.");
+        ImGui::TextWrapped("%s", u8"전신 충격량은 추가 밀림을 정합니다. 회전 배율은 첫 접촉의 실제 충격량에 적용하며, 떨어졌다 다시 닿으면 새로 계산합니다.");
     }
     else
     {

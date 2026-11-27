@@ -131,11 +131,14 @@ private:
         uint64_t firstImpulseStep = 0;
         physx::PxVec3 incomingDirection{0};
         physx::PxVec3 contactImpulse{0};
-        physx::PxVec3 weightedPosition{0};
+        physx::PxVec3 firstPosition{0};
+        physx::PxVec3 weightedOffset{0};
+        physx::PxVec3 contactMoment{0};
         float weight = 0;
         ImpactImpulseSettings settings;
         bool groundedArrowHit = false;
         bool consumed = false;
+        bool fromCharacterCapsule = false;
     };
     struct StoppedProjectile
     {

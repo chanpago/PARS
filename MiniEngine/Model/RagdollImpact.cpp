@@ -521,7 +521,6 @@ namespace PARS
                 response.contactId = hit.impactContactId;
                 response.body = struck->body;
                 response.partPosition = struck->position;
-                response.fromCharacterCapsule = struck->fromCharacterCapsule;
                 responses.push_back(response);
             }
         }
@@ -549,10 +548,6 @@ namespace PARS
                 // 머리와 목처럼 여러 부위가 동시에 맞아도 실제 충격이 가장 컸던 접촉점에 한 번만 가한다.
                 ApplyImpulseAtPoint(*m_Bodies[response.body], response.partImpulse, response.partPosition);
             }
-            if (response.impulse.isZero())
-            {
-                continue;
-            }
             if (mass == 0)
             {
                 Math::Vector3 position(Math::kZero);
@@ -564,9 +559,10 @@ namespace PARS
             }
             // 지상 화살 피격의 전신 이동에서만 상승분을 뺀다. 회전에는 원래 충격량을 사용한다.
             linearImpulse += response.GetLinearImpulse();
-            angularImpulse += response.GetAngularImpulse(center);
+            angularImpulse += response.GetAngularImpulse(center, true);
         }
-        if (mass == 0 || !linearImpulse.isFinite() || !angularImpulse.isFinite())
+        if (mass == 0 || !linearImpulse.isFinite() || !angularImpulse.isFinite() ||
+            (linearImpulse.isZero() && angularImpulse.isZero()))
         {
             return;
         }

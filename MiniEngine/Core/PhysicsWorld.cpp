@@ -395,6 +395,7 @@ void PhysicsWorld::RecordImpactContact(ContactPair& pair, int sourceSide, bool c
         {
             contact->firstImpulseStep = pair.completedStep;
             contact->settings = registered->settings;
+            contact->fromCharacterCapsule = capsule;
             const PxU32 flags = pair.shapes[sourceSide]->getSimulationFilterData().word3;
             const bool arrow = (flags & ProjectileFilterFlag) != 0 && (flags & AttachOnContactFilterFlag) != 0;
             contact->groundedArrowHit = arrow && std::find(m_GroundedImpactReceivers.begin(),
@@ -407,7 +408,8 @@ void PhysicsWorld::RecordImpactContact(ContactPair& pair, int sourceSide, bool c
         return;
     }
     pair.beginsImpact = true;
-    if (contact->settings.bodyImpulse == 0 && contact->settings.partImpulse == 0)
+    if (contact->settings.bodyImpulse == 0 && contact->settings.partImpulse == 0 &&
+        !(capsule && contact->settings.torqueMultiplier > 0))
     {
         return;
     }
@@ -419,15 +421,22 @@ void PhysicsWorld::RecordImpactContact(ContactPair& pair, int sourceSide, bool c
             contact->incomingDirection = incoming.getNormalized();
         }
     }
-    // 여러 바디와 동시에 닿으면 접촉 충격량으로 가중한 한 점을 전신 회전의 작용점으로 쓴다.
+    // 월드 좌표가 커도 정밀도를 유지하도록 첫 접촉점 기준으로 작용점과 각충격량을 합산한다.
     for (const PxContactPairPoint& point : pair.points)
     {
         const float weight = point.impulse.magnitude();
         if (point.position.isFinite() && std::isfinite(weight) && weight > 0)
         {
+            if (contact->weight == 0)
+            {
+                contact->firstPosition = point.position;
+            }
+            const PxVec3 offset = point.position - contact->firstPosition;
+            const PxVec3 impulse = sourceSide == 0 ? -point.impulse : point.impulse;
             contact->weight += weight;
-            contact->weightedPosition += point.position * weight;
-            contact->contactImpulse += sourceSide == 0 ? -point.impulse : point.impulse;
+            contact->weightedOffset += offset * weight;
+            contact->contactImpulse += impulse;
+            contact->contactMoment += offset.cross(impulse);
         }
     }
 }
@@ -443,13 +452,19 @@ bool PhysicsWorld::GetImpactResponse(uint64_t id, PhysicsImpactResponse& respons
                 return false;
             }
             const PxVec3 direction = contact.incomingDirection.isZero() ? contact.contactImpulse.getNormalized() : contact.incomingDirection;
-            response.position = contact.weightedPosition / contact.weight;
+            const PxVec3 offset = contact.weightedOffset / contact.weight;
+            response.position = contact.firstPosition + offset;
             response.impulse = direction * contact.settings.bodyImpulse;
             response.partImpulse = direction * contact.settings.partImpulse;
+            response.contactImpulse = contact.contactImpulse;
+            response.contactMomentAtPosition = contact.contactMoment - offset.cross(contact.contactImpulse);
             response.torqueMultiplier = contact.settings.torqueMultiplier;
             response.groundedArrowHit = contact.groundedArrowHit;
+            response.fromCharacterCapsule = contact.fromCharacterCapsule;
             return response.position.isFinite() && response.impulse.isFinite() && response.partImpulse.isFinite() &&
-                (!response.impulse.isZero() || !response.partImpulse.isZero());
+                response.contactImpulse.isFinite() && response.contactMomentAtPosition.isFinite() &&
+                (!response.impulse.isZero() || !response.partImpulse.isZero() ||
+                    (response.fromCharacterCapsule && response.torqueMultiplier > 0));
         }
     }
     return false;

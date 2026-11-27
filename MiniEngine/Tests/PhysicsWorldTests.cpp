@@ -170,7 +170,7 @@ namespace
         const PxCapsuleGeometry torso(.12f, .08f);
         const PxGeometry& geometry = capsule ? static_cast<const PxGeometry&>(torso) : static_cast<const PxGeometry&>(sphere);
         PxRigidDynamic* ball = world.CreateDynamicBody(PxTransform(PxVec3(0, 3, -.4f)), geometry, 1, "Shared hit");
-        Check(ball && world.SetImpactImpulseSettings(*ball, {8, 0, 0}), "Configure one local impulse against two parts");
+        Check(ball && world.SetImpactImpulseSettings(*ball, {8, 0, capsule ? 1.0f : 0.0f}), "Configure one local impulse against two parts");
         ball->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
         PxShape* shape = nullptr;
         Check(ball->getShapes(&shape, 1) == 1, "Find shared projectile shape");
@@ -199,6 +199,17 @@ namespace
             "Deliver one local impulse across multiple receiver shapes");
         if (capsule)
         {
+            const PxVec3 center(.3f, 2.8f, 0);
+            PxVec3 measuredMoment(0);
+            for (const std::vector<PhysicsContactImpulse>& bodyContacts : contacts)
+            {
+                for (const PhysicsContactImpulse& point : bodyContacts)
+                {
+                    measuredMoment += (point.position - center).cross(point.impulse);
+                }
+            }
+            Check(measuredMoment.magnitude() > .1f && (response.GetAngularImpulse(center) - measuredMoment).magnitude() < .001f &&
+                response.GetAngularImpulse(center, true).isZero(), "Combine both actual contact moments and count the solver spin once");
             Check(contacts[0].front().fromCharacterCapsule && !contacts[0].front().newProjectileHit &&
                 contacts[0].front().newCapsuleHit && contacts[1].front().newCapsuleHit,
                 "A capsule impact keeps its source type");
