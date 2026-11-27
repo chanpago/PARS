@@ -62,7 +62,7 @@ namespace PARS
             const WalkingSwing& swing = {}, float desiredSwingTime = 0.0f, uint32_t requiredClip = UINT32_MAX) const;
         MotionMatchResult FindImpactPoseMatch(MotionFrameUsage usage, uint32_t requiredClip = UINT32_MAX) const;
         bool SampleUpperBodyPose(uint32_t clip, float time, float weight, std::vector<GraphNode>& pose,
-            const std::vector<GraphNode>* basePose = nullptr) const;
+            const std::vector<GraphNode>* basePose = nullptr, const std::vector<GraphNode>* upperBlendSource = nullptr) const;
         MotionMatchResult FindCrossStepMatch(const WalkingSwing& swing, float duration) const;
         bool PlayAnimation(uint32_t index, bool loop = true, float startTime = 0.0f);
         // 시작 시점을 지정해 발 디딤 위상을 맞출 수 있다. 일반 전환에서는 두 클립의 시간을 함께 진행한다.

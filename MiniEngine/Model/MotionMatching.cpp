@@ -493,11 +493,12 @@ namespace PARS
     }
 
     bool AnimInstance::SampleUpperBodyPose(uint32_t clip, float time, float weight, std::vector<GraphNode>& pose,
-        const std::vector<GraphNode>* basePose) const
+        const std::vector<GraphNode>* basePose, const std::vector<GraphNode>* upperBlendSource) const
     {
         const std::vector<GraphNode>& base = basePose ? *basePose : m_Pose;
-        if (!m_MotionDatabase || base.size() != m_Pose.size() || m_MotionDatabase->upperBodyMask.size() != base.size() ||
-            !SampleAnimationPose(clip, time, pose))
+        const std::vector<GraphNode>& upper = upperBlendSource ? *upperBlendSource : base;
+        if (!m_MotionDatabase || base.size() != m_Pose.size() || upper.size() != base.size() ||
+            m_MotionDatabase->upperBodyMask.size() != base.size() || !SampleAnimationPose(clip, time, pose))
         {
             return false;
         }
@@ -505,7 +506,7 @@ namespace PARS
         {
             if (m_MotionDatabase->upperBodyMask[node])
             {
-                BlendAnimationPoses(&base[node], &pose[node], 1, weight);
+                BlendAnimationPoses(&upper[node], &pose[node], 1, weight);
             }
             else
             {

@@ -107,7 +107,7 @@ namespace
     }
 
 #if defined(_M_X64)
-    bool RegisterFallAnimations(PARS::SkeletalMeshComponent& mesh, const std::wstring& directory, bool forceRebuild,
+    bool RegisterRagdollAnimations(PARS::SkeletalMeshComponent& mesh, const std::wstring& directory, bool forceRebuild,
         SkeletalMeshViewer::AnimationModels& models, const std::array<uint32_t, 4>& shoveClips, std::string& error)
     {
         PARS::AnimInstance& animation = mesh.GetAnimInstance();
@@ -155,6 +155,15 @@ namespace
             !mesh.SetAirborneFallAnimations(flailIndices))
         {
             error = u8"공중 낙하 클립 세 개를 등록하지 못했습니다.";
+            return false;
+        }
+        const uint32_t left = static_cast<uint32_t>(animation.GetAnimationCount());
+        const uint32_t right = left + 1;
+        if (!animation.AddAnimation("ShoveReactionLeft", LoadAnimationModel(directory + L"ShoveReactions/ShoveReactionLeft.gltf", forceRebuild, models)) ||
+            !animation.AddAnimation("ShoveReactionRight", LoadAnimationModel(directory + L"ShoveReactions/ShoveReactionRight.gltf", forceRebuild, models)) ||
+            !mesh.SetShoveReactionAnimations(left, right))
+        {
+            error = u8"좌우 어깨 밀침 반응 클립을 등록하지 못했습니다.";
             return false;
         }
         return true;
@@ -1054,7 +1063,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
         return;
     }
 #if defined(_M_X64)
-    if (m_PhysicsDemo && !RegisterFallAnimations(mesh, convertedDirectory, forceRebuild, animationModels, shoveClips, m_PreviewError))
+    if (m_PhysicsDemo && !RegisterRagdollAnimations(mesh, convertedDirectory, forceRebuild, animationModels, shoveClips, m_PreviewError))
     {
         character->Destroy();
         return;
@@ -1166,7 +1175,7 @@ void ModelViewer::LoadAnimationPreview(bool forceRebuild)
             m_RagdollMessage = m_ImpactTest->GetStatusMessage();
             m_ImpactTest.reset();
         }
-        else if (!RegisterFallAnimations(m_ImpactTest->GetDummy()->GetMesh(), convertedDirectory, forceRebuild, animationModels, shoveClips, m_RagdollMessage))
+        else if (!RegisterRagdollAnimations(m_ImpactTest->GetDummy()->GetMesh(), convertedDirectory, forceRebuild, animationModels, shoveClips, m_RagdollMessage))
         {
             m_ImpactTest.reset();
         }

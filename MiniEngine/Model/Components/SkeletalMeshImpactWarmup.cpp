@@ -170,7 +170,10 @@ void SkeletalMeshComponent::UpdateCapsuleImpactFacing(float yawSpeedChange, floa
         AffineTransform actor = GetOwner().GetActorTransform();
         actor.SetBasis(turn * actor.GetBasis());
         actor.SetTranslation(pivot + turn * (actor.GetTranslation() - pivot));
-        GetOwner().SetActorTransform(actor);
+        if (GetOwner().SetActorTransform(actor))
+        {
+            StartShoveReaction(yaw);
+        }
     }
 }
 
@@ -447,9 +450,18 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     }
     next.sweepStart = sweep.centre;
     next.sweepCenter = sweep.centre;
-    if (IsRagdoll() && !character->StopRagdoll(m_PhysicsError))
+    if (IsRagdoll())
     {
-        return false;
+        ImpactFlailPlayback previous = std::move(m_ImpactFlail);
+        const bool stopped = character->StopRagdoll(m_PhysicsError);
+        if (previous.playingShove || !stopped)
+        {
+            m_ImpactFlail = std::move(previous);
+        }
+        if (!stopped)
+        {
+            return false;
+        }
     }
     for (const RagdollImpactResponse& response : responses)
     {
@@ -588,6 +600,7 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
             targets.push_back(FootstepPoseMatrix(frames[joint]) * Invert(PhysicsBoneFrame(original)) * original);
         }
     }
+    StartShoveReaction(warmup.turnYaw);
     UpdateImpactFlail(true, deltaTime);
     const std::vector<GraphNode>& basePose = m_ImpactFlail.pose.empty() ? warmup.sourcePose : m_ImpactFlail.pose;
     if (!OverridePhysicsPose(m_PhysicsSkeleton, basePose, Matrix4(kIdentity), nodes, targets, warmup.pose) ||

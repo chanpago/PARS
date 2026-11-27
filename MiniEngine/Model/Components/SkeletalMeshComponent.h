@@ -77,10 +77,20 @@ namespace PARS
         {
         public:
             std::vector<GraphNode> pose;
+            std::vector<GraphNode> blendSource;
             uint32_t clip = UINT32_MAX;
             float time = 0;
             float weight = 0;
             float impactTimeRemaining = 0;
+            bool playingShove = false;
+        };
+
+        struct ShoveContact
+        {
+        public:
+            uint64_t id = 0;
+            float yaw = 0;
+            bool pending = false;
         };
 
         struct ImpactHandReach
@@ -194,6 +204,8 @@ namespace PARS
         void UpdateHorizontalBalance(float deltaTime);
         void ApplyCrossStepDrivePose(const FootSupportSnapshot& support, float deltaTime, std::vector<Math::Matrix4>& target);
         void ResetCrossStepPlayback();
+        void TrackShoveContact(const std::vector<RagdollBodyImpulse>& impacts);
+        void StartShoveReaction(float yaw);
         void UpdateImpactFlail(bool triggerReaction, float deltaTime);
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);
         void UpdateFootstepCollision(FootstepIKInput& input,
@@ -306,6 +318,7 @@ namespace PARS
         }
         bool SetFallingAnimation(uint32_t animationIndex);
         bool SetDirectionalFallingAnimation(FallDirection direction, uint32_t animationIndex);
+        bool SetShoveReactionAnimations(uint32_t left, uint32_t right);
         bool SetAirborneFallAnimations(const std::array<uint32_t, 3>& clips);
         void SetFallingAnimationEnabled(bool enabled)
         {
@@ -453,6 +466,7 @@ namespace PARS
         StandingSupport m_StandingSupport;
         HorizontalBalance m_HorizontalBalance;
         ImpactFlailPlayback m_ImpactFlail;
+        ShoveContact m_ShoveContact;
         ImpactHandReach m_ImpactHandReach;
         std::vector<physx::PxVec3> m_RecoveryReferenceHull;
         std::vector<GraphNode> m_RecoveryBlendSource;
@@ -481,6 +495,7 @@ namespace PARS
         float m_CapsuleFacingAllowance = 0;
         uint32_t m_FallingAnimationIndex = UINT32_MAX;
         std::array<uint32_t, static_cast<size_t>(FallDirection::Count)> m_DirectionalFallingAnimations;
+        std::array<uint32_t, 2> m_ShoveReactionAnimations{UINT32_MAX, UINT32_MAX};
         std::array<uint32_t, 3> m_AirborneFallAnimations{UINT32_MAX, UINT32_MAX, UINT32_MAX};
         uint32_t m_StandingUpAnimationIndex = UINT32_MAX;
         uint32_t m_StandingIdleAnimationIndex = UINT32_MAX;

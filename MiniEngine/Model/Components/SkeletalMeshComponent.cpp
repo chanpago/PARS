@@ -26,6 +26,8 @@ namespace PARS
         m_SkeletalMesh = std::move(mesh);
         m_ModelInstance = m_SkeletalMesh;
         m_AnimInstance->Initialize(m_SkeletalMesh);
+        m_ShoveReactionAnimations.fill(UINT32_MAX);
+        m_ShoveContact = {};
         m_FallingAnimationIndex = UINT32_MAX;
         m_DirectionalFallingAnimations.fill(UINT32_MAX);
         m_AirborneFallAnimations.fill(UINT32_MAX);
@@ -107,6 +109,7 @@ namespace PARS
         m_ImpactWarmup = {};
         m_CapsuleFacingAllowance = 0;
         m_ImpactFlail = {};
+        m_ShoveContact = {};
         ResetCrossStepPlayback();
         ResetFallArms();
         m_FallArmsInitialized = false;
@@ -139,6 +142,8 @@ namespace PARS
         instance->Initialize(m_SkeletalMesh);
         m_ImpactWarmup = {};
         m_AnimInstance = std::move(instance);
+        m_ShoveReactionAnimations.fill(UINT32_MAX);
+        m_ShoveContact = {};
         ResetFallArms();
         ResetAirborneFall();
         m_FallingAnimationIndex = UINT32_MAX;
@@ -203,6 +208,7 @@ namespace PARS
             const std::vector<RagdollBodyImpulse>& impacts = m_Ragdoll.GetExternalImpacts();
             if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()) || IsImpactWarmupActive())
             {
+                TrackShoveContact(impacts);
                 // 예열이나 물리 모드 전환이 접촉을 비우기 전에 같은 스텝으로 상처와 손 목표를 기록한다.
                 m_Ragdoll.UpdateWounds(impacts);
                 hit = FindImpactHandReach(impacts);

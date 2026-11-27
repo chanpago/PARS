@@ -217,34 +217,42 @@ namespace
                 const PARS::MotionMatchResult match = animation.FindImpactPoseMatch(usage, previous);
                 check(match.clipIndex == previous && std::isfinite(match.score) && match.clipTimeSeconds < animation.GetAnimationDuration(previous),
                     "Live physical pose matches a playable frame of the registered clip");
-                if (usage == PARS::MotionFrameUsage::ShoveFall)
-                {
-                    continue;
-                }
-                std::vector<GraphNode> layer;
-                std::vector<GraphNode> authored;
-                check(animation.SampleAnimationPose(previous, .3f, authored) && animation.SampleUpperBodyPose(previous, .3f, 1, layer),
-                    "Sample the authored and upper-body impact poses");
-                bool movesUpperBody = false;
-                bool matchesMask = true;
-                for (size_t node = 0; node < layer.size(); ++node)
-                {
-                    int ancestor = static_cast<int>(node);
-                    while (ancestor >= 0 && skeleton.names[ancestor].substr(skeleton.names[ancestor].rfind(':') + 1) != "Spine")
-                    {
-                        ancestor = skeleton.parents[ancestor];
-                    }
-                    const GraphNode& base = animation.GetPose()[node];
-                    const GraphNode& expected = ancestor >= 0 ? authored[node] : base;
-                    movesUpperBody |= ancestor >= 0 && std::memcmp(&layer[node].rotation, &base.rotation, sizeof(base.rotation)) != 0;
-                    matchesMask &= std::memcmp(&layer[node].rotation, &expected.rotation, sizeof(expected.rotation)) == 0 &&
-                        std::memcmp(&layer[node].scale, &expected.scale, sizeof(expected.scale)) == 0 &&
-                        Math::LengthSquare(Math::Vector3(layer[node].xform.GetW()) - Math::Vector3(expected.xform.GetW())) < 1e-10f;
-                }
-                check(matchesMask && movesUpperBody, "Spine and descendants follow Slow Jog Backwards while the pelvis and legs keep the base pose");
             }
         }
         check(slot == names.size(), "The balance clip and all four shove falls are indexed on the shared dummy database");
+        for (const char* name : {"Slow Jog Backwards", "ShoveReactionLeft", "ShoveReactionRight"})
+        {
+            uint32_t clip = 0;
+            while (clip < animation.GetAnimationCount() && animation.GetAnimationName(clip) != name)
+            {
+                ++clip;
+            }
+            std::vector<GraphNode> authored;
+            std::vector<GraphNode> layer;
+            std::vector<GraphNode> transition;
+            check(animation.SampleAnimationPose(clip, .3f, authored) && animation.SampleUpperBodyPose(clip, .3f, 1, layer) &&
+                animation.SampleUpperBodyPose(clip, 0, 0, transition, nullptr, &authored), "Sample the upper-body clip and the first frame of its crossfade");
+            bool movesUpperBody = false;
+            bool matchesMask = true;
+            for (size_t node = 0; node < layer.size(); ++node)
+            {
+                int ancestor = static_cast<int>(node);
+                while (ancestor >= 0 && skeleton.names[ancestor].substr(skeleton.names[ancestor].rfind(':') + 1) != "Spine")
+                {
+                    ancestor = skeleton.parents[ancestor];
+                }
+                const GraphNode& base = animation.GetPose()[node];
+                const GraphNode& expected = ancestor >= 0 ? authored[node] : base;
+                movesUpperBody |= ancestor >= 0 && std::memcmp(&layer[node].rotation, &base.rotation, sizeof(base.rotation)) != 0;
+                for (const GraphNode* sample : {&layer[node], &transition[node]})
+                {
+                    matchesMask &= std::memcmp(&sample->rotation, &expected.rotation, sizeof(expected.rotation)) == 0 &&
+                        std::memcmp(&sample->scale, &expected.scale, sizeof(expected.scale)) == 0 &&
+                        Math::LengthSquare(Math::Vector3(sample->xform.GetW()) - Math::Vector3(expected.xform.GetW())) < 1e-10f;
+                }
+            }
+            check(matchesMask && movesUpperBody, "Only Spine and its descendants use the impact clip and its crossfade source");
+        }
     }
 
     void WriteLandingComHeader(std::ostream& stream)
@@ -804,20 +812,26 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         player.GetCharacterMovement().StopMovementImmediately();
         const bool checkWarmup = scenario == 9;
         const bool releaseOnContact = scenario == 10;
-        const bool continuousFrontPush = scenario == 7 || scenario == 8 || checkWarmup || releaseOnContact;
+        const bool continuousPush = scenario == 7 || scenario == 8 || checkWarmup || releaseOnContact;
         float yaw = scenario == 3 || scenario == 5 ? DirectX::XM_PIDIV2 :
             scenario == 4 ? -DirectX::XM_PIDIV2 : scenario == 6 ? DirectX::XM_PIDIV4 : 0.0f;
         float lateralOffset = glancing != 0 ? .18f : 0.0f;
-        if (continuousFrontPush)
+        float approachDegrees = 0;
+        if (continuousPush)
         {
-            // 일반 전진 입력으로 더미의 정면에서 밀어 뒷걸음이 발생하는 상황을 재현한다.
+            // 더미 정면을 기준으로 진입 각도와 좌우 오프셋을 정하고 일반 전진 입력으로 충돌한다.
             const Vector3 facing = dummy->GetMesh().GetComponentTransform().GetBasis() * Vector3(kZUnitVector);
             yaw = std::atan2(-float(facing.GetX()), -float(facing.GetZ()));
             CommandLineArgs::GetFloat(L"bodyimpactoffset", lateralOffset);
+            if ((scenario == 7 || scenario == 8) && CommandLineArgs::GetFloat(L"bodyimpactangle", approachDegrees))
+            {
+                yaw += DirectX::XMConvertToRadians(approachDegrees);
+            }
         }
         if (glancing != 0)
         {
-            check((scenario == 7 || scenario == 8) && lateralOffset != 0, "Use an offset frontal walk or run to check glancing yaw");
+            check((scenario == 7 || scenario == 8) && lateralOffset != 0, "Use an offset walk or run to check glancing yaw");
+            CheckImpactMotionClips(dummy->GetMesh(), check);
         }
         const Vector3 direction(std::sin(yaw), 0, std::cos(yaw));
         const Vector3 right(std::cos(yaw), 0, -std::sin(yaw));
@@ -968,6 +982,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         float secondLandingYaw = 0;
         float supportedYaw = 0;
         bool sawGlancingWarmup = false;
+        std::string firstShoulder;
         for (uint32_t frame = 0; frame < frames; ++frame)
         {
             if (modeCycles && frame % 60 == 0)
@@ -993,7 +1008,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             // 기본 입력: 2초 안정화, 3초 접근, 2초 후퇴, 2초 재접근, 나머지는 정지한다.
             float input = scenario == 0 || frame < 120 || frame >= 540 ? 0.0f :
                 frame < 300 ? 1.0f : frame < 420 ? -1.0f : 1.0f;
-            if (continuousFrontPush)
+            if (continuousPush)
             {
                 input = frame >= 120 && frame < 540 && !(releaseOnContact && eventCount > 0) ? 1.0f : 0.0f;
             }
@@ -1295,6 +1310,16 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const Vector3 dummyForward = dummy->GetActorTransform().GetZ();
             const float actorYaw = std::atan2(float(dummyForward.GetX()), float(dummyForward.GetZ()));
             yawChange = DirectX::XMConvertToDegrees(std::remainder(actorYaw - initialYaw, DirectX::XM_2PI));
+            if (glancing != 0 && firstShoulder.empty())
+            {
+                const std::string& clip = dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip());
+                if (clip == "ShoveReactionLeft" || clip == "ShoveReactionRight")
+                {
+                    firstShoulder = clip;
+                    check(yawChange != 0 && clip == (yawChange > 0 ? "ShoveReactionLeft" : "ShoveReactionRight"),
+                        "The first shoulder reaction matches the sign of the actor's actual turn");
+                }
+            }
             if (glancing != 0 && dummyMesh.IsImpactWarmupActive())
             {
                 sawGlancingWarmup = true;
@@ -1404,11 +1429,18 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         report << "events=" << eventCount << std::endl;
         if (glancing != 0)
         {
-            const float sign = lateralOffset < 0 ? 1.0f : -1.0f;
+            const float angle = DirectX::XMConvertToRadians(approachDegrees);
+            const bool sideApproach = std::abs(std::sin(angle)) > std::abs(std::cos(angle));
+            report << "first_shoulder=" << firstShoulder << std::endl;
+            check(sideApproach == !firstShoulder.empty(), "Side approaches play a shoulder reaction and frontal glances keep their balance reaction");
+            // 측면 충돌의 회전 방향은 출발 오프셋만으로 정해지지 않으므로 첫 실측 회전과 비교한다.
+            const bool expectPositiveYaw = sideApproach ? firstShoulder == "ShoveReactionLeft" : lateralOffset < 0;
+            const float sign = expectPositiveYaw ? 1.0f : -1.0f;
+            const float minimumTurnDegrees = sideApproach ? .001f : 1.0f;
             report << "second_landing_yaw_deg=" << secondLandingYaw << " supported_yaw_deg=" << supportedYaw
                 << " final_yaw_deg=" << yawChange << std::endl;
-            check(impactFrame != UINT32_MAX && supportedYaw * sign > 1.0f, "The supported actor keeps the turn caused by the glancing hit");
-            check(scenario == 7 ? !sawGlancingWarmup : secondLandingYaw * sign > 1.0f && !dummy->GetMesh().IsImpactWarmupActive(),
+            check(impactFrame != UINT32_MAX && supportedYaw * sign > minimumTurnDegrees, "The supported actor keeps the turn caused by the glancing hit");
+            check(scenario == 7 ? !sawGlancingWarmup : secondLandingYaw * sign > minimumTurnDegrees && !dummy->GetMesh().IsImpactWarmupActive(),
                 "Walking turns the active receiver and running turns it by the second warmup landing before handoff");
         }
         if (checkWarmup || releaseOnContact)

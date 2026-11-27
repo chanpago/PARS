@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
 #include "../GameFramework/Character.h"
 #include "PhysicsWorld.h"
 
@@ -32,6 +33,16 @@ namespace PARS
             return false;
         }
         m_DirectionalFallingAnimations[slot] = animationIndex;
+        return true;
+    }
+
+    bool SkeletalMeshComponent::SetShoveReactionAnimations(uint32_t left, uint32_t right)
+    {
+        if (left == right || left >= m_AnimInstance->GetAnimationCount() || right >= m_AnimInstance->GetAnimationCount())
+        {
+            return false;
+        }
+        m_ShoveReactionAnimations = {left, right};
         return true;
     }
 
@@ -102,6 +113,72 @@ namespace PARS
         return UINT32_MAX;
     }
 
+    void SkeletalMeshComponent::TrackShoveContact(const std::vector<RagdollBodyImpulse>& impacts)
+    {
+        if (m_ShoveReactionAnimations[0] == UINT32_MAX)
+        {
+            return;
+        }
+        // 한 번의 충돌이 여러 몸통 본에서 보고되면 가장 큰 수평 충격으로 진입 방향을 판정한다.
+        const RagdollBodyImpulse* hit = nullptr;
+        float largest = 1e-8f;
+        for (const RagdollBodyImpulse& impact : impacts)
+        {
+            const float horizontal = impact.impulse.x * impact.impulse.x + impact.impulse.z * impact.impulse.z;
+            if (impact.newCapsuleHit && impact.impactContactId != 0 && horizontal > largest)
+            {
+                hit = &impact;
+                largest = horizontal;
+            }
+        }
+        if (!hit || hit->impactContactId == m_ShoveContact.id)
+        {
+            return;
+        }
+        m_ShoveContact = {};
+        m_ShoveContact.id = hit->impactContactId;
+        const PxVec3 velocity = hit->capsuleVelocity;
+        const PxVec3 approach = velocity.x * velocity.x + velocity.z * velocity.z > 1e-6f ? velocity : hit->impulse;
+        const Vector3 forward = GetComponentTransform().GetZ();
+        const float axial = float(forward.GetX()) * approach.x + float(forward.GetZ()) * approach.z;
+        const float lateral = float(forward.GetZ()) * approach.x - float(forward.GetX()) * approach.z;
+        const bool sideImpact = std::abs(lateral) > std::abs(axial);
+        m_ShoveContact.pending = sideImpact && hit->capsuleTorqueMultiplier > 0;
+        if (!sideImpact && m_ImpactFlail.playingShove)
+        {
+            // 별개의 정면 충돌은 진행 중인 어깨 반응에서 기존 균형 반응으로 전환한다.
+            std::vector<GraphNode> source = std::move(m_ImpactFlail.pose);
+            m_ImpactFlail = {};
+            m_ImpactFlail.blendSource = std::move(source);
+        }
+    }
+
+    void SkeletalMeshComponent::StartShoveReaction(float yaw)
+    {
+        if (!m_ShoveContact.pending)
+        {
+            return;
+        }
+        // 회전 계산의 수치 오차를 넘긴 첫 방향을 접촉당 한 번만 사용한다.
+        m_ShoveContact.yaw += yaw;
+        if (std::abs(m_ShoveContact.yaw) < 1e-5f)
+        {
+            return;
+        }
+        m_ShoveContact.pending = false;
+        // 이 스켈레톤의 정면 +Z가 +X로 도는 양의 yaw는 캐릭터의 왼쪽 회전이다.
+        const uint32_t clip = m_ShoveReactionAnimations[m_ShoveContact.yaw > 0 ? 0 : 1];
+        if (clip >= m_AnimInstance->GetAnimationCount())
+        {
+            return;
+        }
+        m_ImpactFlail.blendSource = std::move(m_ImpactFlail.pose);
+        m_ImpactFlail.clip = clip;
+        m_ImpactFlail.time = 0;
+        m_ImpactFlail.weight = 0;
+        m_ImpactFlail.playingShove = true;
+    }
+
     void SkeletalMeshComponent::UpdateImpactFlail(bool triggerReaction, float deltaTime)
     {
         if (IsFalling() || IsGroundFallActive() || m_StandingUpState != StandingUpState::None)
@@ -110,30 +187,47 @@ namespace PARS
             return;
         }
         ImpactFlailPlayback& flail = m_ImpactFlail;
-        // 충격 직후 균형 상태가 갱신될 때까지 상체 반응을 이어 간다.
-        flail.impactTimeRemaining = triggerReaction ? MotionFeatures::PredictionTimeSeconds :
-            (std::max)(0.0f, flail.impactTimeRemaining - deltaTime);
-        const bool recovering = flail.impactTimeRemaining > 0 || m_BalanceState == CharacterBalanceState::Unbalanced;
-        if (recovering && flail.clip == UINT32_MAX)
-        {
-            const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(MotionFrameUsage::BalanceUpperBody);
-            flail.clip = match.clipIndex;
-            flail.time = match.clipTimeSeconds;
-        }
-        if (flail.clip == UINT32_MAX)
-        {
-            return;
-        }
         constexpr float blendDuration = .1f;
-        flail.weight = Clamp(flail.weight + (recovering ? deltaTime : -deltaTime) / blendDuration, 0.0f, 1.0f);
+        if (flail.playingShove)
+        {
+            const float duration = m_AnimInstance->GetAnimationDuration(flail.clip);
+            flail.time = (std::min)(flail.time + deltaTime, duration);
+            flail.weight = Clamp((std::min)(flail.time, duration - flail.time) / blendDuration, 0.0f, 1.0f);
+        }
+        else
+        {
+            // 충격 직후 균형 상태가 갱신될 때까지 상체 반응을 이어 간다.
+            flail.impactTimeRemaining = triggerReaction ? MotionFeatures::PredictionTimeSeconds :
+                (std::max)(0.0f, flail.impactTimeRemaining - deltaTime);
+            const bool recovering = flail.impactTimeRemaining > 0 || m_BalanceState == CharacterBalanceState::Unbalanced;
+            if (recovering && flail.clip == UINT32_MAX)
+            {
+                const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(MotionFrameUsage::BalanceUpperBody);
+                flail.clip = match.clipIndex;
+                flail.time = match.clipTimeSeconds;
+            }
+            if (flail.clip == UINT32_MAX)
+            {
+                return;
+            }
+            flail.weight = Clamp(flail.weight + (recovering ? deltaTime : -deltaTime) / blendDuration, 0.0f, 1.0f);
+        }
         const std::vector<GraphNode>* basePose = IsImpactWarmupActive() ? &m_ImpactWarmup.sourcePose : nullptr;
-        if (flail.weight <= 0 || !m_AnimInstance->SampleUpperBodyPose(flail.clip, flail.time, flail.weight, flail.pose, basePose))
+        const std::vector<GraphNode>* source = flail.blendSource.empty() ? nullptr : &flail.blendSource;
+        if (flail.weight <= 0 || !m_AnimInstance->SampleUpperBodyPose(flail.clip, flail.time, flail.weight, flail.pose, basePose, source))
         {
             flail = {};
             return;
         }
-        constexpr float playbackRate = 0.5f;
-        flail.time = std::fmod(flail.time + deltaTime * playbackRate, m_AnimInstance->GetAnimationDuration(flail.clip));
+        if (flail.weight >= 1.0f)
+        {
+            flail.blendSource.clear();
+        }
+        if (!flail.playingShove)
+        {
+            constexpr float playbackRate = 0.5f;
+            flail.time = std::fmod(flail.time + deltaTime * playbackRate, m_AnimInstance->GetAnimationDuration(flail.clip));
+        }
     }
 
     MotionMatchResult SkeletalMeshComponent::SelectFallingAnimation() const
