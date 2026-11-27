@@ -582,6 +582,7 @@ namespace PARS
 
     void SkeletalMeshComponent::DestroyPhysicsState()
     {
+        m_CapsuleFacingAllowance = 0;
         ResetAirborneFall();
         ResetFallArms();
         m_FallArmsInitialized = false;
@@ -769,6 +770,7 @@ namespace PARS
         m_KinematicBlendSource.clear();
         m_KinematicBlendPose.clear();
         m_PhysicsMode = mode;
+        m_CapsuleFacingAllowance = 0;
         if (!active)
         {
             ResetAirborneFall();
@@ -860,6 +862,7 @@ namespace PARS
 
     void SkeletalMeshComponent::StopRagdoll()
     {
+        m_CapsuleFacingAllowance = 0;
         m_ImpactWarmup = {};
         ResetFallArms();
         if (!IsRagdoll())

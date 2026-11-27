@@ -223,7 +223,8 @@ namespace
                 ball->setLinearVelocity(PxVec3(0, 0, 2));
                 world.Step();
                 Check(world.GetExternalImpactImpulse(*targets[1], &owner, &contacts[1]) > 0 && !contacts[1].empty() &&
-                    contacts[1].front().impactContactId == first && !contacts[1].front().newCapsuleHit && !world.GetImpactResponse(first, response),
+                    contacts[1].front().impactContactId == first && contacts[1].front().capsuleTorqueMultiplier == 1.0f &&
+                    !contacts[1].front().newCapsuleHit && !world.GetImpactResponse(first, response),
                     "Continuing the push on one spine cannot restart the configured impulse");
             }
             // 한 스텝에 이전 본의 접촉이 끝나고 다른 본에서 새 형상 쌍이 생긴다.
@@ -244,6 +245,7 @@ namespace
             world.Step();
             Check(world.GetExternalImpactImpulse(*targets[0], &owner, &contacts[0]) > 0 && !contacts[0].empty() &&
                 contacts[0].front().impactContactId != first && contacts[0].front().newCapsuleHit &&
+                contacts[0].front().capsuleTorqueMultiplier == .5f &&
                 world.GetImpactResponse(contacts[0].front().impactContactId, response) &&
                 std::abs(response.partImpulse.z - 3) < .01f && std::abs(response.impulse.z - 12) < .01f && response.torqueMultiplier == .5f,
                 "A new contact after separation uses the edited capsule settings");

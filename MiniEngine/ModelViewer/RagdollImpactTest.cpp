@@ -838,7 +838,7 @@ void RagdollImpactTest::DrawImpactSettingsUI(Character* player)
                 component.SetImpactImpulseSettings(settings);
             }
         }
-        ImGui::TextWrapped("%s", u8"전신 충격량은 추가 밀림을 정합니다. 회전 배율은 첫 접촉의 실제 충격량에 적용하며, 떨어졌다 다시 닿으면 새로 계산합니다.");
+        ImGui::TextWrapped("%s", u8"전신 충격량은 첫 접촉에 더하는 밀림입니다. 회전 배율은 실제 충격이 질량중심 주위에 만드는 회전에 적용됩니다. 액티브 래그돌은 골반이 돌아간 만큼 정면이 바뀌고, 강한 충격은 두 발을 디디며 회전합니다.");
     }
     else
     {

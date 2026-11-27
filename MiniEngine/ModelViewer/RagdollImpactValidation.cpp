@@ -750,7 +750,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
     std::ofstream capsules(path + L".capsules.csv");
     std::ofstream landingCom(path + L".landing-com.csv");
     landingCom.precision(9);
-    uint32_t kinematicPlayer = 0;
+    uint32_t glancing = 0;
+    CommandLineArgs::GetInteger(L"bodyimpactglancing", glancing);
+    uint32_t kinematicPlayer = glancing != 0 ? 1 : 0;
     uint32_t modeCycles = 0;
     uint32_t incoming = 0;
     uint32_t contactCheck = 0;
@@ -805,7 +807,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         const bool continuousFrontPush = scenario == 7 || scenario == 8 || checkWarmup || releaseOnContact;
         float yaw = scenario == 3 || scenario == 5 ? DirectX::XM_PIDIV2 :
             scenario == 4 ? -DirectX::XM_PIDIV2 : scenario == 6 ? DirectX::XM_PIDIV4 : 0.0f;
-        float lateralOffset = 0.0f;
+        float lateralOffset = glancing != 0 ? .18f : 0.0f;
         if (continuousFrontPush)
         {
             // 일반 전진 입력으로 더미의 정면에서 밀어 뒷걸음이 발생하는 상황을 재현한다.
@@ -813,11 +815,17 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             yaw = std::atan2(-float(facing.GetX()), -float(facing.GetZ()));
             CommandLineArgs::GetFloat(L"bodyimpactoffset", lateralOffset);
         }
+        if (glancing != 0)
+        {
+            check((scenario == 7 || scenario == 8) && lateralOffset != 0, "Use an offset frontal walk or run to check glancing yaw");
+        }
         const Vector3 direction(std::sin(yaw), 0, std::cos(yaw));
         const Vector3 right(std::cos(yaw), 0, -std::sin(yaw));
         const Vector3 origin = dummy->GetActorLocation() - direction * 2.0f + right * lateralOffset;
         player.SetActorTransform(AffineTransform(Quaternion(Vector3(kYUnitVector), yaw),
             Vector3(origin.GetX(), player.GetCapsuleComponent().GetHalfHeight(), origin.GetZ())));
+        // 측면 출발점은 벽 끝과 겹칠 수 있다. 초기 배치 보정이 첫 이동 속도에 들어가지 않게 먼저 분리한다.
+        player.GetCapsuleComponent().Move(Vector3(kZero), static_cast<float>(PhysicsWorld::FixedDeltaTime));
         controller->SetControlYaw(yaw);
         PreviewAnimInstance& animation = static_cast<PreviewAnimInstance&>(player.GetMesh().GetAnimInstance());
         animation.SetAutoCycleEnabled(false);
@@ -831,12 +839,27 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 "Start the receiver in a stationary pose with a different clip name");
         }
         world.Tick(0);
+        if (glancing != 0 && scenario == 7)
+        {
+            // 걷는 캡슐이 닿기 전부터 동적인 더미에서 정면 인계를 따로 검증한다.
+            dummy->GetMesh().SetAutomaticRagdoll(false);
+            check(dummy->SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
+                dummy->GetMesh().GetRagdoll().SetRootSupported(true, error), "Start with an active supported receiver");
+        }
         if (!kinematicPlayer)
         {
             check(player.SetPhysicsMode(PhysicsAnimationMode::ActiveRagdoll, error) &&
                 player.GetMesh().GetRagdoll().SetRootSupported(true, error), "Enable original supported player");
         }
         CharacterImpactSettings impactSettings = player.GetCharacterImpact().GetSettings();
+        if (glancing != 0)
+        {
+            // 보행과 달리기에 같은 캡슐 질량을 쓰고, 추가 밀림 없이 실제 접촉으로만 회전을 검증한다.
+            impactSettings.collisionMass = 40.0f;
+            ImpactImpulseSettings glancingSettings;
+            glancingSettings.torqueMultiplier = 1;
+            check(player.GetCharacterImpact().SetImpactImpulseSettings(glancingSettings), "Use measured contact impulse with unit torque multiplier");
+        }
         CommandLineArgs::GetFloat(L"bodyimpactmass", impactSettings.collisionMass);
         CommandLineArgs::GetFloat(L"bodyimpactradius", impactSettings.capsuleRadiusScale);
         CommandLineArgs::GetFloat(L"bodyimpactheight", impactSettings.capsuleHeightScale);
@@ -881,7 +904,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         world.SetPhysicsTimeScale(1);
         samples << "frame,time,actor,bone,x,y,z,qx,qy,qz,qw,animation_position_error,animation_rotation_error,point_speed,root_supported,grounded_left,grounded_right,drive_error\n";
         events << "frame,time,event,hit,receiver,requested,applied,closing,px,py,pz,ix,iy,iz,capped\n";
-        states << "frame,mode,blending,zone,stable_time,step_count,impact,physics_step,requested_foot,load_left,load_right,confirm_left,confirm_right,impulse_left,impulse_right,normal_y_left,normal_y_right,grounded_left,grounded_right,started_left,started_right,landed_left,landed_right,avoidance,prediction,candidates,intervals,queries,prediction_ms,tracking_error,reach_limited,joint_limited,fixed_pose_blocked,warmup,warmup_landings,com_vx,com_vz\n";
+        states << "frame,mode,blending,zone,stable_time,step_count,impact,physics_step,requested_foot,load_left,load_right,confirm_left,confirm_right,impulse_left,impulse_right,normal_y_left,normal_y_right,grounded_left,grounded_right,started_left,started_right,landed_left,landed_right,avoidance,prediction,candidates,intervals,queries,prediction_ms,tracking_error,reach_limited,joint_limited,fixed_pose_blocked,warmup,warmup_landings,com_vx,com_vz,actor_yaw_change_deg\n";
         capsules << "frame,time,mode,root_x,root_y,root_z,present,mass,radius,half_length,x,y,z,cyan_lines\n";
         report << "scenario=" << scenario << " frames=" << frames << " fixed_dt=" << PhysicsWorld::FixedDeltaTime
             << " player_auto_support=" << player.GetMesh().UsesAutomaticRootSupport()
@@ -939,6 +962,12 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         bool contactAfterHandoff = false;
         bool pushedLastStep = false;
         uint32_t coastingTicks = 0;
+        const Vector3 initialForward = dummy->GetActorTransform().GetZ();
+        const float initialYaw = std::atan2(float(initialForward.GetX()), float(initialForward.GetZ()));
+        float yawChange = 0;
+        float secondLandingYaw = 0;
+        float supportedYaw = 0;
+        bool sawGlancingWarmup = false;
         for (uint32_t frame = 0; frame < frames; ++frame)
         {
             if (modeCycles && frame % 60 == 0)
@@ -1263,6 +1292,23 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             }
             const FootstepAvoidanceSnapshot& avoidance = dummyMesh.GetFootstepAvoidanceSnapshot();
             const FootstepCollisionSnapshot& prediction = dummyMesh.GetFootstepCollisionSnapshot();
+            const Vector3 dummyForward = dummy->GetActorTransform().GetZ();
+            const float actorYaw = std::atan2(float(dummyForward.GetX()), float(dummyForward.GetZ()));
+            yawChange = DirectX::XMConvertToDegrees(std::remainder(actorYaw - initialYaw, DirectX::XM_2PI));
+            if (glancing != 0 && dummyMesh.IsImpactWarmupActive())
+            {
+                sawGlancingWarmup = true;
+                if (dummyMesh.GetImpactWarmupLandings() == 2)
+                {
+                    secondLandingYaw = yawChange;
+                }
+            }
+            else if (glancing != 0 && (scenario == 7 || sawGlancingWarmup) &&
+                dummyMesh.IsActiveRagdoll() && dummyMesh.GetRagdoll().IsRootSupported())
+            {
+                // 낙상 후 기상 자세는 누운 골반에 다시 맞추므로, 충격 반응은 지지 중인 실제 정면으로 잰다.
+                supportedYaw = yawChange;
+            }
             states << frame << ',' << static_cast<int>(dummyMesh.GetPhysicsMode()) << ',' << dummyMesh.IsBlendingToKinematic()
                 << ',' << static_cast<int>(dummySupport.balance.zone) << ',' << dummyMesh.GetKinematicStableTime()
                 << ',' << dummySupport.footstep.startCount << ',' << dummy->GetMesh().GetRagdoll().GetExternalImpactImpulse()
@@ -1279,7 +1325,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                 << ',' << prediction.elapsedMilliseconds << ',' << prediction.maximumTrackingError
                 << ',' << prediction.reachLimited << ',' << prediction.jointLimited << ',' << prediction.fixedPoseBlocked
                 << ',' << dummyMesh.IsImpactWarmupActive() << ',' << dummyMesh.GetImpactWarmupLandings()
-                << ',' << dummySupport.centerOfMassVelocity.x << ',' << dummySupport.centerOfMassVelocity.z << '\n';
+                << ',' << dummySupport.centerOfMassVelocity.x << ',' << dummySupport.centerOfMassVelocity.z << ',' << yawChange << '\n';
             pushedLastStep = false;
             for (const CharacterImpactSnapshot& impact : player.GetCharacterImpact().GetAppliedImpacts())
             {
@@ -1356,6 +1402,15 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             check(false, "Expected an actual leg contact before the frame limit");
         }
         report << "events=" << eventCount << std::endl;
+        if (glancing != 0)
+        {
+            const float sign = lateralOffset < 0 ? 1.0f : -1.0f;
+            report << "second_landing_yaw_deg=" << secondLandingYaw << " supported_yaw_deg=" << supportedYaw
+                << " final_yaw_deg=" << yawChange << std::endl;
+            check(impactFrame != UINT32_MAX && supportedYaw * sign > 1.0f, "The supported actor keeps the turn caused by the glancing hit");
+            check(scenario == 7 ? !sawGlancingWarmup : secondLandingYaw * sign > 1.0f && !dummy->GetMesh().IsImpactWarmupActive(),
+                "Walking turns the active receiver and running turns it by the second warmup landing before handoff");
+        }
         if (checkWarmup || releaseOnContact)
         {
             const float dt = static_cast<float>(PhysicsWorld::FixedDeltaTime);

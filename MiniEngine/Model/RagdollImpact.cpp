@@ -94,6 +94,7 @@ namespace PARS
                 impact.fromAnimatedCapsule = contact.fromAnimatedCapsule;
                 impact.capsuleVelocity = contact.capsuleVelocity;
                 impact.capsuleGroup = contact.capsuleGroup;
+                impact.capsuleTorqueMultiplier = contact.capsuleTorqueMultiplier;
                 m_ExternalImpacts.push_back(impact);
             }
         }
@@ -876,6 +877,43 @@ namespace PARS
             return 0;
         }
         return m_Bodies[root]->getAngularVelocity().y;
+    }
+
+    float Ragdoll::GetSupportedPelvisYawOffset() const
+    {
+        if (!m_SupportJoint || !m_HasSupportTarget || m_SupportBody < 0)
+        {
+            return 0;
+        }
+        // 직전 지지 목표에 대한 실제 골반 회전에서 월드 수직축의 비틀림만 꺼낸다.
+        PxQuat difference = m_Bodies[m_SupportBody]->getGlobalPose().q * m_SupportJoint->getDrivePosition().q.getConjugate();
+        if (difference.w < 0)
+        {
+            difference = -difference;
+        }
+        if (difference.w * difference.w + difference.y * difference.y < 1e-8f)
+        {
+            return 0;
+        }
+        return 2.0f * std::atan2(difference.y, difference.w);
+    }
+
+    float Ragdoll::GetCapsuleImpactYawSpeed(const PxVec3& center, bool firstContactsOnly) const
+    {
+        float moment = 0;
+        for (const RagdollBodyImpulse& hit : GetExternalImpacts())
+        {
+            if (hit.fromCharacterCapsule && (!firstContactsOnly || hit.newCapsuleHit))
+            {
+                moment += (hit.position - center).cross(hit.impulse).y * hit.capsuleTorqueMultiplier;
+            }
+        }
+        if (!std::isfinite(moment) || moment == 0)
+        {
+            return 0;
+        }
+        // 지지 중인 몸의 정면에는 COM 주위 수직축 각충격량만 반영한다.
+        return GetImpactAngularVelocity(center, PxVec3(0, moment, 0)).y;
     }
 
     bool Ragdoll::GetCharacterImpactCapsule(float radiusScale, PxTransform& pose, float& radius,

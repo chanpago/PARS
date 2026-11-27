@@ -105,6 +105,7 @@ namespace PARS
         }
         m_Ragdoll.Swap(candidate);
         m_ImpactWarmup = {};
+        m_CapsuleFacingAllowance = 0;
         m_ImpactFlail = {};
         ResetCrossStepPlayback();
         ResetFallArms();
@@ -219,11 +220,16 @@ namespace PARS
             m_Ragdoll.ApplyImpactResponses(responses);
         }
         UpdateFootSupport();
-        if (m_FootSupport.GetSnapshot().hasGroundedFoot)
+        const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
+        // 모드 전환이 접촉을 비우기 전에 읽는다. 예열 인계에서는 새로 부딪힌 캡슐만 이어받는다.
+        const bool capsuleCanTurn = IsActiveRagdoll() || m_AutomaticRagdoll || IsImpactWarmupActive();
+        const float capsuleYawSpeed = capsuleCanTurn && support.hasCenterOfMass ?
+            m_Ragdoll.GetCapsuleImpactYawSpeed(support.centerOfMass, IsImpactWarmupActive()) : 0.0f;
+        if (support.hasGroundedFoot)
         {
             GetOwner().GetWorld()->GetPhysicsWorld()->RecordGroundedImpactReceiver(&GetOwner());
         }
-        if (UpdateImpactWarmup(deltaTime, responses))
+        if (UpdateImpactWarmup(deltaTime, responses, capsuleYawSpeed))
         {
             return;
         }
@@ -285,6 +291,7 @@ namespace PARS
 
         // 지지 해제 판정이 끝난 같은 물리 스텝에서 낙상 클립을 선택한다.
         const bool fallingTargetReady = UpdateBalanceState(deltaTime) && UpdateFallingAnimation(deltaTime);
+        UpdateCapsuleImpactFacing(capsuleYawSpeed, deltaTime);
         if (!fallingTargetReady && !IsActiveRagdoll())
         {
             return;

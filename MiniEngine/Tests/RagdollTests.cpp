@@ -182,6 +182,17 @@ namespace
         }
         Check(!impacts.empty() && impacts.front().impactContactId != 0, "Capture contact before changing the physical bodies");
         const PxVec3 contactPoint = impacts.front().position;
+        if (capsule)
+        {
+            // 같은 실측 충격선에 대해 중심을 좌우로 옮겨 부호와 정중앙의 영점을 확인한다.
+            const PxVec3 lateral(0, 0, .2f);
+            const float left = ragdoll.GetCapsuleImpactYawSpeed(contactPoint - lateral, true);
+            const float right = ragdoll.GetCapsuleImpactYawSpeed(contactPoint + lateral, false);
+            Check(std::abs(ragdoll.GetCapsuleImpactYawSpeed(contactPoint, false)) < .001f &&
+                std::abs(left + right) < .001f, "A centered capsule gives zero yaw and opposite lever arms give mirrored turns");
+            Check(torqueMultiplier > 0 ? left > .01f && right < -.01f : left == 0 && right == 0,
+                "The capsule multiplier enables heading changes independently of the additional linear impulse");
+        }
         if (partImpulse > 0)
         {
             Check(impacts.front().body == 1 && (contactPoint - PxVec3(0, 4, 0)).cross(direction).magnitude() > .02f,

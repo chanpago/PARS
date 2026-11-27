@@ -134,6 +134,7 @@ namespace PARS
             physx::PxVec3 approachVelocity{0};
             physx::PxVec3 sweepStart{0};
             physx::PxVec3 sweepCenter{0};
+            physx::PxVec3 turnPivotWorld{0};
             physx::PxVec3 turnPivotInComponent{0};
             physx::PxVec3 peakTorsoLean{0};
             physx::PxVec3 impactDirection{0};
@@ -204,8 +205,10 @@ namespace PARS
         bool UpdateAutomaticRootSupport(std::string& error);
         bool UpdateAutomaticRagdoll(float deltaTime, bool firstHit);
         void ReplayKinematicImpacts(const std::vector<RagdollBodyImpulse>& impacts, float deltaTime);
-        bool UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses);
-        bool BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses, const physx::PxVec3& impulse, float deltaTime);
+        void UpdateCapsuleImpactFacing(float yawSpeedChange, float deltaTime);
+        bool UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses, float capsuleYawSpeed);
+        bool BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses, const physx::PxVec3& impulse,
+            float capsuleYawSpeed, float deltaTime);
         bool AdvanceImpactWarmup(float deltaTime);
         bool FinishImpactWarmup(bool lostFloor, bool replayCapsuleImpacts = false);
         bool UpdateBalanceState(float deltaTime);
@@ -475,6 +478,7 @@ namespace PARS
         float m_ArmDriveStrength = 1.0f;
         float m_KinematicBlendTime = 0;
         float m_StandingUpStableTime = 0;
+        float m_CapsuleFacingAllowance = 0;
         uint32_t m_FallingAnimationIndex = UINT32_MAX;
         std::array<uint32_t, static_cast<size_t>(FallDirection::Count)> m_DirectionalFallingAnimations;
         std::array<uint32_t, 3> m_AirborneFallAnimations{UINT32_MAX, UINT32_MAX, UINT32_MAX};

@@ -64,6 +64,7 @@ public:
     physx::PxVec3 outwardNormal{0};
     physx::PxVec3 capsuleVelocity{0};
     uint32_t capsuleGroup = 0;
+    float capsuleTorqueMultiplier = 0;
     bool fromProjectile = false;
     bool newProjectileHit = false;
     bool fromCharacterCapsule = false;
@@ -114,6 +115,7 @@ private:
         uint64_t firstImpulseStep = 0;
         uint64_t impactContactId = 0;
         physx::PxVec3 capsuleVelocity{0};
+        float capsuleTorqueMultiplier = 0;
         bool beginsImpact = false;
     };
     struct ImpactSource

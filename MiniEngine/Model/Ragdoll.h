@@ -35,6 +35,7 @@ namespace PARS
         physx::PxVec3 outwardNormal{0};
         physx::PxVec3 capsuleVelocity{0};
         uint32_t capsuleGroup = 0;
+        float capsuleTorqueMultiplier = 0;
         bool fromProjectile = false;
         bool newProjectileHit = false;
         bool fromCharacterCapsule = false;
@@ -313,6 +314,8 @@ namespace PARS
         int FindPhysicsBody(const physx::PxRigidActor* actor) const;
         physx::PxVec3 GetBodyPointVelocity(size_t body, physx::PxVec3 point) const;
         float GetImpactRootYawSpeed() const;
+        float GetSupportedPelvisYawOffset() const;
+        float GetCapsuleImpactYawSpeed(const physx::PxVec3& center, bool firstContactsOnly) const;
         float GetImpactRootMass() const;
         float GetCharacterCapsuleMass() const;
         void GetCharacterCapsuleContacts(std::vector<PhysicsCapsuleContact>& contacts) const;

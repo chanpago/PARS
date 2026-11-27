@@ -1499,30 +1499,17 @@ void TestImpactWarmupPlanning()
     Check(settled.stride.isZero() && settled.duration >= centered.duration && Near(held.duration / dt, std::round(held.duration / dt)),
         "A settled COM finishes in place and landing times use whole physics ticks");
 
-    const PxVec3 forward(0, 0, 1);
-    const PxVec3 swingOffset(.15f, 0, .05f);
-    const PxVec3 supportOffset(-.15f, 0, -.05f);
-    const PxVec3 stride(.1f, 0, 0);
-    const PxVec3 diagonal(2, 0, 1);
-    const float angle = std::atan2(2.0f, 1.0f);
-    Check(Near(SelectImpactWarmupYaw(forward, diagonal, -1, swingOffset, supportOffset, stride), angle) &&
-        Near(SelectImpactWarmupYaw(forward, PxVec3(2, 0, -1), 1, swingOffset, supportOffset, stride), -angle) &&
-        Near(SelectImpactWarmupYaw(forward, -diagonal, -1, swingOffset, supportOffset, stride), angle),
-        "Oblique side shoves turn toward the nearer forward or backward step");
-    Check(SelectImpactWarmupYaw(forward, forward, 1, swingOffset, supportOffset, stride) == 0 &&
-        SelectImpactWarmupYaw(forward, -forward, -1, swingOffset, supportOffset, stride) == 0 &&
-        SelectImpactWarmupYaw(forward, PxVec3(0), 1, swingOffset, supportOffset, stride) == 0,
-        "Axial shoves and a stopped COM retain the heading");
-    const PxVec3 foreOffset(0, 0, .12f);
-    Check(Near(SelectImpactWarmupYaw(forward, shove, 1, swingOffset, supportOffset, stride), PxHalfPi) &&
-        Near(SelectImpactWarmupYaw(forward, shove, -1, swingOffset, supportOffset, stride), -PxHalfPi) &&
-        Near(SelectImpactWarmupYaw(forward, shove, 0, swingOffset, supportOffset, stride), -PxHalfPi) &&
-        Near(SelectImpactWarmupYaw(forward, shove, 0, swingOffset + foreOffset, supportOffset + foreOffset, stride), PxHalfPi),
-        "A lateral tie follows pelvis yaw first, then the heading that preserves foot order");
-    Check(Near(SelectImpactWarmupYaw(rotation.rotate(forward), rotation.rotate(shove), 0, rotation.rotate(swingOffset),
-        rotation.rotate(supportOffset), rotation.rotate(stride)), -PxHalfPi),
-        "The warmup turn is independent of the character's starting heading");
-    std::puts("PASS: COM-based warmup cadence, reach and lateral turn into forward or backward steps");
+    const float bracingTime = 2.0f * centered.duration;
+    Check(centered.stride.x > 0 && Near(centered.stride.z, 0) && PlanCapsuleImpactTurn(0, bracingTime) == 0,
+        "A shove through the COM supplies no turn, even when its stride is lateral");
+    Check(Near(PlanCapsuleImpactTurn(1, bracingTime), bracingTime) &&
+        Near(PlanCapsuleImpactTurn(-1, bracingTime), -bracingTime) &&
+        Near(PlanCapsuleImpactTurn(2, bracingTime), 2.0f * bracingTime),
+        "Opposite angular impulses turn the root in opposite directions for the bracing time");
+    Check(Near(PlanCapsuleImpactTurn(100, bracingTime), PxHalfPi) &&
+        Near(PlanCapsuleImpactTurn(-100, bracingTime), -PxHalfPi) && PlanCapsuleImpactTurn(1, 0) == 0,
+        "Two planted steps bound extreme turns without changing the contact sign");
+    std::puts("PASS: COM-based warmup cadence and placement, contact-based root turn");
 }
 
 void TestFootstepFalls()

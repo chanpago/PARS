@@ -206,6 +206,7 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         cached->clockRevision = m_ClockRevision;
         cached->impactContactId = 0;
         cached->capsuleVelocity = PxVec3(0);
+        cached->capsuleTorqueMultiplier = 0;
         cached->beginsImpact = false;
         for (int side = 0; side < 2; ++side)
         {
@@ -403,6 +404,7 @@ void PhysicsWorld::RecordImpactContact(ContactPair& pair, int sourceSide, bool c
         }
     }
     pair.impactContactId = contact->id;
+    pair.capsuleTorqueMultiplier = capsule ? contact->settings.torqueMultiplier : 0.0f;
     if (contact->firstImpulseStep != pair.completedStep)
     {
         return;
@@ -696,6 +698,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
                     contact.fromAnimatedCapsule = (sourceFlags & AnimatedCapsuleFilterFlag) != 0;
                     contact.capsuleVelocity = pair.capsuleVelocity;
                     contact.capsuleGroup = sourceData.word2;
+                    contact.capsuleTorqueMultiplier = pair.capsuleTorqueMultiplier;
                     contacts->push_back(contact);
                 }
             }

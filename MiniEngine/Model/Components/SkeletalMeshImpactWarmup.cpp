@@ -91,18 +91,9 @@ ImpactWarmupStep SkeletalMeshComponent::ImpactWarmup::PlanStep(const FootstepPol
     const float legLength = PxMin(legs[0].thighLength + legs[0].calfLength, legs[1].thighLength + legs[1].calfLength);
     ImpactWarmupStep step = PlanImpactWarmupStep(hull, com, velocity, legLength * .22f,
         static_cast<float>(PhysicsWorld::FixedDeltaTime));
-    if (secondStep && turnYaw != 0)
-    {
-        // 두 번째 보폭은 돌아선 몸의 전후축에 놓고, COM 계획에서 얻은 제동 거리와 부호를 따른다.
-        const PxQuat turn(turnYaw, PxVec3(0, 1, 0));
-        PxVec3 forward = turn.rotate(componentRotation.rotate(PxVec3(0, 0, 1)));
-        forward.y = 0;
-        forward.normalize();
-        step.stride = forward * forward.dot(step.stride);
-        return step;
-    }
-    // 양발이 반대 방향으로 움직여도 원래 좌우 간격의 20%는 남긴다.
-    const float lateral = PxAbs(componentRotation.rotateInv(step.stride).x);
+    // COM이 밀리는 방향으로 디디되, 회전한 발 배치에서도 원래 좌우 간격의 20%는 남긴다.
+    const PxQuat stance = secondStep ? PxQuat(turnYaw, PxVec3(0, 1, 0)) * componentRotation : componentRotation;
+    const float lateral = PxAbs(stance.rotateInv(step.stride).x);
     const float width = PxAbs(legs[0].targetSole.p.x - legs[1].targetSole.p.x);
     if (lateral > .4f * width)
     {
@@ -151,7 +142,39 @@ PxTransform SkeletalMeshComponent::ImpactWarmup::GetPelvisBrace(const PxQuat& ro
     return PxTransform(pivot - tilt.rotate(pivot) - up * lowering, tilt);
 }
 
-bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses)
+void SkeletalMeshComponent::UpdateCapsuleImpactFacing(float yawSpeedChange, float deltaTime)
+{
+    if (!IsActiveRagdoll() || !m_Ragdoll.IsRootSupported() || !m_FootSupport.GetSnapshot().hasCenterOfMass ||
+        IsFalling() || IsGroundFallActive())
+    {
+        m_CapsuleFacingAllowance = 0;
+        return;
+    }
+    // 실제로 돈 골반만 정면에 반영하고, 남은 회전각은 발딛기 시간에 맞춰 감쇠한다.
+    m_CapsuleFacingAllowance += PlanCapsuleImpactTurn(yawSpeedChange, MaximumFootstepDuration);
+    m_CapsuleFacingAllowance = PxClamp(m_CapsuleFacingAllowance, -PxHalfPi, PxHalfPi);
+    if (PxAbs(m_CapsuleFacingAllowance) < 1e-5f)
+    {
+        m_CapsuleFacingAllowance = 0;
+        return;
+    }
+    const float actualStep = PxClamp(m_Ragdoll.GetImpactRootYawSpeed() * deltaTime,
+        PxMin(0.0f, m_CapsuleFacingAllowance), PxMax(0.0f, m_CapsuleFacingAllowance));
+    const float yaw = PxClamp(m_Ragdoll.GetSupportedPelvisYawOffset(), PxMin(0.0f, actualStep), PxMax(0.0f, actualStep));
+    m_CapsuleFacingAllowance = (m_CapsuleFacingAllowance - yaw) * std::exp(-deltaTime / MaximumFootstepDuration);
+    if (yaw != 0)
+    {
+        const PxVec3 center = m_FootSupport.GetSnapshot().centerOfMass;
+        const Vector3 pivot(center.x, center.y, center.z);
+        const Matrix3 turn = Matrix3::MakeYRotation(yaw);
+        AffineTransform actor = GetOwner().GetActorTransform();
+        actor.SetBasis(turn * actor.GetBasis());
+        actor.SetTranslation(pivot + turn * (actor.GetTranslation() - pivot));
+        GetOwner().SetActorTransform(actor);
+    }
+}
+
+bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses, float capsuleYawSpeed)
 {
     if (!m_AutomaticRootSupport || (!m_AutomaticRagdoll && !IsActiveRagdoll() && !IsImpactWarmupActive()))
     {
@@ -223,7 +246,8 @@ bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vecto
         sample.hasComProjection && sample.hasCenterOfMassVelocity && sample.totalMass > 0 &&
         sample.feet[0].available && sample.feet[0].leg.available && sample.feet[1].available && sample.feet[1].leg.available;
     if (standing && m_ImpactWarmup.wasResting && !projectile && !m_Ragdoll.HasWound() &&
-        impulse.magnitude() >= ImpactWarmup::MinimumImpactSpeedChange * sample.totalMass && BeginImpactWarmup(responses, impulse, deltaTime))
+        impulse.magnitude() >= ImpactWarmup::MinimumImpactSpeedChange * sample.totalMass &&
+        BeginImpactWarmup(responses, impulse, capsuleYawSpeed, deltaTime))
     {
         return AdvanceImpactWarmup(deltaTime);
     }
@@ -242,7 +266,8 @@ bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vecto
     return false;
 }
 
-bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses, const PxVec3& impulse, float deltaTime)
+bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactResponse>& responses, const PxVec3& impulse,
+    float capsuleYawSpeed, float deltaTime)
 {
     Character* character = dynamic_cast<Character*>(&GetOwner());
     if (!character)
@@ -303,16 +328,11 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     // 예열 전에 남아 있던 피격 반응은 전신 물리로 돌아갈 때까지 경과 시간만 갱신한다.
     next.reaction = m_Ragdoll.GetImpactReaction();
     m_Ragdoll.AdvanceImpactReaction(next.reaction, impacts, deltaTime);
-    float yawImpulse = 0;
-    float horizontalImpulse = 0;
     PxVec3 leanImpulse(0);
     for (const RagdollBodyImpulse& contact : impacts)
     {
         if (contact.fromCharacterCapsule)
         {
-            const PxVec3 push(contact.impulse.x, 0, contact.impulse.z);
-            yawImpulse += (contact.position - sample.centerOfMass).cross(push).y;
-            horizontalImpulse += push.magnitude();
             leanImpulse += (contact.position - pelvisPosition).cross(contact.impulse);
         }
         const PxVec3 approach(contact.capsuleVelocity.x, 0, contact.capsuleVelocity.z);
@@ -349,8 +369,9 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     const Matrix4 componentTransform(GetComponentTransform());
     next.componentRotation = RigidFrame(componentTransform).q;
     const Vector3 actorPosition = next.actorAtStart.GetTranslation();
-    const PxVec3 turnPivot(actorPosition.GetX(), actorPosition.GetY(), actorPosition.GetZ());
-    const Vector3 localPivot(Invert(componentTransform) * actorPosition);
+    next.turnPivotWorld = PxVec3(sample.centerOfMass.x, actorPosition.GetY(), sample.centerOfMass.z);
+    const Vector3 turnPivot(next.turnPivotWorld.x, next.turnPivotWorld.y, next.turnPivotWorld.z);
+    const Vector3 localPivot(Invert(componentTransform) * turnPivot);
     next.turnPivotInComponent = PxVec3(localPivot.GetX(), localPivot.GetY(), localPivot.GetZ());
     std::array<PxVec3, 2> soleOffsets;
     for (size_t side = 0; side < next.legs.size(); ++side)
@@ -363,7 +384,7 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
         leg.ankle = RigidFrame(next.sourceBones[setup.ankleNode]);
         leg.soleInBone = RigidFrame(foot.soleInBone);
         leg.targetSole = leg.ankle * leg.soleInBone;
-        const Vector3 soleOffset = Vector3(foot.soleWorld.GetW()) - actorPosition;
+        const Vector3 soleOffset = Vector3(foot.soleWorld.GetW()) - turnPivot;
         soleOffsets[side] = PxVec3(soleOffset.GetX(), soleOffset.GetY(), soleOffset.GetZ());
         leg.thighLength = (leg.knee.p - leg.hip.p).magnitude();
         leg.calfLength = (leg.ankle.p - leg.knee.p).magnitude();
@@ -377,16 +398,8 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     }
     const PxVec3 spacing = next.componentRotation.rotate(next.legs[0].targetSole.p - next.legs[1].targetSole.p);
     next.firstFoot = spacing.dot(next.steps[0].stride) >= 0 ? 0u : 1u;
-    // 동적 골반은 실제 회전을 따르고, 정지한 몸은 COM에서 벗어난 접촉의 각충격량을 사용한다.
-    float turnPreference = IsRagdoll() ? m_Ragdoll.GetImpactRootYawSpeed() : 0;
-    if (PxAbs(turnPreference) < .1f)
-    {
-        turnPreference = PxAbs(yawImpulse) > .01f * horizontalImpulse ? yawImpulse : 0;
-    }
-    next.turnYaw = SelectImpactWarmupYaw(next.componentRotation.rotate(PxVec3(0, 0, 1)), velocity, turnPreference,
-        soleOffsets[next.firstFoot], soleOffsets[1 - next.firstFoot], next.steps[0].stride);
-    // 빗맞은 전신 충격의 수직축 회전도 첫 착지부터 발과 루트에 함께 반영한다.
-    next.turnYaw += PxClamp(bodySpin.y * TorsoLeanPeakTime, -MaximumTorsoLean, MaximumTorsoLean);
+    // 두 발을 디딜 시간만큼 첫 충격의 회전을 인계한다. 발이 밀려나는 방향은 보폭에만 사용한다.
+    next.turnYaw = PlanCapsuleImpactTurn(capsuleYawSpeed, 2.0f * next.steps[0].duration);
     const PxQuat landingTurn(next.turnYaw, PxVec3(0, 1, 0));
     const PxQuat landingSoleTurn(next.GetLandingSoleYaw(0), PxVec3(0, 1, 0));
     // 첫 착지를 미리 배치한다. 루트의 예상 평행이동은 COM과 양발에 공통이므로 함께 생략한다.
@@ -396,8 +409,8 @@ bool SkeletalMeshComponent::BeginImpactWarmup(const std::vector<RagdollImpactRes
     {
         const FootSoleSample& foot = sample.feet[side];
         const PxVec3 offset = side == next.firstFoot ? next.steps[0].stride : -next.steps[0].stride;
-        const PxVec3 center = turnPivot + soleOffsets[side];
-        const PxVec3 turnedCenter = turnPivot + landingTurn.rotate(soleOffsets[side]);
+        const PxVec3 center = next.turnPivotWorld + soleOffsets[side];
+        const PxVec3 turnedCenter = next.turnPivotWorld + landingTurn.rotate(soleOffsets[side]);
         for (size_t corner = 0; corner < foot.projected.size(); ++corner)
         {
             if (foot.projected[corner])
@@ -487,10 +500,14 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
     const float rootYaw = warmup.turnYaw * turnProgress;
     const PxVec3 worldUp(0, 1, 0);
     const PxVec3 localUp = warmup.componentRotation.rotateInv(worldUp);
-    const PxQuat componentRotation = PxQuat(rootYaw, worldUp) * warmup.componentRotation;
+    const PxQuat turn(rootYaw, worldUp);
+    const PxQuat componentRotation = turn * warmup.componentRotation;
     AffineTransform actor = warmup.actorAtStart;
     actor.SetBasis(Matrix3::MakeYRotation(rootYaw) * actor.GetBasis());
-    actor.SetTranslation(actor.GetTranslation() + Vector3(offset.x, offset.y, offset.z));
+    const Vector3 origin = actor.GetTranslation();
+    const PxVec3 pivot = warmup.turnPivotWorld + offset;
+    const PxVec3 location = pivot + turn.rotate(PxVec3(origin.GetX(), origin.GetY(), origin.GetZ()) - warmup.turnPivotWorld);
+    actor.SetTranslation(Vector3(location.x, location.y, location.z));
     const float elapsed = first ? warmup.stepTime : warmup.steps[0].duration + warmup.stepTime;
     const PxTransform brace = warmup.GetPelvisBrace(componentRotation, elapsed, m_StandingSupportSettings.maximumLowering);
     const PxVec3 firstStride = componentRotation.rotateInv(warmup.steps[0].stride);
@@ -540,8 +557,6 @@ bool SkeletalMeshComponent::AdvanceImpactWarmup(float deltaTime)
         {
             // 마지막 구간은 발밑으로 내려딛는다. 다음 물리 틱은 지면에 닿은 자세와 수평으로 멎은 발을 물려받는다.
             const PxTransform previous = RigidFrame(support.feet[side].soleWorld);
-            const Vector3 root = actor.GetTranslation();
-            const PxVec3 pivot(root.GetX(), root.GetY(), root.GetZ());
             const PxTransform component(pivot - componentRotation.rotate(warmup.turnPivotInComponent), componentRotation);
             const float probe = leg.calfLength * .5f;
             PxRaycastHit ground;
