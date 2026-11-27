@@ -213,6 +213,10 @@ namespace PARS
                 // 예열이나 물리 모드 전환이 접촉을 비우기 전에 같은 스텝으로 상처와 손 목표를 기록한다.
                 m_Ragdoll.UpdateWounds(impacts);
                 hit = FindImpactHandReach(impacts);
+                if (hit.blocksHandReach)
+                {
+                    ResetFallArms();
+                }
             }
             responses = m_Ragdoll.GetImpactResponses(impacts);
         }
@@ -280,7 +284,7 @@ namespace PARS
         {
             return;
         }
-        if (hit.body >= 0 && IsActiveRagdoll())
+        if (hit.body >= 0 && !hit.blocksHandReach && IsActiveRagdoll())
         {
             if (hit.hand < 0)
             {

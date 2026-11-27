@@ -120,14 +120,58 @@ void SkeletalMeshComponent::ResetFallArms()
 SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReach(const std::vector<RagdollBodyImpulse>& impacts) const
 {
     ImpactHandReach reach;
+    const std::vector<RagdollBodyImpulse>::const_iterator firstHit = std::find_if(impacts.begin(), impacts.end(),
+        [](const RagdollBodyImpulse& hit) -> bool
+        {
+            return hit.newProjectileHit && hit.fromProjectile;
+        });
+    if (firstHit == impacts.end())
+    {
+        return reach;
+    }
+
+    const int leftShoulder = FindBody(m_PhysicsSkeleton, m_Ragdoll, "LeftArm");
+    const int rightShoulder = FindBody(m_PhysicsSkeleton, m_Ragdoll, "RightArm");
+    int pelvis = FindBody(m_PhysicsSkeleton, m_Ragdoll, "Hips");
+    if (pelvis < 0)
+    {
+        pelvis = FindBody(m_PhysicsSkeleton, m_Ragdoll, "Pelvis");
+    }
+    const bool hasTorsoBones = leftShoulder >= 0 && rightShoulder >= 0 && pelvis >= 0;
+    PxVec3 leftPosition(0);
+    PxVec3 rightPosition(0);
+    PxVec3 pelvisPosition(0);
+    PxVec3 forward = ToFrame(GetComponentTransform()).q.getBasisVector2();
+    if (hasTorsoBones)
+    {
+        leftPosition = ToFrame(m_Ragdoll.GetBoneWorld(leftShoulder)).p;
+        rightPosition = ToFrame(m_Ragdoll.GetBoneWorld(rightShoulder)).p;
+        pelvisPosition = ToFrame(m_Ragdoll.GetBoneWorld(pelvis)).p;
+        const PxVec3 up = (leftPosition + rightPosition) * .5f - pelvisPosition;
+        const PxVec3 torsoForward = up.cross(rightPosition - leftPosition);
+        if (torsoForward.magnitudeSquared() > 1e-8f)
+        {
+            forward = torsoForward.getNormalized();
+        }
+    }
+
     const RagdollBodyImpulse* strongest = nullptr;
     float largestImpulse = 0;
-    for (const RagdollBodyImpulse& hit : impacts)
+    for (std::vector<RagdollBodyImpulse>::const_iterator entry = firstHit; entry != impacts.end(); ++entry)
     {
+        const RagdollBodyImpulse& hit = *entry;
         if (!m_Ragdoll.IsPrimaryProjectileHit(hit, impacts) || !hit.outwardNormal.isFinite() ||
             hit.outwardNormal.magnitudeSquared() <= .5f)
         {
             continue;
+        }
+        // 등 피격은 같은 스텝의 손 선택과 이전 상처의 양손 고정을 모두 취소한다.
+        if (m_Ragdoll.IsCharacterImpactBody(hit.body) && forward.dot(hit.outwardNormal.getNormalized()) <= -0.7f)
+        {
+            ImpactHandReach blocked;
+            blocked.body = static_cast<int>(hit.body);
+            blocked.blocksHandReach = true;
+            return blocked;
         }
         const int woundJoint = m_Ragdoll.FindWoundJoint(hit.body);
         // 상처를 감싸는 동안 짧은 피격 반응이 같은 손의 목표를 가로채지 않게 한다.
@@ -152,18 +196,10 @@ SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReac
         reach.body = static_cast<int>(strongest->body);
         reach.pointInBone = bone.transformInv(strongest->position);
         reach.normalInBone = bone.q.rotateInv(strongest->outwardNormal.getNormalized());
-        const int leftShoulder = FindBody(m_PhysicsSkeleton, m_Ragdoll, "LeftArm");
-        const int rightShoulder = FindBody(m_PhysicsSkeleton, m_Ragdoll, "RightArm");
-        int pelvis = FindBody(m_PhysicsSkeleton, m_Ragdoll, "Hips");
-        if (pelvis < 0)
-        {
-            pelvis = FindBody(m_PhysicsSkeleton, m_Ragdoll, "Pelvis");
-        }
-        if (leftShoulder >= 0 && rightShoulder >= 0 && pelvis >= 0)
+        if (hasTorsoBones)
         {
             reach.selection = SelectWoundHand(strongest->position, strongest->outwardNormal,
-                ToFrame(m_Ragdoll.GetBoneWorld(leftShoulder)).p, ToFrame(m_Ragdoll.GetBoneWorld(rightShoulder)).p,
-                ToFrame(m_Ragdoll.GetBoneWorld(pelvis)).p);
+                leftPosition, rightPosition, pelvisPosition);
         }
         reach.step = physics->GetStepCount();
         reach.clock = physics->GetClockRevision();

@@ -112,6 +112,7 @@ namespace PARS
             int hand = -1;
             int woundJoint = -1;
             WoundHandSelection selection;
+            bool blocksHandReach = false;
         };
 
         struct ImpactWarmup
