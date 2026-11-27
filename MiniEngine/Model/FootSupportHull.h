@@ -119,9 +119,61 @@ namespace PARS
     // 기준 다리 길이를 구할 수 없는 모델에 사용하는 완충 확장 반경(m).
     constexpr float DefaultFootSupportBufferRadius = 1.0f;
 
-    // A의 면적 중심을 기준으로 B를 확대하되, 가장 먼 꼭짓점이 제한 반경에 닿으면 확장을 멈춘다.
+    inline double FootSupportLateralProjection(const physx::PxVec3& point, const physx::PxVec3& right)
+    {
+        return static_cast<double>(point.x) * right.x + static_cast<double>(point.z) * right.z;
+    }
+
+    inline physx::PxVec3 ExpandFootSupportVertex(const physx::PxVec3& vertex, double cx, double cz, double expansion)
+    {
+        return physx::PxVec3(static_cast<float>(vertex.x + expansion * (vertex.x - cx)), vertex.y,
+            static_cast<float>(vertex.z + expansion * (vertex.z - cz)));
+    }
+
+    // 각 변을 확대하면서 좌우 경계에서 자른다. 한 변이 두 경계를 모두 지나면 진행 순서대로 교점을 넣는다.
+    inline std::vector<physx::PxVec3> BuildFootSupportBufferHull(const std::vector<physx::PxVec3>& hull,
+        double cx, double cz, double expansion, const physx::PxVec3& right, double leftLimit, double rightLimit)
+    {
+        if (hull.empty() || expansion == 0)
+        {
+            return hull;
+        }
+        std::vector<physx::PxVec3> clipped;
+        clipped.reserve(hull.size() + 2);
+        physx::PxVec3 previous = ExpandFootSupportVertex(hull.back(), cx, cz, expansion);
+        double previousSide = FootSupportLateralProjection(previous, right);
+        for (const physx::PxVec3& support : hull)
+        {
+            const physx::PxVec3 vertex = ExpandFootSupportVertex(support, cx, cz, expansion);
+            if (!vertex.isFinite())
+            {
+                return {};
+            }
+            const double side = FootSupportLateralProjection(vertex, right);
+            const double firstLimit = side > previousSide ? leftLimit : rightLimit;
+            const double secondLimit = side > previousSide ? rightLimit : leftLimit;
+            for (const double limit : {firstLimit, secondLimit})
+            {
+                if ((previousSide < limit && limit < side) || (side < limit && limit < previousSide))
+                {
+                    const float fraction = static_cast<float>((limit - previousSide) / (side - previousSide));
+                    clipped.push_back(previous + (vertex - previous) * fraction);
+                }
+            }
+            if (leftLimit <= side && side <= rightLimit)
+            {
+                clipped.push_back(vertex);
+            }
+            previous = vertex;
+            previousSide = side;
+        }
+        return clipped;
+    }
+
+    // A의 면적 중심에서 다리 길이 상한까지 확장한 뒤 캐릭터 좌우의 추가 여유만 절반으로 줄인다.
     inline FootSupportBalance EvaluateFootSupportBalance(const std::vector<physx::PxVec3>& hull,
-        const physx::PxVec3& point, float scale = 2.0f, float radiusLimit = DefaultFootSupportBufferRadius)
+        const physx::PxVec3& point, float scale = 2.0f, float radiusLimit = DefaultFootSupportBufferRadius,
+        const physx::PxVec3& characterForward = physx::PxVec3(0, 0, 1))
     {
         FootSupportBalance result;
         if (hull.size() < 3 || !std::isfinite(scale) || scale <= 1.0f ||
@@ -164,26 +216,34 @@ namespace PARS
         cx = origin.x + cx / (3 * area2);
         cz = origin.z + cz / (3 * area2);
         result.center = physx::PxVec3(float(cx), float(height / hull.size()), float(cz));
+        physx::PxVec3 right(characterForward.z, 0, -characterForward.x);
+        if (!right.isFinite() || right.isZero())
+        {
+            right = physx::PxVec3(1, 0, 0);
+        }
+        const double centerSide = cx * right.x + cz * right.z;
+        double leftEdge = centerSide;
+        double rightEdge = centerSide;
         double radiusSquared = 0;
         for (const physx::PxVec3& vertex : hull)
         {
             const double x = double(vertex.x) - cx;
             const double z = double(vertex.z) - cz;
             radiusSquared = (std::max)(radiusSquared, x * x + z * z);
+            const double side = FootSupportLateralProjection(vertex, right);
+            leftEdge = (std::min)(leftEdge, side);
+            rightEdge = (std::max)(rightEdge, side);
         }
         // A가 이미 제한 반경을 채웠으면 B를 A와 일치시켜 실제 발 지지 영역을 보존한다.
         const double bufferScale = physx::PxClamp(radiusLimit / std::sqrt(radiusSquared), 1.0, static_cast<double>(scale));
         const double expansion = bufferScale - 1.0;
-        result.bufferHull.reserve(hull.size());
-        for (const physx::PxVec3& vertex : hull)
+        const double lateralExpansion = 0.5 * expansion;
+        const double leftLimit = leftEdge + lateralExpansion * (leftEdge - centerSide);
+        const double rightLimit = rightEdge + lateralExpansion * (rightEdge - centerSide);
+        result.bufferHull = BuildFootSupportBufferHull(hull, cx, cz, expansion, right, leftLimit, rightLimit);
+        if (result.bufferHull.empty())
         {
-            const physx::PxVec3 expanded(float(vertex.x + expansion * (vertex.x - cx)), vertex.y,
-                float(vertex.z + expansion * (vertex.z - cz)));
-            if (!expanded.isFinite())
-            {
-                return {};
-            }
-            result.bufferHull.push_back(expanded);
+            return {};
         }
         if (!point.isFinite())
         {
@@ -219,7 +279,14 @@ namespace PARS
         {
             return result;
         }
-        const double outer = bufferScale * inner;
+        // COM 방향에서 확대 다각형과 좌우 절단선 중 먼저 만나는 경계가 실제 B의 끝이다.
+        double outer = bufferScale * inner;
+        const double lateralDirection = directionX * right.x + directionZ * right.z;
+        if (lateralDirection != 0)
+        {
+            const double limit = lateralDirection > 0 ? rightLimit : leftLimit;
+            outer = (std::min)(outer, (limit - centerSide) / lateralDirection);
+        }
         result.hasDirection = true;
         result.innerDistance = float(inner);
         result.outerDistance = float(outer);

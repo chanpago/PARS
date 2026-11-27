@@ -386,13 +386,12 @@ bool PARS::FootSupport::SetBufferScale(float scale)
     return true;
 }
 
-void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
+void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh, const Matrix4& component)
 {
     FramePerformance::Scope planningTiming(FramePerformance::Category::FootstepPlanning);
     const AnimInstance& animation = mesh.GetAnimInstance();
     const Ragdoll& ragdoll = mesh.GetRagdoll();
     const int root = ragdoll.GetImpactRootBody();
-    const Matrix4 component(mesh.GetComponentTransform());
 
     // 애니메이션 전환 중이 아니고 현재 클립이름이 idle일때만 true
     const bool idle = !animation.IsBlending() && animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle";
@@ -743,10 +742,13 @@ void PARS::FootSupport::Update(SkeletalMeshComponent& mesh, const PhysicsWorld& 
     // 현재 COM이 어디에 있는지 기록한다.
     const PxVec3 projectedCom = m_Snapshot.hasComProjection ? m_Snapshot.projectedCenterOfMass :
         PxVec3(std::numeric_limits<float>::quiet_NaN());
-    m_Snapshot.balance = EvaluateFootSupportBalance(m_Snapshot.hull, projectedCom, m_BufferScale, GetBufferRadiusLimit());
+    const Matrix4 component(mesh.GetComponentTransform());
+    const PxVec3 characterForward = ToPx(Vector3(component.GetZ()));
+    m_Snapshot.balance = EvaluateFootSupportBalance(m_Snapshot.hull, projectedCom, m_BufferScale,
+        GetBufferRadiusLimit(), characterForward);
 
     // COM 예측과 발 접촉 정보를 바탕으로 발딛기 필요 여부, 움직일 발과 착지 목표를 판단한다.
     // 실제 발의 이동·접촉에 따라 진행 상태와 발 이동 목표를 갱신하고 m_Snapshot.footstep에 저장한다.
     // 목표를 실제 관절에 적용하는 IK·물리 제어는 이후 단계에서 수행한다.
-    UpdateFootstep(mesh);
+    UpdateFootstep(mesh, component);
 }

@@ -905,13 +905,17 @@ namespace
         const PARS::FootSupportBalance center = EvaluateFootSupportBalance(hull, PxVec3(0), 2.0f, radiusLimit);
         Check(center.zone == FootSupportZone::Inside && center.weight == 1 && !center.hasDirection,
             "COM at the area centroid has full weight without normalizing a zero vector");
-        Check(center.bufferHull.size() == 4 && center.bufferHull[0] == PxVec3(-2, .4f, -4),
-            "B doubles XZ distances while preserving surface height");
-        for (const PxVec3 direction : {PxVec3(1, 0, 0), PxVec3(0, 0, 2), PxVec3(1, 0, 2)})
+        Check(center.bufferHull.size() == 4 &&
+                std::find(center.bufferHull.begin(), center.bufferHull.end(), PxVec3(-1.5f, .4f, -4)) != center.bufferHull.end(),
+            "B halves lateral clearance while keeping the forward extent and surface height");
+        for (const PxVec3& direction : {PxVec3(-1, 0, 0), PxVec3(1, 0, 0), PxVec3(0, 0, 2),
+                 PxVec3(0, 0, -2), PxVec3(1, 0, 2), PxVec3(-.5f, 0, 2)})
         {
+            const float outerScale = std::abs(direction.x) == 1.0f ? 1.5f : 2.0f;
+            const PxVec3 boundary = direction * outerScale;
             const PARS::FootSupportBalance edgeA = EvaluateFootSupportBalance(hull, direction, 2.0f, radiusLimit);
-            const PARS::FootSupportBalance middle = EvaluateFootSupportBalance(hull, direction * 1.5f, 2.0f, radiusLimit);
-            const PARS::FootSupportBalance edgeB = EvaluateFootSupportBalance(hull, direction * 2, 2.0f, radiusLimit);
+            const PARS::FootSupportBalance middle = EvaluateFootSupportBalance(hull, (direction + boundary) * .5f, 2.0f, radiusLimit);
+            const PARS::FootSupportBalance edgeB = EvaluateFootSupportBalance(hull, boundary, 2.0f, radiusLimit);
             const PARS::FootSupportBalance outside = EvaluateFootSupportBalance(hull, direction * 3, 2.0f, radiusLimit);
             Check(edgeA.weight == 1 && edgeA.zone == FootSupportZone::Inside,
                 "A edges and corners have full weight");
@@ -919,8 +923,9 @@ namespace
                 "Halfway between A and B has half weight along narrow, long and corner directions");
             Check(edgeB.weight == 0 && edgeB.zone == FootSupportZone::Outside && outside.weight == 0,
                 "B boundary and exterior have zero weight");
-            Check(std::abs(middle.outerDistance - 2 * middle.innerDistance) < 1e-6f,
-                "Radial B distance uses the same direction as A");
+            Check(std::abs(middle.outerDistance - boundary.magnitude()) < 1e-6f &&
+                    IsInsideFootSupportHull(center.bufferHull, boundary) && !IsInsideFootSupportHull(center.bufferHull, boundary * 1.01f),
+                "The drawn boundary and the COM fade use the same lateral, forward and diagonal limits");
         }
         float previous = 1;
         for (int i = 0; i <= 100; ++i)
@@ -929,11 +934,25 @@ namespace
             Check(weight <= previous && weight >= 0 && weight <= 1, "Weight decreases monotonically across the band");
             previous = weight;
         }
-        // This trapezoid's area centroid differs from the average of its vertices.
+        // 비대칭 사다리꼴에서는 면적 중심에서 양쪽 가장자리까지의 거리가 다르다.
         const std::vector<physx::PxVec3> trapezoid = BuildFootSupportHull({{0, 0, 0}, {4, 0, 0}, {2, 0, 2}, {0, 0, 2}});
-        const physx::PxVec3 centroid = EvaluateFootSupportBalance(trapezoid, PxVec3(0)).center;
+        const FootSupportBalance asymmetric = EvaluateFootSupportBalance(trapezoid, PxVec3(0), 2.0f, radiusLimit);
+        const physx::PxVec3 centroid = asymmetric.center;
         Check(std::abs(centroid.x - 14.0f / 9) < 1e-6f && std::abs(centroid.z - 8.0f / 9) < 1e-6f,
             "Expansion uses the polygon area centroid, not the vertex average");
+        float left = centroid.x;
+        float right = centroid.x;
+        for (const PxVec3& vertex : asymmetric.bufferHull)
+        {
+            left = (std::min)(left, vertex.x);
+            right = (std::max)(right, vertex.x);
+        }
+        Check(std::abs(left + .5f * centroid.x) < 1e-6f && std::abs(right - (4 + .5f * (4 - centroid.x))) < 1e-6f,
+            "Each side keeps half of its own clearance on an asymmetric stance");
+        for (const PxVec3& vertex : trapezoid)
+        {
+            Check(IsInsideFootSupportHull(asymmetric.bufferHull, vertex), "Clipping preserves every support vertex");
+        }
         std::vector<physx::PxVec3> moved = hull;
         physx::PxVec3 (*const transform)(physx::PxVec3) = [](PxVec3 v) -> physx::PxVec3
         {
@@ -943,18 +962,26 @@ namespace
         {
             vertex = transform(vertex);
         }
-        const PARS::FootSupportBalance movedBalance = EvaluateFootSupportBalance(moved, transform(PxVec3(1.5f, 0, 0)), 2.0f, radiusLimit);
+        const PARS::FootSupportBalance movedBalance = EvaluateFootSupportBalance(moved, transform(PxVec3(1.25f, 0, 0)),
+            2.0f, radiusLimit, PxVec3(-1, 0, 0));
         Check(std::abs(movedBalance.weight - .5f) < 1e-6f &&
                 (movedBalance.center - transform(center.center)).magnitude() < 1e-5f,
             "Translation and rotation move A, B and centroid without changing weight");
-        Check(EvaluateFootSupportBalance(hull, PxVec3(2, 0, 0), 3, radiusLimit).weight == .5f,
+        const FootSupportBalance oblique = EvaluateFootSupportBalance(hull, PxVec3(1.25f, 0, -2.5f),
+            2.0f, radiusLimit, PxVec3(3, 2, 4));
+        Check(std::abs(oblique.weight - .5f) < 1e-6f && IsInsideFootSupportHull(oblique.bufferHull, PxVec3(2, 0, 4)) &&
+                !IsInsideFootSupportHull(oblique.bufferHull, PxVec3(1.51f, 0, -3.02f)),
+            "The side cuts follow the projected character heading even when the feet face another way");
+        Check(EvaluateFootSupportBalance(hull, PxVec3(1.5f, 0, 0), 3, radiusLimit).weight == .5f,
             "Changing B scale changes the fade interval");
         const std::vector<PxVec3> wide = BuildFootSupportHull({{-.6f, 0, 0}, {0, 0, -.15f}, {.6f, 0, 0}, {0, 0, .15f}});
-        const FootSupportBalance capped = EvaluateFootSupportBalance(wide, PxVec3(.75f, 0, 0), 2.86f, .9f);
+        const FootSupportBalance capped = EvaluateFootSupportBalance(wide, PxVec3(.675f, 0, 0), 2.86f, .9f);
         Check(capped.zone == FootSupportZone::Buffer && std::abs(capped.weight - .5f) < 1e-6f &&
-                std::abs(capped.outerDistance - .9f) < 1e-6f && IsInsideFootSupportHull(capped.bufferHull, PxVec3(.9f, 0, 0)) &&
-                !IsInsideFootSupportHull(capped.bufferHull, PxVec3(.91f, 0, 0)),
-            "The radius cap bounds both the support fade and the polygon used for the fall timer");
+                std::abs(capped.outerDistance - .75f) < 1e-6f && IsInsideFootSupportHull(capped.bufferHull, PxVec3(.75f, 0, 0)) &&
+                !IsInsideFootSupportHull(capped.bufferHull, PxVec3(.76f, 0, 0)),
+            "The radius cap applies before halving both lateral margins");
+        Check(capped.bufferHull.size() == 6 && IsInsideFootSupportHull(capped.bufferHull, PxVec3(.6f, 0, .07f)),
+            "Clipping the ends of a diamond preserves its sloping edges between the two cuts");
         const FootSupportBalance atFoot = EvaluateFootSupportBalance(wide, PxVec3(.6f, 0, 0), 2.86f, .5f);
         const FootSupportBalance pastFoot = EvaluateFootSupportBalance(wide, PxVec3(.61f, 0, 0), 2.86f, .5f);
         Check(atFoot.bufferHull == wide && atFoot.zone == FootSupportZone::Inside && atFoot.weight == 1 &&

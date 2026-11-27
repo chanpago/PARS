@@ -1202,7 +1202,7 @@ namespace
         {
             support.SetBufferScale(scale);
         }
-        ImGui::TextWrapped(u8"B는 A의 면적 중심에서 최대 %.0f cm까지 확장됩니다. A가 이미 이 반경에 닿으면 추가 확장 폭은 0입니다.",
+        ImGui::TextWrapped(u8"B는 A의 면적 중심에서 최대 %.0f cm까지 확장하며, 캐릭터 좌우의 추가 여유는 절반입니다. A가 이미 이 반경에 닿으면 추가 확장 폭은 0입니다.",
             support.GetBufferRadiusLimit() * 100.0f);
         if (drawBufferSettings)
         {

@@ -141,7 +141,7 @@ namespace PARS
     private:
         bool Prepare(SkeletalMeshComponent& mesh);
         void UpdateContacts(const Ragdoll& ragdoll, const PhysicsWorld& physics);
-        void UpdateFootstep(SkeletalMeshComponent& mesh);
+        void UpdateFootstep(SkeletalMeshComponent& mesh, const Math::Matrix4& component);
 
     public:
         const FootSupportSnapshot& GetSnapshot() const
