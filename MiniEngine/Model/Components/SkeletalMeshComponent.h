@@ -90,6 +90,7 @@ namespace PARS
         public:
             uint64_t id = 0;
             float yaw = 0;
+            MotionFrameUsage usage = MotionFrameUsage::ShoveUpperBody;
             bool pending = false;
         };
 
@@ -318,7 +319,7 @@ namespace PARS
         }
         bool SetFallingAnimation(uint32_t animationIndex);
         bool SetDirectionalFallingAnimation(FallDirection direction, uint32_t animationIndex);
-        bool SetShoveReactionAnimations(uint32_t left, uint32_t right);
+        bool SetShoveReactionAnimations(uint32_t left, uint32_t right, MotionFrameUsage usage = MotionFrameUsage::ShoveUpperBody);
         bool SetAirborneFallAnimations(const std::array<uint32_t, 3>& clips);
         void SetFallingAnimationEnabled(bool enabled)
         {
@@ -496,6 +497,7 @@ namespace PARS
         uint32_t m_FallingAnimationIndex = UINT32_MAX;
         std::array<uint32_t, static_cast<size_t>(FallDirection::Count)> m_DirectionalFallingAnimations;
         std::array<uint32_t, 2> m_ShoveReactionAnimations{UINT32_MAX, UINT32_MAX};
+        std::array<uint32_t, 2> m_RearShoveReactionAnimations{UINT32_MAX, UINT32_MAX};
         std::array<uint32_t, 3> m_AirborneFallAnimations{UINT32_MAX, UINT32_MAX, UINT32_MAX};
         uint32_t m_StandingUpAnimationIndex = UINT32_MAX;
         uint32_t m_StandingIdleAnimationIndex = UINT32_MAX;

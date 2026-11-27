@@ -93,6 +93,7 @@ namespace PARS
                 impact.newCapsuleHit = contact.newCapsuleHit;
                 impact.fromAnimatedCapsule = contact.fromAnimatedCapsule;
                 impact.capsuleVelocity = contact.capsuleVelocity;
+                impact.capsuleApproachVelocity = contact.capsuleApproachVelocity;
                 impact.capsuleGroup = contact.capsuleGroup;
                 impact.capsuleTorqueMultiplier = contact.capsuleTorqueMultiplier;
                 m_ExternalImpacts.push_back(impact);

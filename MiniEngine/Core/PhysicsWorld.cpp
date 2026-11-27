@@ -206,6 +206,7 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         cached->clockRevision = m_ClockRevision;
         cached->impactContactId = 0;
         cached->capsuleVelocity = PxVec3(0);
+        cached->capsuleApproachVelocity = PxVec3(0);
         cached->capsuleTorqueMultiplier = 0;
         cached->beginsImpact = false;
         for (int side = 0; side < 2; ++side)
@@ -216,6 +217,8 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
             if (capsule && beforeContact)
             {
                 cached->capsuleVelocity = beforeContact->linearVelocity[side];
+                // 솔버가 속도를 바꾸기 전에 맞은 강체를 기준으로 캡슐의 진입 방향을 보관한다.
+                cached->capsuleApproachVelocity = cached->capsuleVelocity - beforeContact->linearVelocity[1 - side];
             }
             // 같은 형상 쌍에서 처음으로 솔버 충격량이 생긴 스텝을 기록한다.
             if (impactSource && cached->firstImpulseStep == 0 &&
@@ -697,6 +700,7 @@ float PhysicsWorld::GetExternalImpactImpulse(const PxRigidActor& body, const voi
                     contact.newCapsuleHit = capsule && pair.beginsImpact;
                     contact.fromAnimatedCapsule = (sourceFlags & AnimatedCapsuleFilterFlag) != 0;
                     contact.capsuleVelocity = pair.capsuleVelocity;
+                    contact.capsuleApproachVelocity = pair.capsuleApproachVelocity;
                     contact.capsuleGroup = sourceData.word2;
                     contact.capsuleTorqueMultiplier = pair.capsuleTorqueMultiplier;
                     contacts->push_back(contact);

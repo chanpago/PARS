@@ -15,8 +15,15 @@ namespace PARS
         Walking,
         BalanceUpperBody,
         ShoveFall,
+        ShoveUpperBody,
+        RearShoveUpperBody,
         Count
     };
+
+    inline bool IsShoveUpperBodyUsage(MotionFrameUsage usage)
+    {
+        return usage == MotionFrameUsage::ShoveUpperBody || usage == MotionFrameUsage::RearShoveUpperBody;
+    }
 
     // 전체 후보 배열의 [firstFrameIndex, firstFrameIndex + frameCount) 구간이다.
     struct MotionFrameRange

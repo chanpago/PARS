@@ -27,6 +27,7 @@ namespace PARS
         m_ModelInstance = m_SkeletalMesh;
         m_AnimInstance->Initialize(m_SkeletalMesh);
         m_ShoveReactionAnimations.fill(UINT32_MAX);
+        m_RearShoveReactionAnimations.fill(UINT32_MAX);
         m_ShoveContact = {};
         m_FallingAnimationIndex = UINT32_MAX;
         m_DirectionalFallingAnimations.fill(UINT32_MAX);
@@ -143,6 +144,7 @@ namespace PARS
         m_ImpactWarmup = {};
         m_AnimInstance = std::move(instance);
         m_ShoveReactionAnimations.fill(UINT32_MAX);
+        m_RearShoveReactionAnimations.fill(UINT32_MAX);
         m_ShoveContact = {};
         ResetFallArms();
         ResetAirborneFall();

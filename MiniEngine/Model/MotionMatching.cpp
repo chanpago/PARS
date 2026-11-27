@@ -65,6 +65,16 @@ namespace PARS
             return Math::LengthSquare(Math::Vector3(first) - Math::Vector3(second));
         }
 
+        float UpperBodyPoseError(const std::array<DirectX::XMFLOAT3, 3>& first, const std::array<DirectX::XMFLOAT3, 3>& second)
+        {
+            float error = 0.0f;
+            for (size_t joint = 0; joint < first.size(); ++joint)
+            {
+                error += SquaredDistance(first[joint], second[joint]);
+            }
+            return error;
+        }
+
         int WalkingAngleError(float requestedDegrees, float clipDegrees)
         {
             if (!std::isfinite(requestedDegrees))
@@ -97,7 +107,7 @@ namespace PARS
 
         bool IsImpactUsage(MotionFrameUsage usage)
         {
-            return usage == MotionFrameUsage::BalanceUpperBody || usage == MotionFrameUsage::ShoveFall;
+            return usage == MotionFrameUsage::BalanceUpperBody || usage == MotionFrameUsage::ShoveFall || IsShoveUpperBodyUsage(usage);
         }
 
         bool SampleClip(const AnimInstance& animation, const MotionClipSelection& clip, const PhysicsSkeleton& skeleton,
@@ -137,11 +147,13 @@ namespace PARS
                 const bool impact = IsImpactUsage(clip.usage);
                 if (impact)
                 {
-                    // 낙상으로 골반이 누워도 클립의 정면을 기준으로 팔다리와 머리의 기울기를 비교한다.
-                    sample.toHeadingSpace = Math::Matrix3(Math::kIdentity);
+                    // 어깨 레이어는 골반을 덮지 않으므로 골반 회전을 제거한다. 낙상은 모델 정면에 대한 기울기를 보존한다.
+                    sample.toHeadingSpace = IsShoveUpperBodyUsage(clip.usage) ?
+                        Math::Transpose(PhysicsBoneFrame(hips).Get3x3()) : Math::Matrix3(Math::kIdentity);
                     for (size_t joint = 0; joint < upperJoints.size(); ++joint)
                     {
-                        DirectX::XMStoreFloat3(&sample.upperBodyPositions[joint], Math::Vector3(modelPose[upperJoints[joint]].GetW()) - sample.pelvis);
+                        const Math::Vector3 offset = Math::Vector3(modelPose[upperJoints[joint]].GetW()) - sample.pelvis;
+                        DirectX::XMStoreFloat3(&sample.upperBodyPositions[joint], sample.toHeadingSpace * offset);
                     }
                 }
                 else if (!MakeHeadingSpace(hips, bones.bindForwardInPelvis, sample.toHeadingSpace))
@@ -220,6 +232,23 @@ namespace PARS
             frames[period].remainingSwingTime = frames[0].remainingSwingTime;
         }
 
+        size_t FindShovePeak(const std::vector<MotionSample>& samples)
+        {
+            // 양손과 머리가 시작 자세에서 가장 멀어진 뒤에는 복귀 동작이므로 진입 후보에서 제외한다.
+            size_t peak = 0;
+            float largest = 0.0f;
+            for (size_t i = 1; i < samples.size(); ++i)
+            {
+                const float distance = UpperBodyPoseError(samples.front().upperBodyPositions, samples[i].upperBodyPositions);
+                if (distance > largest)
+                {
+                    largest = distance;
+                    peak = i;
+                }
+            }
+            return peak;
+        }
+
         void AppendClipFrames(const MotionClipSelection& clip, const std::vector<MotionSample>& samples,
             std::vector<MotionFrame>& frames)
         {
@@ -232,7 +261,8 @@ namespace PARS
             const float walkingAngle = walking ? GetWalkingTravelAngleDegrees({0.0f, 1.0f},
                 {meanVelocity.GetX(), meanVelocity.GetZ()}) : std::numeric_limits<float>::quiet_NaN();
             const double lookahead = MotionFeatures::PredictionTimeSeconds * static_cast<double>(last) / samples.back().time;
-            for (size_t i = 0; i <= last; ++i)
+            const size_t lastCandidate = IsShoveUpperBodyUsage(clip.usage) ? FindShovePeak(samples) : last;
+            for (size_t i = 0; i <= lastCandidate; ++i)
             {
                 const MotionSample& sample = samples[i];
                 const MotionSample& previous = samples[i == 0 ? (walking ? last - 1 : 0) : i - 1];
@@ -399,11 +429,7 @@ namespace PARS
                 {
                     continue;
                 }
-                float poseError = 0.0f;
-                for (size_t joint = 0; joint < currentFeatures.upperBodyPositions.size(); ++joint)
-                {
-                    poseError += SquaredDistance(currentFeatures.upperBodyPositions[joint], frame.features.upperBodyPositions[joint]);
-                }
+                float poseError = UpperBodyPoseError(currentFeatures.upperBodyPositions, frame.features.upperBodyPositions);
                 if (usage == MotionFrameUsage::ShoveFall)
                 {
                     for (size_t foot = 0; foot < currentFeatures.footPositions.size(); ++foot)
@@ -467,9 +493,14 @@ namespace PARS
         {
             return {};
         }
-        const Math::Vector3 origin(ragdoll.GetBoneWorld(root).GetW());
+        const Math::Matrix4 pelvis = ragdoll.GetBoneWorld(root);
+        const Math::Vector3 origin(pelvis.GetW());
         Math::Matrix3 toHeading;
-        if (!MakeHeadingSpace(Math::Matrix4(m_Owner.GetComponentTransform()), Math::Vector3(Math::kZUnitVector), toHeading))
+        if (IsShoveUpperBodyUsage(usage))
+        {
+            toHeading = Math::Transpose(PhysicsBoneFrame(pelvis).Get3x3());
+        }
+        else if (!MakeHeadingSpace(Math::Matrix4(m_Owner.GetComponentTransform()), Math::Vector3(Math::kZUnitVector), toHeading))
         {
             return {};
         }

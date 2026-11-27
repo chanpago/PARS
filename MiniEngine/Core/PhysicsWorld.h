@@ -63,6 +63,7 @@ public:
     physx::PxVec3 impulse{0};
     physx::PxVec3 outwardNormal{0};
     physx::PxVec3 capsuleVelocity{0};
+    physx::PxVec3 capsuleApproachVelocity{0};
     uint32_t capsuleGroup = 0;
     float capsuleTorqueMultiplier = 0;
     bool fromProjectile = false;
@@ -115,6 +116,7 @@ private:
         uint64_t firstImpulseStep = 0;
         uint64_t impactContactId = 0;
         physx::PxVec3 capsuleVelocity{0};
+        physx::PxVec3 capsuleApproachVelocity{0};
         float capsuleTorqueMultiplier = 0;
         bool beginsImpact = false;
     };

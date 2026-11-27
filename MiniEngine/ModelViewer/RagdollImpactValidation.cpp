@@ -50,7 +50,8 @@ namespace
             walkingFrameCount += clip.frameCount;
         }
         size_t total = kIdleClip.frameCount + walkingFrameCount;
-        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::BalanceUpperBody, PARS::MotionFrameUsage::ShoveFall})
+        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::BalanceUpperBody, PARS::MotionFrameUsage::ShoveFall,
+            PARS::MotionFrameUsage::ShoveUpperBody, PARS::MotionFrameUsage::RearShoveUpperBody})
         {
             const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
             check(range.firstFrameIndex == total, "Impact frames follow the previous usage without a gap");
@@ -188,15 +189,30 @@ namespace
             << " backward_lift_time_ratio=" << settings.backwardLiftTimeRatio << std::endl;
     }
 
+    int GetShoulderTurnSign(const std::string& clip)
+    {
+        if (clip == "ShoveReactionLeft" || clip == "ShoveReactionRearRight")
+        {
+            return 1;
+        }
+        if (clip == "ShoveReactionRight" || clip == "ShoveReactionRearLeft")
+        {
+            return -1;
+        }
+        return 0;
+    }
+
     void CheckImpactMotionClips(const PARS::SkeletalMeshComponent& mesh, const std::function<void(bool, const char*)>& check)
     {
         const PARS::AnimInstance& animation = mesh.GetAnimInstance();
         PARS::PhysicsSkeleton skeleton;
         std::string error;
         check(mesh.BuildPhysicsSkeleton(skeleton, error), "Resolve the live dummy skeleton for the upper-body mask");
-        const std::array<const char*, 5> names = {"Slow Jog Backwards", "ShoveFallForward", "ShoveFallBackward", "ShoveFallLeft", "ShoveFallRight"};
+        const std::array<const char*, 9> names = {"Slow Jog Backwards", "ShoveFallForward", "ShoveFallBackward", "ShoveFallLeft", "ShoveFallRight",
+            "ShoveReactionLeft", "ShoveReactionRight", "ShoveReactionRearLeft", "ShoveReactionRearRight"};
         size_t slot = 0;
-        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::BalanceUpperBody, PARS::MotionFrameUsage::ShoveFall})
+        for (PARS::MotionFrameUsage usage : {PARS::MotionFrameUsage::BalanceUpperBody, PARS::MotionFrameUsage::ShoveFall,
+            PARS::MotionFrameUsage::ShoveUpperBody, PARS::MotionFrameUsage::RearShoveUpperBody})
         {
             const PARS::MotionFrameRange range = animation.GetMotionFrameRange(usage);
             if (usage == PARS::MotionFrameUsage::BalanceUpperBody)
@@ -207,20 +223,32 @@ namespace
             for (size_t index = range.firstFrameIndex; index < range.firstFrameIndex + range.frameCount; ++index)
             {
                 const PARS::MotionFrame& frame = animation.GetMotionFrames()[index];
+                if (PARS::IsShoveUpperBodyUsage(usage) && (index + 1 == range.firstFrameIndex + range.frameCount ||
+                    animation.GetMotionFrames()[index + 1].clipIndex != frame.clipIndex))
+                {
+                    const PARS::MotionMatchResult peak = animation.FindMotionMatch(usage, frame.features, {}, 0.0f, frame.clipIndex);
+                    check(peak.clipIndex == frame.clipIndex && peak.score == 0.0f && peak.clipTimeSeconds == frame.clipTimeSeconds &&
+                        peak.clipTimeSeconds > 0.0f && peak.clipTimeSeconds < animation.GetAnimationDuration(frame.clipIndex),
+                        "The authored shoulder peak matches its nonzero entry frame and leaves the recovery to play");
+                    const PARS::MotionFrameUsage other = usage == PARS::MotionFrameUsage::RearShoveUpperBody ?
+                        PARS::MotionFrameUsage::ShoveUpperBody : PARS::MotionFrameUsage::RearShoveUpperBody;
+                    check(animation.FindMotionMatch(other, frame.features, {}, 0.0f, frame.clipIndex).clipIndex == UINT32_MAX,
+                        "A front shoulder clip cannot match a rear query or vice versa");
+                }
                 if (frame.clipIndex == previous)
                 {
                     continue;
                 }
                 previous = frame.clipIndex;
-                check(slot < names.size() && animation.GetAnimationName(previous) == names[slot], "Registered clip matches its balance or fall usage");
+                check(slot < names.size() && animation.GetAnimationName(previous) == names[slot], "Registered clip matches its impact usage");
                 ++slot;
                 const PARS::MotionMatchResult match = animation.FindImpactPoseMatch(usage, previous);
                 check(match.clipIndex == previous && std::isfinite(match.score) && match.clipTimeSeconds < animation.GetAnimationDuration(previous),
                     "Live physical pose matches a playable frame of the registered clip");
             }
         }
-        check(slot == names.size(), "The balance clip and all four shove falls are indexed on the shared dummy database");
-        for (const char* name : {"Slow Jog Backwards", "ShoveReactionLeft", "ShoveReactionRight"})
+        check(slot == names.size(), "The balance clip, four shove falls and all four shoulder reactions are indexed on the shared dummy database");
+        for (const char* name : {"Slow Jog Backwards", "ShoveReactionLeft", "ShoveReactionRight", "ShoveReactionRearLeft", "ShoveReactionRearRight"})
         {
             uint32_t clip = 0;
             while (clip < animation.GetAnimationCount() && animation.GetAnimationName(clip) != name)
@@ -984,7 +1012,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         bool sawGlancingWarmup = false;
         std::string warmupUpperBodyClip;
         std::string firstShoulder;
+        float firstShoulderTime = 0.0f;
         bool checkedShoulderTurn = false;
+        bool checkedShoulderSpeed = false;
         for (uint32_t frame = 0; frame < frames; ++frame)
         {
             if (modeCycles && frame % 60 == 0)
@@ -1318,17 +1348,25 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const Vector3 dummyForward = dummy->GetActorTransform().GetZ();
             const float actorYaw = std::atan2(float(dummyForward.GetX()), float(dummyForward.GetZ()));
             yawChange = DirectX::XMConvertToDegrees(std::remainder(actorYaw - initialYaw, DirectX::XM_2PI));
-            if (glancing != 0 && !checkedShoulderTurn)
+            if (glancing != 0 && (!checkedShoulderTurn || !checkedShoulderSpeed))
             {
                 const std::string& clip = dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip());
-                if (firstShoulder.empty() && (clip == "ShoveReactionLeft" || clip == "ShoveReactionRight"))
+                if (firstShoulder.empty() && GetShoulderTurnSign(clip) != 0)
                 {
                     firstShoulder = clip;
+                    firstShoulderTime = dummyMesh.GetImpactFlailTime();
+                }
+                else if (!checkedShoulderSpeed && !firstShoulder.empty() && clip == firstShoulder)
+                {
+                    const float advance = dummyMesh.GetImpactFlailTime() - firstShoulderTime;
+                    check(std::abs(advance - 2.0f * static_cast<float>(PhysicsWorld::FixedDeltaTime)) < .0001f,
+                        "The shoulder clip advances at twice the fixed-step rate from the matched frame");
+                    checkedShoulderSpeed = true;
                 }
                 // 발 지지가 첫 틱의 루트 회전을 막을 수 있으므로 실제로 방향이 변한 시점에 비교한다.
-                if (!firstShoulder.empty() && std::abs(yawChange) > .001f)
+                if (!checkedShoulderTurn && !firstShoulder.empty() && std::abs(yawChange) > .001f)
                 {
-                    check(firstShoulder == (yawChange > 0 ? "ShoveReactionLeft" : "ShoveReactionRight"),
+                    check(GetShoulderTurnSign(firstShoulder) * yawChange > 0.0f,
                         "The first shoulder reaction matches the sign of the actor's actual turn");
                     checkedShoulderTurn = true;
                 }
@@ -1444,10 +1482,15 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         {
             const float angle = DirectX::XMConvertToRadians(approachDegrees);
             const bool sideApproach = std::abs(std::sin(angle)) > std::abs(std::cos(angle));
-            report << "first_shoulder=" << firstShoulder << std::endl;
-            check(checkedShoulderTurn, "Both frontal shoulder grazes and lateral glancing hits play a directional upper-body reaction");
+            report << "first_shoulder=" << firstShoulder << " matched_time_s=" << firstShoulderTime << std::endl;
+            check(checkedShoulderTurn && checkedShoulderSpeed, "Glancing hits play a directional upper-body reaction at double speed");
+            if (!sideApproach)
+            {
+                const bool rearClip = firstShoulder == "ShoveReactionRearLeft" || firstShoulder == "ShoveReactionRearRight";
+                check(rearClip == (std::cos(angle) < 0.0f), "A longitudinal approach plays the shoulder clip for the struck front or back");
+            }
             // 측면 충돌의 회전 방향은 출발 오프셋만으로 정해지지 않으므로 첫 실측 회전과 비교한다.
-            const bool expectPositiveYaw = sideApproach ? firstShoulder == "ShoveReactionLeft" : lateralOffset < 0;
+            const bool expectPositiveYaw = sideApproach ? GetShoulderTurnSign(firstShoulder) > 0 : lateralOffset < 0;
             const float sign = expectPositiveYaw ? 1.0f : -1.0f;
             const float minimumTurnDegrees = sideApproach ? .001f : 1.0f;
             report << "second_landing_yaw_deg=" << secondLandingYaw << " supported_yaw_deg=" << supportedYaw

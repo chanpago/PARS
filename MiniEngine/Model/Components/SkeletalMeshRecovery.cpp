@@ -36,13 +36,15 @@ namespace PARS
         return true;
     }
 
-    bool SkeletalMeshComponent::SetShoveReactionAnimations(uint32_t left, uint32_t right)
+    bool SkeletalMeshComponent::SetShoveReactionAnimations(uint32_t left, uint32_t right, MotionFrameUsage usage)
     {
-        if (left == right || left >= m_AnimInstance->GetAnimationCount() || right >= m_AnimInstance->GetAnimationCount())
+        if (!IsShoveUpperBodyUsage(usage) || left == right || left >= m_AnimInstance->GetAnimationCount() ||
+            right >= m_AnimInstance->GetAnimationCount())
         {
             return false;
         }
-        m_ShoveReactionAnimations = {left, right};
+        std::array<uint32_t, 2>& clips = usage == MotionFrameUsage::RearShoveUpperBody ? m_RearShoveReactionAnimations : m_ShoveReactionAnimations;
+        clips = {left, right};
         return true;
     }
 
@@ -115,7 +117,7 @@ namespace PARS
 
     void SkeletalMeshComponent::TrackShoveContact(const std::vector<RagdollBodyImpulse>& impacts, const PxVec3& centerOfMass)
     {
-        if (m_ShoveReactionAnimations[0] == UINT32_MAX)
+        if (m_ShoveReactionAnimations[0] == UINT32_MAX && m_RearShoveReactionAnimations[0] == UINT32_MAX)
         {
             return;
         }
@@ -153,6 +155,15 @@ namespace PARS
         constexpr float centerHalfWidthToDepth = .5f;
         const bool shoulderHit = std::abs(lateral) > centerHalfWidthToDepth * std::abs(axial);
         m_ShoveContact.pending = shoulderHit && hit->capsuleTorqueMultiplier > 0;
+        // 첫 접촉에서 상대 진입 방향을 고정한다. 거의 정지했거나 측면에서 10도 이내로 스치면 접촉점이 등 쪽인지 본다.
+        const PxVec3& approach = hit->capsuleApproachVelocity;
+        const float approachForward = float(forward.GetX()) * approach.x + float(forward.GetZ()) * approach.z;
+        const float approachLateral = float(forward.GetZ()) * approach.x - float(forward.GetX()) * approach.z;
+        constexpr float lateralApproachSlope = .176327f;
+        const bool hasLongitudinalApproach = approach.x * approach.x + approach.z * approach.z > .0001f &&
+            std::abs(approachForward) > lateralApproachSlope * std::abs(approachLateral);
+        const bool fromRear = hasLongitudinalApproach ? approachForward > 0.0f : axial < -centerHalfWidthToDepth * std::abs(lateral);
+        m_ShoveContact.usage = fromRear ? MotionFrameUsage::RearShoveUpperBody : MotionFrameUsage::ShoveUpperBody;
         if (!shoulderHit && m_ImpactFlail.playingShove)
         {
             // 별개의 정면 충돌은 진행 중인 어깨 반응에서 기존 균형 반응으로 전환한다.
@@ -175,15 +186,20 @@ namespace PARS
             return;
         }
         m_ShoveContact.pending = false;
-        // 이 스켈레톤의 정면 +Z가 +X로 도는 양의 yaw는 캐릭터의 왼쪽 회전이다.
-        const uint32_t clip = m_ShoveReactionAnimations[m_ShoveContact.yaw > 0 ? 0 : 1];
+        // 양의 yaw에서는 앞에서 밀린 왼쪽 어깨 또는 뒤에서 밀린 오른쪽 어깨가 같은 방향으로 몸을 돌린다.
+        const bool fromRear = m_ShoveContact.usage == MotionFrameUsage::RearShoveUpperBody;
+        const bool leftShoulder = fromRear ? m_ShoveContact.yaw < 0.0f : m_ShoveContact.yaw > 0.0f;
+        const std::array<uint32_t, 2>& clips = fromRear ? m_RearShoveReactionAnimations : m_ShoveReactionAnimations;
+        const uint32_t clip = clips[leftShoulder ? 0 : 1];
         if (clip >= m_AnimInstance->GetAnimationCount())
         {
             return;
         }
+        // 충돌이 정한 방향 안에서 현재 양손과 머리 위치에 가장 가까운 시작 자세를 고른다.
+        const MotionMatchResult match = m_AnimInstance->FindImpactPoseMatch(m_ShoveContact.usage, clip);
         m_ImpactFlail.blendSource = std::move(m_ImpactFlail.pose);
         m_ImpactFlail.clip = clip;
-        m_ImpactFlail.time = 0;
+        m_ImpactFlail.time = match.clipIndex == clip ? match.clipTimeSeconds : 0.0f;
         m_ImpactFlail.weight = 0;
         m_ImpactFlail.playingShove = true;
     }
@@ -199,9 +215,15 @@ namespace PARS
         constexpr float blendDuration = .1f;
         if (flail.playingShove)
         {
+            constexpr float playbackRate = 2.0f;
             const float duration = m_AnimInstance->GetAnimationDuration(flail.clip);
-            flail.time = (std::min)(flail.time + deltaTime, duration);
-            flail.weight = Clamp((std::min)(flail.time, duration - flail.time) / blendDuration, 0.0f, 1.0f);
+            // 첫 틱은 매칭한 프레임을 샘플링하고 블렌딩은 클립의 시작 시각과 무관하게 실제 시간으로 진행한다.
+            if (flail.weight > 0.0f)
+            {
+                flail.time = (std::min)(flail.time + deltaTime * playbackRate, duration);
+            }
+            const float remaining = (duration - flail.time) / playbackRate;
+            flail.weight = Clamp((std::min)(flail.weight + deltaTime / blendDuration, remaining / blendDuration), 0.0f, 1.0f);
         }
         else
         {
