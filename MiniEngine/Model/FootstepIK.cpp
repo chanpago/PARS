@@ -72,18 +72,47 @@ namespace
     }
 }
 
-PxVec3 PARS::GetFootstepTravelForward(const PxVec3& displacement, const PxVec3& referenceForward)
+float PARS::GetFootstepStrideWeight(const PxVec3& characterForward, const PxVec3& predictedComDelta)
 {
-    PxVec3 travel(displacement.x, 0, displacement.z);
-    if (!Unit(travel))
+    const float along = PxAbs(characterForward.x * predictedComDelta.x + characterForward.z * predictedComDelta.z);
+    const float across = PxAbs(characterForward.z * predictedComDelta.x - characterForward.x * predictedComDelta.z);
+    if (!std::isfinite(along) || !std::isfinite(across) || (along == 0 && across == 0))
+    {
+        return 0;
+    }
+    // 내적과 외적의 절댓값으로 앞뒤를 같은 직선으로 본다. 두 벡터의 길이는 각도에서 상쇄된다.
+    constexpr float followStrideAngle = PxPi / 6.0f;
+    constexpr float keepStanceAngle = PxPi / 3.0f;
+    const float angle = std::atan2(across, along);
+    return PxClamp((keepStanceAngle - angle) / (keepStanceAngle - followStrideAngle), 0.0f, 1.0f);
+}
+
+PxVec3 PARS::GetFootstepSoleForward(const PxVec3& displacement, const PxVec3& stanceForward, float strideWeight)
+{
+    PxVec3 stance(stanceForward.x, 0, stanceForward.z);
+    if (!Unit(stance))
     {
         return PxVec3(0);
     }
-    return travel.dot(referenceForward) < 0 ? -travel : travel;
+    PxVec3 travel(displacement.x, 0, displacement.z);
+    if (!std::isfinite(strideWeight) || strideWeight <= 0 || !Unit(travel))
+    {
+        return stance;
+    }
+    if (stance.dot(travel) < 0)
+    {
+        travel = -travel;
+    }
+    if (strideWeight >= 1)
+    {
+        return travel;
+    }
+    const float yaw = std::atan2(stance.cross(travel).y, stance.dot(travel));
+    return PxQuat(strideWeight * yaw, PxVec3(0, 1, 0)).rotate(stance);
 }
 
 FootIKIssue PARS::BuildFootSoleTarget(const PxVec3& position, const PxVec3& normal,
-    const PxTransform& referenceSole, PxTransform& target, const PxVec3& displacement)
+    const PxTransform& referenceSole, PxTransform& target, const PxVec3& soleForward)
 {
     PxVec3 up = normal;
     if (!position.isFinite())
@@ -98,12 +127,15 @@ FootIKIssue PARS::BuildFootSoleTarget(const PxVec3& position, const PxVec3& norm
     {
         return FootIKIssue::GroundNormal;
     }
-    PxVec3 forward = referenceSole.q.rotate(PxVec3(0, 0, 1));
-    const PxVec3 travel = GetFootstepTravelForward(displacement, forward);
-    if (!travel.isZero())
+    if (!soleForward.isFinite())
     {
-        // 경사면에서도 발끝의 수평 방향이 보폭과 나란하도록 높이 성분만 지면에 맞춘다.
-        forward = PxVec3(travel.z, 0, -travel.x).cross(up);
+        return FootIKIssue::SoleOrientation;
+    }
+    PxVec3 forward = referenceSole.q.rotate(PxVec3(0, 0, 1));
+    if (soleForward.x != 0 || soleForward.z != 0)
+    {
+        // 경사면에서도 정해 둔 발끝의 수평 방향을 보존한다.
+        forward = PxVec3(soleForward.z, 0, -soleForward.x).cross(up);
     }
     if (!ProjectHint(forward, up))
     {
@@ -120,9 +152,9 @@ FootIKIssue PARS::BuildFootSoleTarget(const PxVec3& position, const PxVec3& norm
 }
 
 bool PARS::MakeFootSoleTarget(const PxVec3& position, const PxVec3& normal,
-    const PxTransform& referenceSole, PxTransform& target, const PxVec3& displacement)
+    const PxTransform& referenceSole, PxTransform& target, const PxVec3& soleForward)
 {
-    return BuildFootSoleTarget(position, normal, referenceSole, target, displacement) == FootIKIssue::None;
+    return BuildFootSoleTarget(position, normal, referenceSole, target, soleForward) == FootIKIssue::None;
 }
 
 float PARS::PredictSupportReachTime(const PxVec3& hipFromAnkle, const PxVec3& hipVelocity,

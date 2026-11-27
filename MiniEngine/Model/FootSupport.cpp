@@ -464,9 +464,9 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
     {
         landingQuery.Prepare(mesh, m_Snapshot, reaches);
         input.checkLandingPose = [&landingQuery](size_t side, const PxVec3& position, const PxVec3& normal,
-            const PxVec3& displacement) -> FootstepPoseCheck
+            const PxVec3& soleForward) -> FootstepPoseCheck
         {
-            return landingQuery.CheckPose(side, position, normal, displacement);
+            return landingQuery.CheckPose(side, position, normal, soleForward);
         };
     }
     input.active = mesh.IsActiveRagdoll();
@@ -543,6 +543,7 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh)
         {
             // 앞서 구한 로컬 발바닥 변환에 월드 발 m_IdleFootBones[side] 을 곱해 로컬 발바닥 위치를 구한다
             const Matrix4 sole = m_IdleFootBones[side] * m_Snapshot.feet[side].soleInBone;
+            input.feet[side].stanceForwardInComponent = ToPx(Vector3(sole.GetZ()));
 
             // 위치 성분만 꺼내서 배열에 저장
             referenceFeet[side] = ToPx(Vector3(sole.GetW()));

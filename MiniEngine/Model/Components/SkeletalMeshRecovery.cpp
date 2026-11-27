@@ -1071,8 +1071,7 @@ namespace PARS
                     // 다음 물리 틱 끝에 도달할 자세를 관절 PD에 전달한다.
                     const PxVec3 drivePosition = command.motion.hasSupportDeadline ?
                         SampleFootstepPosition(command, deltaTime) : command.motion.position;
-                    if (MakeFootSoleTarget(drivePosition, command.target.normal, actualSole, sole,
-                        command.target.position - command.startPosition))
+                    if (MakeFootSoleTarget(drivePosition, command.target.normal, actualSole, sole, command.target.soleForward))
                     {
                         m_RecoverySoles[side] = sole;
                     }

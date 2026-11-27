@@ -89,8 +89,12 @@ ImpactWarmupStep SkeletalMeshComponent::ImpactWarmup::PlanStep(const FootstepPol
     const PxVec3& velocity, bool secondStep) const
 {
     const float legLength = PxMin(legs[0].thighLength + legs[0].calfLength, legs[1].thighLength + legs[1].calfLength);
+    // 두 번째 걸음은 첫 착지 시점에 루트가 실제로 향하는 방향에서 시작한다.
+    const PxVec3 initialForward = componentRotation.rotate(PxVec3(0, 0, 1));
+    const PxVec3 characterForward = secondStep ? PxQuat(FirstLandingTurnFraction * turnYaw, PxVec3(0, 1, 0)).rotate(initialForward) :
+        initialForward;
     ImpactWarmupStep step = PlanImpactWarmupStep(hull, com, velocity, legLength * .22f,
-        static_cast<float>(PhysicsWorld::FixedDeltaTime));
+        static_cast<float>(PhysicsWorld::FixedDeltaTime), characterForward);
     // COM이 밀리는 방향으로 디디되, 회전한 발 배치에서도 원래 좌우 간격의 20%는 남긴다.
     const PxQuat stance = secondStep ? PxQuat(turnYaw, PxVec3(0, 1, 0)) * componentRotation : componentRotation;
     const float lateral = PxAbs(stance.rotateInv(step.stride).x);
@@ -115,7 +119,7 @@ float SkeletalMeshComponent::ImpactWarmup::GetLandingSoleYaw(size_t stepIndex) c
         displacement += steps[1].stride;
     }
     const PxVec3 turnedForward = (landingTurn * componentRotation * sole.q).rotate(PxVec3(0, 0, 1));
-    const PxVec3 forward = GetFootstepTravelForward(displacement, turnedForward);
+    const PxVec3 forward = GetFootstepSoleForward(displacement, turnedForward, steps[stepIndex].strideHeadingWeight);
     if (forward.isZero())
     {
         return turnYaw;

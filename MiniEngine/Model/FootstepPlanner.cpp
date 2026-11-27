@@ -213,6 +213,20 @@ namespace
         return result;
     }
 
+    PxVec3 LandingForward(const FootstepInput& input, const FootstepCommand& command, size_t side,
+        const PxVec3& landing, float strideWeight)
+    {
+        if (command.IsInProgress() && command.motion.landingTargetLocked)
+        {
+            return command.target.soleForward;
+        }
+        const FootstepFootInput& foot = input.feet[side];
+        const PxVec3 origin = command.IsInProgress() ? command.startPosition : foot.position;
+        const PxVec3 bodyForward(-input.supportRight.z, 0, input.supportRight.x);
+        const PxVec3 stance = input.supportRight * foot.stanceForwardInComponent.x + bodyForward * foot.stanceForwardInComponent.z;
+        return GetFootstepSoleForward(landing - origin, stance, strideWeight);
+    }
+
     FootstepTarget MakeTarget(const FootstepInput& input, const FootstepSettings& settings,
         const FootstepSnapshot& state, size_t side)
     {
@@ -303,6 +317,9 @@ namespace
         }
         result.position = origin + delta;
         result.normal = normal;
+        const PxVec3 bodyForward(-input.supportRight.z, 0, input.supportRight.x);
+        const float strideWeight = GetFootstepStrideWeight(bodyForward, result.landingCom.raw - result.landingCom.origin);
+        result.soleForward = LandingForward(input, command, side, result.position, strideWeight);
         result.travelDistance = HorizontalDistance(foot.position, result.position);
         result.separationDistance = other.available && other.position.isFinite() ?
             HorizontalDistance(other.position, result.position) : 0;
@@ -459,8 +476,8 @@ namespace
             const float idleWidth = std::abs(sign);
             reach.minimumWidth = MinimumStanceWidth(idleWidth, settings);
         }
-        const PxVec3 stepOrigin = request.feet[side].stepOrigin;
-        request.checkTargetPose = [&input, &state, side, stepOrigin](const PxVec3& position) -> FootstepPoseCheck
+        const float strideWeight = GetFootstepStrideWeight(request.forward, normal.landingCom.raw - normal.landingCom.origin);
+        request.checkTargetPose = [&input, &state, &command, side, strideWeight](const PxVec3& position) -> FootstepPoseCheck
         {
             if (!input.checkLandingPose)
             {
@@ -468,7 +485,7 @@ namespace
                 check.inputIssue = FootstepPoseInputIssue::Validator;
                 return check;
             }
-            return input.checkLandingPose(side, position, state.groundNormal, position - stepOrigin);
+            return input.checkLandingPose(side, position, state.groundNormal, LandingForward(input, command, side, position, strideWeight));
         };
         normal.recovery = SelectFootstepRecovery(request, settings.recovery);
         normal.recovery.pathRejected = inProgress && command.target.recovery.pathRejected;
@@ -476,6 +493,7 @@ namespace
         {
             // 이번 걸음의 모드에서 새 후보를 찾지 못하면 직전 착지점을 유지한다.
             normal.position = command.target.position;
+            normal.soleForward = command.target.soleForward;
             normal.raw = command.target.raw;
             normal.recovery.mode = command.target.recovery.mode;
             normal.travelDistance = HorizontalDistance(input.feet[side].position, normal.position);
@@ -494,6 +512,7 @@ namespace
             normal.recovery.pathRejected = request.locked ? command.target.recovery.pathRejected :
                 (request.hasRejectedTarget && (normal.recovery.target - request.rejectedTarget).magnitudeSquared() < .0001f);
             normal.position = normal.recovery.target;
+            normal.soleForward = LandingForward(input, command, side, normal.position, strideWeight);
             normal.travelDistance = HorizontalDistance(input.feet[side].position, normal.position);
             normal.separationDistance = HorizontalDistance(input.feet[1 - side].position, normal.position);
         }
@@ -649,7 +668,7 @@ namespace
 }
 
 ImpactWarmupStep PARS::PlanImpactWarmupStep(const FootstepPolygon& hull, const PxVec3& com,
-    const PxVec3& velocity, float maximumStride, float fixedDeltaTime)
+    const PxVec3& velocity, float maximumStride, float fixedDeltaTime, const PxVec3& characterForward)
 {
     ImpactWarmupStep step;
     if (!com.isFinite() || !velocity.isFinite() || !std::isfinite(maximumStride) || maximumStride <= 0 ||
@@ -685,6 +704,7 @@ ImpactWarmupStep PARS::PlanImpactWarmupStep(const FootstepPolygon& hull, const P
     step.duration = PxMax(1.0f, std::round(duration / fixedDeltaTime)) * fixedDeltaTime;
 
     const PxVec3 travel = planarVelocity * step.duration;
+    step.strideHeadingWeight = GetFootstepStrideWeight(characterForward, travel);
     const PxVec3 prediction = com + travel;
     const PxVec3 boundary = ClosestFootstepPoint(hull, prediction);
     const PxVec3 overrun(prediction.x - boundary.x, 0, prediction.z - boundary.z);

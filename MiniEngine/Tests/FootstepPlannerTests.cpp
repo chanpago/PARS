@@ -1256,8 +1256,9 @@ namespace
         const FootstepCommand locked = planner.GetSnapshot().feet[1];
         Check(Near(locked.target.position.x, lastEditable.position.x) &&
                 Near(locked.target.position.z, lastEditable.position.z) &&
+                locked.target.soleForward == lastEditable.soleForward &&
                 (planner.GetSnapshot().candidates[1].landingCom.origin - lastEditable.landingCom.origin).magnitude() > .1f,
-            "Latest COM and character heading update debug candidates without moving the locked landing point");
+            "Latest COM and character heading update debug candidates while the locked landing keeps its position and yaw");
         Check(planner.GetSnapshot().startCom.origin.x == input.com.x &&
                 planner.GetSnapshot().startCom.origin.z == input.com.z &&
                 !IsInsideFootstepLandingRegion(planner.GetSnapshot().startCom.region, planner.GetSnapshot().predictedCom),
@@ -1474,6 +1475,14 @@ void TestImpactWarmupPlanning()
     const PxVec3 shove(1, 0, 0);
     const float reach = .18f;
     const ImpactWarmupStep centered = PlanImpactWarmupStep(standing.hull, standing.com, shove, reach, dt);
+    const PxVec3 standingForward(0, 0, 1);
+    const ImpactWarmupStep sideStep = PlanImpactWarmupStep(standing.hull, standing.com, shove, reach, dt, standingForward);
+    const ImpactWarmupStep diagonal = PlanImpactWarmupStep(standing.hull, standing.com, shove, reach, dt,
+        PxVec3(1, 0, 1).getNormalized());
+    const ImpactWarmupStep axial = PlanImpactWarmupStep(standing.hull, standing.com, shove, reach, dt, PxVec3(-1, 0, 0));
+    Check(sideStep.stride == axial.stride && axial.stride == diagonal.stride && Near(sideStep.duration, axial.duration) &&
+        Near(sideStep.strideHeadingWeight, 0) && Near(diagonal.strideHeadingWeight, .5f) && Near(axial.strideHeadingWeight, 1),
+        "Turning the character changes warmup toe heading by the COM-line angle while preserving foot travel and timing");
     const ImpactWarmupStep nearEdge = PlanImpactWarmupStep(standing.hull, PxVec3(.23f, 1, 0), shove, reach, dt);
     Check(nearEdge.duration < centered.duration && nearEdge.stride.x > centered.stride.x,
         "The same shove from near the support edge needs a sooner, longer warmup placement");

@@ -562,6 +562,60 @@ namespace
         return input;
     }
 
+    void TestLandingHeadingFromComLine()
+    {
+        FootstepSettings settings;
+        settings.recovery.enabled = false;
+        settings.landingComClampEnabled = false;
+        for (size_t side = 0; side < 2; ++side)
+        {
+            const float sign = side == 0 ? -1.0f : 1.0f;
+            FootstepInput input = PlannerInput();
+            input.requestedFoot = static_cast<int>(side);
+            input.com = PxVec3(sign * .3f, 1, 0);
+            input.velocity = PxVec3(sign * .3f, 1.8f, 0);
+            const PxVec3 toes = PxVec3(sign * .12f, 0, 1).getNormalized();
+            input.feet[side].stanceForwardInComponent = toes;
+            FootstepPlanner planner;
+            planner.Update(input, settings);
+            const FootstepCommand& command = planner.GetSnapshot().feet[side];
+            Check(command.justStarted && sign * (command.target.position.x - command.startPosition.x) > .1f &&
+                (command.target.soleForward - toes).magnitude() < 1e-5f,
+                "A real lateral step at low horizontal COM speed keeps each foot's standing toe heading");
+
+            planner.Reset();
+            input.velocity = PxVec3(0, 1.8f, sign * .03f);
+            planner.Update(input, settings);
+            const FootstepCommand& aligned = planner.GetSnapshot().feet[side];
+            const PxVec3 delta = aligned.target.position - aligned.startPosition;
+            PxVec3 stride = PxVec3(delta.x, 0, delta.z).getNormalized();
+            if (stride.dot(toes) < 0)
+            {
+                stride = -stride;
+            }
+            Check(aligned.justStarted && (stride - toes).magnitude() > .1f &&
+                (aligned.target.soleForward - stride).magnitude() < 1e-5f,
+                "Even a slow forward or backward COM line uses the actual foot trajectory as the heading");
+        }
+
+        FootstepInput input = PlannerInput();
+        input.com = PxVec3(.18f, 1, .3f);
+        input.velocity = PxVec3(-.6f, 0, -.6f);
+        const PxVec3 toes = PxVec3(-.35f, 0, 1).getNormalized();
+        input.feet[1].stanceForwardInComponent = toes;
+        settings.landingComClampEnabled = true;
+        settings.landingPredictionTime = settings.startPredictionTime;
+        FootstepPlanner planner;
+        planner.Update(input, settings);
+        const FootstepTarget& target = planner.GetSnapshot().candidates[1];
+        const FootstepComPrediction& prediction = target.landingCom;
+        const float clampedWeight = GetFootstepStrideWeight(PxVec3(0, 0, 1), prediction.clamped - prediction.origin);
+        const PxVec3 stride = target.position - input.feet[1].position;
+        Check(prediction.limited && PxAbs(clampedWeight - .5f) > .01f &&
+            (target.soleForward - GetFootstepSoleForward(stride, toes, .5f)).magnitude() < 1e-5f,
+            "A 45-degree raw COM line keeps the half turn even when the support foot redirects the predicted point");
+    }
+
     void TestNormalStepBoundary()
     {
         FootstepSettings settings;
@@ -726,12 +780,17 @@ namespace
         // 기본 보폭 한도 안에서 선호점만 회복 영역 밖으로 옮긴다.
         input.feet[1].stanceOffset.x += .3f;
         FootstepPolygon checked;
-        input.checkLandingPose = [&checked, &input](size_t side, const PxVec3& point, const PxVec3& normal,
-            const PxVec3& displacement) -> FootstepPoseCheck
+        FootstepPolygon checkedHeadings;
+        input.feet[1].stanceForwardInComponent = PxVec3(.2f, 0, 1).getNormalized();
+        input.checkLandingPose = [&checked, &checkedHeadings, &input](size_t side, const PxVec3& point, const PxVec3& normal,
+            const PxVec3& soleForward) -> FootstepPoseCheck
         {
-            Check(normal == PxVec3(0, 1, 0) && displacement == point - input.feet[side].position,
-                "Each landing pose is checked with its own stride from the stepping foot");
+            const PxVec3 expected = GetFootstepSoleForward(point - input.feet[side].position,
+                input.feet[side].stanceForwardInComponent, 1.0f);
+            Check(normal == PxVec3(0, 1, 0) && (soleForward - expected).magnitude() < 1e-5f,
+                "Each landing pose uses the moving foot's standing heading and the candidate stride");
             checked.push_back(point);
+            checkedHeadings.push_back(soleForward);
             FootstepPoseCheck check;
             check.joints[2].correctionRadians = .82f;
             if (checked.size() != 2)
@@ -749,6 +808,8 @@ namespace
         Check(second.recovery.poseChecks == checked.size() &&
             std::equal(checked.begin(), checked.end(), second.recovery.poseCheckPositions.begin()),
             "the snapshot retains the checked positions through the first accepted landing");
+        Check(second.soleForward == checkedHeadings.back() && planner.GetSnapshot().feet[1].target.soleForward == second.soleForward,
+            "The drive command keeps the exact heading accepted by the landing validator");
         Check(second.recovery.poseCheckResults[0].failures == FootstepPoseFailure::Reach &&
             second.recovery.poseCheckResults[1].failures == FootstepPoseFailure::None &&
             second.recovery.poseCheckResults[1].joints[2].correctionRadians == .82f,
@@ -910,6 +971,7 @@ void TestFootstepRecovery()
     checks = 0;
     TestPolygonGeometry();
     TestNormalReachDisplay();
+    TestLandingHeadingFromComLine();
     TestNormalStepBoundary();
     TestBackwardFallFoothold();
     TestModeChoice();

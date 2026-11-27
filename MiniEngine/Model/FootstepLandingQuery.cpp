@@ -117,7 +117,7 @@ void FootstepLandingQuery::Prepare(const SkeletalMeshComponent& mesh, const Foot
 }
 
 FootstepPoseCheck FootstepLandingQuery::CheckPose(size_t side, const PxVec3& position, const PxVec3& normal,
-    const PxVec3& displacement) const
+    const PxVec3& soleForward) const
 {
     FootstepPoseCheck check(FootstepPoseFailure::InvalidInput);
     if (side >= m_Legs.size())
@@ -138,7 +138,7 @@ FootstepPoseCheck FootstepLandingQuery::CheckPose(size_t side, const PxVec3& pos
     const Leg& leg = m_Legs[side];
     TwoBoneIKInput input = leg.pose;
     input.jointLimits = &leg.jointLimits;
-    check.ikIssue = BuildFootSoleTarget(position, normal, leg.pose.targetSole, input.targetSole, displacement);
+    check.ikIssue = BuildFootSoleTarget(position, normal, leg.pose.targetSole, input.targetSole, soleForward);
     if (check.ikIssue != FootIKIssue::None)
     {
         return check;

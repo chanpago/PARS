@@ -198,18 +198,38 @@ namespace
         Check(SolveTwoBoneIK(invalidLength).issue == FootIKIssue::CalfLength,
             "an unsolved IK pose identifies the invalid leg segment");
 
-        const PxVec3 travel(-.2f, .4f, .6f);
-        const PxVec3 horizontal = PxVec3(travel.x, 0, travel.z).getNormalized();
-        for (const PxVec3& displacement : {travel, -travel})
+        constexpr float radians = PxPi / 180.0f;
+        const PxVec3 up(0, 1, 0);
+        const PxVec3 facing = animated.q.rotate(PxVec3(0, 0, 1));
+        const PxVec3 stance = PxQuat(-10 * radians, up).rotate(facing);
+        const PxVec3 stride = PxQuat(50 * radians, up).rotate(facing);
+        for (float degrees : {-90.0f, -60.0f, -45.0f, -30.0f, 0.0f, 15.0f, 30.0f, 37.5f, 45.0f, 52.5f, 60.0f, 75.0f, 90.0f})
         {
-            Check(MakeFootSoleTarget(PxVec3(0), normal, animated, target, displacement),
+            const float expectedWeight = PxClamp((60.0f - PxAbs(degrees)) / 30.0f, 0.0f, 1.0f);
+            const PxVec3 expected = PxQuat((-10.0f + 60.0f * expectedWeight) * radians, up).rotate(facing);
+            for (float scale : {.003f, 2.0f, -2.0f})
+            {
+                const PxVec3 comDelta = PxQuat(degrees * radians, up).rotate(facing) * scale + up;
+                const float weight = GetFootstepStrideWeight(facing + up, comDelta);
+                Check(PxAbs(weight - expectedWeight) < 1e-5f &&
+                    Near(GetFootstepSoleForward(stride, stance, weight), expected) &&
+                    Near(GetFootstepSoleForward(-stride, stance, weight), expected),
+                    "The unsigned horizontal body/COM angle blends toe yaw linearly at 30-60 degrees regardless of COM speed or sign");
+            }
+        }
+        Check(GetFootstepStrideWeight(facing, up) == 0 && GetFootstepStrideWeight(up, stride) == 0,
+            "A missing horizontal COM line or character forward keeps the standing foot heading");
+        for (const PxVec3& displacement : {stride, -stride})
+        {
+            const PxVec3 heading = GetFootstepSoleForward(displacement, stance, 1.0f);
+            Check(Near(heading, stride) && MakeFootSoleTarget(PxVec3(0), normal, animated, target, heading),
                 "Diagonal forward and backward steps produce a sloped sole target");
             const PxVec3 toes = target.q.rotate(PxVec3(0, 0, 1));
-            Check(Near(PxVec3(toes.x, 0, toes.z).getNormalized(), horizontal) && Near(target.q.rotate(PxVec3(0, 1, 0)), normal),
-                "Toe-out straightens along the horizontal stride without reversing the toes on a backward step");
+            Check(Near(PxVec3(toes.x, 0, toes.z).getNormalized(), stride) && Near(target.q.rotate(up), normal),
+                "The slope and the measured ankle do not change the planned horizontal toe heading");
         }
-        Check(MakeFootSoleTarget(PxVec3(0), PxVec3(0, 1, 0), animated, target, PxVec3(0, .1f, 0)) && Near(target, animated),
-            "A vertical lift alone preserves the current sole heading");
+        Check(Near(GetFootstepSoleForward(PxVec3(0, .1f, 0), stance, 1.0f), stance),
+            "A vertical lift alone preserves the standing heading");
     }
 
     struct PoseFixture

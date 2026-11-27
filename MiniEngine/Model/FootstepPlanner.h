@@ -17,10 +17,12 @@ namespace PARS
         // 루트의 이동을 제외한 발의 착지 편위이며 방향은 월드 수평축 기준이다.
         physx::PxVec3 stride{0};
         float duration = 0;
+        float strideHeadingWeight = 0;
     };
 
     ImpactWarmupStep PlanImpactWarmupStep(const FootstepPolygon& hull, const physx::PxVec3& com,
-        const physx::PxVec3& velocity, float maximumStride, float fixedDeltaTime);
+        const physx::PxVec3& velocity, float maximumStride, float fixedDeltaTime,
+        const physx::PxVec3& characterForward = physx::PxVec3(0));
     // 각속도(rad/s)를 발로 버티는 시간 동안의 수직축 회전각(rad)으로 변환한다.
     float PlanCapsuleImpactTurn(float yawSpeed, float duration);
 
@@ -94,6 +96,7 @@ namespace PARS
         physx::PxVec3 contactPosition{0};
         physx::PxVec3 normal{0};
         physx::PxVec3 stanceOffset{0};
+        physx::PxVec3 stanceForwardInComponent{0, 0, 1};
         std::array<physx::PxVec3, 4> corners{physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0), physx::PxVec3(0)};
         float calfLength = 0;
         float normalImpulse = 0;
@@ -109,7 +112,7 @@ namespace PARS
     {
     public:
         std::function<FootstepPoseCheck(size_t side, const physx::PxVec3& position, const physx::PxVec3& normal,
-            const physx::PxVec3& displacement)> checkLandingPose;
+            const physx::PxVec3& soleForward)> checkLandingPose;
         std::vector<physx::PxVec3> hull;
         uint64_t completedStep = 0;
         uint64_t revision = 0;
@@ -187,6 +190,7 @@ namespace PARS
         physx::PxVec3 raw{0};
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0};
+        physx::PxVec3 soleForward{0};
         physx::PxVec3 normalStepOutward{0};
         float travelDistance = 0;
         float separationDistance = 0;
