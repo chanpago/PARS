@@ -480,11 +480,14 @@ namespace
             Check(!state.HasLowPelvis() && !state.aborted, "A pelvis just above the threshold can keep stepping");
             input.pelvisY = input.feet[lower].position.y + input.standingPelvisHeight * settings.fallHeightRatio;
             Advance(planner, input, settings);
-            Check(state.HasLowPelvis() && state.aborted && state.reason == FootstepReason::LowPelvis && !state.IsInProgress(),
-                "Reaching the configured height triggers a fall on that tick even inside A");
+            Check(state.HasLowPelvis() && state.fallStepsRemaining == FootstepPlanner::MaximumFallSteps,
+                "Reaching the configured height triggers fall steps on that tick even inside A");
             input.pelvisY += 1;
+            input.rootReleased = true;
+            input.groundFall = true;
             Advance(planner, input, settings);
-            Check(state.aborted && state.abortCount == 1, "The ground fall remains latched until reset");
+            Check(state.fallStepsRemaining == FootstepPlanner::MaximumFallSteps,
+                "A rising pelvis during the same fall preserves the remaining steps");
         }
         FootstepPlanner planner;
         FootstepInput input = Standing();
@@ -498,12 +501,11 @@ namespace
         Check(!planner.GetSnapshot().HasLowPelvis(), "A missing standing reference cannot fabricate a height fall");
     }
 
-    void TestBackwardFallSteps()
+    void TestGroundFallSteps()
     {
         FootstepPlanner planner;
         const FootstepSettings settings = TestSettings();
         FootstepInput input = Standing();
-        input.fallingBackward = true;
         input.com.z = -.45f;
         input.velocity.z = -.5f;
         input.zone = EvaluateFootSupportBalance(input.hull, input.com).zone;
@@ -512,11 +514,11 @@ namespace
         input.feet[1].grounded = false;
         input.pelvisY = input.feet[0].position.y + .7f * input.standingPelvisHeight;
         Advance(planner, input, settings);
-        Check(state.backwardFallStepsRemaining == 2 && state.feet[1].IsInProgress() && state.startCount == 1,
+        Check(state.fallStepsRemaining == 2 && state.feet[1].IsInProgress() && state.startCount == 1,
             "A backward fall keeps the airborne first step at the normal fall threshold");
         input.rootReleased = true;
         input.idleAnimation = false;
-        input.fallingBackward = false;
+        input.groundFall = true;
         Advance(planner, input, settings);
         Check(state.feet[1].motion.valid && state.landingCount == 0 && !state.aborted,
             "Releasing the pelvis and switching to a fall clip preserve the swing");
@@ -524,24 +526,21 @@ namespace
         input.feet[1].grounded = true;
         Advance(planner, input, settings);
         planner.Update(input, settings);
-        Check(state.backwardFallStepsRemaining == 1 && state.landingCount == 1 && state.startCount == 1,
+        Check(state.fallStepsRemaining == 1 && state.landingCount == 1 && state.startCount == 1,
             "The first physical landing counts once and does not immediately lift the other foot");
         input.com.z = -.05f;
         input.zone = FootSupportZone::Inside;
         input.velocity.z = 0;
         input.feet[1].normalImpulse = 0;
         Advance(planner, input, settings, 4);
-        Check(state.startCount == 1 && state.backwardFallStepsRemaining == 1,
-            "The opposite leg waits for the foot that landed to take the load");
-        input.feet[1].normalImpulse = input.bodyWeight * input.fixedDeltaTime;
-        Advance(planner, input, settings, 4);
-        Check(state.startCount == 2 && state.feet[0].IsInProgress() && state.feet[0].motion.valid,
-            "The other leg can step during the fall even after the COM re-enters the hull");
+        Check(state.startCount == 2 && state.fallStepsRemaining == 1 &&
+                state.feet[0].IsInProgress() && state.feet[0].motion.valid && !state.loadTransfer.required,
+            "The opposite leg steps after a light touchdown even with the COM inside the hull");
         input.feet[0].grounded = false;
         Advance(planner, input, settings);
         input.feet[0].grounded = true;
         Advance(planner, input, settings);
-        Check(state.feet[0].justLanded && state.landingCount == 2 && state.backwardFallStepsRemaining == 0 &&
+        Check(state.feet[0].justLanded && state.landingCount == 2 && state.fallStepsRemaining == 0 &&
                 state.aborted && !state.IsInProgress(), "The second real landing ends backward fall stepping");
         Advance(planner, input, settings, 8);
         Check(state.startCount == 2 && state.abortCount == 1, "A latched fall cannot start a third step");
@@ -555,12 +554,12 @@ namespace
         Advance(planner, input, settings);
         Check(state.followupFoot == 0, "Ordinary recovery queues the foot opposite its last landing");
         input.zone = FootSupportZone::Invalid;
-        input.fallingBackward = true;
+        input.groundFall = true;
         input.feet[1].grounded = false;
         input.feet[0].timeToReachLimit = .25f;
         Advance(planner, input, settings);
         Check(state.feet[1].justStarted && state.feet[1].motion.hasSupportDeadline,
-            "A backward fall takes over the free foot even when ordinary recovery had queued the planted foot");
+            "A ground fall takes over the free foot even when ordinary recovery had queued the planted foot");
         input.rootReleased = true;
         input.feet[1].grounded = true;
         input.feet[1].landed = true;
@@ -570,21 +569,50 @@ namespace
         input.velocity = PxVec3(0);
         Advance(planner, input, settings);
         Check(state.feet[0].justStarted && state.feet[0].hasTakenOff && state.feet[0].motion.valid &&
-                Near(state.feet[0].motion.initialHeight, 0) && state.feet[1].justLanded && state.backwardFallStepsRemaining == 1,
+                Near(state.feet[0].motion.initialHeight, 0) && state.feet[1].justLanded && state.fallStepsRemaining == 1,
             "An already airborne foot can reach straight down without another takeoff or a standing load");
     }
 
-    void TestBackwardFallInterruptions()
+    void TestGroundFallEntry()
+    {
+        const FootstepSettings settings = TestSettings();
+        const std::array<PxVec3, 4> directions{{PxVec3(0, 0, 1), PxVec3(0, 0, -1), PxVec3(1, 0, 0), PxVec3(-1, 0, 0)}};
+        for (const PxVec3& direction : directions)
+        {
+            FootstepPlanner planner;
+            FootstepInput input = Standing();
+            input.idleAnimation = false;
+            input.rootReleased = true;
+            input.velocity = direction;
+            input.feet[0].grounded = false;
+            planner.Update(input, settings);
+            const FootstepSnapshot& state = planner.GetSnapshot();
+            Check(state.aborted && state.startCount == 0, "A release outside GroundFall cannot start a fall step");
+            input.groundFall = true;
+            Advance(planner, input, settings);
+            Check(!state.aborted && state.fallStepsRemaining == FootstepPlanner::MaximumFallSteps &&
+                state.feet[0].justStarted && state.feet[0].motion.valid && !state.HasLowPelvis(),
+                "Entering a directional fall clip with a released root starts the free leg at standing pelvis height");
+            input.pelvisGrounded = true;
+            Advance(planner, input, settings);
+            input.pelvisGrounded = false;
+            Advance(planner, input, settings);
+            Check(state.aborted && state.fallStepsRemaining == 0 && state.startCount == 1,
+                "A pelvis bouncing off the ground cannot restart the fall steps");
+        }
+    }
+
+    void TestGroundFallInterruptions()
     {
         FootstepPlanner planner;
         const FootstepSettings settings = TestSettings();
         FootstepInput input = Standing();
         input.zone = FootSupportZone::Invalid;
         input.hull.clear();
-        input.fallingBackward = true;
+        input.groundFall = true;
         planner.Update(input, settings);
         const FootstepSnapshot& state = planner.GetSnapshot();
-        Check(state.backwardFallStepsRemaining == 2, "A grounded backward fall can start when the support hull is lost");
+        Check(state.fallStepsRemaining == 2, "A ground fall can start when the support hull is lost");
         input.rootReleased = true;
         input.pelvisGrounded = true;
         Advance(planner, input, settings);
@@ -601,7 +629,7 @@ namespace
         Check(!state.aborted, "A remaining floor ray keeps the falling swing active without a complete support hull");
         input.hasFloorProjection = false;
         Advance(planner, input, settings);
-        Check(state.aborted && state.backwardFallStepsRemaining == 0, "Losing the floor ends the remaining attempts");
+        Check(state.aborted && state.fallStepsRemaining == 0, "Losing the floor ends the remaining attempts");
 
         planner.Reset();
         input.feet[0].grounded = true;
@@ -1524,9 +1552,10 @@ void TestImpactWarmupPlanning()
 void TestFootstepFalls()
 {
     TestLowestSoleFallHeight();
-    TestBackwardFallSteps();
-    TestBackwardFallInterruptions();
-    std::puts("PASS: lowest-sole fall height, backward fall steps and interruptions");
+    TestGroundFallSteps();
+    TestGroundFallEntry();
+    TestGroundFallInterruptions();
+    std::puts("PASS: lowest-sole fall height, directional GroundFall steps, light touchdowns and interruptions");
 }
 
 void TestFootstepPlanner()

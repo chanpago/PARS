@@ -111,10 +111,10 @@ namespace
         }
     }
 
-    void TestBackwardFallFoothold()
+    void TestGroundFallFoothold()
     {
         FootstepRecoveryInput input = Input();
-        input.backwardFall = true;
+        input.fallingStep = true;
         input.velocity.z = -3.0f;
         input.preferred.z = -1.0f;
         FootstepRecoverySettings settings;
@@ -130,6 +130,30 @@ namespace
         Check(result.hasTarget && result.status == FootstepRecoveryStatus::BestEffort &&
             result.poseChecks == 2 && (result.target - underHip).magnitudeSquared() < 1e-6f,
             "A falling character can plant under the hip within the usual pose budget when balance is out of reach");
+
+        input.checkTargetPose = [](const PxVec3& position) -> FootstepPoseCheck
+        {
+            FootstepPoseCheck check(FootstepPoseFailure::Reach);
+            check.solvedHipAnkleDistance = .6f;
+            check.soleError = .01f + std::abs(position.z);
+            return check;
+        };
+        const FootstepRecoverySnapshot attempt = SelectFootstepRecovery(input, settings);
+        Check(attempt.hasTarget && !attempt.modelFeasible && attempt.status == FootstepRecoveryStatus::BestEffort &&
+            (attempt.target - underHip).magnitudeSquared() < 1e-6f,
+            "A fall can aim for the closest joint-limited pose when no sole fits the ground exactly");
+        input.fallingStep = false;
+        Check(!SelectFootstepRecovery(input, settings).hasTarget, "Ordinary recovery still requires an attainable foothold");
+        input.fallingStep = true;
+        input.checkTargetPose = [](const PxVec3&) -> FootstepPoseCheck
+        {
+            FootstepPoseCheck check(FootstepPoseFailure::Reach);
+            check.failures |= FootstepPoseFailure::OppositeLegOverlap;
+            check.solvedHipAnkleDistance = .6f;
+            check.soleError = .01f;
+            return check;
+        };
+        Check(!SelectFootstepRecovery(input, settings).hasTarget, "A fall attempt cannot use a pose that intersects the other leg");
     }
 
     void TestNormalReachDisplay()
@@ -278,12 +302,12 @@ namespace
             inside.mode == FootstepMode::Normal && inside.status == FootstepRecoveryStatus::BestEffort,
             "cross overlap alone cannot turn an inside center into a crossover");
         input.com.x = input.feet[0].position.x - .01f;
-        input.backwardFall = true;
+        input.fallingStep = true;
         const FootstepRecoverySnapshot outside = SelectFootstepRecovery(input, settings);
         Check(outside.hasTarget && outside.mode == FootstepMode::FrontCross,
             "a fall cannot inject a normal under-hip target into the selected cross modes");
 
-        input.backwardFall = false;
+        input.fallingStep = false;
         input.com.z = 0;
         input.firstStepTime = .45f;
         settings.maximumPoseChecks = 2;
@@ -973,7 +997,7 @@ void TestFootstepRecovery()
     TestNormalReachDisplay();
     TestLandingHeadingFromComLine();
     TestNormalStepBoundary();
-    TestBackwardFallFoothold();
+    TestGroundFallFoothold();
     TestModeChoice();
     TestCaptureCenterCrossing();
     TestNearestNormalLanding();

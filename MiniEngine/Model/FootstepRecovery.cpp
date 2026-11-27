@@ -418,7 +418,7 @@ namespace
                     {best.mode, start + stride * .5f, best.score}, {best.mode, start + stride * .25f, best.score}});
             }
         }
-        if (input.backwardFall && modes[0] && !result.reachable[0].empty())
+        if (input.fallingStep && modes[0] && !result.reachable[0].empty())
         {
             // 이미 넘어지는 중에는 골반 아래에서 짧게 짚을 수 있는 자세를 같은 검사 예산 안에서 먼저 찾는다.
             const FootstepPolygon& reach = result.reachable[0];
@@ -427,6 +427,8 @@ namespace
             const PxVec3 underFoot = ClosestFootstepPoint(reach, input.feet[input.movingFoot].stepOrigin);
             candidates.insert(candidates.begin(), {{0, (underHip + towardFall) * .5f, 0}, {0, underHip, 0}, {0, underFoot, 0}});
         }
+        const LandingCandidate* closestFallAttempt = nullptr;
+        float smallestSoleError = std::numeric_limits<float>::infinity();
         for (const LandingCandidate& candidate : candidates)
         {
             if (input.hasRejectedTarget && DistanceSquared(candidate.position, input.rejectedTarget) < .0001f)
@@ -458,13 +460,30 @@ namespace
             if (check.failures)
             {
                 result.poseRejected = true;
+                // 낙상에서는 발바닥을 정확히 맞추기 어려워도 관절 한계 안에서 가장 가까이 뻗을 수 있다.
+                if (input.fallingStep && input.modeSelection == FootstepRecoveryInput::ModeSelection::NewStep &&
+                    check.failures == FootstepPoseFailure::Reach && check.ikIssue == FootIKIssue::None &&
+                    check.solvedHipAnkleDistance > 0 && check.soleError < smallestSoleError)
+                {
+                    closestFallAttempt = &candidate;
+                    smallestSoleError = check.soleError;
+                }
                 continue;
             }
             result.target = candidate.position;
             result.mode = static_cast<FootstepMode>(candidate.mode);
             result.hasTarget = true;
-            result.modelFeasible = hasOverlap && (!input.backwardFall || Contains(result.intersections[candidate.mode], candidate.position));
+            result.modelFeasible = hasOverlap && (!input.fallingStep || Contains(result.intersections[candidate.mode], candidate.position));
             result.status = result.modelFeasible ? FootstepRecoveryStatus::Feasible : FootstepRecoveryStatus::BestEffort;
+            return;
+        }
+        if (closestFallAttempt)
+        {
+            result.target = closestFallAttempt->position;
+            result.mode = static_cast<FootstepMode>(closestFallAttempt->mode);
+            result.hasTarget = true;
+            result.modelFeasible = false;
+            result.status = FootstepRecoveryStatus::BestEffort;
             return;
         }
         result.status = result.poseRejected ? FootstepRecoveryStatus::PoseRejected : FootstepRecoveryStatus::NoReach;

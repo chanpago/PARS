@@ -132,7 +132,7 @@ namespace PARS
         bool automaticSupport = false;
         bool idleAnimation = false;
         bool rootReleased = false;
-        bool fallingBackward = false;
+        bool groundFall = false;
         bool pelvisGrounded = false;
         bool hasFloorProjection = false;
         bool hasCom = false;
@@ -301,12 +301,13 @@ namespace PARS
         FootstepReason reason = FootstepReason::Inactive;
         int requestedFoot = -1;
         int followupFoot = -1;
-        uint32_t backwardFallStepsRemaining = 0;
+        uint32_t fallStepsRemaining = 0;
         bool hasPrediction = false;
         bool needsStep = false;
         bool hasGroundPlane = false;
         bool hasImpact = false;
         bool aborted = false;
+        bool fallStepsStarted = false;
     };
 
     class FootstepPlanner
@@ -328,7 +329,7 @@ namespace PARS
         }
 
     public:
-        static constexpr uint32_t MaximumBackwardFallSteps = 2;
+        static constexpr uint32_t MaximumFallSteps = 2;
 
     private:
         FootstepSnapshot m_Snapshot;

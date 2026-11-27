@@ -132,7 +132,10 @@ namespace PARS
             m_FootSupport.Reset();
         }
         const PARS::FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
-        if (!IsActiveRagdoll() || sample.contactRevision != m_Recovery.GetSnapshot().revision)
+        // 낙상 중에는 일반 회복 상태가 초기화되므로 다리 IK의 접촉 이력으로 무릎 굽힘의 연속성을 판단한다.
+        const uint64_t revision = m_BalanceState == CharacterBalanceState::GroundFall ?
+            m_FootstepIK.GetSnapshot().revision : m_Recovery.GetSnapshot().revision;
+        if (!IsActiveRagdoll() || sample.contactRevision != revision)
         {
             ResetRecovery();
         }
@@ -146,7 +149,7 @@ namespace PARS
         // IK를 실행할 수 있는 상태인지 확인. 발 지지 정보와 발딛기 상태를 가져옴
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const FootstepSnapshot& step = sample.footstep;
-        const bool fallingSteps = step.backwardFallStepsRemaining > 0;
+        const bool fallingSteps = step.fallStepsRemaining > 0;
         const bool hasRecoveryTargets = m_RootSupportRelease == RootSupportRelease::None && m_HasRecoverySoles &&
             (m_Ragdoll.UsesFootDrivenSupport() || m_Recovery.GetSnapshot().state == RecoveryState::Recovery);
 
@@ -180,7 +183,7 @@ namespace PARS
 
         const std::vector<int>& nodes = m_Ragdoll.GetBoneNodes();
         StandingSupportInput standing;
-        standing.enabled = m_Ragdoll.UsesFootDrivenSupport();
+        standing.enabled = !fallingSteps && m_Ragdoll.UsesFootDrivenSupport();
         standing.stepping = step.IsInProgress();
         standing.stepDistance = step.GetMaximumInitialDistance();
         standing.deltaTime = deltaTime;

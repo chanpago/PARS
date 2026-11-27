@@ -395,8 +395,9 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh, const Matrix
 
     // 애니메이션 전환 중이 아니고 현재 클립이름이 idle일때만 true
     const bool idle = !animation.IsBlending() && animation.GetAnimationName(animation.GetCurrentAnimationIndex()) == "Idle";
-    const bool continuingFallSteps = m_FootstepPlanner.GetSnapshot().backwardFallStepsRemaining > 0;
-    const bool planningSteps = idle || continuingFallSteps;
+    const bool groundFall = mesh.GetBalanceState() == CharacterBalanceState::GroundFall;
+    const FootstepSnapshot& step = m_FootstepPlanner.GetSnapshot();
+    const bool planningSteps = idle || step.fallStepsRemaining > 0 || (groundFall && !step.fallStepsStarted);
 
     if (m_IdleReferenceRevision != m_Snapshot.contactRevision || !planningSteps)
     {
@@ -405,14 +406,17 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh, const Matrix
     }
 
     // 필요할 때 idle 자세의 양발 본 변환을 저장
-    if (idle && !m_HasIdleReference && m_Snapshot.feet[0].available && m_Snapshot.feet[1].available)
+    if (planningSteps && !m_HasIdleReference && m_Snapshot.feet[0].available && m_Snapshot.feet[1].available)
     {
         PhysicsSkeleton skeleton;
         std::vector<Matrix4> reference;
+        std::vector<GraphNode> idlePose;
         std::string error;
 
-        // 메시의 본 계층과 연결정보를 준비, animation.GetPose()에 들어잇는 그 시점의 Idle애니메이션 자세를 본 계층에 따라 계산해서 reference에 넣음 reference는 vector<matrix>
-        if (mesh.BuildPhysicsSkeleton(skeleton, error) && EvaluatePhysicsPose(skeleton, animation.GetPose(), Matrix4(kIdentity), reference, error))
+        // 낙상 클립에서 처음 기준이 필요해져도 같은 Idle 보폭과 골반 높이를 사용한다.
+        const bool hasPose = idle || animation.SampleAnimationPose(mesh.GetIdleAnimationIndex(), 0, idlePose);
+        if (hasPose && mesh.BuildPhysicsSkeleton(skeleton, error) &&
+            EvaluatePhysicsPose(skeleton, idle ? animation.GetPose() : idlePose, Matrix4(kIdentity), reference, error))
         {
             m_StandingPelvisHeight = 0;
             float lowestSoleY = std::numeric_limits<float>::infinity();
@@ -488,11 +492,8 @@ void PARS::FootSupport::UpdateFootstep(SkeletalMeshComponent& mesh, const Matrix
         input.standingPelvisHeight = m_StandingPelvisHeight;
         input.pelvisY = float(ragdoll.GetBoneWorld(root).GetW().GetY());
     }
-    const bool fullBodyFall = mesh.IsFallingAnimationEnabled() &&
-        mesh.GetAnimInstance().GetMotionFrameRange(MotionFrameUsage::ShoveFall).frameCount > 0;
-    input.fallingBackward = !fullBodyFall && input.active && input.automaticSupport && idle && !input.rootReleased &&
-        mesh.GetGroundFallDirection() == FallDirection::Backward;
-    if (root >= 0 && (input.fallingBackward || continuingFallSteps))
+    input.groundFall = groundFall;
+    if (root >= 0 && input.active && input.automaticSupport && planningSteps)
     {
         PhysicsGroundContact contact;
         input.pelvisGrounded = ragdoll.GetBodyGroundContact(static_cast<size_t>(root), contact);

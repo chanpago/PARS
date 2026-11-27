@@ -183,7 +183,7 @@ namespace PARS
         bool tryShorterFirstStep = false;
         bool locked = false;
         bool hasRejectedTarget = false;
-        bool backwardFall = false;
+        bool fallingStep = false;
     };
 
     struct FootstepNormalReach

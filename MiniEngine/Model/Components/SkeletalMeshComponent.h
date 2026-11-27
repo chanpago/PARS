@@ -338,6 +338,7 @@ namespace PARS
             return m_BalanceState;
         }
         FallDirection GetGroundFallDirection() const;
+        uint32_t GetIdleAnimationIndex() const;
         bool IsFollowingFallingAnimation() const;
         bool SetStandingUpAnimation(uint32_t animationIndex, uint32_t idleAnimationIndex);
         bool IsFollowingStandingUpAnimation() const;
@@ -440,7 +441,6 @@ namespace PARS
         }
         bool IsFallingClip(uint32_t animationIndex) const;
         bool IsAirborneFallClip(uint32_t animationIndex) const;
-        uint32_t GetIdleAnimationIndex() const;
         MotionMatchResult SelectFallingAnimation() const;
         const std::vector<GraphNode>& GetImpactAnimationPose() const
         {

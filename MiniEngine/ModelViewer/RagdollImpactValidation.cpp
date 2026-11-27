@@ -294,7 +294,7 @@ namespace
             "normal_area,front_area,back_area,capture_pieces,decision_steps,path_rejected,"
             "animation_clip,animation_time_s,com_velocity_x,com_velocity_z,target_in_capture_margin,balance_state,"
             "pelvis_to_lowest_sole_ratio,fall_height_threshold_ratio,"
-            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,swing_target_y,backward_fall_steps_remaining,upper_body_clip,upper_body_time_s\n";
+            "has_support_deadline,trajectory_duration_s,trajectory_elapsed_s,landing_time_error_s,swing_target_y,fall_steps_remaining,upper_body_clip,upper_body_time_s\n";
     }
 
     void RecordLandingComFrame(std::ostream& stream, PARS::SkeletalMeshComponent& mesh, uint32_t frame)
@@ -352,7 +352,7 @@ namespace
                 stream << PARS::SampleFootstepPosition(command, ahead).y;
             }
             const uint32_t upper = mesh.GetImpactFlailClip();
-            stream << ',' << support.footstep.backwardFallStepsRemaining << ',';
+            stream << ',' << support.footstep.fallStepsRemaining << ',';
             if (upper < animation.GetAnimationCount())
             {
                 stream << animation.GetAnimationName(upper);
@@ -586,8 +586,7 @@ bool RunKinematicRecoveryValidation(RagdollImpactTest& test, PARS::World& world,
             {
                 const FootSupportSnapshot& support = mesh.GetFootSupport().GetSnapshot();
                 check(support.footstep.HasLowPelvis() &&
-                        (support.footstep.aborted || (mesh.GetGroundFallDirection() == FallDirection::Backward &&
-                        support.footstep.backwardFallStepsRemaining > 0)) &&
+                        (support.footstep.aborted || support.footstep.fallStepsRemaining > 0) &&
                         !mesh.GetRagdoll().UsesFootDrivenSupport() && !mesh.GetRagdoll().IsRootSupported() &&
                         mesh.GetBalanceState() == CharacterBalanceState::GroundFall &&
                         (!mesh.IsFallingAnimationEnabled() || mesh.IsFollowingFallingAnimation()),
@@ -1140,6 +1139,17 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const float time = (frame + 1) / 60.0f;
             const SkeletalMeshComponent& dummyMesh = dummy->GetMesh();
             const FootSupportSnapshot& dummySupport = dummyMesh.GetFootSupport().GetSnapshot();
+            if (dummyMesh.GetBalanceState() == CharacterBalanceState::GroundFall &&
+                dummySupport.footstep.fallStepsRemaining > 0 && dummySupport.footstep.IsInProgress())
+            {
+                const FootstepIKSnapshot& ik = dummyMesh.GetFootstepIKSnapshot();
+                check(ik.status == FootstepIKStatus::Applied && !ik.correctedNodes.empty() &&
+                    ik.motionTargets[0] == dummySupport.footstep.feet[0].IsInProgress() &&
+                    ik.motionTargets[1] == dummySupport.footstep.feet[1].IsInProgress() &&
+                    !dummyMesh.GetRagdoll().IsRootSupported() && !dummyMesh.GetRagdoll().UsesFootDrivenSupport() &&
+                    (!dummyMesh.IsFallingAnimationEnabled() || dummyMesh.IsFollowingFallingAnimation()),
+                    "GroundFall drives the stepping leg while the fall clip plays with the pelvis unsupported");
+            }
             const bool swingingSecondFoot = dummyMesh.IsImpactWarmupActive() && warmupLandings == 1;
             if ((checkWarmup || releaseOnContact) && dummyMesh.IsImpactWarmupActive())
             {

@@ -667,7 +667,7 @@ namespace PARS
         }
         // 이번 틱에 발딛기를 포기한 경우도 낙상 경로에 맡겨, 서기 복귀가 먼저 시작되지 않게 한다.
         if (!IsActiveRagdoll() || IsFalling() || IsGroundFallActive() ||
-            sample.footstep.aborted || sample.footstep.backwardFallStepsRemaining > 0)
+            sample.footstep.aborted || sample.footstep.fallStepsRemaining > 0)
         {
             m_KinematicRecoveryTimer.Reset();
             return true;
@@ -853,15 +853,17 @@ namespace PARS
         const FootSupportSnapshot& sample = m_FootSupport.GetSnapshot();
         const FootstepSnapshot& step = sample.footstep;
 
-        if (IsGroundFallActive() && IsFollowingFallingAnimation())
-        {
-            // 지상 낙상 클립이 시작된 뒤에는 팔과 다리도 선택된 전신 자세를 따른다.
-            return true;
-        }
-        if (step.backwardFallStepsRemaining > 0)
+        if (m_BalanceState == CharacterBalanceState::GroundFall && step.fallStepsRemaining > 0 && step.IsInProgress())
         {
             // 낙상 클립의 상체를 유지하고 지면을 짚는 다리에만 목표를 적용한다.
             ApplyFootstepIKTargets(target, deltaTime);
+            return true;
+        }
+        if (IsGroundFallActive() && IsFollowingFallingAnimation())
+        {
+            m_FootstepIK.Reset();
+            m_FootstepAvoidance.Reset();
+            m_FootstepCollision = {};
             return true;
         }
 
