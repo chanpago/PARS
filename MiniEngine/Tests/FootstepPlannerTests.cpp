@@ -363,17 +363,19 @@ namespace
         FootstepInput input = Standing();
         input.velocity = PxVec3(-2, 0, 1);
         input.feet[0].grounded = false;
+        settings.preventCrossing = false;
         planner.Update(input, settings);
         const FootstepTarget narrowed = planner.GetSnapshot().feet[1].target;
+        const PxVec3 outward = PxVec3(1, 0, 2).getNormalized();
         Check(narrowed.valid && narrowed.stanceWidthLimited &&
-                Near(narrowed.position.x - input.feet[0].position.x, .24f * settings.minimumStanceWidthRatio),
+                Near((narrowed.position - input.feet[0].position).dot(outward), .24f * settings.minimumStanceWidthRatio),
             "Width limiting uses the other foot as geometry without requiring its contact");
         planner.Reset();
         settings.preventCrossing = true;
         settings.crossingOffset = .3f;
         planner.Update(input, settings);
-        Check(planner.GetSnapshot().feet[1].target.crossingLimited &&
-                Near(planner.GetSnapshot().feet[1].target.position.x - input.feet[0].position.x, .3f),
+        const FootstepTarget& limited = planner.GetSnapshot().feet[1].target;
+        Check(limited.crossingLimited && Near((limited.position - input.feet[0].position).dot(outward), .3f),
             "Optional crossing prevention remains a geometric target constraint");
     }
 

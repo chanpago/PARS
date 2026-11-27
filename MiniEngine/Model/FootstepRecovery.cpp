@@ -165,9 +165,12 @@ namespace
         FootstepNormalReach result;
         const FootstepReachInput& foot = input.feet[side];
         const FootstepReachInput& support = input.feet[1 - side];
+        const PxVec3 outward = foot.stepStartOutward.isZero() ?
+            GetFootstepNormalOutward(input.velocity, foot.outward) : foot.stepStartOutward;
         if (!foot.available || !support.available || foot.sole.size() < 3 || support.sole.size() < 3 ||
             !foot.hip.isFinite() || !foot.ankleOffset.isFinite() || !foot.outward.isFinite() ||
             std::abs(foot.outward.magnitudeSquared() - 1.0f) > .01f ||
+            !outward.isFinite() || std::abs(outward.magnitudeSquared() - 1.0f) > .01f ||
             !std::isfinite(foot.legLength) || foot.legLength <= 0 ||
             !std::isfinite(foot.minimumWidth) || foot.minimumWidth < 0)
         {
@@ -180,13 +183,13 @@ namespace
         {
             return result;
         }
-        const float physicalWidth = FootstepSoleHalfExtent(foot.sole, foot.position, foot.outward) +
-            FootstepSoleHalfExtent(support.sole, support.position, foot.outward) + settings.clearance;
+        const float physicalWidth = FootstepSoleHalfExtent(foot.sole, foot.position, outward) +
+            FootstepSoleHalfExtent(support.sole, support.position, outward) + settings.clearance;
         result.center = PxVec3(foot.hip.x - foot.ankleOffset.x, input.groundHeight, foot.hip.z - foot.ankleOffset.z);
         result.radius = std::sqrt(radiusSquared);
-        result.outward = foot.outward;
+        result.outward = outward;
         result.minimumWidth = (std::max)(foot.minimumWidth, physicalWidth);
-        result.minimumProjection = support.position.dot(foot.outward) + result.minimumWidth;
+        result.minimumProjection = support.position.dot(outward) + result.minimumWidth;
         result.combinedHalfLength = FootstepSoleHalfExtent(foot.sole, foot.position, input.forward) +
             FootstepSoleHalfExtent(support.sole, support.position, input.forward);
         return result;
@@ -466,6 +469,24 @@ namespace
         }
         result.status = result.poseRejected ? FootstepRecoveryStatus::PoseRejected : FootstepRecoveryStatus::NoReach;
     }
+}
+
+PxVec3 PARS::GetFootstepNormalOutward(const PxVec3& velocity, const PxVec3& bodyOutward)
+{
+    constexpr float minimumSpeed = .05f;
+    constexpr float sideStepAlignment = .17364818f; // 순수 옆걸음에서 10도 이내
+    // 보정 전 예측 COM까지의 수평 변위는 수평 속도에 예측 시간을 곱한 값이다.
+    PxVec3 outward(velocity.z, 0, -velocity.x);
+    if (!outward.isFinite() || outward.normalize() <= minimumSpeed)
+    {
+        return bodyOutward;
+    }
+    const float alignment = outward.dot(bodyOutward);
+    if (std::abs(alignment) <= sideStepAlignment)
+    {
+        return bodyOutward;
+    }
+    return alignment > 0 ? outward : -outward;
 }
 
 FootstepPolygon FootstepNormalReach::BuildPolygon() const

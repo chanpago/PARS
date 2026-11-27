@@ -1462,7 +1462,9 @@ namespace
             ImGui::SliderFloat(u8"부채꼴 경계 선택 유지 반각 (도)", &settings.landingComClampHysteresisDegrees,
                 0.0f, 30.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
             ImGui::TextWrapped(u8"기존 일반 딛기 후보에 적용하는 COM 보정입니다. 회복 영역 판단과 교차 후보는 보정 전 실제 COM·속도를 사용합니다. 회복 영역 선택을 끄면 기존 청록색 보정점으로 시작을 판단합니다.");
-            ImGui::Checkbox(u8"발 교차 억제 (경계 0.1m)", &settings.preventCrossing);
+            ImGui::Checkbox(u8"발 교차 억제", &settings.preventCrossing);
+            ImGui::SameLine();
+            ImGui::Text(u8"(경계 %.2f m)", settings.crossingOffset);
             if (step.hasPrediction)
             {
                 ImGui::Text(u8"시작 판정용 COM 보정 예측 (%.3f, %.3f, %.3f) m / A %s", step.predictedCom.x,

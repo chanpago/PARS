@@ -34,7 +34,7 @@ namespace PARS
         float stanceScale = 1.7f;
         float minimumStanceWidthRatio = .0f;
         float maximumStepLength = 1.0f; // 각 발 명령의 출발점에서 허용하는 최대 이동 거리(m)
-        float crossingOffset = .1f;
+        float crossingOffset = .3f;
         float liftHeightScale = .20f;
         float backwardLiftTimeRatio = 1.25f; // 완전히 뒤로 디딜 때 상승 시간과 하강 시간의 비
         float stepDuration = MinimumFootstepDuration;
@@ -188,6 +188,7 @@ namespace PARS
         physx::PxVec3 raw{0};
         physx::PxVec3 position{0};
         physx::PxVec3 normal{0};
+        physx::PxVec3 normalStepOutward{0};
         float travelDistance = 0;
         float separationDistance = 0;
         FootstepComPrediction landingCom;

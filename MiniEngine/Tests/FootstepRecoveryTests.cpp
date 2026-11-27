@@ -562,6 +562,89 @@ namespace
         return input;
     }
 
+    void TestNormalStepBoundary()
+    {
+        FootstepSettings settings;
+        settings.recovery.maximumSteps = 1;
+        Check(settings.crossingOffset == .3f, "Default crossing clearance is 30 cm");
+        for (size_t side = 0; side < 2; ++side)
+        {
+            const float footSign = side == 0 ? -1.0f : 1.0f;
+            for (const float travelSign : {-1.0f, 1.0f})
+            {
+                FootstepPlanner planner;
+                FootstepInput input = PlannerInput();
+                input.requestedFoot = static_cast<int>(side);
+                input.com.z = 0;
+                input.velocity = PxVec3(footSign * .6f, 0, travelSign * .6f);
+                planner.Update(input, settings);
+
+                const PxVec3 outward = PxVec3(footSign, 0, -travelSign).getNormalized();
+                const PxVec3 support = input.feet[1 - side].position;
+                const PxVec3 boundaryPoint = support + outward * .3f + input.velocity * .1f;
+                const FootstepRecoverySnapshot& search = planner.GetSnapshot().candidates[side].recovery;
+                const FootstepPolygon overlay = search.normalReach.BuildPolygon();
+                const FootstepCommand& command = planner.GetSnapshot().feet[side];
+                Check(command.justStarted && command.target.recovery.mode == FootstepMode::Normal &&
+                    (search.normalReach.outward - outward).magnitude() < 1e-5f &&
+                    (command.target.position - support).dot(outward) >= .3f - 1e-5f,
+                    "Both feet land at least 30 cm outward across forward and backward diagonal travel");
+                const PxVec3 inside = boundaryPoint + outward * .01f;
+                const PxVec3 outside = boundaryPoint - outward * .01f;
+                Check(IsInsideFootSupportHull(overlay, inside) && !IsInsideFootSupportHull(overlay, outside) &&
+                    IsInsideFootSupportHull(search.reachable[0], inside) && !IsInsideFootSupportHull(search.reachable[0], outside),
+                    "The black overlay and normal landing search cut at the same perpendicular distance");
+
+                input.feet[side].grounded = false;
+                input.velocity.x = -input.velocity.x;
+                ++input.completedStep;
+                planner.Update(input, settings);
+                Check(command.phase == FootstepPhase::Airborne && (search.normalReach.outward - outward).magnitude() < 1e-5f &&
+                    (command.target.position - support).dot(outward) >= .3f - 1e-5f,
+                    "Changing COM direction during swing preserves the step-start boundary");
+                input.feet[side].grounded = true;
+                ++input.completedStep;
+                planner.Update(input, settings);
+                const PxVec3 nextOutward = PxVec3(footSign, 0, travelSign).getNormalized();
+                Check(command.justLanded && (planner.GetSnapshot().candidates[side].normalStepOutward - nextOutward).magnitude() < 1e-5f,
+                    "The next landing candidate uses the new travel direction after touchdown");
+            }
+        }
+
+        FootstepRecoveryInput preview = Input();
+        preview.stepping = false;
+        for (const PxVec3& velocity : {PxVec3(.02f, 2, .02f), PxVec3(-1, 0, .1f), PxVec3(1, 0, 0)})
+        {
+            preview.velocity = velocity;
+            const FootstepRecoverySnapshot result = SelectFootstepRecovery(preview, settings.recovery);
+            Check(result.normalReach.outward == preview.feet[preview.movingFoot].outward,
+                "Nearly stationary and sideways steps use the body's lateral axis");
+        }
+
+        FootstepInput input = PlannerInput();
+        input.com = PxVec3(.18f, 1, .3f);
+        input.velocity = PxVec3(-.6f, 0, -.6f);
+        FootstepPlanner planner;
+        planner.Update(input, settings);
+        const FootstepComPrediction& prediction = planner.GetSnapshot().startCom;
+        const PxVec3 outward = planner.GetSnapshot().candidates[1].recovery.normalReach.outward;
+        Check(prediction.limited && std::abs((prediction.raw - prediction.origin).dot(outward)) < 1e-5f &&
+            std::abs((prediction.clamped - prediction.origin).dot(outward)) > .01f,
+            "The boundary follows the raw COM displacement when support-foot correction changes the prediction");
+
+        planner.Reset();
+        input = PlannerInput();
+        input.velocity = PxVec3(0, 0, 1);
+        planner.Update(input, settings);
+        input.feet[1].grounded = false;
+        ++input.completedStep;
+        planner.Update(input, settings);
+        const FootstepCommand& swing = planner.GetSnapshot().feet[1];
+        Check(swing.phase == FootstepPhase::Airborne && swing.motion.swingOutwardOffset.isZero() &&
+            swing.target.position.x - input.feet[0].position.x >= .3f - 1e-5f,
+            "Starting with a narrow stance widens the landing without a sudden lateral offset at takeoff");
+    }
+
     void TestFollowupAfterOneStepLanding()
     {
         FootstepSettings settings;
@@ -827,6 +910,7 @@ void TestFootstepRecovery()
     checks = 0;
     TestPolygonGeometry();
     TestNormalReachDisplay();
+    TestNormalStepBoundary();
     TestBackwardFallFoothold();
     TestModeChoice();
     TestCaptureCenterCrossing();

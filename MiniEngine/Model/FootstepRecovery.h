@@ -23,6 +23,8 @@ namespace PARS
         return extent;
     }
 
+    physx::PxVec3 GetFootstepNormalOutward(const physx::PxVec3& velocity, const physx::PxVec3& bodyOutward);
+
     enum class FootstepRecoveryStatus
     {
         Unavailable,
@@ -140,6 +142,8 @@ namespace PARS
         physx::PxVec3 hip{0};
         physx::PxVec3 ankleOffset{0};
         physx::PxVec3 outward{0};
+        // 진행 중인 걸음에서 고정한 일반 딛기 경계의 법선이다. 새 걸음은 현재 COM 속도로 정한다.
+        physx::PxVec3 stepStartOutward{0};
         physx::PxVec3 stepOrigin{0};
         float legLength = 0;
         float minimumWidth = 0;

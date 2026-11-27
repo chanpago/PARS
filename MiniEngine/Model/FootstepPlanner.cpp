@@ -68,26 +68,14 @@ namespace
             return PxVec3(0);
         }
 
-        const PxVec3 outward = signedIdleWidth > 0 ? right : -right;
-        const PxVec3 forward(-right.z, 0, right.x);
-        const FootstepNormalReach& reach = state.candidates[side].recovery.normalReach;
-        float minimumWidth;
-        float combinedHalfLength;
-        if (reach.radius > 0)
-        {
-            // 이번 틱에 검은 영역의 안쪽 경계를 만들 때 구한 양발 간격을 그대로 사용한다.
-            minimumWidth = reach.minimumWidth;
-            combinedHalfLength = reach.combinedHalfLength;
-        }
-        else
-        {
-            // 회복 영역 탐색을 생략한 일반 스텝에도 현재 양발 사각형으로 같은 기준을 적용한다.
-            const float physicalWidth = FootstepSoleHalfExtent(moving.corners, moving.position, outward) +
-                FootstepSoleHalfExtent(support.corners, support.position, outward) + settings.recovery.clearance;
-            minimumWidth = (std::max)(physicalWidth, MinimumStanceWidth(std::abs(signedIdleWidth), settings));
-            combinedHalfLength = FootstepSoleHalfExtent(moving.corners, moving.position, forward) +
-                FootstepSoleHalfExtent(support.corners, support.position, forward);
-        }
+        const PxVec3 outward = state.feet[side].target.normalStepOutward;
+        const PxVec3 alongBoundary(-outward.z, 0, outward.x);
+        const float physicalWidth = FootstepSoleHalfExtent(moving.corners, moving.position, outward) +
+            FootstepSoleHalfExtent(support.corners, support.position, outward) + settings.recovery.clearance;
+        const float currentWidth = (moving.position - support.position).dot(outward);
+        // 좁게 출발한 발은 착지 궤적을 따라 벌리고, 공중 보정은 발바닥 겹침과 추가로 좁아지는 폭만 막는다.
+        const float stanceWidth = MinimumStanceWidth(std::abs(signedIdleWidth), settings);
+        const float minimumWidth = (std::max)(physicalWidth, (std::min)(stanceWidth, currentWidth));
         const float missingWidth = minimumWidth - nextSeparation.dot(outward);
         if (missingWidth <= 0)
         {
@@ -95,7 +83,9 @@ namespace
         }
 
         // 앞뒤로 스치기 시작하거나 빠져나오는 구간에서는 겹치는 깊이만큼만 보정한다.
-        const float foreOverlap = combinedHalfLength - std::abs(nextSeparation.dot(forward));
+        const float combinedHalfLength = FootstepSoleHalfExtent(moving.corners, moving.position, alongBoundary) +
+            FootstepSoleHalfExtent(support.corners, support.position, alongBoundary);
+        const float foreOverlap = combinedHalfLength - std::abs(nextSeparation.dot(alongBoundary));
         return outward * PxClamp(foreOverlap, 0.0f, (std::min)(missingWidth, minimumWidth));
     }
 
@@ -269,27 +259,28 @@ namespace
             result.lengthLimited = true;
         }
         const FootstepFootInput& other = input.feet[1 - side];
+        const float signedIdleWidth = (foot.stanceOffset - other.stanceOffset).dot(input.supportRight);
+        const PxVec3 bodyOutward = signedIdleWidth >= 0 ? input.supportRight : -input.supportRight;
+        result.normalStepOutward = command.IsInProgress() ? command.target.normalStepOutward :
+            GetFootstepNormalOutward(input.velocity, bodyOutward);
         if ((settings.preventCrossing || settings.minimumStanceWidthRatio > 0) &&
             other.available && other.position.isFinite() && other.stanceOffset.isFinite())
         {
-            PxVec3 outward = input.supportRight;
-            const float sideDirection = (foot.stanceOffset - other.stanceOffset).dot(outward);
-            if (!outward.isFinite() || std::abs(sideDirection) < 1e-6f)
+            if (!input.supportRight.isFinite() || std::abs(signedIdleWidth) < 1e-6f)
             {
                 return result;
             }
-            outward *= sideDirection > 0 ? 1.0f : -1.0f;
-            outward -= normal * outward.dot(normal);
-            if (outward.normalize() < 1e-6f)
+            PxVec3 outward = result.normalStepOutward - normal * result.normalStepOutward.dot(normal);
+            const float planeScale = outward.normalize();
+            if (planeScale < 1e-6f)
             {
                 return result;
             }
-            // 반대 발은 간격 계산에만 사용하며 그 발의 접지 여부는 요구하지 않는다.
-            const float idleWidth = std::abs((foot.stanceOffset - other.stanceOffset).dot(outward));
-            const float minimumWidth = idleWidth * settings.minimumStanceWidthRatio;
+            // 경사면에서도 반대 발과의 최소 폭은 수평 경계의 법선 방향으로 잰다.
+            const float minimumWidth = std::abs(signedIdleWidth) * settings.minimumStanceWidthRatio;
             const float crossingWidth = settings.preventCrossing ? settings.crossingOffset : 0.0f;
-            const float relativeOther = (other.position - origin).dot(outward);
-            const float requiredLateral = relativeOther + (std::max)(minimumWidth, crossingWidth);
+            const float relativeOther = (other.position - origin).dot(result.normalStepOutward);
+            const float requiredLateral = (relativeOther + (std::max)(minimumWidth, crossingWidth)) / planeScale;
             const float minimumLateral = (std::min)(settings.maximumStepLength, requiredLateral);
             const float lateral = delta.dot(outward);
             if (lateral < minimumLateral)
@@ -304,8 +295,9 @@ namespace
                     result.lengthLimited = true;
                 }
                 delta = outward * minimumLateral + tangent;
-                result.stanceWidthLimited = lateral < relativeOther + minimumWidth;
-                result.crossingLimited = settings.preventCrossing && lateral < relativeOther + crossingWidth;
+                const float width = lateral * planeScale - relativeOther;
+                result.stanceWidthLimited = width < minimumWidth;
+                result.crossingLimited = settings.preventCrossing && width < crossingWidth;
                 result.lengthLimited = result.lengthLimited || requiredLateral > settings.maximumStepLength;
             }
         }
@@ -462,6 +454,8 @@ namespace
             reach.maximumDistance = settings.maximumStepLength;
             const float sign = (input.feet[foot].stanceOffset - input.feet[1 - foot].stanceOffset).dot(input.supportRight);
             reach.outward = input.supportRight * (sign >= 0 ? 1.0f : -1.0f);
+            const FootstepCommand& footCommand = state.feet[foot];
+            reach.stepStartOutward = footCommand.IsInProgress() ? footCommand.target.normalStepOutward : PxVec3(0);
             const float idleWidth = std::abs(sign);
             reach.minimumWidth = MinimumStanceWidth(idleWidth, settings);
         }
