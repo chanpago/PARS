@@ -204,7 +204,7 @@ namespace PARS
         void UpdateHorizontalBalance(float deltaTime);
         void ApplyCrossStepDrivePose(const FootSupportSnapshot& support, float deltaTime, std::vector<Math::Matrix4>& target);
         void ResetCrossStepPlayback();
-        void TrackShoveContact(const std::vector<RagdollBodyImpulse>& impacts);
+        void TrackShoveContact(const std::vector<RagdollBodyImpulse>& impacts, const physx::PxVec3& centerOfMass);
         void StartShoveReaction(float yaw);
         void UpdateImpactFlail(bool triggerReaction, float deltaTime);
         void ApplyFootstepIKTargets(std::vector<Math::Matrix4>& target, float deltaTime);

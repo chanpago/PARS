@@ -162,6 +162,8 @@ void SkeletalMeshComponent::UpdateCapsuleImpactFacing(float yawSpeedChange, floa
         PxMin(0.0f, m_CapsuleFacingAllowance), PxMax(0.0f, m_CapsuleFacingAllowance));
     const float yaw = PxClamp(m_Ragdoll.GetSupportedPelvisYawOffset(), PxMin(0.0f, actualStep), PxMax(0.0f, actualStep));
     m_CapsuleFacingAllowance = (m_CapsuleFacingAllowance - yaw) * std::exp(-deltaTime / MaximumFootstepDuration);
+    // 발 지지 때문에 아직 루트가 돌지 않은 첫 틱에도 실측 각충격량의 방향으로 상체가 반응한다.
+    float reactionYaw = yawSpeedChange * deltaTime;
     if (yaw != 0)
     {
         const PxVec3 center = m_FootSupport.GetSnapshot().centerOfMass;
@@ -172,9 +174,10 @@ void SkeletalMeshComponent::UpdateCapsuleImpactFacing(float yawSpeedChange, floa
         actor.SetTranslation(pivot + turn * (actor.GetTranslation() - pivot));
         if (GetOwner().SetActorTransform(actor))
         {
-            StartShoveReaction(yaw);
+            reactionYaw = yaw;
         }
     }
+    StartShoveReaction(reactionYaw);
 }
 
 bool SkeletalMeshComponent::UpdateImpactWarmup(float deltaTime, const std::vector<RagdollImpactResponse>& responses, float capsuleYawSpeed)

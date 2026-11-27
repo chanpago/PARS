@@ -982,7 +982,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
         float secondLandingYaw = 0;
         float supportedYaw = 0;
         bool sawGlancingWarmup = false;
+        std::string warmupUpperBodyClip;
         std::string firstShoulder;
+        bool checkedShoulderTurn = false;
         for (uint32_t frame = 0; frame < frames; ++frame)
         {
             if (modeCycles && frame % 60 == 0)
@@ -1150,9 +1152,15 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             if (checkWarmup && dummyMesh.IsImpactWarmupActive())
             {
                 const Ragdoll& body = dummyMesh.GetRagdoll();
-                check(body.GetKinematicBodyCount() == body.GetBodyCount() &&
-                    dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Slow Jog Backwards",
-                    "The kinematic upper body follows Slow Jog Backwards during capsule warmup");
+                const std::string& clip = dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip());
+                if (warmupTicks == 0)
+                {
+                    warmupUpperBodyClip = clip;
+                    check(clip == "Slow Jog Backwards" || (lateralOffset != 0 && (clip == "ShoveReactionLeft" || clip == "ShoveReactionRight")),
+                        "A centered frontal warmup uses the balance reaction and an offset hit can use a shoulder reaction");
+                }
+                check(body.GetKinematicBodyCount() == body.GetBodyCount() && clip == warmupUpperBodyClip,
+                    "The kinematic upper body keeps the selected impact clip through the warmup");
                 const Vector3 pelvis(body.GetBoneWorld(body.GetImpactRootBody()).GetW());
                 const float pelvisY = pelvis.GetY();
                 const Vector3 root = dummy->GetActorLocation();
@@ -1244,9 +1252,9 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
                         (warmupLandings == 2 || interruptedSwing),
                         "Two opposite feet swing, with early handoff only on a new impact during the second swing");
                     handoffSupportFoot = swingFeet[warmupLandings - 1];
-                    check(!dummyMesh.GetRagdoll().GetImpactReaction().IsYielding() &&
-                        dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == "Slow Jog Backwards",
-                        "The first active step continues tracking Slow Jog Backwards at full drive strength");
+                    check(!dummyMesh.GetRagdoll().GetImpactReaction().IsYielding() && (interruptedSwing ||
+                        dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip()) == warmupUpperBodyClip),
+                        "The first active step keeps the warmup clip at full drive strength until a new impact");
                     if (!interruptedSwing)
                     {
                         check(slideVelocity.magnitude() > .25f && (velocity - slideVelocity).magnitude() < .025f,
@@ -1310,14 +1318,19 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const Vector3 dummyForward = dummy->GetActorTransform().GetZ();
             const float actorYaw = std::atan2(float(dummyForward.GetX()), float(dummyForward.GetZ()));
             yawChange = DirectX::XMConvertToDegrees(std::remainder(actorYaw - initialYaw, DirectX::XM_2PI));
-            if (glancing != 0 && firstShoulder.empty())
+            if (glancing != 0 && !checkedShoulderTurn)
             {
                 const std::string& clip = dummyMesh.GetAnimInstance().GetAnimationName(dummyMesh.GetImpactFlailClip());
-                if (clip == "ShoveReactionLeft" || clip == "ShoveReactionRight")
+                if (firstShoulder.empty() && (clip == "ShoveReactionLeft" || clip == "ShoveReactionRight"))
                 {
                     firstShoulder = clip;
-                    check(yawChange != 0 && clip == (yawChange > 0 ? "ShoveReactionLeft" : "ShoveReactionRight"),
+                }
+                // 발 지지가 첫 틱의 루트 회전을 막을 수 있으므로 실제로 방향이 변한 시점에 비교한다.
+                if (!firstShoulder.empty() && std::abs(yawChange) > .001f)
+                {
+                    check(firstShoulder == (yawChange > 0 ? "ShoveReactionLeft" : "ShoveReactionRight"),
                         "The first shoulder reaction matches the sign of the actor's actual turn");
+                    checkedShoulderTurn = true;
                 }
             }
             if (glancing != 0 && dummyMesh.IsImpactWarmupActive())
@@ -1432,7 +1445,7 @@ bool RunCharacterBodyImpactValidation(RagdollImpactTest& test, PARS::World& worl
             const float angle = DirectX::XMConvertToRadians(approachDegrees);
             const bool sideApproach = std::abs(std::sin(angle)) > std::abs(std::cos(angle));
             report << "first_shoulder=" << firstShoulder << std::endl;
-            check(sideApproach == !firstShoulder.empty(), "Side approaches play a shoulder reaction and frontal glances keep their balance reaction");
+            check(checkedShoulderTurn, "Both frontal shoulder grazes and lateral glancing hits play a directional upper-body reaction");
             // 측면 충돌의 회전 방향은 출발 오프셋만으로 정해지지 않으므로 첫 실측 회전과 비교한다.
             const bool expectPositiveYaw = sideApproach ? firstShoulder == "ShoveReactionLeft" : lateralOffset < 0;
             const float sign = expectPositiveYaw ? 1.0f : -1.0f;

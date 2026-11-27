@@ -113,13 +113,13 @@ namespace PARS
         return UINT32_MAX;
     }
 
-    void SkeletalMeshComponent::TrackShoveContact(const std::vector<RagdollBodyImpulse>& impacts)
+    void SkeletalMeshComponent::TrackShoveContact(const std::vector<RagdollBodyImpulse>& impacts, const PxVec3& centerOfMass)
     {
         if (m_ShoveReactionAnimations[0] == UINT32_MAX)
         {
             return;
         }
-        // 한 번의 충돌이 여러 몸통 본에서 보고되면 가장 큰 수평 충격으로 진입 방향을 판정한다.
+        // 같은 틱에 여러 캡슐이 닿으면 수평 충격이 가장 큰 접촉을 선택한다.
         const RagdollBodyImpulse* hit = nullptr;
         float largest = 1e-8f;
         for (const RagdollBodyImpulse& impact : impacts)
@@ -137,14 +137,23 @@ namespace PARS
         }
         m_ShoveContact = {};
         m_ShoveContact.id = hit->impactContactId;
-        const PxVec3 velocity = hit->capsuleVelocity;
-        const PxVec3 approach = velocity.x * velocity.x + velocity.z * velocity.z > 1e-6f ? velocity : hit->impulse;
+        // 여러 몸통 본에 걸친 접촉은 충격량으로 가중한다. 방향 성분의 비율만 쓰므로 가중치 합은 생략한다.
+        PxVec3 offset(0);
+        for (const RagdollBodyImpulse& impact : impacts)
+        {
+            if (impact.impactContactId == hit->impactContactId)
+            {
+                offset += (impact.position - centerOfMass) * impact.impulse.magnitude();
+            }
+        }
         const Vector3 forward = GetComponentTransform().GetZ();
-        const float axial = float(forward.GetX()) * approach.x + float(forward.GetZ()) * approach.z;
-        const float lateral = float(forward.GetZ()) * approach.x - float(forward.GetX()) * approach.z;
-        const bool sideImpact = std::abs(lateral) > std::abs(axial);
-        m_ShoveContact.pending = sideImpact && hit->capsuleTorqueMultiplier > 0;
-        if (!sideImpact && m_ImpactFlail.playingShove)
+        const float axial = float(forward.GetX()) * offset.x + float(forward.GetZ()) * offset.z;
+        const float lateral = float(forward.GetZ()) * offset.x - float(forward.GetX()) * offset.z;
+        // 정면 중앙은 기존 반응을 쓴다. 앞에서 들어와도 접촉점이 어깨 쪽으로 벗어나면 밀침 반응을 쓴다.
+        constexpr float centerHalfWidthToDepth = .5f;
+        const bool shoulderHit = std::abs(lateral) > centerHalfWidthToDepth * std::abs(axial);
+        m_ShoveContact.pending = shoulderHit && hit->capsuleTorqueMultiplier > 0;
+        if (!shoulderHit && m_ImpactFlail.playingShove)
         {
             // 별개의 정면 충돌은 진행 중인 어깨 반응에서 기존 균형 반응으로 전환한다.
             std::vector<GraphNode> source = std::move(m_ImpactFlail.pose);
@@ -159,7 +168,7 @@ namespace PARS
         {
             return;
         }
-        // 회전 계산의 수치 오차를 넘긴 첫 방향을 접촉당 한 번만 사용한다.
+        // 수치 오차를 넘긴 첫 회전 방향을 접촉당 한 번만 사용한다.
         m_ShoveContact.yaw += yaw;
         if (std::abs(m_ShoveContact.yaw) < 1e-5f)
         {

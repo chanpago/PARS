@@ -208,7 +208,6 @@ namespace PARS
             const std::vector<RagdollBodyImpulse>& impacts = m_Ragdoll.GetExternalImpacts();
             if (IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()) || IsImpactWarmupActive())
             {
-                TrackShoveContact(impacts);
                 // 예열이나 물리 모드 전환이 접촉을 비우기 전에 같은 스텝으로 상처와 손 목표를 기록한다.
                 m_Ragdoll.UpdateWounds(impacts);
                 hit = FindImpactHandReach(impacts);
@@ -228,9 +227,13 @@ namespace PARS
         UpdateFootSupport();
         const FootSupportSnapshot& support = m_FootSupport.GetSnapshot();
         // 모드 전환이 접촉을 비우기 전에 읽는다. 예열 인계에서는 새로 부딪힌 캡슐만 이어받는다.
-        const bool capsuleCanTurn = IsActiveRagdoll() || m_AutomaticRagdoll || IsImpactWarmupActive();
-        const float capsuleYawSpeed = capsuleCanTurn && support.hasCenterOfMass ?
-            m_Ragdoll.GetCapsuleImpactYawSpeed(support.centerOfMass, IsImpactWarmupActive()) : 0.0f;
+        const bool capsuleCanTurn = IsActiveRagdoll() || (m_AutomaticRagdoll && !IsRagdoll()) || IsImpactWarmupActive();
+        float capsuleYawSpeed = 0.0f;
+        if (capsuleCanTurn && support.hasCenterOfMass)
+        {
+            TrackShoveContact(m_Ragdoll.GetExternalImpacts(), support.centerOfMass);
+            capsuleYawSpeed = m_Ragdoll.GetCapsuleImpactYawSpeed(support.centerOfMass, IsImpactWarmupActive());
+        }
         if (support.hasGroundedFoot)
         {
             GetOwner().GetWorld()->GetPhysicsWorld()->RecordGroundedImpactReceiver(&GetOwner());
