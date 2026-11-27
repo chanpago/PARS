@@ -101,7 +101,7 @@ namespace PARS
     // 한 호출 안에서는 골반·지지 다리를 고정한 계획 궤적과 관측한 추종 오차 범위를 검사한다.
     // 이 모델의 시간 구간 전체가 분리되어야 통과하며, 예산·수치 한계는 미확인으로 반환한다.
     // 미래 외력이나 지지 다리의 운동을 보장하지 않으므로 매 물리 틱 다시 검사해야 한다.
-    // 발의 도달 제한은 후보 거절 조건이고, 관절 각도 보정은 디버그용으로 기록한다.
+    // 관절 보정 후에도 남은 발 목표 오차는 도달 판정에 반영하고 보정 발생 여부를 기록한다.
     FootstepCollisionSnapshot PredictFootstepCollisions(const FootstepCollisionInput& input,
         FootstepCollisionPass pass = FootstepCollisionPass::CurrentPath);
 }

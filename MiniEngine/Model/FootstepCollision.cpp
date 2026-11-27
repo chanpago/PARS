@@ -75,6 +75,7 @@ namespace
             }
             sample.solePositions[side] = solved.solvedSole.p;
             sample.reachLimited = sample.reachLimited || solved.reachLimited;
+            result.jointLimited = result.jointLimited || solved.jointAdjusted;
             if (input.legs[side].command.IsInProgress() && input.checkJoints)
             {
                 const FootstepJointStatus joints = input.checkJoints(side, solved);

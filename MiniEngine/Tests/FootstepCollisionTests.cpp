@@ -2,6 +2,7 @@
 #include <cmath>
 #include "../Model/FootstepCollisionBounds.h"
 #include "../Model/FootstepAvoidance.h"
+#include "../Model/PhysicsAsset.h"
 #include "FramePerformance.h"
 #include <chrono>
 #include <cstdio>
@@ -298,6 +299,40 @@ namespace
         std::printf("PASS: %u curved IK intervals contain dense transformed geometry\n", checked);
     }
 
+    void TestBoundAfterJointCorrection()
+    {
+        FootstepCollisionLeg leg = MakeLeg(.5f);
+        PhysicsConstraint locked;
+        FootIKJointLimits limits;
+        limits.joints.fill(&locked);
+        limits.project = [](const PhysicsConstraint&, const PxQuat&) -> PxQuat
+        {
+            return PxQuat(PxIdentity);
+        };
+        limits.contains = [](const PhysicsConstraint&, PxQuat, float) -> bool
+        {
+            return false;
+        };
+        leg.pose.jointLimits = &limits;
+        std::array<FootstepInterval::Transform, 3> bounds;
+        Check(BoundFootstepLeg(leg, .12f, .13f, bounds), "A corrected interval has a conservative leg envelope");
+        for (int sample = 0; sample <= 5; ++sample)
+        {
+            std::array<PxTransform, 3> shapes;
+            LegIKResult solved;
+            Check(PredictFootstepLeg(leg, .12f + sample * .002f, shapes, solved) && solved.jointAdjusted,
+                "The collision sample uses the same joint-limited foot pose as the drive");
+            for (size_t part = 0; part < shapes.size(); ++part)
+            {
+                const FootstepInterval::Vector& box = bounds[part].position;
+                const PxVec3 point = shapes[part].p;
+                Check(point.x >= box.x.lower && point.x <= box.x.upper && point.y >= box.y.lower &&
+                    point.y <= box.y.upper && point.z >= box.z.lower && point.z <= box.z.upper,
+                    "The continuous bound includes the corrected shape even when it leaves the animation bend plane");
+            }
+        }
+    }
+
     FootstepCollisionInput MakeAvoidanceFixture()
     {
         FootstepCollisionInput input = MakeInput();
@@ -415,6 +450,7 @@ void TestFootstepCollision()
     TestUnavailableAndReachLimit();
     TestIntervalsAndTracking();
     TestBoundsContainCurvedIK();
+    TestBoundAfterJointCorrection();
     TestAvoidanceAndContinuity();
     std::puts("PASS: FootstepCollision continuous bounds, tracking, primitives, avoidance and failure handling");
 }

@@ -78,6 +78,7 @@ void FootstepLandingQuery::Prepare(const SkeletalMeshComponent& mesh, const Foot
             continue;
         }
         leg.anchor = Frame(m_Ragdoll->GetBoneWorld(leg.bodies[0]));
+        PrepareFootIKJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(), leg.bodies, leg.anchor.q, leg.jointLimits);
         leg.pose.hip = Frame(m_Ragdoll->GetBoneWorld(leg.bodies[1]));
         leg.pose.knee = Frame(m_Ragdoll->GetBoneWorld(leg.bodies[2]));
         leg.pose.ankle = Frame(m_Ragdoll->GetBoneWorld(leg.bodies[3]));
@@ -136,6 +137,7 @@ FootstepPoseCheck FootstepLandingQuery::CheckPose(size_t side, const PxVec3& pos
     }
     const Leg& leg = m_Legs[side];
     TwoBoneIKInput input = leg.pose;
+    input.jointLimits = &leg.jointLimits;
     check.ikIssue = BuildFootSoleTarget(position, normal, leg.pose.targetSole, input.targetSole, displacement);
     if (check.ikIssue != FootIKIssue::None)
     {
@@ -150,17 +152,20 @@ FootstepPoseCheck FootstepLandingQuery::CheckPose(size_t side, const PxVec3& pos
     }
     // 도달 오차가 있어도 계산된 자세로 다른 탈락 사유와 관절 보정량을 함께 확인한다.
     check.failures = FootstepPoseFailure::None;
-    if (solved.reachError > FootstepPoseCheck::SoleTolerance)
+    if (solved.reachError > FootstepPoseCheck::SoleTolerance || solved.soleAngleError > FootstepSoleAngleTolerance)
     {
         check.failures |= FootstepPoseFailure::Reach;
         check.soleError = solved.reachError;
+        check.soleAngleError = solved.soleAngleError;
         check.requestedHipAnkleDistance = (solved.requestedAnkle - solved.hip.p).magnitude();
         check.solvedHipAnkleDistance = (solved.ankle.p - solved.hip.p).magnitude();
         check.reachLimited = solved.reachLimited;
+        check.jointAdjusted = solved.jointAdjusted;
     }
     const std::array<PxTransform, 4> frames{{leg.anchor, solved.hip, solved.knee, solved.ankle}};
-    if (CheckFootstepJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(), leg.bodies, frames, &check.joints) ==
-        FootstepJointStatus::InvalidInput)
+    const FootstepJointStatus jointStatus = CheckFootstepJointLimits(*m_Asset, m_Ragdoll->UsesArticulation(),
+        leg.bodies, frames, &check.joints);
+    if (jointStatus == FootstepJointStatus::InvalidInput || !leg.jointLimits.project)
     {
         check.failures |= FootstepPoseFailure::InvalidInput;
     }

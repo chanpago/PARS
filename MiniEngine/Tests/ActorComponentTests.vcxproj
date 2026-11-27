@@ -46,6 +46,8 @@
     <ClCompile Include="..\Model\RagdollRecoveryPose.cpp" />
     <ClCompile Include="PhysicsAssetTests.cpp" />
     <ClCompile Include="JointLimitTests.cpp" />
+    <ClCompile Include="..\Model\FootstepIK.cpp" />
+    <ClCompile Include="..\Model\FootstepJointIK.cpp" />
     <ClCompile Include="..\Model\PhysicsAsset.cpp" />
     <ClCompile Include="..\Model\PhysicsPose.cpp" />
     <ClCompile Include="..\Model\Ragdoll.cpp" />

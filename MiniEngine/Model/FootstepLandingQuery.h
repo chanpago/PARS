@@ -16,6 +16,7 @@ namespace PARS
         struct Leg
         {
         public:
+            FootIKJointLimits jointLimits;
             std::array<FootstepCollisionShape, 3> shapes;
             TwoBoneIKInput pose;
             physx::PxTransform anchor{physx::PxIdentity};

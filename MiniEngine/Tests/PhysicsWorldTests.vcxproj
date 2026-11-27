@@ -51,6 +51,7 @@
     <ClCompile Include="FootstepRecoveryTests.cpp" />
     <ClCompile Include="FootstepIKTests.cpp" />
     <ClCompile Include="..\Model\FootstepIK.cpp" />
+    <ClCompile Include="..\Model\FootstepJointIK.cpp" />
     <ClCompile Include="..\Model\FallArmBrace.cpp" />
     <ClCompile Include="FootstepCollisionTests.cpp" />
     <ClCompile Include="..\Model\FootstepCollision.cpp" />

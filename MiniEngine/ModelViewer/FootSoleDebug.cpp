@@ -260,13 +260,19 @@ namespace
             {
                 return std::string(FootLabel(static_cast<int>(movingFoot))) + u8" IK 계산 불가 · " + FootIKIssueLabel(check.ikIssue);
             }
-            if (check.soleError > 0)
+            if (check.soleError > 0 || check.jointAdjusted)
             {
                 std::snprintf(value, sizeof(value), u8"%s 발바닥 오차 %.3f mm / 허용 %.1f mm, 고관절-발목 목표 %.2f cm / 계산 %.2f cm",
                     FootLabel(static_cast<int>(movingFoot)), check.soleError * 1000, PARS::FootstepPoseCheck::SoleTolerance * 1000,
                     check.requestedHipAnkleDistance * 100, check.solvedHipAnkleDistance * 100);
                 details = value;
-                if (check.reachLimited && check.requestedHipAnkleDistance > check.solvedHipAnkleDistance)
+                if (check.jointAdjusted)
+                {
+                    std::snprintf(value, sizeof(value), u8"관절 제한 보정 후 발바닥 방향 오차 %.2f°",
+                        check.soleAngleError * 180.0f / physx::PxPi);
+                    AppendDetail(details, value);
+                }
+                else if (check.reachLimited && check.requestedHipAnkleDistance > check.solvedHipAnkleDistance)
                 {
                     AppendDetail(details, u8"최대로 펴도 목표가 너무 멂");
                 }

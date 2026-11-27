@@ -7,6 +7,29 @@
 
 namespace PARS
 {
+    struct PhysicsConstraint;
+
+    constexpr float FootstepSoleTolerance = .005f;
+    constexpr float FootstepSoleAngleTolerance = .01f;
+
+    struct FootIKJointLimits
+    {
+    public:
+        using ProjectRotation = physx::PxQuat (*)(const PhysicsConstraint&, const physx::PxQuat&);
+        using ContainsRotations = bool (*)(const PhysicsConstraint&, physx::PxQuat, float);
+
+    public:
+        ProjectRotation project = nullptr;
+        ContainsRotations contains = nullptr;
+        std::array<const PhysicsConstraint*, 3> joints{};
+        // 고관절, 무릎, 발목 순서의 PA 관절축을 부모 본과 자식 본 기준으로 저장한다.
+        std::array<physx::PxQuat, 3> parentFrames{{physx::PxQuat(physx::PxIdentity),
+            physx::PxQuat(physx::PxIdentity), physx::PxQuat(physx::PxIdentity)}};
+        std::array<physx::PxQuat, 3> childFrames{{physx::PxQuat(physx::PxIdentity),
+            physx::PxQuat(physx::PxIdentity), physx::PxQuat(physx::PxIdentity)}};
+        physx::PxQuat anchorRotation{physx::PxIdentity};
+    };
+
     enum class KneeHintSource
     {
         Animation,
@@ -39,6 +62,7 @@ namespace PARS
     struct TwoBoneIKInput
     {
     public:
+        const FootIKJointLimits* jointLimits = nullptr;
         physx::PxTransform hip{physx::PxIdentity};
         physx::PxTransform knee{physx::PxIdentity};
         physx::PxTransform ankle{physx::PxIdentity};
@@ -66,9 +90,11 @@ namespace PARS
         physx::PxVec3 requestedAnkle{0};
         physx::PxVec3 bendDirection{0};
         float reachError = 0;
+        float soleAngleError = 0;
         FootIKIssue issue = FootIKIssue::None;
         bool valid = false;
         bool reachLimited = false;
+        bool jointAdjusted = false;
     };
 
     // 발끝과 가까운 쪽을 택해 보폭의 수평축을 정한다. 수평 이동이 없으면 영벡터를 반환한다.
@@ -80,12 +106,14 @@ namespace PARS
         const physx::PxTransform& referenceSole, physx::PxTransform& target,
         const physx::PxVec3& displacement = physx::PxVec3(0));
     LegIKResult SolveTwoBoneIK(const TwoBoneIKInput& input);
+    void ConstrainFootstepLeg(const FootIKJointLimits& limits, const physx::PxTransform& soleInBone, LegIKResult& result);
     float PredictSupportReachTime(const physx::PxVec3& hipFromAnkle,
         const physx::PxVec3& hipVelocity, float thighLength, float calfLength);
 
     struct FootIKLegInput
     {
     public:
+        FootIKJointLimits jointLimits;
         int anchorNode = -1;
         int hipNode = -1;
         int kneeNode = -1;

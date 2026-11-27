@@ -321,6 +321,10 @@ LegIKResult PARS::SolveTwoBoneIK(const TwoBoneIKInput& input)
     result.bendDirection = bend;
     result.reachError = (result.solvedSole.p - input.targetSole.p).magnitude();
     result.reachLimited = PxAbs(distance - requestedDistance) > 1e-6f;
+    if (input.jointLimits && input.jointLimits->project)
+    {
+        ConstrainFootstepLeg(*input.jointLimits, input.soleInBone, result);
+    }
     result.valid = result.hip.isSane() && result.knee.isSane() && result.ankle.isSane() &&
         result.solvedSole.isSane() && std::isfinite(result.reachError);
     if (!result.valid)
@@ -445,6 +449,7 @@ bool FootstepIK::BuildLegInput(const FootstepIKInput& input, size_t side,
         return false;
     }
     const PxTransform toPhysical = leg.actualAnchor * pose[leg.anchorNode].getInverse();
+    result.jointLimits = input.motionTargets[side] && leg.jointLimits.project ? &leg.jointLimits : nullptr;
     result.hip = toPhysical * pose[leg.hipNode];
     result.knee = toPhysical * pose[leg.kneeNode];
     result.ankle = toPhysical * pose[leg.ankleNode];

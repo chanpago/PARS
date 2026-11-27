@@ -158,6 +158,7 @@
       <Filter>Components</Filter>
     </ClCompile>
     <ClCompile Include="FootstepIK.cpp" />
+    <ClCompile Include="FootstepJointIK.cpp" />
     <ClInclude Include="FootstepCollision.h" />
     <ClCompile Include="FootstepCollision.cpp" />
     <ClCompile Include="FootstepPath.cpp" />

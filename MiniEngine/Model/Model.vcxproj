@@ -231,6 +231,9 @@
     <ClCompile Include="FootstepIK.cpp">
       <FloatingPointModel>Precise</FloatingPointModel>
     </ClCompile>
+    <ClCompile Include="FootstepJointIK.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
     <ClInclude Include="FootstepCollision.h" />
     <ClCompile Include="FootstepCollision.cpp">
       <FloatingPointModel>Precise</FloatingPointModel>

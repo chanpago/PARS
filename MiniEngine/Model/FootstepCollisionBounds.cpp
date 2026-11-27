@@ -199,6 +199,38 @@ namespace
         return Normalize(result);
     }
 
+    bool WithinDriveLimits(const FootIKJointLimits& limits, const std::array<Transform, 3>& bones)
+    {
+        PxQuat parent = limits.anchorRotation;
+        float parentRadius = 0;
+        for (size_t i = 0; i < bones.size(); ++i)
+        {
+            const Quaternion& interval = bones[i].rotation;
+            const PxQuat center(static_cast<float>(interval.x.center), static_cast<float>(interval.y.center),
+                static_cast<float>(interval.z.center), static_cast<float>(interval.w.center));
+            if (!limits.contains || !center.isFinite() || center.magnitudeSquared() < 1e-8f)
+            {
+                return false;
+            }
+            const PxQuat child = center.getNormalized();
+            const double x = MagnitudeUpper(interval.x - Range(child.x));
+            const double y = MagnitudeUpper(interval.y - Range(child.y));
+            const double z = MagnitudeUpper(interval.z - Range(child.z));
+            const double w = MagnitudeUpper(interval.w - Range(child.w));
+            const double chord = std::sqrt(x * x + y * y + z * z + w * w);
+            const float radius = static_cast<float>(4 * std::asin((std::min)(1.0, .5 * chord))) + 1e-5f;
+            const PxQuat relative = (limits.parentFrames[i].getConjugate() * parent.getConjugate() *
+                child * limits.childFrames[i]).getNormalized();
+            if (!limits.contains(*limits.joints[i], relative, parentRadius + radius))
+            {
+                return false;
+            }
+            parent = child;
+            parentRadius = radius;
+        }
+        return true;
+    }
+
     bool BoundIK(const TwoBoneIKInput& input, const Vector& sole, std::array<Transform, 3>& bones)
     {
         const float upper = input.thighLength;
@@ -384,7 +416,22 @@ bool PARS::BoundFootstepLeg(const FootstepCollisionLeg& leg, float begin, float 
     }
     TwoBoneIKInput pose = leg.pose;
     std::array<Transform, 3> bones;
-    if (!BoundIK(pose, BoundPosition(leg, Time(begin, end)), bones))
+    const bool bounded = BoundIK(pose, BoundPosition(leg, Time(begin, end)), bones);
+    if (pose.jointLimits && pose.jointLimits->project && (!bounded || !WithinDriveLimits(*pose.jointLimits, bones)))
+    {
+        // 무릎이 다른 쪽으로 움직일 수 있는 구간은 고관절에서 각 본까지의 최대 반경으로만 분리를 증명한다.
+        const Range unit(-1, 1);
+        const float lengths[] = {0, pose.thighLength, pose.thighLength + pose.calfLength};
+        for (size_t part = 0; part < shapes.size(); ++part)
+        {
+            const float radius = lengths[part] + leg.shapes[part].inBone.p.magnitude() + 1e-5f;
+            const Range extent = Rounded(-radius, radius);
+            shapes[part].position = Vector(pose.hip.p) + Vector(extent, extent, extent);
+            shapes[part].rotation = Quaternion(unit, unit, unit, unit);
+        }
+        return true;
+    }
+    if (!bounded)
     {
         return false;
     }

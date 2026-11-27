@@ -218,11 +218,15 @@ namespace PARS
             }
 
             // 세 본의 실제 바디와 연결된 가장 가까운 물리 부모가 있어야 관절 PD로 구동할 수 있다.
-            if (std::find(nodes.begin(), nodes.end(), setup.hipNode) == nodes.end() ||
-                std::find(nodes.begin(), nodes.end(), setup.kneeNode) == nodes.end() ||
-                std::find(nodes.begin(), nodes.end(), setup.ankleNode) == nodes.end())
+            std::array<int, 4> bodies{{-1, -1, -1, -1}};
+            const std::array<int, 3> legNodes{{setup.hipNode, setup.kneeNode, setup.ankleNode}};
+            for (size_t part = 0; part < legNodes.size(); ++part)
             {
-                continue;
+                const std::vector<int>::const_iterator body = std::find(nodes.begin(), nodes.end(), legNodes[part]);
+                if (body != nodes.end())
+                {
+                    bodies[part + 1] = static_cast<int>(body - nodes.begin());
+                }
             }
             // 다리를 지탱하는 실제 물리 부모를 찾음
             for (int parent = m_PhysicsSkeleton.parents[setup.hipNode]; parent >= 0; parent = m_PhysicsSkeleton.parents[parent])
@@ -231,7 +235,8 @@ namespace PARS
                 if (body != nodes.end())
                 {
                     leg.anchorNode = parent;
-                    leg.actualAnchor = toPx(m_Ragdoll.GetBoneWorld(size_t(body - nodes.begin())));
+                    bodies[0] = static_cast<int>(body - nodes.begin());
+                    leg.actualAnchor = toPx(m_Ragdoll.GetBoneWorld(bodies[0]));
                     break;
                 }
             }
@@ -239,18 +244,8 @@ namespace PARS
             {
                 continue;
             }
-            const std::function<bool(int, int)> linked = [&](int parent, int child) -> bool
-            {
-                return std::any_of(m_PhysicsAsset->constraints.begin(), m_PhysicsAsset->constraints.end(),
-                    [&](const PhysicsConstraint& joint) -> bool
-                    {
-                    return joint.parentBone == m_PhysicsSkeleton.names[parent] &&
-                        joint.childBone == m_PhysicsSkeleton.names[child];
-                });
-            };
-            // PA에 힙, 허벅지, 무릎, 발목이 연결되어 있는지 확인
-            if (!linked(leg.anchorNode, setup.hipNode) || !linked(setup.hipNode, setup.kneeNode) ||
-                !linked(setup.kneeNode, setup.ankleNode))
+            if (!PrepareFootIKJointLimits(*m_PhysicsAsset, m_Ragdoll.UsesArticulation(), bodies,
+                leg.actualAnchor.q, leg.jointLimits))
             {
                 continue;
             }

@@ -63,6 +63,95 @@ namespace
             "A missing knee constraint is identified without hiding a measurable ankle correction");
     }
 
+    void TestConstrainedFootstep(bool articulation)
+    {
+        PhysicsAsset asset;
+        for (const char* name : {"pelvis", "thigh", "calf", "foot"})
+        {
+            PhysicsBody body;
+            body.bone = name;
+            asset.bodies.push_back(body);
+        }
+        for (size_t i = 0; i < 3; ++i)
+        {
+            PhysicsConstraint joint;
+            joint.parentBone = asset.bodies[i].bone;
+            joint.childBone = asset.bodies[i + 1].bone;
+            joint.twist = PhysicsJointMotion::Free;
+            joint.swingY = PhysicsJointMotion::Free;
+            joint.swingZ = PhysicsJointMotion::Free;
+            asset.constraints.push_back(joint);
+        }
+        const PxVec3 hinge(1, 0, 0);
+        const PxQuat thigh(-.45f, hinge);
+        const PxQuat calf(.7f, hinge);
+        PhysicsConstraint& hipJoint = asset.constraints[0];
+        hipJoint.parentFrame.rotation = DirectX::XMFLOAT4(thigh.x, thigh.y, thigh.z, thigh.w);
+        hipJoint.twist = PhysicsJointMotion::Locked;
+        hipJoint.swingY = PhysicsJointMotion::Locked;
+        hipJoint.swingZ = PhysicsJointMotion::Locked;
+        asset.constraints[1].swingY = PhysicsJointMotion::Locked;
+        asset.constraints[1].swingZ = PhysicsJointMotion::Locked;
+        const PxQuat bodyRotation(.31f, PxVec3(0, 0, 1));
+        const DirectX::XMFLOAT4 inverseFrame(0, 0, -bodyRotation.z, bodyRotation.w);
+        asset.bodies[2].rotation = DirectX::XMFLOAT4(0, 0, bodyRotation.z, bodyRotation.w);
+        asset.constraints[1].childFrame.rotation = inverseFrame;
+        asset.constraints[2].parentFrame.rotation = inverseFrame;
+
+        const PxTransform pelvis(PxVec3(2, 1, -3), PxQuat(.63f, PxVec3(0, 1, 0)));
+        const std::array<int, 4> bodies{{0, 1, 2, 3}};
+        FootIKJointLimits limits;
+        CheckLimit(PrepareFootIKJointLimits(asset, articulation, bodies, pelvis.q, limits),
+            "Bind the physical joint axes to the leg solver");
+        TwoBoneIKInput input;
+        input.thighLength = .45f;
+        input.calfLength = .42f;
+        input.hip = pelvis * PxTransform(PxVec3(.1f, 0, 0), thigh);
+        input.knee = PxTransform(input.hip.transform(PxVec3(0, -input.thighLength, 0)), pelvis.q * calf);
+        input.ankle = PxTransform(input.knee.transform(PxVec3(0, -input.calfLength, 0)), pelvis.q);
+        input.soleInBone = PxTransform(PxVec3(.02f, -.07f, .08f));
+        input.targetSole = input.ankle * input.soleInBone;
+        const LegIKResult preferred = SolveTwoBoneIK(input);
+        input.jointLimits = &limits;
+        const LegIKResult unchanged = SolveTwoBoneIK(input);
+        CheckLimit(unchanged.valid && unchanged.hip.q == preferred.hip.q && unchanged.knee.q == preferred.knee.q &&
+            unchanged.knee.p == preferred.knee.p, "An admissible animation bend is preserved exactly");
+
+        // 같은 발목을 유지하면서 무릎을 옆으로 돌리고 허벅지에 비틀림을 넣은 입력 자세를 만든다.
+        const PxQuat swivel(.46f, (input.ankle.p - input.hip.p).getNormalized());
+        input.hip.q = swivel * input.hip.q * PxQuat(.52f, PxVec3(0, 1, 0));
+        input.knee.p = input.hip.p + swivel.rotate(input.knee.p - input.hip.p);
+        input.knee.q = swivel * input.knee.q;
+        const LegIKResult solved = SolveTwoBoneIK(input);
+        const std::array<PxTransform, 4> frames{{pelvis, solved.hip, solved.knee, solved.ankle}};
+        CheckLimit(solved.valid && solved.jointAdjusted && !solved.reachLimited && solved.reachError < .0005f &&
+            PxAbs(solved.solvedSole.q.dot(input.targetSole.q)) > .99999f &&
+            (solved.knee.p - input.knee.p).magnitude() > .05f &&
+            CheckFootstepJointLimits(asset, articulation, bodies, frames) == FootstepJointStatus::WithinLimits,
+            "Refit the knee and thigh roll inside the drive limits while preserving the requested sole pose");
+        CheckLimit((solved.hip.p - input.hip.p).magnitude() < .00001f &&
+            PxAbs((solved.knee.p - solved.hip.p).magnitude() - input.thighLength) < .00001f &&
+            PxAbs((solved.ankle.p - solved.knee.p).magnitude() - input.calfLength) < .00001f,
+            "The refit keeps the hip pivot and both segment lengths");
+
+        asset.constraints[1].twist = PhysicsJointMotion::Locked;
+        asset.constraints[2].twist = PhysicsJointMotion::Locked;
+        asset.constraints[2].swingY = PhysicsJointMotion::Locked;
+        asset.constraints[2].swingZ = PhysicsJointMotion::Locked;
+        const LegIKResult blocked = SolveTwoBoneIK(input);
+        const std::array<PxTransform, 4> blockedFrames{{pelvis, blocked.hip, blocked.knee, blocked.ankle}};
+        CheckLimit(blocked.valid && blocked.reachLimited && blocked.reachError > .1f &&
+            (blocked.requestedSole.p - input.targetSole.p).magnitude() < .00001f &&
+            PxAbs(blocked.reachError - (blocked.solvedSole.p - input.targetSole.p).magnitude()) < .00001f &&
+            CheckFootstepJointLimits(asset, articulation, bodies, blockedFrames) == FootstepJointStatus::WithinLimits,
+            "An impossible goal retains its requested position and reports the bounded chain's actual error");
+        input.targetSole = blocked.solvedSole;
+        input.targetSole.q = PxQuat(.2f, hinge) * input.targetSole.q;
+        const LegIKResult tilted = SolveTwoBoneIK(input);
+        CheckLimit(tilted.valid && tilted.reachLimited && tilted.reachError < FootstepSoleTolerance &&
+            tilted.soleAngleError > .19f, "An unreachable sole orientation is reported even at the requested position");
+    }
+
     void TestAsymmetricTargets()
     {
         PhysicsConstraint joint;
@@ -223,6 +312,7 @@ void RunJointLimitTests()
     for (bool articulation : {false, true})
     {
         TestLandingJointDetails(articulation);
+        TestConstrainedFootstep(articulation);
         for (bool lockedY : {false, true})
         {
             TestAsymmetricPhysics(articulation, lockedY);

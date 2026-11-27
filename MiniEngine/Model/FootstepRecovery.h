@@ -99,13 +99,14 @@ namespace PARS
         }
 
     public:
-        static constexpr float SoleTolerance = .005f;
+        static constexpr float SoleTolerance = FootstepSoleTolerance;
         static constexpr float JointToleranceRadians = .01f;
 
     public:
         // 이동하는 다리의 고관절, 무릎, 발목 순서다.
         std::array<FootstepJointCheck, 3> joints{};
         float soleError = 0;
+        float soleAngleError = 0;
         float requestedHipAnkleDistance = 0;
         float solvedHipAnkleDistance = 0;
         // 비트 번호는 기존 충돌 예측과 같이 왼쪽 부위 * 3 + 오른쪽 부위다.
@@ -115,6 +116,7 @@ namespace PARS
         FootstepPoseInputIssue inputIssue = FootstepPoseInputIssue::None;
         std::array<FootstepPoseInputIssue, 2> legInputIssues{};
         bool reachLimited = false;
+        bool jointAdjusted = false;
     };
 
     struct FootstepRecoverySettings
