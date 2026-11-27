@@ -115,6 +115,18 @@ namespace
     };
 
 #if defined(_M_X64)
+    void DrawFootStates(const PARS::SkeletalMeshComponent& mesh)
+    {
+        const PARS::FootSupportSnapshot& sample = mesh.GetFootSupport().GetSnapshot();
+        for (size_t side = 0; side < sample.feet.size(); ++side)
+        {
+            const PARS::FootContactSample& contact = sample.feet[side].contact;
+            ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
+                contact.hasSample && contact.grounded ? "ON" : "OFF",
+                sample.footstep.feet[side].IsInProgress() ? "ON" : "OFF");
+        }
+    }
+
     bool RegisterRagdollAnimations(PARS::SkeletalMeshComponent& mesh, const std::wstring& directory, bool forceRebuild,
         SkeletalMeshViewer::AnimationModels& models, const std::array<uint32_t, 4>& shoveClips,
         const std::array<ShoulderReactionClips, 2>& shoulderClips, std::string& error)
@@ -426,7 +438,6 @@ private:
     bool m_SponzaStarted = false;
 #if defined(_M_X64)
     bool m_ContactOverlayVisible = false;
-    bool m_ShowLandingCandidates = false;
     bool m_WasComparing = false;
     bool m_PreComparisonFreeCamera = false;
     bool m_MapSelectionVisible = false;
@@ -2071,88 +2082,78 @@ void ModelViewer::DrawCharacterAnimationTab()
         }
 #if defined(_M_X64)
         const bool showingComparison = m_Comparison && m_Comparison->IsShowingScene();
-        if (ImGui::CollapsingHeader(u8"발 상태 및 디버그 표시"))
+        if (ImGui::CollapsingHeader(u8"발 상태 및 디버그 표시") && ImGui::BeginTabBar("FootDebugTargets"))
         {
-            if (ImGui::Button(m_ShowLandingCandidates ? u8"착지 후보 X 표시 끄기###LandingCandidateToggle" :
-                u8"착지 후보 X 표시 켜기###LandingCandidateToggle"))
+            if (character && ImGui::BeginTabItem(u8"플레이어"))
             {
-                m_ShowLandingCandidates = !m_ShowLandingCandidates;
-            }
-            if (ImGui::Button(m_ContactOverlayVisible ? u8"상단 디버그 끄기###ContactOverlayToggle" :
-                u8"상단 디버그 켜기###ContactOverlayToggle"))
-            {
-                m_ContactOverlayVisible = !m_ContactOverlayVisible;
-            }
-            if (!showingComparison)
-            {
-                if (PhysicsWorld* physics = m_World.GetPhysicsWorld())
+                m_PlayerFootSoles.DrawLandingCandidateToggle();
+                if (!showingComparison)
                 {
-                    const bool visible = physics->IsCapsuleDebugVisible();
-                    if (ImGui::Button(visible ? u8"플레이어 이동 캡슐 윤곽선 끄기###MovementCapsuleToggle" :
-                        u8"플레이어 이동 캡슐 윤곽선 켜기###MovementCapsuleToggle"))
+                    if (PhysicsWorld* physics = m_World.GetPhysicsWorld())
                     {
-                        physics->SetCapsuleDebugVisible(!visible);
+                        const bool visible = physics->IsCapsuleDebugVisible();
+                        if (ImGui::Button(visible ? u8"이동 캡슐 윤곽선 끄기###MovementCapsuleToggle" :
+                            u8"이동 캡슐 윤곽선 켜기###MovementCapsuleToggle"))
+                        {
+                            physics->SetCapsuleDebugVisible(!visible);
+                        }
+                    }
+                    if (m_ImpactTest)
+                    {
+                        const bool visible = m_ImpactTest->IsBodyImpactCapsuleVisible();
+                        if (ImGui::Button(visible ? u8"몸통 충돌 캡슐 윤곽선 끄기###BodyImpactCapsuleToggle" :
+                            u8"몸통 충돌 캡슐 윤곽선 켜기###BodyImpactCapsuleToggle"))
+                        {
+                            m_ImpactTest->SetBodyImpactCapsuleVisible(!visible);
+                        }
+                    }
+                    if (ImGui::Button(m_PlayerFootDebugVisible ? u8"발 상태·디버그 끄기###PlayerFootDebugToggle" :
+                        u8"발 상태·디버그 켜기###PlayerFootDebugToggle"))
+                    {
+                        SetPlayerFootDebugVisible(!m_PlayerFootDebugVisible);
+                    }
+                    if (m_PlayerFootDebugVisible)
+                    {
+                        DrawFootStates(character->GetMesh());
                     }
                 }
-                if (m_ImpactTest)
+                if (previewReady && m_PlayerFootSoles.IsVisible())
                 {
-                    const bool visible = m_ImpactTest->IsBodyImpactCapsuleVisible();
-                    if (ImGui::Button(visible ? u8"몸통 충돌 캡슐 윤곽선 끄기###BodyImpactCapsuleToggle" :
-                        u8"몸통 충돌 캡슐 윤곽선 켜기###BodyImpactCapsuleToggle"))
-                    {
-                        m_ImpactTest->SetBodyImpactCapsuleVisible(!visible);
-                    }
+                    m_PlayerFootSoles.DrawUI(character->GetMesh());
                 }
-                PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
-                bool dummyFootStatesVisible = dummy && dummy->GetMesh().IsFootCandidateDebugVisible();
-                ImGui::BeginDisabled(!dummy);
-                if (ImGui::Button(dummyFootStatesVisible ? u8"더미 발 상태 표시 끄기" : u8"더미 발 상태 표시") && dummy)
-                {
-                    dummyFootStatesVisible = !dummyFootStatesVisible;
-                    dummy->GetMesh().SetFootCandidateDebugVisible(dummyFootStatesVisible);
-                }
-                ImGui::SameLine();
-                if (ImGui::Button(m_DummyFootSoles.IsVisible() ? u8"더미 발 디버그 끄기" : u8"더미 발 디버그 켜기"))
-                {
-                    m_DummyFootSoles.SetVisible(!m_DummyFootSoles.IsVisible());
-                }
-                ImGui::EndDisabled();
-                if (ImGui::Button(m_PlayerFootDebugVisible ? u8"플레이어 발 상태·디버그 끄기###PlayerFootDebugToggle" :
-                    u8"플레이어 발 상태·디버그 켜기###PlayerFootDebugToggle"))
-                {
-                    SetPlayerFootDebugVisible(!m_PlayerFootDebugVisible);
-                }
-                void (*const drawFootStates)(PARS::Character*, const char*) = [](PARS::Character* target, const char* label) -> void
-                {
-                    if (!target)
-                    {
-                        return;
-                    }
-                    const PARS::FootSupportSnapshot& sample = target->GetMesh().GetFootSupport().GetSnapshot();
-                    ImGui::TextUnformatted(label);
-                    for (size_t side = 0; side < sample.feet.size(); ++side)
-                    {
-                        const PARS::FootContactSample& contact = sample.feet[side].contact;
-                        ImGui::Text(u8"%s: 접지 %s / 이동 명령 %s", side == 0 ? u8"왼발" : u8"오른발",
-                            contact.hasSample && contact.grounded ? "ON" : "OFF",
-                            sample.footstep.feet[side].IsInProgress() ? "ON" : "OFF");
-                    }
-                };
-                if (dummyFootStatesVisible)
-                {
-                    drawFootStates(dummy, u8"더미 발 상태");
-                }
-                if (m_PlayerFootDebugVisible)
-                {
-                    drawFootStates(character, u8"플레이어 발 상태");
-                }
+                ImGui::EndTabItem();
             }
-            if (previewReady && m_PlayerFootSoles.IsVisible())
+            PARS::Character* dummy = m_ImpactTest ? m_ImpactTest->GetDummy() : nullptr;
+            if (dummy && ImGui::BeginTabItem(u8"더미"))
             {
-                ImGui::Indent();
-                m_PlayerFootSoles.DrawUI(character->GetMesh());
-                ImGui::Unindent();
+                m_DummyFootSoles.DrawLandingCandidateToggle();
+                if (ImGui::Button(m_ContactOverlayVisible ? u8"상단 접촉 디버그 끄기###ContactOverlayToggle" :
+                    u8"상단 접촉 디버그 켜기###ContactOverlayToggle"))
+                {
+                    m_ContactOverlayVisible = !m_ContactOverlayVisible;
+                }
+                if (!showingComparison)
+                {
+                    PARS::SkeletalMeshComponent& mesh = dummy->GetMesh();
+                    if (ImGui::Button(mesh.IsFootCandidateDebugVisible() ? u8"발 상태 표시 끄기###DummyFootStateToggle" :
+                        u8"발 상태 표시 켜기###DummyFootStateToggle"))
+                    {
+                        mesh.SetFootCandidateDebugVisible(!mesh.IsFootCandidateDebugVisible());
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(m_DummyFootSoles.IsVisible() ? u8"발 디버그 끄기###DummyFootDebugToggle" :
+                        u8"발 디버그 켜기###DummyFootDebugToggle"))
+                    {
+                        m_DummyFootSoles.SetVisible(!m_DummyFootSoles.IsVisible());
+                    }
+                    if (mesh.IsFootCandidateDebugVisible())
+                    {
+                        DrawFootStates(mesh);
+                    }
+                }
+                ImGui::EndTabItem();
             }
+            ImGui::EndTabBar();
         }
         if (m_Comparison && ImGui::CollapsingHeader(u8"시뮬레이션 비교"))
         {
@@ -2667,19 +2668,13 @@ void ModelViewer::RenderScene(void)
             if (PARS::Character* dummy = m_ImpactTest->GetDummy())
             {
                 m_DummyFootSoles.BuildRegionTriangles(dummy->GetMesh(), regions);
-                if (m_ShowLandingCandidates)
-                {
-                    FootSoleDebug::BuildLandingCandidateLines(dummy->GetMesh(), lines);
-                }
+                m_DummyFootSoles.BuildLandingCandidateLines(dummy->GetMesh(), lines);
             }
         }
         if (PARS::Character* character = GetPreviewCharacter())
         {
             m_PlayerFootSoles.BuildLines(character->GetMesh(), lines);
-            if (m_ShowLandingCandidates)
-            {
-                FootSoleDebug::BuildLandingCandidateLines(character->GetMesh(), lines);
-            }
+            m_PlayerFootSoles.BuildLandingCandidateLines(character->GetMesh(), lines);
         }
         m_PhysicsDemo->RenderDebugTriangles(gfxContext, m_Camera, viewport, scissor, regions);
         m_PhysicsDemo->RenderDebugLines(gfxContext, m_Camera, viewport, scissor, lines, true);

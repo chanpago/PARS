@@ -1156,8 +1156,12 @@ void FootSoleDebug::BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vec
     }
 }
 
-void FootSoleDebug::BuildLandingCandidateLines(const PARS::SkeletalMeshComponent& mesh, std::vector<PxDebugLine>& lines)
+void FootSoleDebug::BuildLandingCandidateLines(const PARS::SkeletalMeshComponent& mesh, std::vector<PxDebugLine>& lines) const
 {
+    if (!m_ShowLandingCandidates)
+    {
+        return;
+    }
     const PARS::FootstepRecoverySnapshot* recovery = VisibleRecovery(mesh);
     if (!recovery)
     {
@@ -1672,6 +1676,15 @@ namespace
             }
             ImGui::TreePop();
         }
+    }
+}
+
+void FootSoleDebug::DrawLandingCandidateToggle()
+{
+    if (ImGui::Button(m_ShowLandingCandidates ? u8"착지 후보 X 표시 끄기###LandingCandidateToggle" :
+        u8"착지 후보 X 표시 켜기###LandingCandidateToggle"))
+    {
+        m_ShowLandingCandidates = !m_ShowLandingCandidates;
     }
 }
 

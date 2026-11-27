@@ -17,9 +17,10 @@ class FootSoleDebug
 {
 public:
     void DrawUI(PARS::SkeletalMeshComponent& mesh, const std::function<void()>& drawBufferSettings = {});
+    void DrawLandingCandidateToggle();
     void DrawContactOverlay(const std::string& text, bool touching, const ImVec2& sceneOrigin, const ImVec2& sceneSize) const;
     void BuildLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
-    static void BuildLandingCandidateLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines);
+    void BuildLandingCandidateLines(const PARS::SkeletalMeshComponent& mesh, std::vector<physx::PxDebugLine>& lines) const;
     void BuildRegionTriangles(const PARS::SkeletalMeshComponent& mesh,
         std::vector<physx::PxDebugTriangle>& triangles) const;
 
@@ -45,5 +46,6 @@ private:
     bool m_ShowFootstep = true;
     bool m_ShowLandingComClamp = true;
     bool m_ShowLandingFoot = true;
+    bool m_ShowLandingCandidates = false;
     bool m_ShowRecoveryRegions = true;
 };
