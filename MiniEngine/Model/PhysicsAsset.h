@@ -22,6 +22,11 @@ namespace PARS
     {
     public:
         Math::Matrix4 GetLocalTransform() const;
+        int GetDefaultWoundPriority() const;
+
+    public:
+        static constexpr int HighestWoundPriority = 1;
+        static constexpr int LowestWoundPriority = 3;
 
     public:
         std::string bone;
@@ -33,6 +38,7 @@ namespace PARS
         float halfLength = .1f; // 원통 부분의 반길이이며, 양 끝의 반구는 제외한다.
         float mass = 1;
         PhysicsMaterialSettings material;
+        int woundPriority = LowestWoundPriority;
         bool isCriticalWound = false;
     };
 

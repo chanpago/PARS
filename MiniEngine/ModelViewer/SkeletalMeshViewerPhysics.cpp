@@ -114,6 +114,7 @@ void SkeletalMeshViewer::CreatePhysicsBody(PhysicsShapeType shape)
     }
     PhysicsBody body;
     body.bone = names[m_SelectedBone];
+    body.woundPriority = body.GetDefaultWoundPriority();
     body.shape = shape;
     const Matrix4 frame = PhysicsBoneFrame(m_NodeWorld[m_SelectedBone]);
     Vector3 endpoint(.15f, 0, 0);
@@ -417,6 +418,13 @@ void SkeletalMeshViewer::DrawPhysicsPanel()
     }
     ImGui::SetNextItemWidth(110);
     changed |= ImGui::DragFloat(u8"질량 (kg)", &body.mass, .1f, .001f, 10000, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    int priorityIndex = body.woundPriority - PhysicsBody::HighestWoundPriority;
+    ImGui::SetNextItemWidth(110);
+    if (ImGui::Combo(u8"손 IK 우선순위", &priorityIndex, u8"1 (높음)\0" u8"2 (보통)\0" u8"3 (낮음)\0"))
+    {
+        body.woundPriority = priorityIndex + PhysicsBody::HighestWoundPriority;
+        changed = true;
+    }
     changed |= ImGui::Checkbox(u8"치명상 부위", &body.isCriticalWound);
     if (ImGui::CollapsingHeader(u8"물리 머터리얼"))
     {

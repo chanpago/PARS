@@ -108,6 +108,7 @@ namespace PARS
             float freeLegWeight = 0;
             float restingLegWeight = 0;
             float legLoad = .5f;
+            float gripAge = -1.0f;
             int body = -1;
             int hand = -1;
             int woundJoint = -1;
@@ -235,6 +236,7 @@ namespace PARS
         bool UpdateKinematicRecoveryPose(float deltaTime);
         void InitializeFallArms();
         ImpactHandReach FindImpactHandReach(const std::vector<RagdollBodyImpulse>& impacts) const;
+        bool SampleImpactHandTiming(const PhysicsWorld& physics, ImpactPalmGoal& goal) const;
         void ApplyImpactHandReach(const PhysicsWorld& physics, const std::array<FallArmSample, 2>& arms,
             std::vector<physx::PxTransform>& frames, FallArmSnapshot& corrected);
         void ApplyArmTargets(std::vector<Math::Matrix4>& target);

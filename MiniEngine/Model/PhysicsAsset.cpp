@@ -5,6 +5,7 @@
 #pragma warning(pop)
 #include <Windows.h>
 #include <fstream>
+#include <cctype>
 #include <cmath>
 #include <set>
 #include <algorithm>
@@ -138,6 +139,30 @@ namespace PARS
     Matrix4 PhysicsBody::GetLocalTransform() const
     {
         return Matrix4(OrthogonalTransform(Quaternion(DirectX::XMLoadFloat4(&rotation)), Vector3(offset)));
+    }
+
+    int PhysicsBody::GetDefaultWoundPriority() const
+    {
+        const size_t separator = bone.find_last_of(':');
+        std::string name = bone.substr(separator == std::string::npos ? 0 : separator + 1);
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char value) -> char
+        {
+            return static_cast<char>(std::tolower(value));
+        });
+        if (name.find("head") != std::string::npos || name.find("neck") != std::string::npos ||
+            name.find("spine") != std::string::npos || name.find("chest") != std::string::npos ||
+            name.find("torso") != std::string::npos || name.find("abdomen") != std::string::npos)
+        {
+            return HighestWoundPriority;
+        }
+        if (name == "hips" || name == "pelvis" || name.find("shoulder") != std::string::npos ||
+            name.find("clavicle") != std::string::npos || name.find("upperarm") != std::string::npos ||
+            name == "arm" || name == "leftarm" || name == "rightarm" || name.find("upleg") != std::string::npos ||
+            name.find("upperleg") != std::string::npos || name.find("thigh") != std::string::npos)
+        {
+            return 2;
+        }
+        return LowestWoundPriority;
     }
 
     Matrix4 PhysicsJointFrame::GetTransform() const
@@ -295,6 +320,10 @@ namespace PARS
             {
                 error = "Unknown collision shape.";
             }
+            else if (body.woundPriority < PhysicsBody::HighestWoundPriority || body.woundPriority > PhysicsBody::LowestWoundPriority)
+            {
+                error = "Wound priority must be an integer from 1 to 3.";
+            }
             else if (body.radius <= 0 || body.halfLength < 0 || body.mass <= 0 ||
                 body.halfExtents.x <= 0 || body.halfExtents.y <= 0 || body.halfExtents.z <= 0)
             {
@@ -409,6 +438,7 @@ namespace PARS
                 entry["halfLength"] = body.halfLength;
                 entry["mass"] = body.mass;
                 entry["isCriticalWound"] = body.isCriticalWound;
+                entry["woundPriority"] = body.woundPriority;
                 nlohmann::json& material = entry["material"];
                 material["staticFriction"] = body.material.staticFriction;
                 material["dynamicFriction"] = body.material.dynamicFriction;
@@ -533,6 +563,20 @@ namespace PARS
                 body.halfLength = entry.at("halfLength").get<float>();
                 body.mass = entry.at("mass").get<float>();
                 body.isCriticalWound = entry.value("isCriticalWound", false);
+                const json::const_iterator priority = entry.find("woundPriority");
+                if (priority == entry.end())
+                {
+                    body.woundPriority = body.GetDefaultWoundPriority();
+                }
+                else
+                {
+                    if (!priority->is_number_integer() || *priority < PhysicsBody::HighestWoundPriority ||
+                        *priority > PhysicsBody::LowestWoundPriority)
+                    {
+                        throw std::runtime_error("Wound priority must be an integer from 1 to 3.");
+                    }
+                    body.woundPriority = priority->get<int>();
+                }
                 if (version >= 5 && entry.count("material"))
                 {
                     const nlohmann::json& material = entry.at("material");

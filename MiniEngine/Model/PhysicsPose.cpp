@@ -429,6 +429,7 @@ namespace PARS
             }
             PhysicsBody body;
             body.bone = skeleton.names[node];
+            body.woundPriority = body.GetDefaultWoundPriority();
             body.shape = part.shape;
             body.radius = part.radius;
             body.halfLength = Max(.0f, length * .5f - body.radius);

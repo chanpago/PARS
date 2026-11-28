@@ -29,7 +29,8 @@
         0.01752801239490509,
         0.9986428618431091
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 2
     },
     {
       "bone": "mixamorig1:Spine",
@@ -59,7 +60,8 @@
         -0.0056358580477535725,
         0.9999841451644897
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 1
     },
     {
       "bone": "mixamorig1:Spine1",
@@ -89,7 +91,8 @@
         -0.02883663959801197,
         0.9995841383934021
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 1
     },
     {
       "bone": "mixamorig1:Spine2",
@@ -119,7 +122,8 @@
         -0.022531719878315926,
         0.9997461438179016
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 1
     },
     {
       "bone": "mixamorig1:Neck",
@@ -149,7 +153,8 @@
         0.0006383615545928478,
         0.9900577068328857
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 1
     },
     {
       "bone": "mixamorig1:Head",
@@ -179,7 +184,8 @@
         0.6536246538162231,
         0.7072238326072693
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 1
     },
     {
       "bone": "mixamorig1:LeftShoulder",
@@ -209,7 +215,8 @@
         0.7071092128753662,
         0.7071043252944946
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 2
     },
     {
       "bone": "mixamorig1:LeftArm",
@@ -239,7 +246,8 @@
         0.7071059346199036,
         0.707107663154602
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 2
     },
     {
       "bone": "mixamorig1:LeftForeArm",
@@ -269,7 +277,8 @@
         0.7071073055267334,
         0.7071062326431274
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:LeftHand",
@@ -299,7 +308,8 @@
         0.7356434464454651,
         0.677107572555542
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:RightShoulder",
@@ -329,7 +339,8 @@
         0.7071062326431274,
         0.7071073651313782
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 2
     },
     {
       "bone": "mixamorig1:RightArm",
@@ -359,7 +370,8 @@
         0.7071070671081543,
         0.7071064710617065
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 2
     },
     {
       "bone": "mixamorig1:RightForeArm",
@@ -389,7 +401,8 @@
         0.7071056962013245,
         0.7071079015731812
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:RightHand",
@@ -419,7 +432,8 @@
         0.6797692775726318,
         0.7333210110664368
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:LeftUpLeg",
@@ -449,7 +463,8 @@
         0.7071067690849304,
         0.7071067094802856
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 2
     },
     {
       "bone": "mixamorig1:LeftLeg",
@@ -479,7 +494,8 @@
         0.7071067094802856,
         0.7071068286895752
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:LeftFoot",
@@ -509,7 +525,8 @@
         0.7384433746337891,
         0.6179418563842773
       ],
-      "shape": "box"
+      "shape": "box",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:RightUpLeg",
@@ -539,7 +556,8 @@
         0.7071067690849304,
         0.7071067094802856
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 2
     },
     {
       "bone": "mixamorig1:RightLeg",
@@ -569,7 +587,8 @@
         0.70710688829422,
         0.7071066498756409
       ],
-      "shape": "capsule"
+      "shape": "capsule",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:RightFoot",
@@ -599,7 +618,8 @@
         0.635820746421814,
         0.725202739238739
       ],
-      "shape": "box"
+      "shape": "box",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:LeftToeBase",
@@ -629,7 +649,8 @@
         0.1006593406200409,
         0.9945169687271118
       ],
-      "shape": "box"
+      "shape": "box",
+      "woundPriority": 3
     },
     {
       "bone": "mixamorig1:RightToeBase",
@@ -659,7 +680,8 @@
         0.0,
         0.9978708624839783
       ],
-      "shape": "box"
+      "shape": "box",
+      "woundPriority": 3
     }
   ],
   "constraints": [

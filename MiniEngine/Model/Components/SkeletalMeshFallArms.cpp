@@ -12,6 +12,11 @@ using namespace physx;
 
 namespace
 {
+    float ElapsedSeconds(uint64_t startStep, uint64_t endStep)
+    {
+        return static_cast<float>((endStep - startStep) * PhysicsWorld::FixedDeltaTime);
+    }
+
     PxTransform ToFrame(const Matrix4& matrix)
     {
         const PhysicsJointFrame frame = PhysicsJointFrame::FromTransform(PhysicsBoneFrame(matrix));
@@ -125,7 +130,7 @@ SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReac
         {
             return hit.newProjectileHit && hit.fromProjectile;
         });
-    if (firstHit == impacts.end())
+    if (firstHit == impacts.end() || !m_PhysicsAsset)
     {
         return reach;
     }
@@ -155,7 +160,17 @@ SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReac
         }
     }
 
-    const RagdollBodyImpulse* strongest = nullptr;
+    const PhysicsWorld& physics = *GetOwner().GetWorld()->GetPhysicsWorld();
+    const uint64_t step = physics.GetStepCount();
+    const bool allowBriefReach = !IsFalling() && !IsGroundFallActive() && m_StandingUpState == StandingUpState::None;
+    int activePriority = PhysicsBody::LowestWoundPriority + 1;
+    ImpactPalmGoal currentGoal;
+    if ((m_ImpactHandReach.woundJoint >= 0 || allowBriefReach) && SampleImpactHandTiming(physics, currentGoal))
+    {
+        activePriority = m_PhysicsAsset->bodies[m_ImpactHandReach.body].woundPriority;
+    }
+
+    int selectedPriority = activePriority;
     float largestImpulse = 0;
     for (std::vector<RagdollBodyImpulse>::const_iterator entry = firstHit; entry != impacts.end(); ++entry)
     {
@@ -173,77 +188,75 @@ SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReac
             blocked.blocksHandReach = true;
             return blocked;
         }
-        const int woundJoint = m_Ragdoll.FindWoundJoint(hit.body);
-        // 상처를 감싸는 동안 짧은 피격 반응이 같은 손의 목표를 가로채지 않게 한다.
-        if (woundJoint < 0 && (reach.woundJoint >= 0 || (m_ImpactHandReach.woundJoint >= 0 && m_Ragdoll.HasWound()) || IsFalling() ||
-            IsGroundFallActive() || m_StandingUpState != StandingUpState::None))
-        {
-            continue;
-        }
+        const int priority = m_PhysicsAsset->bodies[hit.body].woundPriority;
         const float impulse = hit.impulse.magnitudeSquared();
-        if ((woundJoint >= 0) == (reach.woundJoint >= 0) && impulse <= largestImpulse)
+        if (priority > selectedPriority || (priority == selectedPriority && impulse <= largestImpulse))
         {
             continue;
         }
-        strongest = &hit;
-        largestImpulse = impulse;
-        reach.woundJoint = woundJoint;
-    }
-    if (strongest)
-    {
-        const PhysicsWorld* physics = GetOwner().GetWorld()->GetPhysicsWorld();
-        const PxTransform bone = ToFrame(m_Ragdoll.GetBoneWorld(strongest->body));
-        reach.body = static_cast<int>(strongest->body);
-        reach.pointInBone = bone.transformInv(strongest->position);
-        reach.normalInBone = bone.q.rotateInv(strongest->outwardNormal.getNormalized());
-        if (hasTorsoBones)
+        const bool samePriority = priority == activePriority;
+        if (samePriority && hit.body != static_cast<size_t>(m_ImpactHandReach.body))
         {
-            reach.selection = SelectWoundHand(strongest->position, strongest->outwardNormal,
-                leftPosition, rightPosition, pelvisPosition);
+            continue;
         }
-        reach.step = physics->GetStepCount();
-        reach.clock = physics->GetClockRevision();
-        reach.approachStep = reach.step;
-        const bool sameHand = reach.selection.hand < 0 || reach.selection.hand == m_ImpactHandReach.selection.hand ||
-            reach.selection.hand == m_ImpactHandReach.hand;
-        if (sameHand && reach.woundJoint >= 0 && m_ImpactHandReach.body == reach.body && m_ImpactHandReach.clock == reach.clock &&
-            (m_ImpactHandReach.pointInBone - reach.pointInBone).magnitudeSquared() < .04f * .04f &&
-            m_ImpactHandReach.normalInBone.dot(reach.normalInBone) > .5f)
+        const int woundJoint = m_Ragdoll.FindWoundJoint(hit.body);
+        if (woundJoint < 0 && !allowBriefReach)
         {
-            // 같은 부위의 재피격은 유지 시간을 갱신하되 이미 다가간 손을 떼지 않는다.
-            reach.approachStep = m_ImpactHandReach.approachStep;
-            reach.hand = m_ImpactHandReach.hand;
-            reach.armHistory = m_ImpactHandReach.armHistory;
-            reach.supportStartStep = m_ImpactHandReach.supportStartStep;
-            reach.supportHistory = m_ImpactHandReach.supportHistory;
-            reach.freeLegWeight = m_ImpactHandReach.freeLegWeight;
-            reach.restingLegWeight = m_ImpactHandReach.restingLegWeight;
-            reach.legLoad = m_ImpactHandReach.legLoad;
-            if (reach.selection.hand < 0)
+            continue;
+        }
+
+        const PxTransform bone = ToFrame(m_Ragdoll.GetBoneWorld(hit.body));
+        const PxVec3 pointInBone = bone.transformInv(hit.position);
+        const PxVec3 normalInBone = bone.q.rotateInv(hit.outwardNormal.getNormalized());
+        if (samePriority)
+        {
+            // 같은 등급은 먼저 짚은 상처를 유지한다. 같은 지점을 다시 맞으면 유지 시간만 갱신한다.
+            if ((pointInBone - m_ImpactHandReach.pointInBone).magnitudeSquared() >= .04f * .04f ||
+                normalInBone.dot(m_ImpactHandReach.normalInBone) <= .5f)
             {
-                reach.selection = m_ImpactHandReach.selection;
+                continue;
+            }
+            reach = m_ImpactHandReach;
+            reach.gripAge = -1.0f;
+        }
+        else
+        {
+            reach = {};
+            reach.body = static_cast<int>(hit.body);
+            reach.woundJoint = woundJoint;
+            reach.pointInBone = pointInBone;
+            reach.normalInBone = normalInBone;
+            reach.clock = physics.GetClockRevision();
+            reach.approachStep = step;
+            if (hasTorsoBones)
+            {
+                reach.selection = SelectWoundHand(hit.position, hit.outwardNormal, leftPosition, rightPosition, pelvisPosition);
             }
         }
+        reach.step = step;
+        selectedPriority = priority;
+        largestImpulse = impulse;
     }
     return reach;
 }
 
-void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, const std::array<FallArmSample, 2>& arms,
-    std::vector<PxTransform>& frames, FallArmSnapshot& corrected)
+bool SkeletalMeshComponent::SampleImpactHandTiming(const PhysicsWorld& physics, ImpactPalmGoal& goal) const
 {
     const uint64_t step = physics.GetStepCount();
     if (m_ImpactHandReach.clock != physics.GetClockRevision() || step < m_ImpactHandReach.step ||
         static_cast<size_t>(m_ImpactHandReach.body) >= m_Ragdoll.GetBodyCount())
     {
-        ResetFallArms();
-        return;
+        return false;
     }
-    const float age = static_cast<float>((step - m_ImpactHandReach.step) * PhysicsWorld::FixedDeltaTime);
-    const float approachAge = static_cast<float>((step - m_ImpactHandReach.approachStep) * PhysicsWorld::FixedDeltaTime);
+    return goal.SampleTiming(ElapsedSeconds(m_ImpactHandReach.step, step), ElapsedSeconds(m_ImpactHandReach.approachStep, step),
+        m_ImpactHandReach.woundJoint >= 0, m_ImpactHandReach.gripAge);
+}
+
+void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, const std::array<FallArmSample, 2>& arms,
+    std::vector<PxTransform>& frames, FallArmSnapshot& corrected)
+{
     ImpactPalmGoal goal;
-    const int woundJoint = m_ImpactHandReach.woundJoint;
-    const float gripAge = woundJoint >= 0 ? m_Ragdoll.GetWoundGripAge(woundJoint) : -1.0f;
-    if (!goal.SampleTiming(age, approachAge, woundJoint >= 0, gripAge))
+    if (!SampleImpactHandTiming(physics, goal))
     {
         ResetFallArms();
         return;
@@ -254,6 +267,8 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
         m_Ragdoll.SetArmDriveScales({1.0f, 1.0f});
         return;
     }
+    const uint64_t step = physics.GetStepCount();
+    const int woundJoint = m_ImpactHandReach.woundJoint;
     const PxTransform bone = ToFrame(m_Ragdoll.GetBoneWorld(m_ImpactHandReach.body));
     goal.point = bone.transform(m_ImpactHandReach.pointInBone);
     goal.normal = bone.q.rotate(m_ImpactHandReach.normalInBone);
@@ -290,6 +305,7 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
                 const PxVec3 offset = frames[goal.hitNode].transform(m_ImpactHandReach.pointInBone) - frames[leg.hipNode].p;
                 const float thighDepth = PxClamp(offset.dot(thigh) / PxMax(1e-6f, thigh.magnitudeSquared()), 0.0f, 1.0f);
                 // 허리를 손보다 천천히 굽혀 발 지지 제어가 체중 이동을 받아낼 시간을 준다.
+                const float approachAge = ElapsedSeconds(m_ImpactHandReach.approachStep, step);
                 const float phase = PxClamp((approachAge - ImpactPalmGoal::RecoilTime) / .80f, 0.0f, 1.0f);
                 goal.legBendWeight = (.35f + .65f * thighDepth) * (.94f + .12f * m_ImpactHandReach.legLoad) *
                     (phase * phase * (3.0f - 2.0f * phase));
@@ -366,8 +382,14 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
         const PxTransform& driveTarget = m_Ragdoll.IsHoldingWound() || canHold ? target.palm : target.assistPalm;
         m_Ragdoll.DriveWoundGrip(woundJoint, arm.setup.handBody, m_ImpactHandReach.body, palm,
             driveTarget, goal.weight, canHold, target.canAssistWoundReach);
+        const bool holding = m_Ragdoll.IsHoldingWound();
+        if (holding && m_ImpactHandReach.gripAge < 0)
+        {
+            // 같은 관절의 다른 상처가 갱신돼도 선택한 상처의 손 유지 시간은 보존한다.
+            m_ImpactHandReach.gripAge = ElapsedSeconds(m_ImpactHandReach.step, step);
+        }
         const FallArmTarget& support = corrected.arms[1 - goal.hand];
-        if (support.applied && m_Ragdoll.IsHoldingWound())
+        if (support.applied && holding)
         {
             const FallArmSample& other = arms[1 - goal.hand];
             m_Ragdoll.DriveWoundSupport(arm.setup.handBody, other.setup.handBody,
