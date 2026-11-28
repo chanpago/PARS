@@ -152,6 +152,13 @@ private:
         uint64_t step = 0;
         float weight = -1;
     };
+    struct ProjectileCcdImpulse
+    {
+    public:
+        physx::PxArticulationLink* link;
+        physx::PxVec3 position;
+        physx::PxVec3 impulse;
+    };
     class ErrorCallback : public physx::PxDefaultErrorCallback
     {
     public:
@@ -218,6 +225,8 @@ private:
     void RecordImpactContact(ContactPair& pair, int sourceSide, bool capsule, const physx::PxContactPairVelocity* beforeContact);
     void RecordProjectileAttachment(physx::PxRigidDynamic& projectile, const physx::PxRigidActor& target, const ContactPair& pair,
         int side, const physx::PxContactPairVelocity* velocity, const physx::PxContactPairPose* pose);
+    void RecordProjectileCcdImpulses(physx::PxActor& target, const ContactPair& pair);
+    void ApplyProjectileCcdImpulses();
     void onContact(const physx::PxContactPairHeader& header, const physx::PxContactPair* pairs,
         physx::PxU32 count) override;
     void onRelease(const physx::PxBase* object, void* userData, physx::PxDeletionEventFlag::Enum event) override;
@@ -320,6 +329,7 @@ private:
     std::vector<ImpactContact> m_ImpactContacts;
     std::vector<const void*> m_GroundedImpactReceivers;
     std::vector<StoppedProjectile> m_StoppedProjectiles;
+    std::vector<ProjectileCcdImpulse> m_ProjectileCcdImpulses;
     uint64_t m_NextImpactContactId = 1;
     std::vector<physx::PxRigidDynamic*> m_ImpactedAimedProjectiles;
     uint64_t m_ClockRevision = 0;

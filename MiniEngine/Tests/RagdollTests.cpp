@@ -113,6 +113,72 @@ namespace
         std::puts("PASS: whole-body COM, unequal masses and rotated local mass frames on D6/articulation");
     }
 
+    void TestProjectileContactMomentum(bool hitRoot, bool arrow, bool sweep)
+    {
+        using namespace physx;
+        PhysicsWorld world;
+        Check(world.Initialize(false), "Initialize projectile momentum scene");
+        PxArticulationReducedCoordinate* rig = world.CreateArticulation();
+        Check(rig != nullptr, "Create projectile momentum rig");
+        const PxSphereGeometry targetShape(.20f);
+        PxArticulationLink* hip = world.CreateArticulationLink(*rig, nullptr, PxTransform(PxVec3(0, 3, 0)),
+            targetShape, 12.0f, "hip");
+        Check(hip != nullptr, "Create hip");
+        PxArticulationLink* chest = world.CreateArticulationLink(*rig, hip, PxTransform(PxVec3(0, 4, 0)),
+            targetShape, 8.0f, "chest");
+        Check(chest != nullptr, "Create chest");
+        PxArticulationJointReducedCoordinate* joint = chest->getInboundJoint();
+        joint->setJointType(PxArticulationJointType::eFIX);
+        joint->setParentPose(PxTransform(PxVec3(0, 1, 0)));
+        Check(world.AddArticulation(*rig), "Add connected projectile targets to scene");
+        for (PxArticulationLink* link : {hip, chest})
+        {
+            link->setLinearDamping(0);
+            link->setAngularDamping(0);
+        }
+        const PxVec3 initialRigVelocity(1.25f, 0, 0);
+        rig->setRootLinearVelocity(initialRigVelocity);
+        rig->updateKinematic(PxArticulationKinematicFlag::eVELOCITY);
+        PxArticulationLink* target = hitRoot ? hip : chest;
+        const float startX = sweep ? -.65f : -.24f;
+        const float startY = target->getGlobalPose().p.y;
+        PxRigidDynamic* shot = world.CreateDynamicBody(PxTransform(PxVec3(startX, startY, 0)),
+            PxSphereGeometry(.05f), 1.0f, "projectile");
+        Check(shot != nullptr, "Create physics-only projectile");
+        shot->getScene()->setGravity(PxVec3(0));
+        shot->setLinearDamping(0);
+        PxShape* shape = nullptr;
+        Check(shot->getShapes(&shape, 1) == 1, "Find projectile filter");
+        PxFilterData filter = shape->getSimulationFilterData();
+        filter.word3 |= PhysicsWorld::ProjectileFilterFlag |
+            (arrow ? PhysicsWorld::AttachOnContactFilterFlag : PhysicsWorld::AimedProjectileFilterFlag);
+        shape->setSimulationFilterData(filter);
+        shot->setMinCCDAdvanceCoefficient(0);
+        shot->setRigidBodyFlag(PxRigidBodyFlag::eENABLE_CCD, true);
+        const PxVec3 incomingVelocity(sweep ? 60.0f : 4.0f, 0, 0);
+        shot->setLinearVelocity(incomingVelocity);
+        world.Step();
+        Check(world.HasContact(*shot, *target) && world.GetExternalImpactImpulse(*target) > 0,
+            "Projectile hit the selected bone in one step");
+
+        // 중력과 감쇠가 없는 두 링크의 운동량 증가는 투사체가 잃은 운동량과 같아야 한다.
+        const PxVec3 impulse = (incomingVelocity - shot->getLinearVelocity()) * shot->getMass();
+        shot->release();
+        const float totalMass = hip->getMass() + chest->getMass();
+        const PxVec3 expectedVelocity = initialRigVelocity + impulse / totalMass;
+        for (int step = 0; step < 3; ++step)
+        {
+            world.Step();
+            const PxVec3 momentum = hip->getLinearVelocity() * hip->getMass() + chest->getLinearVelocity() * chest->getMass();
+            Check((momentum / totalMass - expectedVelocity).magnitude() < .02f,
+                hitRoot ? "Hip hit transfers projectile momentum precisely once" : "Chest hit transfers projectile momentum precisely once");
+            Check(hitRoot ? hip->getAngularVelocity().z > .01f : hip->getAngularVelocity().z < -.01f,
+                "Hits on opposite sides of the center of mass produce opposite rotations");
+        }
+        rig->release();
+        Check(world.GetErrorCount() == 0, "Resolve projectile momentum without PhysX errors");
+    }
+
     void TestImpactBodyImpulse(bool articulation, float torqueMultiplier, float hitHeight,
         float bodyImpulse = 8.0f, float partImpulse = 0, physx::PxU32 sourceFlags = PhysicsWorld::ProjectileFilterFlag,
         const physx::PxVec3& direction = physx::PxVec3(1, 0, 0), bool grounded = false)
@@ -378,6 +444,13 @@ namespace
 
 void RunProjectileBodyImpulseTests()
 {
+    for (bool hitRoot : {true, false})
+    {
+        TestProjectileContactMomentum(hitRoot, false, true);
+        TestProjectileContactMomentum(hitRoot, true, true);
+        TestProjectileContactMomentum(hitRoot, false, false);
+    }
+    std::puts("PASS: projectile momentum and contact-point rotation on moving hip and chest targets");
     const physx::PxU32 arrow = PhysicsWorld::ProjectileFilterFlag | PhysicsWorld::AttachOnContactFilterFlag;
     const physx::PxVec3 upward(.48f, .6f, .64f);
     const physx::PxVec3 downward(.48f, -.6f, .64f);

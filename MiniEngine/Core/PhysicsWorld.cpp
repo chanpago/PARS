@@ -61,6 +61,11 @@ namespace
             if ((data0.word3 | data1.word3) & (PhysicsWorld::AimedProjectileFilterFlag | PhysicsWorld::AttachOnContactFilterFlag))
             {
                 pairFlags |= PxPairFlag::eDETECT_CCD_CONTACT;
+                if (PxGetFilterObjectType(attributes0) == PxFilterObjectType::eARTICULATION ||
+                    PxGetFilterObjectType(attributes1) == PxFilterObjectType::eARTICULATION)
+                {
+                    pairFlags |= PxPairFlag::eNOTIFY_TOUCH_CCD;
+                }
             }
             if ((data0.word3 | data1.word3) & PhysicsWorld::AttachOnContactFilterFlag)
             {
@@ -212,6 +217,10 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         for (int side = 0; side < 2; ++side)
         {
             const uint32_t flags = pair.shapes[side]->getSimulationFilterData().word3;
+            if ((flags & ProjectileFilterFlag) != 0 && pair.events.isSet(PxPairFlag::eNOTIFY_TOUCH_CCD))
+            {
+                RecordProjectileCcdImpulses(*header.actors[1 - side], *cached);
+            }
             const bool capsule = (flags & CharacterCapsuleFilterFlag) != 0;
             const bool impactSource = capsule || (flags & ProjectileFilterFlag) != 0;
             if (capsule && beforeContact)
@@ -258,6 +267,43 @@ void PhysicsWorld::onContact(const PxContactPairHeader& header, const PxContactP
         }
     }
     // 잠든 바디에는 PERSISTS가 오지 않으므로 LOST 또는 명시적인 무효화 전까지 보존한다.
+}
+
+void PhysicsWorld::RecordProjectileCcdImpulses(PxActor& target, const ContactPair& pair)
+{
+    PxArticulationLink* link = target.is<PxArticulationLink>();
+    if (!link)
+    {
+        return;
+    }
+    for (const PxContactPairPoint& point : pair.points)
+    {
+        if (point.position.isFinite() && point.impulse.isFinite() && !point.impulse.isZero())
+        {
+            const PxVec3 impulse = pair.actors[0] == link ? point.impulse : -point.impulse;
+            m_ProjectileCcdImpulses.push_back({link, point.position, impulse});
+        }
+    }
+}
+
+void PhysicsWorld::ApplyProjectileCcdImpulses()
+{
+    for (const ProjectileCcdImpulse& hit : m_ProjectileCcdImpulses)
+    {
+        PxArticulationLink& link = *hit.link;
+        PxArticulationReducedCoordinate& rig = link.getArticulation();
+        if (!link.getInboundJoint())
+        {
+            // 스윕 CCD가 솔버 실행 뒤 루트에 직접 더한 속도만 되돌린다.
+            const PxVec3 rootVelocity = rig.getArticulationFlags().isSet(PxArticulationFlag::eFIX_BASE)
+                ? PxVec3(0) : rig.getRootLinearVelocity() - hit.impulse * link.getInvMass();
+            rig.setRootLinearVelocity(rootVelocity);
+        }
+        // 루트와 관절 속도로 링크들을 동기화하고, 다음 고정 스텝에서 실측 충격량을 접촉점에 한 번 전달한다.
+        rig.updateKinematic(PxArticulationKinematicFlag::eVELOCITY);
+        PxRigidBodyExt::addForceAtPos(link, hit.impulse / static_cast<float>(FixedDeltaTime), hit.position, PxForceMode::eFORCE);
+    }
+    m_ProjectileCcdImpulses.clear();
 }
 
 void PhysicsWorld::RecordProjectileAttachment(PxRigidDynamic& projectile, const PxRigidActor& target, const ContactPair& pair,
@@ -940,6 +986,7 @@ void PhysicsWorld::Shutdown()
     m_Contacts.clear();
     m_ImpactSources.clear();
     m_StoppedProjectiles.clear();
+    m_ProjectileCcdImpulses.clear();
     Release(m_Scene); // Actor와 각 Actor가 독점 소유하는 형상도 함께 해제한다.
     if (m_ServiceOwner)
     {
@@ -1054,6 +1101,7 @@ void PhysicsWorld::Step(const BeforeStep& beforeStep)
         // PhysX는 시뮬레이션이 끝나면 fetchResults()를 호출해야 한다. fetchResults()가 끝나야 Actor의 pose를 읽을 수 있다. true파라미터는 simulate의 결과를 다 받고 진행하겠다는 뜻.
         m_Scene->fetchResults(true);
     }
+    ApplyProjectileCcdImpulses();
     // 모든 형상의 접촉 보고가 끝나야 캐릭터 단위로 접촉이 끊겼는지 알 수 있다.
     m_ImpactContacts.erase(std::remove_if(m_ImpactContacts.begin(), m_ImpactContacts.end(),
         [this](const ImpactContact& contact) -> bool
