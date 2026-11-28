@@ -175,20 +175,26 @@ SkeletalMeshComponent::ImpactHandReach SkeletalMeshComponent::FindImpactHandReac
     for (std::vector<RagdollBodyImpulse>::const_iterator entry = firstHit; entry != impacts.end(); ++entry)
     {
         const RagdollBodyImpulse& hit = *entry;
-        if (!m_Ragdoll.IsPrimaryProjectileHit(hit, impacts) || !hit.outwardNormal.isFinite() ||
-            hit.outwardNormal.magnitudeSquared() <= .5f)
+        if (!m_Ragdoll.IsPrimaryProjectileHit(hit, impacts))
         {
             continue;
         }
-        // 등 피격은 같은 스텝의 손 선택과 이전 상처의 양손 고정을 모두 취소한다.
-        if (m_Ragdoll.IsCharacterImpactBody(hit.body) && forward.dot(hit.outwardNormal.getNormalized()) <= -0.7f)
+        const PhysicsBody& hitBody = m_PhysicsAsset->bodies[hit.body];
+        PxTransform bodyPose;
+        // 피격점이 몸통 바디 중심보다 뒤에 있으면 양손의 상처 짚기를 해제한다.
+        if (m_Ragdoll.IsCharacterImpactBody(hit.body) && m_Ragdoll.GetBodyPose(hitBody.bone, bodyPose) &&
+            (hit.position - bodyPose.p).dot(forward) < 0.0f)
         {
             ImpactHandReach blocked;
             blocked.body = static_cast<int>(hit.body);
             blocked.blocksHandReach = true;
             return blocked;
         }
-        const int priority = m_PhysicsAsset->bodies[hit.body].woundPriority;
+        if (!hit.outwardNormal.isFinite() || hit.outwardNormal.magnitudeSquared() <= .5f)
+        {
+            continue;
+        }
+        const int priority = hitBody.woundPriority;
         const float impulse = hit.impulse.magnitudeSquared();
         if (priority > selectedPriority || (priority == selectedPriority && impulse <= largestImpulse))
         {
