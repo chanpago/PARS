@@ -690,13 +690,36 @@ namespace
             (planted[7].p - rest[7].p).magnitude() < 1e-5f && (planted[10].p - rest[10].p).magnitude() < 1e-5f &&
             PxAbs(planted[7].q.dot(rest[7].q)) > .99999f && PxAbs(planted[10].q.dot(rest[10].q)) > .99999f,
             "A knee hit folds the trunk and preserves the world targets of both planted feet");
+        const PxTransform actualPelvis(PxVec3(.3f, .96f, -.2f), PxQuat(.4f, PxVec3(0, 1, 0)));
+        const PxTransform soleInAnkle(PxVec3(0, -.04f, .08f));
+        for (size_t side = 0; side < legs.size(); ++side)
+        {
+            PARS::ImpactPalmGoal stepGoal = goal;
+            stepGoal.steppingLegAnchors[side] = goal.pelvisNode;
+            const PARS::FootLegSetup& moving = legs[side];
+            const int stanceAnkle = legs[1 - side].ankleNode;
+            std::vector<PxTransform> stepping = rest;
+            const PxQuat swing(-.38f, PxVec3(1, 0, 0));
+            const PxVec3 hip = rest[moving.hipNode].p;
+            const PxTransform lift(hip - swing.rotate(hip), swing);
+            for (int node : {moving.hipNode, moving.kneeNode, moving.ankleNode})
+            {
+                stepping[node] = lift * stepping[node];
+            }
+            const PxTransform target = actualPelvis * rest[0].getInverse() * stepping[moving.ankleNode] * soleInAnkle;
+            Check(PARS::ApplyImpactPalmTarget(stepGoal, arms, parents, stepping, result), "Apply the wound pose during a step");
+            const PxTransform driven = actualPelvis * stepping[0].getInverse() * stepping[moving.ankleNode] * soleInAnkle;
+            Check(stepping[0].q.getAngle(rest[0].q) > .5f && (stepping[stanceAnkle].p - rest[stanceAnkle].p).magnitude() < 1e-5f &&
+                (driven.p - target.p).magnitude() < 1e-5f && PxAbs(driven.q.dot(target.q)) > .99999f,
+                "The folded pelvis preserves either swing foot's position and rotation in the physical frame");
+        }
         goal.freeLegWeight = 1;
         std::vector<PxTransform> freeLeg = rest;
         Check(PARS::ApplyImpactPalmTarget(goal, arms, parents, freeLeg, result) &&
             freeLeg[6].p.y > rest[6].p.y + .1f && freeLeg[1].p.z - freeLeg[0].p.z < planted[1].p.z - planted[0].p.z &&
             (freeLeg[10].p - rest[10].p).magnitude() < 1e-5f,
             "An unloaded injured knee can rise while the supporting foot keeps its target");
-        std::puts("PASS: wound posture with planted feet and with an unloaded knee");
+        std::puts("PASS: wound posture with planted feet, swing foot targets and an unloaded knee");
         goal.freeLegWeight = 0;
         goal.legBendWeight = 0;
         goal.restingLegWeight = 1;

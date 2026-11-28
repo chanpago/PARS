@@ -139,6 +139,8 @@ namespace PARS
         float freeLegWeight = 0;
         float restingLegWeight = 0;
         float legBendWeight = 1.0f;
+        // 다친 다리와 반대 다리 순서로, 진행 중인 발딛기 IK의 물리 부모 본을 저장한다.
+        std::array<int, 2> steppingLegAnchors{-1, -1};
         int pelvisNode = -1;
         int hitNode = -1;
         int hand = -1;

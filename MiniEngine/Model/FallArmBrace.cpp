@@ -439,16 +439,22 @@ namespace
     }
 
     void TransformBranch(int root, const PxTransform& delta, const std::vector<int32_t>& parents,
-        std::vector<PxTransform>& pose, std::vector<bool>& changed)
+        const std::vector<PxTransform>& source, std::vector<PxTransform>& pose, std::vector<bool>& changed)
     {
         for (int node = root; node < static_cast<int>(pose.size()); ++node)
         {
             if (node == root || Ancestor(parents, root, node))
             {
-                pose[node] = delta * pose[node];
+                pose[node] = delta * source[node];
                 changed[node] = true;
             }
         }
+    }
+
+    void TransformBranch(int root, const PxTransform& delta, const std::vector<int32_t>& parents,
+        std::vector<PxTransform>& pose, std::vector<bool>& changed)
+    {
+        TransformBranch(root, delta, parents, pose, pose, changed);
     }
 
     void RotateBranch(int root, const PxVec3& pivot, const PxQuat& rotation, const std::vector<int32_t>& parents,
@@ -518,7 +524,8 @@ namespace
     }
 
     void ApplyWoundPosture(const ImpactPalmGoal& goal, const FallArmSetup& injured, const FallArmSetup& reaching,
-        const std::vector<int32_t>& parents, std::vector<PxTransform>& pose, std::vector<bool>& changed)
+        const std::vector<int32_t>& parents, const std::vector<PxTransform>& footstepPose,
+        std::vector<PxTransform>& pose, std::vector<bool>& changed)
     {
         if (!goal.limitJointRotation || reaching.chestNode < 0 || !Ancestor(parents, reaching.chestNode, reaching.shoulderNode))
         {
@@ -587,6 +594,18 @@ namespace
                 RotateBranch(leg.hipNode, pose[leg.hipNode].p, PxQuat(-.92f * lift, bendAxis), parents, pose, changed);
                 RotateBranch(leg.kneeNode, pose[leg.kneeNode].p, PxQuat(1.05f * lift, bendAxis), parents, pose, changed);
             }
+            const std::array<const FootLegSetup*, 2> legs{goal.injuredLeg, goal.oppositeLeg};
+            for (size_t sideIndex = 0; sideIndex < legs.size(); ++sideIndex)
+            {
+                const FootLegSetup* moving = legs[sideIndex];
+                const int anchor = goal.steppingLegAnchors[sideIndex];
+                if (moving && moving->available && Ancestor(parents, anchor, moving->hipNode))
+                {
+                    // 같은 물리 틱에서 이미 푼 이동발 자세를 피격 보정 후의 부모 기준으로 옮긴다.
+                    const PxTransform delta = pose[anchor] * footstepPose[anchor].getInverse();
+                    TransformBranch(moving->hipNode, delta, parents, footstepPose, pose, changed);
+                }
+            }
             return;
         }
         if (!injured.available || !Ancestor(parents, injured.chestNode, injured.clavicleNode) ||
@@ -622,7 +641,7 @@ namespace
         std::vector<bool> assisted(pose.size(), false);
         if (injuredArm)
         {
-            ApplyWoundPosture(goal, *injuredArm, setup, parents, source, assisted);
+            ApplyWoundPosture(goal, *injuredArm, setup, parents, pose, source, assisted);
         }
         ArmReachPose reach;
         if (!SolveArmReach(arm, side, goal, palm, parents, source, reach))

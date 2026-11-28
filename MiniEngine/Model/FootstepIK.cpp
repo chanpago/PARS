@@ -459,6 +459,7 @@ bool FootstepIK::Apply(const FootstepIKInput& input, const std::vector<int32_t>&
     pose = std::move(corrected);
     for (size_t side = 0; side < input.legs.size(); ++side)
     {
+        m_Snapshot.anchorNodes[side] = input.legs[side].anchorNode;
         m_PreviousBendInAnchor[side] = input.legs[side].actualAnchor.q.rotateInv(m_Snapshot.legs[side].bendDirection);
         m_HasPreviousBend[side] = true;
     }

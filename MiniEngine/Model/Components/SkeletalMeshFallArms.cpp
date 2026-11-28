@@ -318,6 +318,18 @@ void SkeletalMeshComponent::ApplyImpactHandReach(const PhysicsWorld& physics, co
                 goal.pelvisNode = m_PhysicsSkeleton.parents[leg.hipNode];
                 goal.injuredLeg = &leg;
                 goal.oppositeLeg = &support.feet[1 - side].leg;
+                const FootstepIKSnapshot& ik = m_FootstepIK.GetSnapshot();
+                if (ik.status == FootstepIKStatus::Applied && ik.revision == support.contactRevision)
+                {
+                    for (size_t index = 0; index < goal.steppingLegAnchors.size(); ++index)
+                    {
+                        const int foot = index == 0 ? side : 1 - side;
+                        if (ik.motionTargets[foot] && support.footstep.feet[foot].IsInProgress())
+                        {
+                            goal.steppingLegAnchors[index] = ik.anchorNodes[foot];
+                        }
+                    }
+                }
             }
             else if (IsGroundFallActive() && m_StandingUpState == StandingUpState::None && arms[side].setup.chestBody >= 0)
             {

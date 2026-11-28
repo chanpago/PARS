@@ -155,6 +155,8 @@ namespace PARS
         std::vector<int> correctedNodes;
         FootstepIKStatus status = FootstepIKStatus::Inactive;
         std::array<LegIKResult, 2> legs;
+        // 다리별 IK 해를 구할 때 기준으로 삼은 물리 부모 본이다.
+        std::array<int, 2> anchorNodes{-1, -1};
         std::array<bool, 2> motionTargets{};
     };
 
